@@ -33,6 +33,13 @@ The package implements the launch path and Juggler RPC core:
 - `pkg/fingerprint` — minimal Firefox fingerprint sampler (presets + font/voice subset)
 - `camoufox` — top-level public API: `Launch`, `Browser`, `BrowserContext`, `Page`
 
+## Features
+
+- **Phase 1** — dialog, navigation (Goto/NavigateGuarded), console/pageerror/crash events, keyboard, mouse (move/click/wheel), permissions, hover, scroll-into-view, bounding-box, element screenshot, wait state machine
+- **Phase 2** — file upload, download, file-chooser intercept, accessibility tree, touch events, frame URL/Name
+- **Phase 3** — XPath query, shadow DOM pierce, mutation observer, resilient selector (CSS/XPath/Text/TestID), navigation guard with bot-wall detection, React fiber props
+- **Phase 4** — scroll (ScrollTo/ScrollBy/ScrollToBottom with jitter), dismiss overlays, fill form (label/name/placeholder/aria-label matching), extract text, page summary (title/headings/main text), localStorage/sessionStorage, StorageState snapshot, page state snapshot
+
 ## Quickstart
 
 ```go

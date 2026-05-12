@@ -1,4 +1,4 @@
-// Example: exercise WaitForSelector + Click + Type against a real
+// Example: exercise WaitFor + Click + Type against a real
 // Camoufox binary. Loads a tiny inline data: URL with a button + input
 // so we don't depend on network state.
 package main
@@ -53,7 +53,7 @@ func main() {
 	if err := p.Goto(ctx, u, camoufox.GotoOptions{WaitUntil: camoufox.WaitUntilDOMContentLoaded}); err != nil {
 		log.Fatalf("goto: %v", err)
 	}
-	if err := p.WaitForSelector(ctx, "#name"); err != nil {
+	if _, err := p.WaitFor(ctx, "#name", camoufox.WaitForOptions{State: camoufox.WaitAttached}); err != nil {
 		log.Fatalf("wait name: %v", err)
 	}
 	if err := p.Type(ctx, "#name", "camoufox-go"); err != nil {
@@ -62,7 +62,7 @@ func main() {
 	if err := p.Click(ctx, "#go"); err != nil {
 		log.Fatalf("click: %v", err)
 	}
-	if err := p.WaitForSelector(ctx, "#status:not(:empty)"); err != nil {
+	if _, err := p.WaitFor(ctx, "#status:not(:empty)", camoufox.WaitForOptions{State: camoufox.WaitAttached}); err != nil {
 		log.Fatalf("wait status: %v", err)
 	}
 	got, err := p.Evaluate(ctx, "document.getElementById('status').textContent")

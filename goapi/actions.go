@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/lang315/camoufox/goapi/pkg/juggler"
 )
@@ -108,28 +107,6 @@ func (p *Page) Type(ctx context.Context, selector, text string) error {
 		return err
 	}
 	return p.session.Call(ctx, "Page.insertText", map[string]any{"text": text}, nil)
-}
-
-// WaitForSelector polls Runtime.evaluate until the selector resolves
-// to a non-null element or ctx expires. The poll interval is 50ms.
-func (p *Page) WaitForSelector(ctx context.Context, selector string) error {
-	expr := fmt.Sprintf(`document.querySelector(%s) !== null`, jsString(selector))
-	tick := time.NewTicker(50 * time.Millisecond)
-	defer tick.Stop()
-	for {
-		v, err := p.Evaluate(ctx, expr)
-		if err != nil {
-			return err
-		}
-		if ok, _ := v.(bool); ok {
-			return nil
-		}
-		select {
-		case <-tick.C:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
 }
 
 // executionContextID returns the cached main-world context id.

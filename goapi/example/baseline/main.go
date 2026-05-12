@@ -198,7 +198,7 @@ func runProbe(ctx context.Context, p *camoufox.Page, pr probe) (map[string]strin
 	if pr.Wait != "" {
 		waitCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
 		defer cancel()
-		_ = p.WaitForSelector(waitCtx, pr.Wait) // best-effort
+		_, _ = p.WaitFor(waitCtx, pr.Wait, camoufox.WaitForOptions{State: camoufox.WaitAttached}) // best-effort
 		// Give async fingerprinting widgets a chance to settle.
 		time.Sleep(2 * time.Second)
 	}

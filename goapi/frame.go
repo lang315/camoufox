@@ -20,10 +20,26 @@ type Frame struct {
 	mu            sync.Mutex
 	mainContextID string
 	readyCh       chan struct{}
+	url           string
+	name          string
 }
 
 // ID returns the juggler frameId.
 func (f *Frame) ID() string { return f.id }
+
+// URL returns the frame's last committed URL.
+func (f *Frame) URL() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.url
+}
+
+// Name returns the frame's name attribute (empty for unnamed frames).
+func (f *Frame) Name() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.name
+}
 
 // Parent returns the parent Frame, or nil for the main frame.
 func (f *Frame) Parent() *Frame {
@@ -194,6 +210,31 @@ func (p *Page) registerFrameEvents() {
 		default:
 			close(fr.readyCh)
 		}
+		fr.mu.Unlock()
+	}))
+
+	p.subs = append(p.subs, conn.On("Page.navigationCommitted", func(ev juggler.Event) {
+		if ev.SessionID != p.session.ID() {
+			return
+		}
+		var nc juggler.NavigationCommittedEvent
+		if err := json.Unmarshal(ev.Params, &nc); err != nil {
+			return
+		}
+		p.framesMu.Lock()
+		fr := p.frames[nc.FrameID]
+		if fr == nil {
+			fr = &Frame{
+				page:    p,
+				id:      nc.FrameID,
+				readyCh: make(chan struct{}),
+			}
+			p.frames[nc.FrameID] = fr
+		}
+		p.framesMu.Unlock()
+		fr.mu.Lock()
+		fr.url = nc.URL
+		fr.name = nc.Name
 		fr.mu.Unlock()
 	}))
 
