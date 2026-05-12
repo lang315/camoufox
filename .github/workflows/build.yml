@@ -2,24 +2,59 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      build_target:
+        description: "Matrix scope. 'full' = all targets. Otherwise build a single leg."
+        required: true
+        default: "full"
+        type: choice
+        options:
+          - "full"
+          - "linux-x86_64"
+          - "linux-arm64"
+          - "linux-i686"
+          - "windows-x86_64"
+          - "windows-i686"
+          - "macos-x86_64"
+          - "macos-arm64"
   push:
     tags:
-      - "*"
+      - "v*"
 
 jobs:
+  matrix:
+    runs-on: ubuntu-24.04
+    outputs:
+      json: ${{ steps.gen.outputs.json }}
+    steps:
+      - id: gen
+        env:
+          BUILD_TARGET: ${{ inputs.build_target }}
+        run: |
+          if [ -z "$BUILD_TARGET" ] || [ "$BUILD_TARGET" = "full" ]; then
+            cat >>"$GITHUB_OUTPUT" <<'JSON'
+          json={"include":[
+            {"target":"linux","arch":"x86_64"},
+            {"target":"linux","arch":"arm64"},
+            {"target":"linux","arch":"i686"},
+            {"target":"windows","arch":"x86_64"},
+            {"target":"windows","arch":"i686"},
+            {"target":"macos","arch":"x86_64"},
+            {"target":"macos","arch":"arm64"}
+          ]}
+          JSON
+          else
+            os="${BUILD_TARGET%-*}"
+            arch="${BUILD_TARGET#*-}"
+            echo "json={\"include\":[{\"target\":\"$os\",\"arch\":\"$arch\"}]}" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: matrix
     runs-on: ubuntu-24.04
     strategy:
-      matrix:
-        target: [linux, windows, macos]
-        arch: [x86_64, arm64, i686]
-        exclude:
-          # Fails (.mozbuild does not include clang++-cl)
-          - target: windows
-            arch: arm64
-          # Unsuported
-          - target: macos
-            arch: i686
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.matrix.outputs.json) }}
 
     steps:
       - name: Maximize build space
@@ -51,17 +86,18 @@ jobs:
           sudo apt-get autoremove -y > /dev/null
           sudo apt-get clean > /dev/null
 
-      - uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v5
         with:
           go-version: "1.23"
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -84,11 +120,36 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y msitools p7zip-full aria2
 
-      - name: Fetch source
-        env:
-          CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
+      - name: Cache mozbuild state
+        uses: actions/cache@v4
+        with:
+          path: ~/.mozbuild
+          key: mozbuild-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh') }}
+          restore-keys: |
+            mozbuild-${{ matrix.target }}-${{ matrix.arch }}-
+            mozbuild-${{ matrix.target }}-
+
+      - name: Cache Firefox source tarball
+        uses: actions/cache@v4
+        with:
+          path: firefox-*.source.tar.xz
+          key: firefox-source-${{ hashFiles('upstream.sh') }}
+
+      - name: List patches (sanity)
         run: |
-          make fetch
+          echo "Patches that will be applied (alphabetical):"
+          find patches -maxdepth 1 -name '*.patch' | sort
+          echo "---"
+          # Catch alphabetical-ordering footguns where an extension patch
+          # would apply before its base patch.
+          first_webrtc=$(find patches -maxdepth 1 -name 'webrtc-ip-spoofing*.patch' | sort | head -1)
+          if [ -n "$first_webrtc" ] && [ "$(basename "$first_webrtc")" != "webrtc-ip-spoofing.patch" ]; then
+            echo "::error::webrtc-ip-spoofing.patch must sort first among its family"
+            exit 1
+          fi
+
+      - name: Fetch source
+        run: make fetch
 
       - name: Setup and bootstrap
         run: |
@@ -107,17 +168,24 @@ jobs:
       - name: Build
         run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
 
+      - name: List build artifacts
+        if: always()
+        run: ls -lah dist/ || true
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: CamoufoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
           path: dist/*
+          if-no-files-found: error
+          retention-days: 14
 
   release:
     needs: build
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Download all artifacts
@@ -125,11 +193,16 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Flatten artifact dirs
+        run: |
+          mkdir -p release
+          find artifacts -type f -exec cp -v {} release/ \;
+          ls -lah release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**/*
+          files: release/*
           generate_release_notes: true
           draft: true
           prerelease: false

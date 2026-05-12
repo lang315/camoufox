@@ -89,6 +89,8 @@
   { "property": "webGl2:contextAttributes", "type": "dict" },
   { "property": "canvas:aaOffset", "type": "int" },
   { "property": "canvas:aaCapOffset", "type": "bool" },
+  { "property": "canvas:noiseDensity", "type": "double" },
+  { "property": "canvas:noiseStrength", "type": "uint" },
   { "property": "voices", "type": "array" },
   { "property": "voices:blockIfNotDefined", "type": "bool" },
   { "property": "voices:fakeCompletion", "type": "bool" },
