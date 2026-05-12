@@ -28,7 +28,9 @@ run() {
 run 'mkdir -p services/settings/dumps/main'
 run 'cp -v ../assets/search-config.json services/settings/dumps/main/search-config-v2.json'
 
-# vs_pack.py issue... should be temporary
+# vs_pack.py issue... should be temporary. build/vs/ does not exist in
+# recent Firefox source trees, so create it before copying.
+run 'mkdir -p build/vs'
 run 'cp -v ../patches/librewolf/pack_vs.py build/vs/'
 
 # Apply most recent `settings` repository files
