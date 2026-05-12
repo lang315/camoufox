@@ -7,6 +7,17 @@ bin/
 launch
 launch.exe
 
+# Claude Code session state (not part of repo)
+.claude/
+.memsearch/
+
+# Goapi local build + test artifacts
+/goapi/baseline
+/goapi/canvas
+/goapi/example.png
+/goapi/creepjs-*.png
+/goapi/integration-results/
+
 
 # Internal testing
 /extra-docs
