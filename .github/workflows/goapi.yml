@@ -1,0 +1,36 @@
+name: goapi
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'goapi/**'
+      - '.github/workflows/goapi.yml'
+  pull_request:
+    paths:
+      - 'goapi/**'
+      - '.github/workflows/goapi.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: goapi
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: false
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go build
+        run: go build ./...
+
+      - name: go test
+        run: go test -timeout 5m ./...

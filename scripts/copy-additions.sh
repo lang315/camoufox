@@ -23,8 +23,10 @@ run() {
     fi
 }
 
-# Copy the search-config.json file
-run 'cp -v ../assets/search-config.json services/settings/dumps/main/search-config.json'
+# Copy the search-config dump. Firefox 134+ replaced search-config.json with
+# search-config-v2.json under services/settings/dumps/main/.
+run 'mkdir -p services/settings/dumps/main'
+run 'cp -v ../assets/search-config.json services/settings/dumps/main/search-config-v2.json'
 
 # vs_pack.py issue... should be temporary
 run 'cp -v ../patches/librewolf/pack_vs.py build/vs/'
