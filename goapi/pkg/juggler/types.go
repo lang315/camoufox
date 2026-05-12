@@ -364,3 +364,230 @@ type BrowserSetCookiesParams struct {
 type BrowserClearCookiesParams struct {
 	BrowserContextID string `json:"browserContextId,omitempty"`
 }
+
+// PageGoBackParams — Page.goBack.
+type PageGoBackParams struct {
+	FrameID string `json:"frameId"`
+}
+
+// PageGoBackResult — Page.goBack return.
+type PageGoBackResult struct {
+	Success bool `json:"success"`
+}
+
+// PageGoForwardParams — Page.goForward.
+type PageGoForwardParams struct {
+	FrameID string `json:"frameId"`
+}
+
+// PageGoForwardResult — Page.goForward return.
+type PageGoForwardResult struct {
+	Success bool `json:"success"`
+}
+
+// PageScrollIntoViewIfNeededParams — Page.scrollIntoViewIfNeeded.
+type PageScrollIntoViewIfNeededParams struct {
+	FrameID  string `json:"frameId"`
+	ObjectID string `json:"objectId"`
+}
+
+// DOMPoint — one vertex in a DOMQuad.
+type DOMPoint struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	W float64 `json:"w"`
+}
+
+// DOMQuad — pageTypes.DOMQuad (four-point polygon).
+type DOMQuad struct {
+	P1 DOMPoint `json:"p1"`
+	P2 DOMPoint `json:"p2"`
+	P3 DOMPoint `json:"p3"`
+	P4 DOMPoint `json:"p4"`
+}
+
+// PageGetContentQuadsParams — Page.getContentQuads.
+type PageGetContentQuadsParams struct {
+	FrameID  string `json:"frameId"`
+	ObjectID string `json:"objectId"`
+}
+
+// PageGetContentQuadsResult — Page.getContentQuads return.
+type PageGetContentQuadsResult struct {
+	Quads []DOMQuad `json:"quads"`
+}
+
+// PageDispatchWheelEventParams — Page.dispatchWheelEvent.
+type PageDispatchWheelEventParams struct {
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	DeltaX    float64 `json:"deltaX"`
+	DeltaY    float64 `json:"deltaY"`
+	DeltaZ    float64 `json:"deltaZ"`
+	Modifiers int     `json:"modifiers"`
+}
+
+// RuntimeConsoleEvent — Runtime.console.
+type RuntimeConsoleEvent struct {
+	ExecutionContextID string         `json:"executionContextId"`
+	Args               []RemoteObject `json:"args"`
+	Type               string         `json:"type"`
+}
+
+// PageUncaughtErrorEvent — Page.uncaughtError.
+type PageUncaughtErrorEvent struct {
+	FrameID string `json:"frameId"`
+	Message string `json:"message"`
+	Stack   string `json:"stack"`
+}
+
+// BrowserGrantPermissionsParams — Browser.grantPermissions.
+type BrowserGrantPermissionsParams struct {
+	BrowserContextID string   `json:"browserContextId,omitempty"`
+	Origin           string   `json:"origin"`
+	Permissions      []string `json:"permissions"`
+}
+
+// BrowserResetPermissionsParams — Browser.resetPermissions.
+type BrowserResetPermissionsParams struct {
+	BrowserContextID string `json:"browserContextId,omitempty"`
+}
+
+// PageSetFileInputFilesParams — Page.setFileInputFiles.
+type PageSetFileInputFilesParams struct {
+	FrameID  string   `json:"frameId"`
+	ObjectID string   `json:"objectId"`
+	Files    []string `json:"files"`
+}
+
+// PageSetInterceptFileChooserParams — Page.setInterceptFileChooserDialog.
+type PageSetInterceptFileChooserParams struct {
+	Enabled bool `json:"enabled"`
+}
+
+// FileChooserOpenedEvent — Page.fileChooserOpened.
+type FileChooserOpenedEvent struct {
+	ExecutionContextID string       `json:"executionContextId"`
+	Element            RemoteObject `json:"element"`
+}
+
+// DownloadOptionsInner — browserTypes.DownloadOptions (nested).
+// Behavior values: "saveToDisk" | "cancel".
+type DownloadOptionsInner struct {
+	Behavior     string `json:"behavior,omitempty"`
+	DownloadsDir string `json:"downloadsDir,omitempty"`
+}
+
+// BrowserSetDownloadOptionsParams — Browser.setDownloadOptions.
+type BrowserSetDownloadOptionsParams struct {
+	BrowserContextID string                `json:"browserContextId,omitempty"`
+	DownloadOptions  *DownloadOptionsInner `json:"downloadOptions"`
+}
+
+// BrowserCancelDownloadParams — Browser.cancelDownload.
+type BrowserCancelDownloadParams struct {
+	UUID string `json:"uuid,omitempty"`
+}
+
+// DownloadCreatedEvent — Browser.downloadCreated.
+type DownloadCreatedEvent struct {
+	UUID              string `json:"uuid"`
+	BrowserContextID  string `json:"browserContextId,omitempty"`
+	PageTargetID      string `json:"pageTargetId"`
+	FrameID           string `json:"frameId"`
+	URL               string `json:"url"`
+	SuggestedFileName string `json:"suggestedFileName"`
+}
+
+// DownloadFinishedEvent — Browser.downloadFinished.
+type DownloadFinishedEvent struct {
+	UUID     string `json:"uuid"`
+	Canceled bool   `json:"canceled,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// AXNode — axTypes.AXTree; one node in the accessibility tree.
+type AXNode struct {
+	Role            string    `json:"role"`
+	Name            string    `json:"name"`
+	Children        []*AXNode `json:"children,omitempty"`
+	Selected        bool      `json:"selected,omitempty"`
+	Focused         bool      `json:"focused,omitempty"`
+	Pressed         bool      `json:"pressed,omitempty"`
+	Focusable       bool      `json:"focusable,omitempty"`
+	Required        bool      `json:"required,omitempty"`
+	Invalid         bool      `json:"invalid,omitempty"`
+	Modal           bool      `json:"modal,omitempty"`
+	Editable        bool      `json:"editable,omitempty"`
+	Busy            bool      `json:"busy,omitempty"`
+	Multiline       bool      `json:"multiline,omitempty"`
+	Readonly        bool      `json:"readonly,omitempty"`
+	Expanded        bool      `json:"expanded,omitempty"`
+	Disabled        bool      `json:"disabled,omitempty"`
+	Multiselectable bool      `json:"multiselectable,omitempty"`
+	Value           string    `json:"value,omitempty"`
+	HasPopup        string    `json:"haspopup,omitempty"`
+}
+
+// AccessibilityGetFullAXTreeParams — Accessibility.getFullAXTree.
+type AccessibilityGetFullAXTreeParams struct {
+	ObjectID string `json:"objectId,omitempty"`
+}
+
+// AccessibilityGetFullAXTreeResult — Accessibility.getFullAXTree return.
+type AccessibilityGetFullAXTreeResult struct {
+	Tree *AXNode `json:"tree"`
+}
+
+// TouchPoint — pageTypes.TouchPoint.
+type TouchPoint struct {
+	X             float64  `json:"x"`
+	Y             float64  `json:"y"`
+	RadiusX       *float64 `json:"radiusX,omitempty"`
+	RadiusY       *float64 `json:"radiusY,omitempty"`
+	RotationAngle *float64 `json:"rotationAngle,omitempty"`
+	Force         *float64 `json:"force,omitempty"`
+}
+
+// PageDispatchTouchEventParams — Page.dispatchTouchEvent.
+// Type values: "touchStart" | "touchEnd" | "touchMove" | "touchCancel".
+type PageDispatchTouchEventParams struct {
+	Type        string       `json:"type"`
+	TouchPoints []TouchPoint `json:"touchPoints"`
+	Modifiers   int          `json:"modifiers"`
+}
+
+// PageDispatchTouchEventResult — Page.dispatchTouchEvent return.
+type PageDispatchTouchEventResult struct {
+	DefaultPrevented bool `json:"defaultPrevented"`
+}
+
+// PageDispatchTapEventParams — Page.dispatchTapEvent.
+type PageDispatchTapEventParams struct {
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	Modifiers int     `json:"modifiers"`
+}
+
+// BrowserSetTouchOverrideParams — Browser.setTouchOverride.
+// HasTouch nil removes the override.
+type BrowserSetTouchOverrideParams struct {
+	BrowserContextID string `json:"browserContextId,omitempty"`
+	HasTouch         *bool  `json:"hasTouch"`
+}
+
+// PageAddBindingParams — Page.addBinding (Protocol.js L791).
+// Script is evaluated after the binding is installed; it can reference
+// window[Name] to set up observers that call back into Go.
+type PageAddBindingParams struct {
+	WorldName string `json:"worldName,omitempty"`
+	Name      string `json:"name"`
+	Script    string `json:"script"`
+}
+
+// PageBindingCalledEvent — Page.bindingCalled (Protocol.js L714).
+type PageBindingCalledEvent struct {
+	ExecutionContextID string `json:"executionContextId"`
+	Name               string `json:"name"`
+	Payload            string `json:"payload"`
+}

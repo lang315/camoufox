@@ -206,7 +206,7 @@ func runProbe(ctx context.Context, p *camoufox.Page, pr probe) (map[string]strin
 	}
 	if pr.Wait != "" {
 		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		_ = p.WaitForSelector(waitCtx, pr.Wait)
+		_, _ = p.WaitFor(waitCtx, pr.Wait, camoufox.WaitForOptions{State: camoufox.WaitAttached})
 		cancel()
 	}
 	if pr.Settle > 0 {

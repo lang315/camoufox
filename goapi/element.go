@@ -2,9 +2,11 @@ package camoufox
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/lang315/camoufox/goapi/pkg/juggler"
@@ -22,6 +24,32 @@ type ElementHandle struct {
 	page     *Page
 	objectID string
 	ctxID    string
+	frameID  string
+}
+
+// Box is the bounding rectangle of a DOM element in viewport coordinates.
+type Box struct {
+	X      float64
+	Y      float64
+	Width  float64
+	Height float64
+}
+
+// ScreenshotOption configures ElementHandle.Screenshot.
+type ScreenshotOption func(*screenshotOpts)
+
+type screenshotOpts struct {
+	mimeType string
+}
+
+// WithMimeType sets the image format for ElementHandle.Screenshot (default: image/png).
+func WithMimeType(mime string) ScreenshotOption {
+	return func(o *screenshotOpts) { o.mimeType = mime }
+}
+
+// wrapObject builds an ElementHandle from a Runtime.RemoteObject objectId.
+func (p *Page) wrapObject(frameID, ctxID, objectID string) *ElementHandle {
+	return &ElementHandle{page: p, objectID: objectID, ctxID: ctxID, frameID: frameID}
 }
 
 // QuerySelector returns the first matching element, or nil if no
@@ -41,7 +69,7 @@ func (p *Page) QuerySelector(ctx context.Context, selector string) (*ElementHand
 	if res.Result == nil || res.Result.ObjectID == "" {
 		return nil, nil
 	}
-	return &ElementHandle{page: p, objectID: res.Result.ObjectID, ctxID: ctxID}, nil
+	return p.wrapObject(p.MainFrameID(), ctxID, res.Result.ObjectID), nil
 }
 
 // QuerySelectorAll returns every matching element as a slice of handles.
@@ -68,6 +96,7 @@ func (p *Page) QuerySelectorAll(ctx context.Context, selector string) ([]*Elemen
 	}
 	var n int
 	_ = json.Unmarshal(count.Result.Value, &n)
+	frameID := p.MainFrameID()
 	out := make([]*ElementHandle, 0, n)
 	for i := 0; i < n; i++ {
 		idx, err := p.callFunction(ctx, ctxID,
@@ -77,7 +106,7 @@ func (p *Page) QuerySelectorAll(ctx context.Context, selector string) ([]*Elemen
 			return out, err
 		}
 		if idx.Result != nil && idx.Result.ObjectID != "" {
-			out = append(out, &ElementHandle{page: p, objectID: idx.Result.ObjectID, ctxID: ctxID})
+			out = append(out, p.wrapObject(frameID, ctxID, idx.Result.ObjectID))
 		}
 	}
 	return out, nil
@@ -184,6 +213,98 @@ func (e *ElementHandle) Dispose(ctx context.Context) error {
 		map[string]any{"executionContextId": e.ctxID, "objectId": e.objectID}, nil)
 	e.objectID = ""
 	return err
+}
+
+// BoundingBox returns the element's bounding rectangle in viewport coordinates.
+// It calls Page.getContentQuads and folds all quad points into min/max extents.
+func (e *ElementHandle) BoundingBox(ctx context.Context) (*Box, error) {
+	frameID := e.frameID
+	if frameID == "" {
+		frameID = e.page.MainFrameID()
+	}
+	params := juggler.PageGetContentQuadsParams{
+		FrameID:  frameID,
+		ObjectID: e.objectID,
+	}
+	var res juggler.PageGetContentQuadsResult
+	if err := e.page.session.Call(ctx, "Page.getContentQuads", params, &res); err != nil {
+		return nil, fmt.Errorf("camoufox: getContentQuads: %w", err)
+	}
+	if len(res.Quads) == 0 {
+		return nil, errors.New("camoufox: BoundingBox: no quads returned")
+	}
+	minX, minY := math.MaxFloat64, math.MaxFloat64
+	maxX, maxY := -math.MaxFloat64, -math.MaxFloat64
+	for _, q := range res.Quads {
+		for _, pt := range [4]juggler.DOMPoint{q.P1, q.P2, q.P3, q.P4} {
+			if pt.X < minX {
+				minX = pt.X
+			}
+			if pt.X > maxX {
+				maxX = pt.X
+			}
+			if pt.Y < minY {
+				minY = pt.Y
+			}
+			if pt.Y > maxY {
+				maxY = pt.Y
+			}
+		}
+	}
+	return &Box{X: minX, Y: minY, Width: maxX - minX, Height: maxY - minY}, nil
+}
+
+// ScrollIntoViewIfNeeded scrolls the element into the visible area if it is not already.
+func (e *ElementHandle) ScrollIntoViewIfNeeded(ctx context.Context) error {
+	frameID := e.frameID
+	if frameID == "" {
+		frameID = e.page.MainFrameID()
+	}
+	params := juggler.PageScrollIntoViewIfNeededParams{
+		FrameID:  frameID,
+		ObjectID: e.objectID,
+	}
+	return e.page.session.Call(ctx, "Page.scrollIntoViewIfNeeded", params, nil)
+}
+
+// Hover moves the mouse to the center of the element.
+func (e *ElementHandle) Hover(ctx context.Context) error {
+	box, err := e.BoundingBox(ctx)
+	if err != nil {
+		return fmt.Errorf("camoufox: Hover: %w", err)
+	}
+	cx := box.X + box.Width/2
+	cy := box.Y + box.Height/2
+	ev := juggler.PageDispatchMouseEventParams{
+		Type: "mousemove", X: cx, Y: cy,
+	}
+	return e.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil)
+}
+
+// Screenshot captures the element's bounding region as PNG bytes.
+func (e *ElementHandle) Screenshot(ctx context.Context, opts ...ScreenshotOption) ([]byte, error) {
+	o := screenshotOpts{mimeType: "image/png"}
+	for _, fn := range opts {
+		fn(&o)
+	}
+	box, err := e.BoundingBox(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("camoufox: Screenshot: %w", err)
+	}
+	params := juggler.PageScreenshotParams{
+		MimeType: o.mimeType,
+		Clip: juggler.PageScreenshotClip{
+			X:      box.X,
+			Y:      box.Y,
+			Width:  box.Width,
+			Height: box.Height,
+		},
+	}
+	var res juggler.PageScreenshotResult
+	if err := e.page.session.Call(ctx, "Page.screenshot", params, &res); err != nil {
+		return nil, fmt.Errorf("camoufox: element screenshot: %w", err)
+	}
+	return base64.StdEncoding.DecodeString(res.Data)
 }
 
 func (p *Page) callFunction(ctx context.Context, ctxID, fn string,
