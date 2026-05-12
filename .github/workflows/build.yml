@@ -151,6 +151,11 @@ jobs:
       - name: Fetch source
         run: make fetch
 
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@camoufox.local"
+          git config --global user.name "Camoufox CI"
+
       - name: Setup and bootstrap
         run: |
           make setup
