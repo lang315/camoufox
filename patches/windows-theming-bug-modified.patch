@@ -20,10 +20,10 @@ index d11c35ff9d..0aa4b9058b 100644
  	$(MKDIR) -p '$(dist_dest)/Contents/Library/LaunchServices'
  ifdef MOZ_UPDATER
  	cp -f '$(dist_dest)/Contents/MacOS/updater.app/Contents/MacOS/org.mozilla.updater' '$(dist_dest)/Contents/Library/LaunchServices'
-diff --git a/browser/app/firefox.exe.manifest b/browser/app/firefox.exe.manifest
+diff --git a/browser/app/camoufox.exe.manifest b/browser/app/camoufox.exe.manifest
 index 995b2fc869..4a03da3064 100644
---- a/browser/app/firefox.exe.manifest
-+++ b/browser/app/firefox.exe.manifest
+--- a/browser/app/camoufox.exe.manifest
++++ b/browser/app/camoufox.exe.manifest
 @@ -3,10 +3,10 @@
  <assemblyIdentity
          version="1.0.0.0"
