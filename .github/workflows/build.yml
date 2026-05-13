@@ -51,7 +51,7 @@ jobs:
 
   build:
     needs: matrix
-    runs-on: ${{ matrix.target == 'macos' && (matrix.arch == 'arm64' && 'macos-14' || 'macos-13') || 'ubuntu-24.04' }}
+    runs-on: ${{ matrix.target == 'macos' && (matrix.arch == 'arm64' && 'macos-15' || 'macos-13') || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix.outputs.json) }}
