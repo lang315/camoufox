@@ -1,6 +1,12 @@
 ac_add_options --disable-update-agent
 # ac_add_options --disable-alsa
 
+# Disable --enable-bootstrap inherited from base.mozconfig. mach
+# bootstrap on a non-Mozilla CI box fails fetching macOS toolchain
+# artifacts; on a native macOS runner we have Xcode + brew tools
+# already, so the bootstrap step is unnecessary.
+ac_add_options --disable-bootstrap
+
 # Packaging related
 # #export DSYMUTIL="$MOZBUILD/clang/bin/dsymutil"
 # export DMG_TOOL="$MOZBUILD/dmg/dmg"

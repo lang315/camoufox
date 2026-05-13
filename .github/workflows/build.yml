@@ -127,7 +127,11 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.target == 'macos'
         run: |
-          brew install ccache aria2 p7zip
+          brew install ccache aria2 p7zip nasm yasm
+          if ! command -v rustup >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          fi
 
       - name: Cache mozbuild state
         uses: actions/cache@v4
@@ -171,20 +175,15 @@ jobs:
         run: |
           make setup
           if [ "${{ matrix.target }}" = "macos" ]; then
-            # ./mach bootstrap downloads the MacOSX SDK from Mozilla's
-            # Taskcluster CDN, which returns 403 from non-Mozilla CI.
-            # We supply the SDK via xcrun in macos.mozconfig, so stub
-            # unpack-sdk.py with a no-op. Re-stub before each build leg
-            # too (multibuild.py runs `git reset --hard unpatched`).
-            src_dir=$(ls -d camoufox-*/ | head -1)
-            cat > "${src_dir}taskcluster/scripts/misc/unpack-sdk.py" <<'PYEOF'
-          import sys
-          sys.exit(0)
-          PYEOF
-            ( cd "$src_dir" && git add taskcluster/scripts/misc/unpack-sdk.py && git commit --amend --no-edit && git tag -f unpatched )
+            # Skip `make mozbootstrap` on macOS. ./mach bootstrap on a
+            # non-Mozilla CI box fails fetching toolchain artifacts and
+            # MacOSX SDK tarballs from Mozilla's CDN. macos.mozconfig
+            # sets --disable-bootstrap and --with-macos-sdk (xcrun), so
+            # ./mach build uses Xcode's preinstalled clang/SDK instead.
             make set-target
+          else
+            make mozbootstrap
           fi
-          make mozbootstrap
           mkdir -p dist
 
       - name: Create swap space
