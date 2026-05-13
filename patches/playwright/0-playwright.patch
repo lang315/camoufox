@@ -2343,11 +2343,14 @@ diff --git a/juggler/screencast/HeadlessWindowCapturer.h b/juggler/screencast/He
 index cb1bcbbfd7..6b39dfbea0 100644
 --- a/juggler/screencast/HeadlessWindowCapturer.h
 +++ b/juggler/screencast/HeadlessWindowCapturer.h
-@@ -6,12 +6,17 @@
+@@ -6,12 +6,20 @@
  
  #include <memory>
  #include <set>
 +#include "api/scoped_refptr.h"
++#if defined(XP_WIN)
++typedef int pid_t;
++#endif
  #include "api/video/video_frame.h"
  #include "api/video/video_sink_interface.h"
  #include "modules/video_capture/video_capture.h"
