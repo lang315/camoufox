@@ -166,8 +166,17 @@ jobs:
           git config --global user.name "Camoufox CI"
 
       - name: Setup and bootstrap
+        env:
+          BUILD_TARGET: ${{ matrix.target }},${{ matrix.arch }}
         run: |
           make setup
+          # On macOS we need the per-target mozconfig (which sets
+          # --with-macos-sdk via xcrun) in place BEFORE mozbootstrap,
+          # otherwise ./mach bootstrap tries to download the macOS SDK
+          # from the Mozilla Taskcluster CDN and gets 403.
+          if [ "${{ matrix.target }}" = "macos" ]; then
+            make set-target
+          fi
           make mozbootstrap
           mkdir -p dist
 
