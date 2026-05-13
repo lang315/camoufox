@@ -28,3 +28,11 @@ ac_add_options --disable-bootstrap
 if command -v xcrun >/dev/null 2>&1; then
     ac_add_options --with-macos-sdk="$(xcrun --show-sdk-path)"
 fi
+
+# Firefox 146 requires clang >=17. Xcode 15 ships clang 16, so prefer
+# the brew-installed LLVM toolchain when present (set via $MOZ_LLVM_PREFIX
+# in the workflow). Falls back to Xcode's clang otherwise.
+if [ -n "$MOZ_LLVM_PREFIX" ] && [ -x "$MOZ_LLVM_PREFIX/bin/clang" ]; then
+    export CC="$MOZ_LLVM_PREFIX/bin/clang"
+    export CXX="$MOZ_LLVM_PREFIX/bin/clang++"
+fi

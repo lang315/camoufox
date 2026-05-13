@@ -127,11 +127,16 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.target == 'macos'
         run: |
-          brew install ccache aria2 p7zip nasm yasm
+          brew install ccache aria2 p7zip nasm yasm llvm@17
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
+          # Firefox 146 requires clang >=17. Xcode 15 ships clang 16, so
+          # use the brew LLVM toolchain via env vars that mozconfig reads.
+          llvm_prefix=$(brew --prefix llvm@17)
+          echo "MOZ_LLVM_PREFIX=$llvm_prefix" >> $GITHUB_ENV
+          echo "$llvm_prefix/bin" >> $GITHUB_PATH
 
       - name: Cache mozbuild state
         uses: actions/cache@v4
