@@ -180,6 +180,15 @@ jobs:
             # MacOSX SDK tarballs from Mozilla's CDN. macos.mozconfig
             # sets --disable-bootstrap and --with-macos-sdk (xcrun), so
             # ./mach build uses Xcode's preinstalled clang/SDK instead.
+            #
+            # Firefox 146 pins mac_sdk_min_version to 26.1 (Xcode 26).
+            # GitHub macOS runners ship Xcode 15/16 (SDK 14.5 / 15.x),
+            # so lower the minimum to match. Re-apply per leg via the
+            # unpatched tag below.
+            src_dir=$(ls -d camoufox-*/ | head -1)
+            sed -i.bak 's/return "26.1"/return "14.5"/' "${src_dir}build/moz.configure/toolchain.configure"
+            rm -f "${src_dir}build/moz.configure/toolchain.configure.bak"
+            ( cd "$src_dir" && git add build/moz.configure/toolchain.configure && git commit --amend --no-edit && git tag -f unpatched )
             make set-target
           else
             make mozbootstrap
