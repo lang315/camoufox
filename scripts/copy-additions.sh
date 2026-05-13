@@ -53,6 +53,14 @@ fi
 # Copy ALL new files/folders from ../additions to .
 run 'cp -r ../additions/* .'
 
+# Rename firefox.exe.manifest -> camoufox.exe.manifest. The Windows
+# branding patch references the renamed path in browser/app/Makefile.in,
+# but `patch -p1` cannot rename files, so do it here before the patch
+# applies.
+if [ -f browser/app/firefox.exe.manifest ] && [ ! -f browser/app/camoufox.exe.manifest ]; then
+    run 'mv browser/app/firefox.exe.manifest browser/app/camoufox.exe.manifest'
+fi
+
 # Provide a script that fetches and bootstraps Nightly and some mozconfigs
 run 'cp -v ../scripts/mozfetch.sh lw/'
 
