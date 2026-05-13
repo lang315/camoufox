@@ -36,3 +36,8 @@ if [ -n "$MOZ_LLVM_PREFIX" ] && [ -x "$MOZ_LLVM_PREFIX/bin/clang" ]; then
     export CC="$MOZ_LLVM_PREFIX/bin/clang"
     export CXX="$MOZ_LLVM_PREFIX/bin/clang++"
 fi
+
+# WASI SDK is not preinstalled on the macOS runner. RLBox / wasm
+# sandboxed libraries are not strictly required for Camoufox's
+# automation purposes, so disable the sandbox to skip the wasi check.
+ac_add_options --without-wasm-sandboxed-libraries
