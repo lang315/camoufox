@@ -51,13 +51,14 @@ jobs:
 
   build:
     needs: matrix
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.target == 'macos' && (matrix.arch == 'arm64' && 'macos-14' || 'macos-13') || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix.outputs.json) }}
 
     steps:
       - name: Maximize build space
+        if: matrix.target != 'macos'
         uses: AdityaGarg8/remove-unwanted-software@v4.1
         with:
           remove-dotnet: "true"
@@ -70,6 +71,7 @@ jobs:
           verbose: "false"
 
       - name: Remove unwanted tools
+        if: matrix.target != 'macos'
         # Originally from here: https://github.com/AdityaGarg8/remove-unwanted-software/blob/master/action.yml
         run: |
           sudo apt-get remove -y '^aspnetcore-.*' > /dev/null
@@ -101,7 +103,8 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up LLVM
+      - name: Set up LLVM (Linux)
+        if: matrix.target != 'macos'
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -115,10 +118,16 @@ jobs:
       - name: Check disk space
         run: df -h
 
-      - name: Install dependencies
+      - name: Install dependencies (Linux)
+        if: matrix.target != 'macos'
         run: |
           sudo apt-get update
           sudo apt-get install -y msitools p7zip-full aria2 ccache
+
+      - name: Install dependencies (macOS)
+        if: matrix.target == 'macos'
+        run: |
+          brew install ccache aria2 p7zip
 
       - name: Cache mozbuild state
         uses: actions/cache@v4
@@ -163,6 +172,7 @@ jobs:
           mkdir -p dist
 
       - name: Create swap space
+        if: matrix.target != 'macos'
         run: |
           sudo fallocate -l 16G /swapfile
           sudo chmod 600 /swapfile
