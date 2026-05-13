@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.target == 'macos'
         run: |
-          brew install ccache aria2 p7zip nasm yasm llvm@17
+          brew install ccache aria2 p7zip nasm yasm llvm@17 cbindgen node
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
