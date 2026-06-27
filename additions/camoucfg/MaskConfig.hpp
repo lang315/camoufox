@@ -94,6 +94,10 @@ inline bool HasKey(const std::string& key, const nlohmann::json& data) {
 inline std::optional<std::string> GetString(const std::string& key) {
   const auto& data = GetJson();
   if (!HasKey(key, data)) return std::nullopt;
+  if (!data[key].is_string()) {
+    printf_stderr("ERROR: Value for key '%s' is not a string\n", key.c_str());
+    return std::nullopt;
+  }
   return data[key].get<std::string>();
 }
 
@@ -101,8 +105,12 @@ inline std::vector<std::string> GetStringList(const std::string& key) {
   std::vector<std::string> result;
   const auto& data = GetJson();
   if (!HasKey(key, data)) return {};
+  if (!data[key].is_array()) {
+    printf_stderr("ERROR: Value for key '%s' is not an array\n", key.c_str());
+    return {};
+  }
   for (const auto& item : data[key]) {
-    result.push_back(item.get<std::string>());
+    if (item.is_string()) result.push_back(item.get<std::string>());
   }
   return result;
 }
