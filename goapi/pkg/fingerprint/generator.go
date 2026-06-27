@@ -79,8 +79,17 @@ func Generate(cfg *config.Config, opts Options) error {
 	if cfg.CanvasSeed == nil {
 		cfg.CanvasSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
 	}
-	if cfg.WindowHistoryLength == nil {
-		cfg.WindowHistoryLength = config.Uint32(uint32(1 + rng.IntN(5)))
+	// NOTE: window.history.length is deliberately NOT defaulted. Newer
+	// Camoufox clamps docShell session history to this value, which
+	// disables Page.GoBack/GoForward (see navigation.go). donutbrowser
+	// removes this key for the same reason. Callers may still set it
+	// explicitly via Config.WindowHistoryLength if they accept that.
+
+	// Rendering-consistency default (matches donutbrowser): suppress
+	// OS/theme-dependent chrome styling so canvas/screenshot surfaces do
+	// not leak the host theme. Caller-overridable.
+	if cfg.DisableTheming == nil {
+		cfg.DisableTheming = config.Bool(true)
 	}
 	return nil
 }
