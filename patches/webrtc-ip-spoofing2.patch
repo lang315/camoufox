@@ -36,7 +36,7 @@ index 0000000000..0000000001 100644
  // <verify exact line — include block in PeerConnectionImpl.cpp is large;
  //  insert next to the other mozilla/* headers added by webrtc-ip-spoofing.patch>
 
-@@ -500,12 +500,32 @@ bool isSpecialIP(const std::string& ip) {
+@@ -500,8 +500,36 @@ bool isSpecialIP(const std::string& ip) {
    // Check if an IP should not be masked (special addresses)
    return (ip == "0.0.0.0" || ip == "127.0.0.1" ||
            ip == "::" || ip == "::1" ||
@@ -75,7 +75,7 @@ index 0000000000..0000000001 100644
  }
 
  bool isPrivateIP(const std::string& ip) {
-@@ -534,18 +554,38 @@ std::string getMaskForIP(const std::string& ip, uint32_t userContextId) {
+@@ -534,19 +554,38 @@ std::string getMaskForIP(const std::string& ip, uint32_t userContextId) {
    if (isSpecialIP(ip)) {
      return ip;  // dont mask special IPs
    }
@@ -119,7 +119,7 @@ diff --git a/dom/media/webrtc/jsapi/WebRTCIPManager.h b/dom/media/webrtc/jsapi/W
 index 0000000000..0000000002 100644
 --- a/dom/media/webrtc/jsapi/WebRTCIPManager.h
 +++ b/dom/media/webrtc/jsapi/WebRTCIPManager.h
-@@ -25,6 +25,12 @@ class WebRTCIPManager {
+@@ -25,6 +25,13 @@ class WebRTCIPManager {
    static bool GetIPv6(uint32_t userContextId, nsAString& outIPv6);
    static void SetIPv6(uint32_t userContextId, const nsAString& ipv6);
 
@@ -137,7 +137,7 @@ diff --git a/dom/media/webrtc/jsapi/WebRTCIPManager.cpp b/dom/media/webrtc/jsapi
 index 0000000000..0000000003 100644
 --- a/dom/media/webrtc/jsapi/WebRTCIPManager.cpp
 +++ b/dom/media/webrtc/jsapi/WebRTCIPManager.cpp
-@@ -90,6 +90,46 @@ void WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
+@@ -90,3 +90,52 @@ void WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
    DisableIPv6Function(userContextId);
  }
 
