@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000000..0000000001
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,162 @@
 +#include "CanvasSeedManager.h"
 +#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
@@ -171,7 +171,7 @@ new file mode 100644
 index 0000000000..0000000002
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,66 @@
 +#ifndef mozilla_dom_CanvasSeedManager_h
 +#define mozilla_dom_CanvasSeedManager_h
 +
@@ -373,7 +373,7 @@ index 0000000000..0000000008 100644
  #include "mozilla/dom/File.h"
  #include "mozilla/dom/HTMLCanvasElementBinding.h"
  #include "mozilla/dom/ImageBitmap.h"
-@@ -710,6 +711,24 @@ nsresult HTMLCanvasElement::ExtractData(JSContext* aCx,
+@@ -710,6 +711,25 @@ nsresult HTMLCanvasElement::ExtractData(JSContext* aCx,
    // After: the DataSourceSurface is mapped for encoding. Apply
    // perturbation in-place on the mapping so the encoder (libpng /
    // libjpeg) reads the perturbed pixels.
@@ -430,7 +430,7 @@ index 0000000000..0000000009 100644
  bool OffscreenCanvas::IsChrome() const {
    if (NS_IsMainThread()) {
      nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetOwnerGlobal());
-@@ -780,6 +793,21 @@ already_AddRefed<Promise> OffscreenCanvas::ConvertToBlob(
+@@ -780,6 +793,22 @@ already_AddRefed<Promise> OffscreenCanvas::ConvertToBlob(
    // existing encode path — between snapshot and ImageEncoder::ExtractData,
    // apply perturbation when GetCanvasSeed() != 0. Pattern identical to
    // HTMLCanvasElement::ExtractData above.
@@ -465,7 +465,7 @@ index 0000000000..0000000010 100644
  #include "mozilla/Casting.h"
  #include "mozilla/Preferences.h"
  #include "mozilla/dom/Document.h"
-@@ -3120,6 +3121,46 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+@@ -3120,39 +3121,39 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
    // TODO(canvas-spoofing P3): wire ReadPixels perturbation.
    //
    // This hunk is intentionally incomplete because the FF150-beta
