@@ -2,26 +2,25 @@
 
 <h1 align="center">Camoufox</h1>
 
-<h4 align="center">The browser built for AI agents 🦊</h4>
-
-<p align="center">                                      
-Camoufox is an open source browser built for AI agents. It is lightweight, mimics a human browser, and is optimized for LLM automation.
-</p>
+<h4 align="center">Camoufox is an open source anti-detect browser built for webscraping & AI agents. 🦊</h4>
 
 <div align="center">
   <a href="https://trendshift.io/repositories/12224" target="_blank">
     <img src="https://trendshift.io/api/badge/repositories/12224" alt="daijro%2Fcamoufox | Trendshift" width="250" height="55"/>
   </a><br>
-  <a href="https://pepy.tech/projects/camoufox"><img src="https://static.pepy.tech/personalized-badge/camoufox?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="PyPI Downloads"></a>
+  <a href="https://pepy.tech/projects/camoufox"><img src="https://static.pepy.tech/personalized-badge/camoufox?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads" alt="Total Downloads"</a>
+  <a href="https://pepy.tech/projects/camoufox"><img src="https://static.pepy.tech/personalized-badge/camoufox?period=monthly&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads%2Fmonth" alt="Monthly Downloads"></a>
+    <a href="https://pepy.tech/projects/camoufox"><img src="https://static.pepy.tech/personalized-badge/camoufox?period=weekly&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads%2Fweek" alt="Weekly Downloads"></a>
+<h4>⚠️ This project is under development. It may not be suitable for stable production use. ⚠️</h4>
 </div>
 
 ---
 
 > [!NOTE]
-> **All of the latest documentation is avaliable at [camoufox.com](https://camoufox.com).**
+> **All of the latest documentation is available at [camoufox.com](https://camoufox.com).**
 
 > [!NOTE]
-> Browser development is active at [github.com/CloverLabsAI/camoufox](https://github.com/CloverLabsAI/camoufox) and [github.com/VulpineOS/VulpineOS](https://github.com/VulpineOS/VulpineOS).<br>This repo is being used to merge checkpoint releases.
+> Browser development is active at [github.com/CloverLabsAI/camoufox](https://github.com/CloverLabsAI/camoufox) and [github.com/VulpineOS/VulpineOS](https://github.com/VulpineOS/VulpineOS).<br>This repo is being used to merge checkpoint releases and should be treated as the master copy.
 
 > [!NOTE]
 > To make use of the alpha Camoufox releases, use the [`cloverlabs-camoufox`](https://pypi.org/project/cloverlabs-camoufox/) pip package.
@@ -31,7 +30,8 @@ Camoufox is an open source browser built for AI agents. It is lightweight, mimic
 # Sponsors
 
 <details open>
-<summary>View</summary>
+<summary>View/Collapse All</summary>
+<br>
 <table>
   <tr>
     <td width="25%" align="center" valign="middle">
@@ -63,9 +63,33 @@ Camoufox is an open source browser built for AI agents. It is lightweight, mimic
       <a href="https://serpapi.com/use-cases/web-search-api?utm_source=camoufox">SerpApi, a web search API</a> to scrape Google and other search engines with a simple API.
     </td>
   </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle" height="100">
+      <a href="https://talordata.com/?campaignid=X01VSF4OOvlHfN6U&utm_source=github&utm_term=camoufox" target="_blank">
+        <img width="350" alt="color horizontal" src="https://github.com/user-attachments/assets/1f470eca-2a37-47ac-bb84-3a63339c1578"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://talordata.com/?campaignid=X01VSF4OOvlHfN6U&utm_source=github&utm_term=camoufox">Talordata</a> is a simple web search API to scrape Google and other search engines at a fraction of the cost. Get 1,000 free requests upon registration, and pay just $0.25 per 1,000 successful responses—zero charges for failed scrapes.<br>
+Use coupon code <strong>CAMOUFOX</strong> for <strong>10% OFF</strong> Residential Proxies. [<a href="https://discord.gg/dMZFyY39Fx">Discord</a>]
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle" height="100">
+      <a href="https://crawlbase.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox" target="_blank">
+        <img width="350" alt="color horizontal" src="https://github.com/user-attachments/assets/5c515090-86c2-4c76-b7b2-6e0b393594d5"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <strong>Web data that survives the anti-bots.</strong><br>
+      <a href="https://crawlbase.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox">Crawlbase</a> gives developers and AI teams reliable data at scale: a 99% success-rate Crawler, Crawling API, Smart AI Proxies, and Web MCP Server that get through, so your scrapers and agents don't break. You build, we handle the infrastructure.
+
+<strong>Get 15% off your first 3 months with code CAMOUFOX</strong> → <a href="https://crawlbase.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox">crawlbase.com</a>
+    </td>
+  </tr>
 </table>
 
-### Proxy Sponsors
+## Proxy providers
 
 Camoufox is intended to be used with rotating proxies (preferably residential IPs). Check out these providers:
 
@@ -176,6 +200,68 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
       • 💸 <strong>Special discount</strong> code for Camoufox users: <strong>PROXY90 - 10%</strong><br>
       Best for: Web scraping, automation, multi-accounting, and large-scale data extraction
     </td>
+  </tr>     
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://mangoproxy.com/?utm_source=github&utm_medium=partner&utm_campaign=daijro" target="_blank">
+        <img width="380" alt="mangoproxy" src="https://github.com/user-attachments/assets/c2cd3ddf-c940-4906-be1b-5505dcdb6e06"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://mangoproxy.com/?utm_source=github&utm_medium=partner&utm_campaign=daijro">MangoProxy</a> is a Residential, ISP, Mobile and Datacenter proxy service designed for professional tasks where stability, speed, and anonymity matter.<br>
+      Use code DAIJRO for 8% OFF ISP Static Proxies
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://9proxy.com/pricing?utm_source=github&utm_medium=daijro&utm_campaign=githubdev&utm_content=sponsored" target="_blank">
+        <img width="380" alt="9proxy" src="https://github.com/user-attachments/assets/2b59c5d9-317a-488d-a723-134b7237d339"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://9proxy.com/pricing?utm_source=github&utm_medium=daijro&utm_campaign=githubdev&utm_content=sponsored">9Proxy</a> provides residential proxies from just $0.018/IP or $0.68/GB. 20M+ IPs across 90+ countries. Sticky or rotating sessions, managed from desktop or mobile app.<br>
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://go.nodemaven.com/daijro" target="_blank">
+        <img width="380" alt="nodemaven" src="https://github.com/user-attachments/assets/3c4075dd-105a-4ed4-a68a-e8cb127bedfa"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://go.nodemaven.com/daijro">NodeMaven</a>: The most reliable proxy provider with the Highest Quality IP on the market.<br>
+      Best solution for automation, web scraping, SEO research, and social media management.<br>
+      <a href="https://go.nodemaven.com/daijro">NodeMaven</a> offers:<br>
+      • Sticky sessions up to 7 days<br>
+      • 99.9% uptime<br>
+      • IP filtering: all proxies have fraud score <97%<br>
+      • No KYC required<br>
+      • Cashback on traffic - burn GB and earn up to 10% back<br>
+Special offer: Use code CAMOUFOX35 to get 35% discount on Proxies.
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://proxidize.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox&utm_content=daijro" target="_blank">
+        <img width="380" alt="proxidize" src="https://imagedelivery.net/r4caA8hJ3Ww3j8uyC_NNCA/95a9137a-43fd-48d4-7243-983f3f4a3d00/public"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <strong><a href="https://proxidize.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox&utm_content=daijro">Proxidize</a> | Mobile and Residential Proxies for Camoufox</strong><br>
+      Running Camoufox at scale? Your browser setup is only half the stack. Your proxy layer matters too.<br>
+      Proxidize provides mobile and residential proxies built for scraping, browser automation, SEO monitoring, AI agents, and data collection workflows.<br>
+      <strong>Why Proxidize?</strong><br>
+      • Real 4G and 5G mobile proxies<br>
+      • Residential proxies in 195+ countries<br>
+      • Rotating and sticky sessions<br>
+      • City-level and carrier targeting<br>
+      • Unlimited concurrency<br>
+      • HTTP(S), SOCKS5, and UDP over SOCKS support<br>
+      • No hardware or DIY setup required<br>
+      Built for teams that need reliable proxy infrastructure without managing devices, servers, or proxy rotation themselves.<br>
+      <strong>Special offer for Camoufox users</strong>: Use code <strong>CAMOUFOX20</strong> for <strong>20% off</strong>.<br>
+      Start now: <a href="https://proxidize.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox&utm_content=daijro">https://proxidize.com</a>
+    </td>
   </tr>
 </table>
 </details>
@@ -184,14 +270,13 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
 
 # Introduction
 
-Camoufox is a Firefox fork engineered for AI agents. It is headless, undetectable, and optimized to run at scale. With stealth features as the foundation, it gives your AI agent a browser that just works: no bot walls, no fingerprint leaks, no wasted tokens\* parsing bloated DOM.
+Camoufox is a Firefox fork engineered for web scraping and AI agents. It is headless, undetectable, and optimized to run at scale. Every run gets a fresh identity drawn from the real-world distribution of devices, so it blends into normal traffic instead of standing out.
 
 ## Highlights
 
 * **Built for AI agents** 🤖
   * Minimal, debloated Firefox - fast to launch, cheap to run
   * Drop-in Playwright compatibility via Python interface
-  * Token-efficient: clean DOM output, no CSS animations, or tracking noise
   * Invisible to anti-bot systems so you can run your agent cluster locally or in the cloud without being flagged
 
 - **Undetectable by design** 🎭
@@ -291,6 +376,17 @@ with Camoufox() as browser:
     page = browser.new_page()
     page.goto("https://example.com")
 ```
+
+#### Real fingerprint presets (recommended for v149+ binaries)
+
+By default, fingerprint values are synthesized by BrowserForge. For better evasion against complex consistency checks, opt into the bundled presets — real fingerprints scraped from in-the-wild Firefox traffic:
+
+```python
+with Camoufox(fingerprint_preset=True, os="macos") as browser:
+    ...
+```
+
+The library auto-routes by binary version: Firefox ≥ 149 loads `fingerprint-presets-v150.json` (312 presets covering v149–v152, 67 macOS / 180 Windows / 65 Linux); older binaries fall back to the original bundle. UA strings are rewritten to match the active binary, so opting in is safe across versions. Pass a preset dict instead of `True` to pin a specific fingerprint.
 
 ---
 

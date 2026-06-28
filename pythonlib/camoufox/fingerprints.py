@@ -22,7 +22,10 @@ FP_GENERATOR = FingerprintGenerator(browser='firefox', os=('linux', 'macos', 'wi
 
 # Bundled real fingerprint presets
 PRESETS_FILE = Path(__file__).parent / 'fingerprint-presets.json'
-_PRESETS_CACHE: Optional[Dict] = None
+PRESETS_V150_FILE = Path(__file__).parent / 'fingerprint-presets-v150.json'
+# Firefox major version at which the v150 preset bundle becomes preferred.
+PRESETS_V150_MIN_FF = 149
+_PRESETS_CACHE: Dict[Path, Dict] = {}
 
 # CreepJS OS marker fonts used for OS detection
 _MACOS_MARKER_FONTS = [
@@ -184,16 +187,32 @@ def _generate_random_voice_subset(target_os: str) -> List[str]:
     return result
 
 
-def load_presets() -> Optional[Dict]:
+def _select_presets_file(ff_version: Optional[Any] = None) -> Path:
+    """Pick the bundled-presets file appropriate for a given Firefox version.
+
+    For Firefox >= PRESETS_V150_MIN_FF, prefer the v150 bundle (real
+    fingerprints scraped from contemporary browsers); otherwise fall back to
+    the original bundle.
+    """
+    try:
+        major = int(str(ff_version).split('.', 1)[0]) if ff_version else 0
+    except (ValueError, TypeError):
+        major = 0
+    if major >= PRESETS_V150_MIN_FF and PRESETS_V150_FILE.exists():
+        return PRESETS_V150_FILE
+    return PRESETS_FILE
+
+
+def load_presets(ff_version: Optional[Any] = None) -> Optional[Dict]:
     """Load bundled fingerprint presets from JSON file."""
-    global _PRESETS_CACHE
-    if _PRESETS_CACHE is not None:
-        return _PRESETS_CACHE
-    if not PRESETS_FILE.exists():
+    path = _select_presets_file(ff_version)
+    if path in _PRESETS_CACHE:
+        return _PRESETS_CACHE[path]
+    if not path.exists():
         return None
-    with open(PRESETS_FILE) as f:
-        _PRESETS_CACHE = json.load(f)
-    return _PRESETS_CACHE
+    with open(path) as f:
+        _PRESETS_CACHE[path] = json.load(f)
+    return _PRESETS_CACHE[path]
 
 
 # Map OS names to preset keys
@@ -209,12 +228,13 @@ _OS_TO_PRESET_KEY = {
 
 def get_random_preset(
     os: Optional[str] = None,
+    ff_version: Optional[Any] = None,
 ) -> Optional[Dict]:
     """
     Get a random preset for the given OS.
     Returns None if no presets are available.
     """
-    presets = load_presets()
+    presets = load_presets(ff_version)
     if not presets:
         return None
 
@@ -423,6 +443,7 @@ def generate_context_fingerprint(
     webrtc_ip: Optional[str] = None,
     timezone: Optional[str] = None,
     locale: Optional[str] = None,
+    config_overrides: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate fingerprint values for a single per-context identity.
@@ -438,6 +459,9 @@ def generate_context_fingerprint(
         locale: BCP-47 locale string (e.g. 'en-GB'). When provided, parsed via
             normalize_locale() and injected into config. Also sets
             context_options['locale'] for Playwright.
+        config_overrides: Dict of CAMOU_CONFIG keys to override after config
+            is built but before init_script is rendered. Useful for disabling
+            perturbation (e.g. {'fonts:spacing_seed': 0}).
     """
     if preset is not None:
         # Use real fingerprint preset
@@ -534,6 +558,10 @@ def generate_context_fingerprint(
         config['navigator.language'] = parsed.as_string
         if parsed.script:
             config['locale:script'] = parsed.script
+
+    # Apply caller overrides before rendering init_script
+    if config_overrides:
+        config.update(config_overrides)
 
     # Build the values dict for the init script (works for both paths)
     init_values: Dict[str, Any] = {
