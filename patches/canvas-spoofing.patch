@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000000..0000000001
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,168 @@
 +#include "CanvasSeedManager.h"
 +#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
@@ -171,7 +171,7 @@ new file mode 100644
 index 0000000000..0000000002
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.h
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,72 @@
 +#ifndef mozilla_dom_CanvasSeedManager_h
 +#define mozilla_dom_CanvasSeedManager_h
 +
@@ -273,7 +273,7 @@ index 0000000000..0000000004 100644
 @@ -7486,6 +7487,25 @@ void nsGlobalWindowInner::SetFontSpacingSeed(uint32_t seed, ErrorResult& aRv) {
    }
  }
- 
+
 +void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
 +  uint32_t userContextId = 0;
 +  if (BrowsingContext* bc = GetBrowsingContext()) {
@@ -303,12 +303,12 @@ index 0000000000..0000000005 100644
 @@ -683,6 +683,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
    // Font spacing seed for privacy-preserving font fingerprinting
    void SetFontSpacingSeed(uint32_t seed, mozilla::ErrorResult& aRv);
- 
+
 +  // Canvas pixel perturbation seed for privacy-preserving canvas readback
 +  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
 +
    void StoreSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
- 
+
    void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
 index 0000000000..0000000006 100644
@@ -324,7 +324,7 @@ index 0000000000..0000000006 100644
 +  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
 +  undefined setCanvasSeed(unsigned long seed);
 +};
- 
+
  // Mozilla-internal interface for use in browser chrome and toolkit code
  // that wants access to the test functionality declared on Window.
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
@@ -358,7 +358,7 @@ index 0000000000..0000000007 100644
 +      }
 +    }
 +  }
- 
+
    return imageData.forget();
  }
 diff --git a/dom/canvas/HTMLCanvasElement.cpp b/dom/canvas/HTMLCanvasElement.cpp
@@ -373,7 +373,7 @@ index 0000000000..0000000008 100644
  #include "mozilla/dom/File.h"
  #include "mozilla/dom/HTMLCanvasElementBinding.h"
  #include "mozilla/dom/ImageBitmap.h"
-@@ -710,6 +711,25 @@ nsresult HTMLCanvasElement::ExtractData(JSContext* aCx,
+@@ -710,6 +711,24 @@ nsresult HTMLCanvasElement::ExtractData(JSContext* aCx,
    // After: the DataSourceSurface is mapped for encoding. Apply
    // perturbation in-place on the mapping so the encoder (libpng /
    // libjpeg) reads the perturbed pixels.
@@ -414,7 +414,7 @@ index 0000000000..0000000009 100644
 @@ -642,6 +643,18 @@ mozilla::dom::Document* OffscreenCanvas::GetDocument() const {
    return nullptr;
  }
- 
+
 +uint32_t OffscreenCanvas::GetCanvasSeed() const {
 +  // Main-thread case: walk to the owning document.
 +  if (Document* doc = GetDocument()) {
@@ -430,7 +430,7 @@ index 0000000000..0000000009 100644
  bool OffscreenCanvas::IsChrome() const {
    if (NS_IsMainThread()) {
      nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetOwnerGlobal());
-@@ -780,6 +793,22 @@ already_AddRefed<Promise> OffscreenCanvas::ConvertToBlob(
+@@ -780,6 +793,21 @@ already_AddRefed<Promise> OffscreenCanvas::ConvertToBlob(
    // existing encode path — between snapshot and ImageEncoder::ExtractData,
    // apply perturbation when GetCanvasSeed() != 0. Pattern identical to
    // HTMLCanvasElement::ExtractData above.
@@ -453,3 +453,55 @@ index 0000000000..0000000009 100644
    return ImageEncoder::ExtractDataAsync(aType, aOptions, aUsingCustomOptions,
                                          dataSurface, encodeCompleteCallback);
  }
+diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
+index 0000000000..0000000010 100644
+--- a/dom/canvas/ClientWebGLContext.cpp
++++ b/dom/canvas/ClientWebGLContext.cpp
+@@ -10,6 +10,7 @@
+ #include "WebGLChild.h"
+ #include "WebGLMethodDispatcher.h"
+ #include "WebGLValidateStrings.h"
++#include "mozilla/dom/CanvasSeedManager.h"
+ #include "mozilla/Casting.h"
+ #include "mozilla/Preferences.h"
+ #include "mozilla/dom/Document.h"
+@@ -3120,6 +3121,46 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+   // TODO(canvas-spoofing P3): wire ReadPixels perturbation.
+   //
+   // This hunk is intentionally incomplete because the FF150-beta
+   // ClientWebGLContext::ReadPixels signature must be inspected after
+   // `make dir` checks out the Firefox source. Two unknowns:
+   //
+   //   1. The exact ArrayBufferView accessor — Firefox switched from
+   //      JS::AutoCheckCannotGC + raw pointers to TypedArray<Uint8> in
+   //      various revisions. The read path may also bounce through
+   //      WebGLChild::Recv* for the content/parent split.
+   //
+   //   2. The detection that the read targets the default framebuffer.
+   //      `mBoundDrawFramebuffer == nullptr` works in this client class
+   //      but the actual draw FB may live on the host side.
+   //
+   // The skeleton below documents intent — fill in the buffer access
+   // line, then build. As written, the `if (bytes && byteLength)` guard
+   // ensures the hunk is a NO-OP if left unfinished, so a partial patch
+   // still compiles and never crashes; the canvas-2D perturbation
+   // (Phase 2) still applies, so v0 ships with WebGL pixel readback
+   // unprotected — same as today.
+   if (!mBoundDrawFramebuffer) {
+     uint32_t userContextId = GetUserContextId();
+     uint32_t seed = CanvasSeedManager::GetSeed(userContextId);
+     if (seed != 0) {
+       uint8_t* bytes = nullptr;
+       size_t byteLength = 0;
+       // <UNRESOLVED — see TODO above. Must be wired before P3 closes.>
+       MOZ_ASSERT(false, "canvas-spoofing P3 stub: ReadPixels not yet wired");
+       if (bytes && byteLength > 0) {
+         CanvasSeedManager::Perturb(bytes, byteLength, seed,
+             CanvasSeedManager::GetNoiseDensity(),
+             CanvasSeedManager::GetNoiseStrength());
+       }
+     }
+   }
+ }
+
+ // -
