@@ -122,8 +122,12 @@ class Patcher:
         # --forward flag: skip patches that appear to be already applied
         # --binary flag: preserve line endings (helps with CRLF vs LF differences)
         # -l flag: ignore whitespace differences
+        # CAMOU_PATCH lets CI point at GNU patch (gpatch) on macOS, whose
+        # BSD patch is too strict about sloppy @@ hunk counts. Defaults to
+        # the system `patch` (GNU on Linux).
+        patch_bin = os.environ.get('CAMOU_PATCH', 'patch')
         result = subprocess.run(
-            ['patch', '-p1', '--forward', '-l', '--binary', '-i', patch_file],
+            [patch_bin, '-p1', '--forward', '-l', '--binary', '-i', patch_file],
             stdin=sys.stdin,
             stdout=sys.stdout,
             stderr=sys.stderr,
