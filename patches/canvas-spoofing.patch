@@ -273,7 +273,7 @@ index 0000000000..0000000004 100644
 @@ -7486,6 +7487,25 @@ void nsGlobalWindowInner::SetFontSpacingSeed(uint32_t seed, ErrorResult& aRv) {
    }
  }
-
+ 
 +void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
 +  uint32_t userContextId = 0;
 +  if (BrowsingContext* bc = GetBrowsingContext()) {
@@ -303,12 +303,12 @@ index 0000000000..0000000005 100644
 @@ -683,6 +683,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
    // Font spacing seed for privacy-preserving font fingerprinting
    void SetFontSpacingSeed(uint32_t seed, mozilla::ErrorResult& aRv);
-
+ 
 +  // Canvas pixel perturbation seed for privacy-preserving canvas readback
 +  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
 +
    void StoreSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
-
+ 
    void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
 index 0000000000..0000000006 100644
@@ -324,7 +324,7 @@ index 0000000000..0000000006 100644
 +  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
 +  undefined setCanvasSeed(unsigned long seed);
 +};
-
+ 
  // Mozilla-internal interface for use in browser chrome and toolkit code
  // that wants access to the test functionality declared on Window.
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
@@ -358,7 +358,7 @@ index 0000000000..0000000007 100644
 +      }
 +    }
 +  }
-
+ 
    return imageData.forget();
  }
 diff --git a/dom/canvas/HTMLCanvasElement.cpp b/dom/canvas/HTMLCanvasElement.cpp
@@ -414,7 +414,7 @@ index 0000000000..0000000009 100644
 @@ -642,6 +643,18 @@ mozilla::dom::Document* OffscreenCanvas::GetDocument() const {
    return nullptr;
  }
-
+ 
 +uint32_t OffscreenCanvas::GetCanvasSeed() const {
 +  // Main-thread case: walk to the owning document.
 +  if (Document* doc = GetDocument()) {
@@ -453,55 +453,3 @@ index 0000000000..0000000009 100644
    return ImageEncoder::ExtractDataAsync(aType, aOptions, aUsingCustomOptions,
                                          dataSurface, encodeCompleteCallback);
  }
-diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index 0000000000..0000000010 100644
---- a/dom/canvas/ClientWebGLContext.cpp
-+++ b/dom/canvas/ClientWebGLContext.cpp
-@@ -10,6 +10,7 @@
- #include "WebGLChild.h"
- #include "WebGLMethodDispatcher.h"
- #include "WebGLValidateStrings.h"
-+#include "mozilla/dom/CanvasSeedManager.h"
- #include "mozilla/Casting.h"
- #include "mozilla/Preferences.h"
- #include "mozilla/dom/Document.h"
-@@ -3120,39 +3121,39 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
-   // TODO(canvas-spoofing P3): wire ReadPixels perturbation.
-   //
-   // This hunk is intentionally incomplete because the FF150-beta
-   // ClientWebGLContext::ReadPixels signature must be inspected after
-   // `make dir` checks out the Firefox source. Two unknowns:
-   //
-   //   1. The exact ArrayBufferView accessor — Firefox switched from
-   //      JS::AutoCheckCannotGC + raw pointers to TypedArray<Uint8> in
-   //      various revisions. The read path may also bounce through
-   //      WebGLChild::Recv* for the content/parent split.
-   //
-   //   2. The detection that the read targets the default framebuffer.
-   //      `mBoundDrawFramebuffer == nullptr` works in this client class
-   //      but the actual draw FB may live on the host side.
-   //
-   // The skeleton below documents intent — fill in the buffer access
-   // line, then build. As written, the `if (bytes && byteLength)` guard
-   // ensures the hunk is a NO-OP if left unfinished, so a partial patch
-   // still compiles and never crashes; the canvas-2D perturbation
-   // (Phase 2) still applies, so v0 ships with WebGL pixel readback
-   // unprotected — same as today.
-   if (!mBoundDrawFramebuffer) {
-     uint32_t userContextId = GetUserContextId();
-     uint32_t seed = CanvasSeedManager::GetSeed(userContextId);
-     if (seed != 0) {
-       uint8_t* bytes = nullptr;
-       size_t byteLength = 0;
-       // <UNRESOLVED — see TODO above. Must be wired before P3 closes.>
-       MOZ_ASSERT(false, "canvas-spoofing P3 stub: ReadPixels not yet wired");
-       if (bytes && byteLength > 0) {
-         CanvasSeedManager::Perturb(bytes, byteLength, seed,
-             CanvasSeedManager::GetNoiseDensity(),
-             CanvasSeedManager::GetNoiseStrength());
-       }
-     }
-   }
- }
-
- // -
