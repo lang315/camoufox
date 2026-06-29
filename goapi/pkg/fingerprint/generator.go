@@ -113,9 +113,6 @@ func Generate(cfg *config.Config, opts Options) error {
 	if cfg.CSSDynamicRange == "" {
 		cfg.CSSDynamicRange = "standard"
 	}
-	if cfg.CSSPrefersReducedMotion == nil {
-		cfg.CSSPrefersReducedMotion = config.Bool(false)
-	}
 	if cfg.CSSPrefersColorScheme == "" {
 		if rng.IntN(2) == 0 {
 			cfg.CSSPrefersColorScheme = "light"

@@ -12,7 +12,7 @@ index 65874de..b1beb10 100644
      "../base",
      "../generic",
 diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
-index 93eafd4..e871ddf 100644
+index 93eafd4..93478cb 100644
 --- a/layout/style/nsMediaFeatures.cpp
 +++ b/layout/style/nsMediaFeatures.cpp
 @@ -28,6 +28,7 @@
@@ -23,13 +23,12 @@ index 93eafd4..e871ddf 100644
  
  using namespace mozilla;
  using mozilla::dom::DisplayMode;
-@@ -150,6 +151,14 @@ int32_t Gecko_MediaFeatures_GetMonochromeBitsPerPixel(
+@@ -150,6 +151,13 @@ int32_t Gecko_MediaFeatures_GetMonochromeBitsPerPixel(
  }
  
  StyleColorGamut Gecko_MediaFeatures_ColorGamut(const Document* aDocument) {
 +  // camoufox: spoof the output-device color gamut so a wide-gamut (P3/
-+  // Rec2020) monitor is not a fingerprint; the goapi generator defaults
-+  // this to srgb. (#8)
++  // Rec2020) monitor is not a fingerprint; goapi defaults this to srgb. (#8)
 +  if (auto v = MaskConfig::GetString("cssMedia:colorGamut")) {
 +    if (*v == "p3") return StyleColorGamut::P3;
 +    if (*v == "rec2020") return StyleColorGamut::Rec2020;
@@ -38,19 +37,7 @@ index 93eafd4..e871ddf 100644
    auto* dx = GetDeviceContextFor(aDocument);
    if (!dx || aDocument->ShouldResistFingerprinting(RFPTarget::CSSColorInfo)) {
      return StyleColorGamut::Srgb;
-@@ -274,6 +283,11 @@ bool Gecko_MediaFeatures_MatchesPlatform(StylePlatform aPlatform) {
- }
- 
- bool Gecko_MediaFeatures_PrefersReducedMotion(const Document* aDocument) {
-+  // camoufox: spoof prefers-reduced-motion so the host OS accessibility
-+  // setting does not leak; goapi defaults this to false. (#8)
-+  if (auto v = MaskConfig::GetBool("cssMedia:prefersReducedMotion")) {
-+    return *v;
-+  }
-   if (aDocument->ShouldResistFingerprinting(
-           RFPTarget::CSSPrefersReducedMotion)) {
-     return false;
-@@ -292,6 +306,12 @@ bool Gecko_MediaFeatures_PrefersReducedTransparency(const Document* aDocument) {
+@@ -292,6 +300,12 @@ bool Gecko_MediaFeatures_PrefersReducedTransparency(const Document* aDocument) {
  
  StylePrefersColorScheme Gecko_MediaFeatures_PrefersColorScheme(
      const Document* aDocument, bool aUseContent) {
@@ -63,7 +50,7 @@ index 93eafd4..e871ddf 100644
    auto scheme = aUseContent ? PreferenceSheet::ContentPrefs().mColorScheme
                              : aDocument->PreferredColorScheme();
    return scheme == ColorScheme::Dark ? StylePrefersColorScheme::Dark
-@@ -355,6 +375,11 @@ StyleDynamicRange Gecko_MediaFeatures_DynamicRange(const Document* aDocument) {
+@@ -355,6 +369,11 @@ StyleDynamicRange Gecko_MediaFeatures_DynamicRange(const Document* aDocument) {
  
  StyleDynamicRange Gecko_MediaFeatures_VideoDynamicRange(
      const Document* aDocument) {
