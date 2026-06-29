@@ -172,13 +172,11 @@ type Config struct {
 	MediaDecodingInfo map[string]MediaDecodeInfo `json:"mediaCapabilities:decodingInfo,omitempty"`
 
 	// cssMedia:* — per-profile CSS media-feature values so a wide-gamut/HDR
-	// monitor or the host OS theme/accessibility settings don't leak through
-	// matchMedia (color-gamut, dynamic-range, prefers-color-scheme,
-	// prefers-reduced-motion).
-	CSSColorGamut           string `json:"cssMedia:colorGamut,omitempty"`
-	CSSDynamicRange         string `json:"cssMedia:dynamicRange,omitempty"`
-	CSSPrefersColorScheme   string `json:"cssMedia:prefersColorScheme,omitempty"`
-	CSSPrefersReducedMotion *bool  `json:"cssMedia:prefersReducedMotion,omitempty"`
+	// monitor or the host OS theme doesn't leak through matchMedia.
+	// (prefers-reduced-motion is already owned by the Playwright patch.)
+	CSSColorGamut         string `json:"cssMedia:colorGamut,omitempty"`
+	CSSDynamicRange       string `json:"cssMedia:dynamicRange,omitempty"`
+	CSSPrefersColorScheme string `json:"cssMedia:prefersColorScheme,omitempty"`
 
 	// runtime tweaks
 	AllowMainWorld   *bool    `json:"allowMainWorld,omitempty"`

@@ -134,9 +134,6 @@ func TestCSSMediaDefaults(t *testing.T) {
 	if cfg.CSSDynamicRange != "standard" {
 		t.Errorf("dynamicRange = %q, want standard", cfg.CSSDynamicRange)
 	}
-	if cfg.CSSPrefersReducedMotion == nil || *cfg.CSSPrefersReducedMotion {
-		t.Errorf("prefersReducedMotion should default false")
-	}
 	if cfg.CSSPrefersColorScheme != "light" && cfg.CSSPrefersColorScheme != "dark" {
 		t.Errorf("prefersColorScheme = %q, want light|dark", cfg.CSSPrefersColorScheme)
 	}
