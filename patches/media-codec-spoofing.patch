@@ -1,0 +1,97 @@
+diff --git a/dom/media/mediacapabilities/MediaCapabilities.cpp b/dom/media/mediacapabilities/MediaCapabilities.cpp
+index f6e4457..b51bcf9 100644
+--- a/dom/media/mediacapabilities/MediaCapabilities.cpp
++++ b/dom/media/mediacapabilities/MediaCapabilities.cpp
+@@ -34,6 +34,7 @@
+ #include "mozilla/dom/WorkerRef.h"
+ #include "mozilla/layers/KnowsCompositor.h"
+ #include "nsContentUtils.h"
++#include "MaskConfig.hpp"
+ 
+ mozilla::LazyLogModule sMediaCapabilitiesLog("MediaCapabilities");
+ 
+@@ -270,6 +271,29 @@ void MediaCapabilities::CreateMediaCapabilitiesDecodingInfo(
+                   aConfiguration.mAudio.Value().mContentType);
+   }
+ 
++  // camoufox: if the queried content type matches the per-OS codec config,
++  // resolve with spoofed support/smooth/powerEfficient so a cross-OS profile
++  // presents a coherent codec + HW-decode matrix (coherent with
++  // canPlayType) instead of leaking the host capabilities (#6).
++  {
++    nsAutoCString ctype;
++    if (aConfiguration.mVideo.WasPassed()) {
++      ctype = NS_ConvertUTF16toUTF8(aConfiguration.mVideo.Value().mContentType);
++    } else if (aConfiguration.mAudio.WasPassed()) {
++      ctype = NS_ConvertUTF16toUTF8(aConfiguration.mAudio.Value().mContentType);
++    }
++    bool sup = true, smooth = true, power = false;
++    if (!ctype.IsEmpty() &&
++        MaskConfig::GetMediaDecodingInfo(ctype.get(), sup, smooth, power)) {
++      MediaCapabilitiesDecodingInfo info;
++      info.mSupported = sup;
++      info.mSmooth = sup && smooth;
++      info.mPowerEfficient = sup && power;
++      aPromise->MaybeResolve(std::move(info));
++      return;
++    }
++  }
++
+   if (!supported) {
+     MediaCapabilitiesDecodingInfo info;
+     info.mSupported = false;
+diff --git a/dom/media/mediaelement/HTMLMediaElement.cpp b/dom/media/mediaelement/HTMLMediaElement.cpp
+index df8c944..1bbd6bd 100644
+--- a/dom/media/mediaelement/HTMLMediaElement.cpp
++++ b/dom/media/mediaelement/HTMLMediaElement.cpp
+@@ -136,6 +136,7 @@
+ #  include "objbase.h"
+ #endif
+ #include "xpcpublic.h"
++#include "MaskConfig.hpp"
+ 
+ mozilla::LazyLogModule gMediaElementLog("HTMLMediaElement");
+ mozilla::LazyLogModule gMediaElementEventsLog("HTMLMediaElementEvents");
+@@ -5543,6 +5544,13 @@ CanPlayStatus HTMLMediaElement::GetCanPlay(
+ }
+ 
+ void HTMLMediaElement::CanPlayType(const nsAString& aType, nsAString& aResult) {
++  // camoufox: answer from the per-OS codec config when present, so a
++  // cross-OS profile does not leak the host's real decoder support (#6).
++  if (auto spoof = MaskConfig::GetMediaCanPlayType(
++          NS_ConvertUTF16toUTF8(aType).get())) {
++    aResult.Assign(NS_ConvertUTF8toUTF16(spoof->c_str()));
++    return;
++  }
+   DecoderDoctorDiagnostics diagnostics;
+   CanPlayStatus canPlay = GetCanPlay(aType, &diagnostics);
+   diagnostics.StoreFormatDiagnostics(OwnerDoc(), aType, canPlay != CANPLAY_NO,
+diff --git a/dom/media/mediasource/MediaSource.cpp b/dom/media/mediasource/MediaSource.cpp
+index a6eaa23..441f979 100644
+--- a/dom/media/mediasource/MediaSource.cpp
++++ b/dom/media/mediasource/MediaSource.cpp
+@@ -32,6 +32,7 @@
+ #include "nsPIDOMWindow.h"
+ #include "nsString.h"
+ #include "nsThreadUtils.h"
++#include "MaskConfig.hpp"
+ 
+ struct JSContext;
+ class JSObject;
+@@ -136,6 +137,16 @@ void MediaSource::IsTypeSupported(const nsAString& aType,
+     return aRv.ThrowTypeError("Empty type");
+   }
+ 
++  // camoufox: answer from the per-OS codec config so isTypeSupported stays
++  // coherent with canPlayType; "" => unsupported (#6).
++  if (auto spoof = MaskConfig::GetMediaCanPlayType(
++          NS_ConvertUTF16toUTF8(aType).get())) {
++    if (spoof->empty()) {
++      return aRv.ThrowNotSupportedError("Can't play type");
++    }
++    return;
++  }
++
+   Maybe<MediaContainerType> containerType = MakeMediaContainerType(aType);
+   if (!containerType) {
+     return aRv.ThrowNotSupportedError("Unknown type");

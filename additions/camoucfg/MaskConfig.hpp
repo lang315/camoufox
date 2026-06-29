@@ -124,6 +124,62 @@ inline std::vector<std::string> GetStringListLower(const std::string& key) {
   return result;
 }
 
+// --- Media codec spoofing (device-faking target #6) -----------------------
+// A cross-OS profile must not leak the host's real decoder support through
+// canPlayType() / MediaSource.isTypeSupported() / mediaCapabilities
+// .decodingInfo(). These helpers answer those queries from config so the
+// codec matrix matches the claimed OS. Matching is by codec substring (e.g.
+// "hvc1") found in the queried type, so one entry covers a type's many string
+// spellings; the first matching entry wins.
+
+// Returns "probably" | "maybe" | "" for canPlayType()/isTypeSupported(), or
+// nullopt to fall through to the real decoder query.
+// Config: "mediaCapabilities:canPlayType" = { "<substr>": "<answer>" }.
+inline std::optional<std::string> GetMediaCanPlayType(const std::string& type) {
+  const auto& data = GetJson();
+  auto it = data.find("mediaCapabilities:canPlayType");
+  if (it == data.end() || !it->is_object()) return std::nullopt;
+  std::string lower = type;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  for (const auto& [pattern, val] : it->items()) {
+    if (!val.is_string()) continue;
+    std::string p = pattern;
+    std::transform(p.begin(), p.end(), p.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (!p.empty() && lower.find(p) != std::string::npos)
+      return val.get<std::string>();
+  }
+  return std::nullopt;
+}
+
+// Fills a spoofed mediaCapabilities.decodingInfo() result via out-params (kept
+// dom-agnostic so this header has no Gecko dependency; the caller fills the
+// dom struct). Returns true when the type matched a config entry.
+// Config: "mediaCapabilities:decodingInfo" =
+//   { "<substr>": { "supported": bool, "smooth": bool, "powerEfficient": bool } }
+inline bool GetMediaDecodingInfo(const std::string& type, bool& outSupported,
+                                 bool& outSmooth, bool& outPowerEfficient) {
+  const auto& data = GetJson();
+  auto it = data.find("mediaCapabilities:decodingInfo");
+  if (it == data.end() || !it->is_object()) return false;
+  std::string lower = type;
+  std::transform(lower.begin(), lower.end(), lower.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+  for (const auto& [pattern, val] : it->items()) {
+    if (!val.is_object()) continue;
+    std::string p = pattern;
+    std::transform(p.begin(), p.end(), p.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    if (p.empty() || lower.find(p) == std::string::npos) continue;
+    outSupported = val.value("supported", true);
+    outSmooth = val.value("smooth", true);
+    outPowerEfficient = val.value("powerEfficient", false);
+    return true;
+  }
+  return false;
+}
+
 template <typename T>
 inline std::optional<T> GetUintImpl(const std::string& key) {
   const auto& data = GetJson();
