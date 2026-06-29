@@ -103,6 +103,26 @@ func Generate(cfg *config.Config, opts Options) error {
 	if len(cfg.MediaCanPlayType) == 0 && len(cfg.MediaDecodingInfo) == 0 {
 		cfg.MediaCanPlayType, cfg.MediaDecodingInfo = mediaCodecProfile(targetOS)
 	}
+
+	// CSS media features (#8): default to the low-entropy "blends" values so a
+	// wide-gamut/HDR monitor and host accessibility settings don't leak; pick
+	// prefers-color-scheme per-profile so instances don't all report one theme.
+	if cfg.CSSColorGamut == "" {
+		cfg.CSSColorGamut = "srgb"
+	}
+	if cfg.CSSDynamicRange == "" {
+		cfg.CSSDynamicRange = "standard"
+	}
+	if cfg.CSSPrefersReducedMotion == nil {
+		cfg.CSSPrefersReducedMotion = config.Bool(false)
+	}
+	if cfg.CSSPrefersColorScheme == "" {
+		if rng.IntN(2) == 0 {
+			cfg.CSSPrefersColorScheme = "light"
+		} else {
+			cfg.CSSPrefersColorScheme = "dark"
+		}
+	}
 	return nil
 }
 
