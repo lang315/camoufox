@@ -83,6 +83,44 @@ func TestVoiceSubset(t *testing.T) {
 	}
 }
 
+// TestMediaCodecProfile guards #6: HEVC must be supported+coherent on
+// Windows/macOS and unsupported on Linux across canPlayType + decodingInfo.
+func TestMediaCodecProfile(t *testing.T) {
+	cases := map[string]bool{"windows": true, "macos": true, "linux": false}
+	for os, wantHEVC := range cases {
+		cfg := &config.Config{}
+		if err := Generate(cfg, Options{OS: os, Rand: rand.New(rand.NewPCG(5, 6))}); err != nil {
+			t.Fatal(err)
+		}
+		// hvc1 and hev1 must agree (both are HEVC fourccs).
+		for _, codec := range []string{"hvc1", "hev1"} {
+			cp := cfg.MediaCanPlayType[codec]
+			dec := cfg.MediaDecodingInfo[codec]
+			if wantHEVC {
+				if cp != "probably" || !dec.Supported || !dec.Smooth || !dec.PowerEfficient {
+					t.Errorf("%s/%s: HEVC should be supported+HW, got canPlay=%q dec=%+v", os, codec, cp, dec)
+				}
+			} else {
+				if cp != "" || dec.Supported || dec.Smooth || dec.PowerEfficient {
+					t.Errorf("%s/%s: HEVC should be unsupported, got canPlay=%q dec=%+v", os, codec, cp, dec)
+				}
+			}
+		}
+	}
+
+	// User-supplied codec config must not be clobbered by the generator.
+	user := &config.Config{
+		MediaCanPlayType:  map[string]string{"hvc1": "maybe"},
+		MediaDecodingInfo: map[string]config.MediaDecodeInfo{"hvc1": {Supported: true}},
+	}
+	if err := Generate(user, Options{OS: "linux", Rand: rand.New(rand.NewPCG(7, 8))}); err != nil {
+		t.Fatal(err)
+	}
+	if user.MediaCanPlayType["hvc1"] != "maybe" {
+		t.Errorf("generator clobbered user codec config: %q", user.MediaCanPlayType["hvc1"])
+	}
+}
+
 // TestVoiceLangCoherence guards #13: each generated voice must carry its real
 // lang/localService, not a hardcoded en-US. Daniel (en-GB) and Karen (en-AU)
 // are essential macOS voices, so they are always present.
