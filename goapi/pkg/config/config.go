@@ -171,6 +171,15 @@ type Config struct {
 	MediaCanPlayType  map[string]string          `json:"mediaCapabilities:canPlayType,omitempty"`
 	MediaDecodingInfo map[string]MediaDecodeInfo `json:"mediaCapabilities:decodingInfo,omitempty"`
 
+	// cssMedia:* — per-profile CSS media-feature values so a wide-gamut/HDR
+	// monitor or the host OS theme/accessibility settings don't leak through
+	// matchMedia (color-gamut, dynamic-range, prefers-color-scheme,
+	// prefers-reduced-motion).
+	CSSColorGamut           string `json:"cssMedia:colorGamut,omitempty"`
+	CSSDynamicRange         string `json:"cssMedia:dynamicRange,omitempty"`
+	CSSPrefersColorScheme   string `json:"cssMedia:prefersColorScheme,omitempty"`
+	CSSPrefersReducedMotion *bool  `json:"cssMedia:prefersReducedMotion,omitempty"`
+
 	// runtime tweaks
 	AllowMainWorld   *bool    `json:"allowMainWorld,omitempty"`
 	ForceScopeAccess *bool    `json:"forceScopeAccess,omitempty"`

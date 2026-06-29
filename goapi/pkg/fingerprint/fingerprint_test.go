@@ -121,6 +121,36 @@ func TestMediaCodecProfile(t *testing.T) {
 	}
 }
 
+// TestCSSMediaDefaults guards #8: CSS media features default to low-entropy
+// "blend" values, prefers-color-scheme is light or dark, and user overrides win.
+func TestCSSMediaDefaults(t *testing.T) {
+	cfg := &config.Config{}
+	if err := Generate(cfg, Options{OS: "windows", Rand: rand.New(rand.NewPCG(9, 9))}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CSSColorGamut != "srgb" {
+		t.Errorf("colorGamut = %q, want srgb", cfg.CSSColorGamut)
+	}
+	if cfg.CSSDynamicRange != "standard" {
+		t.Errorf("dynamicRange = %q, want standard", cfg.CSSDynamicRange)
+	}
+	if cfg.CSSPrefersReducedMotion == nil || *cfg.CSSPrefersReducedMotion {
+		t.Errorf("prefersReducedMotion should default false")
+	}
+	if cfg.CSSPrefersColorScheme != "light" && cfg.CSSPrefersColorScheme != "dark" {
+		t.Errorf("prefersColorScheme = %q, want light|dark", cfg.CSSPrefersColorScheme)
+	}
+
+	// User override must not be clobbered.
+	user := &config.Config{CSSColorGamut: "p3", CSSPrefersColorScheme: "dark"}
+	if err := Generate(user, Options{OS: "macos", Rand: rand.New(rand.NewPCG(2, 2))}); err != nil {
+		t.Fatal(err)
+	}
+	if user.CSSColorGamut != "p3" || user.CSSPrefersColorScheme != "dark" {
+		t.Errorf("generator clobbered user CSS media config: gamut=%q scheme=%q", user.CSSColorGamut, user.CSSPrefersColorScheme)
+	}
+}
+
 // TestVoiceLangCoherence guards #13: each generated voice must carry its real
 // lang/localService, not a hardcoded en-US. Daniel (en-GB) and Karen (en-AU)
 // are essential macOS voices, so they are always present.
