@@ -15,8 +15,6 @@ on:
           - "linux-i686"
           - "windows-x86_64"
           - "windows-i686"
-          - "macos-x86_64"
-          - "macos-arm64"
   push:
     tags:
       - "v*"
@@ -38,9 +36,7 @@ jobs:
             {"target":"linux","arch":"arm64"},
             {"target":"linux","arch":"i686"},
             {"target":"windows","arch":"x86_64"},
-            {"target":"windows","arch":"i686"},
-            {"target":"macos","arch":"x86_64"},
-            {"target":"macos","arch":"arm64"}
+            {"target":"windows","arch":"i686"}
           ]}
           JSON
           else
@@ -51,12 +47,7 @@ jobs:
 
   build:
     needs: matrix
-    # All macOS legs run on macos-15 (Xcode 16 / SDK 15.x). The SDK is
-    # universal, so the x86_64 leg cross-compiles against it on the arm64
-    # runner — needed because Firefox 146's MacOSWebAuthnService.mm uses
-    # WebAuthn PRF symbols that only exist from the macOS 15 SDK. macos-13
-    # (SDK 14.2) lacked them and failed the x86_64 leg.
-    runs-on: ${{ matrix.target == 'macos' && 'macos-15' || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix.outputs.json) }}
@@ -128,27 +119,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y msitools p7zip-full aria2 ccache
-
-      - name: Install dependencies (macOS)
-        if: matrix.target == 'macos'
-        run: |
-          brew install ccache aria2 p7zip nasm yasm llvm@17 cbindgen node gpatch
-          if ! command -v rustup >/dev/null 2>&1; then
-            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-            echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          fi
-          # Firefox 146 requires clang >=17. Xcode 15 ships clang 16, so
-          # use the brew LLVM toolchain via env vars that mozconfig reads.
-          llvm_prefix=$(brew --prefix llvm@17)
-          echo "MOZ_LLVM_PREFIX=$llvm_prefix" >> $GITHUB_ENV
-          echo "$llvm_prefix/bin" >> $GITHUB_PATH
-          # macOS ships BSD patch, which rejects camoufox patches whose @@
-          # hunk line-counts are sloppy (e.g. canvas-spoofing.patch's new-file
-          # hunk declares 168 lines but has 162). GNU patch on Linux recomputes
-          # from context and the Linux build is green. Point scripts/patch.py
-          # at GNU patch (gpatch) via CAMOU_PATCH so macOS applies the identical
-          # patch set the same way. (A PATH symlink didn't survive mach's env.)
-          echo "CAMOU_PATCH=$(command -v gpatch)" >> $GITHUB_ENV
 
       - name: Cache mozbuild state
         uses: actions/cache@v4
