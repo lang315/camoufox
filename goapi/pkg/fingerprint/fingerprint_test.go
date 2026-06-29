@@ -83,6 +83,29 @@ func TestVoiceSubset(t *testing.T) {
 	}
 }
 
+// TestMediaCodecProfile guards #6: HEVC must be supported+coherent on
+// Windows/macOS and unsupported on Linux across canPlayType + decodingInfo.
+func TestMediaCodecProfile(t *testing.T) {
+	cases := map[string]bool{"windows": true, "macos": true, "linux": false}
+	for os, wantHEVC := range cases {
+		cfg := &config.Config{}
+		if err := Generate(cfg, Options{OS: os, Rand: rand.New(rand.NewPCG(5, 6))}); err != nil {
+			t.Fatal(err)
+		}
+		cp := cfg.MediaCanPlayType["hvc1"]
+		dec := cfg.MediaDecodingInfo["hvc1"]
+		if wantHEVC {
+			if cp != "probably" || !dec.Supported || !dec.PowerEfficient {
+				t.Errorf("%s: HEVC should be supported, got canPlay=%q dec=%+v", os, cp, dec)
+			}
+		} else {
+			if cp != "" || dec.Supported {
+				t.Errorf("%s: HEVC should be unsupported, got canPlay=%q dec=%+v", os, cp, dec)
+			}
+		}
+	}
+}
+
 // TestVoiceLangCoherence guards #13: each generated voice must carry its real
 // lang/localService, not a hardcoded en-US. Daniel (en-GB) and Karen (en-AU)
 // are essential macOS voices, so they are always present.

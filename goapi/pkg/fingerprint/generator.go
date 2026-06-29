@@ -96,7 +96,35 @@ func Generate(cfg *config.Config, opts Options) error {
 	if cfg.DisableTheming == nil {
 		cfg.DisableTheming = config.Bool(true)
 	}
+
+	// Per-OS media codec matrix (#6): keep canPlayType / isTypeSupported /
+	// decodingInfo coherent with the spoofed OS instead of leaking the host's
+	// real decoder support.
+	if len(cfg.MediaCanPlayType) == 0 && len(cfg.MediaDecodingInfo) == 0 {
+		cfg.MediaCanPlayType, cfg.MediaDecodingInfo = mediaCodecProfile(targetOS)
+	}
 	return nil
+}
+
+// mediaCodecProfile returns the per-OS answers for OS-distinguishing media
+// codecs, keyed by the codec substring matched in a queried media type. HEVC
+// (hvc1/hev1) is decodable in Firefox on Windows/macOS via the system decoder
+// but not on Linux, so a cross-OS profile must spoof it consistently across
+// canPlayType, isTypeSupported, and decodingInfo.
+func mediaCodecProfile(targetOS string) (map[string]string, map[string]config.MediaDecodeInfo) {
+	hevc := targetOS == "windows" || targetOS == "macos"
+	canPlay := make(map[string]string, 2)
+	dec := make(map[string]config.MediaDecodeInfo, 2)
+	for _, c := range []string{"hvc1", "hev1"} {
+		if hevc {
+			canPlay[c] = "probably"
+			dec[c] = config.MediaDecodeInfo{Supported: true, Smooth: true, PowerEfficient: true}
+		} else {
+			canPlay[c] = ""
+			dec[c] = config.MediaDecodeInfo{Supported: false}
+		}
+	}
+	return canPlay, dec
 }
 
 func pickPreset(targetOS string, rng *rand.Rand) (*Preset, error) {

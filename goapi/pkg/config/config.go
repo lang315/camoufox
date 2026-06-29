@@ -20,6 +20,14 @@ type Voice struct {
 	IsDefault      bool   `json:"isDefault"`
 }
 
+// MediaDecodeInfo is a spoofed mediaCapabilities.decodingInfo() result for one
+// codec, read by MaskConfig::GetMediaDecodingInfo.
+type MediaDecodeInfo struct {
+	Supported      bool `json:"supported"`
+	Smooth         bool `json:"smooth"`
+	PowerEfficient bool `json:"powerEfficient"`
+}
+
 // Config holds every CAMOU_CONFIG key recognized by Camoufox.
 //
 // All fields are pointers or omitempty so unset keys are not emitted —
@@ -156,6 +164,12 @@ type Config struct {
 	MediaDevicesWebcams  *uint32 `json:"mediaDevices:webcams,omitempty"`
 	MediaDevicesSpeakers *uint32 `json:"mediaDevices:speakers,omitempty"`
 	MediaDevicesEnabled  *bool   `json:"mediaDevices:enabled,omitempty"`
+
+	// mediaCapabilities:* — per-OS codec matrix so canPlayType /
+	// MediaSource.isTypeSupported / mediaCapabilities.decodingInfo don't leak
+	// the host's real decoder support. Keys are codec substrings (e.g. "hvc1").
+	MediaCanPlayType  map[string]string          `json:"mediaCapabilities:canPlayType,omitempty"`
+	MediaDecodingInfo map[string]MediaDecodeInfo `json:"mediaCapabilities:decodingInfo,omitempty"`
 
 	// runtime tweaks
 	AllowMainWorld   *bool    `json:"allowMainWorld,omitempty"`
