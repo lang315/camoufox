@@ -55,13 +55,18 @@ func Generate(cfg *config.Config, opts Options) error {
 		if err != nil {
 			return err
 		}
+		meta := voiceMetaFor(targetOS)
 		voices := make([]config.Voice, len(names))
 		for i, n := range names {
+			lang, local := "en-US", true
+			if m, ok := meta[n]; ok {
+				lang, local = m.lang, m.local
+			}
 			voices[i] = config.Voice{
 				VoiceURI:       n,
 				Name:           n,
-				Lang:           "en-US",
-				IsLocalService: true,
+				Lang:           lang,
+				IsLocalService: local,
 				IsDefault:      i == 0,
 			}
 		}
