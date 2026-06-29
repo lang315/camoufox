@@ -1,0 +1,64 @@
+diff --git a/layout/style/moz.build b/layout/style/moz.build
+index 65874de..b1beb10 100644
+--- a/layout/style/moz.build
++++ b/layout/style/moz.build
+@@ -288,6 +288,8 @@ include("/ipc/chromium/chromium-config.mozbuild")
+ 
+ FINAL_LIBRARY = "xul"
+ 
++LOCAL_INCLUDES += ["/camoucfg"]
++
+ LOCAL_INCLUDES += [
+     "../base",
+     "../generic",
+diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
+index 93eafd4..93478cb 100644
+--- a/layout/style/nsMediaFeatures.cpp
++++ b/layout/style/nsMediaFeatures.cpp
+@@ -28,6 +28,7 @@
+ #include "nsIWidget.h"
+ #include "nsPresContext.h"
+ #include "nsStyleConsts.h"
++#include "MaskConfig.hpp"
+ 
+ using namespace mozilla;
+ using mozilla::dom::DisplayMode;
+@@ -150,6 +151,13 @@ int32_t Gecko_MediaFeatures_GetMonochromeBitsPerPixel(
+ }
+ 
+ StyleColorGamut Gecko_MediaFeatures_ColorGamut(const Document* aDocument) {
++  // camoufox: spoof the output-device color gamut so a wide-gamut (P3/
++  // Rec2020) monitor is not a fingerprint; goapi defaults this to srgb. (#8)
++  if (auto v = MaskConfig::GetString("cssMedia:colorGamut")) {
++    if (*v == "p3") return StyleColorGamut::P3;
++    if (*v == "rec2020") return StyleColorGamut::Rec2020;
++    return StyleColorGamut::Srgb;
++  }
+   auto* dx = GetDeviceContextFor(aDocument);
+   if (!dx || aDocument->ShouldResistFingerprinting(RFPTarget::CSSColorInfo)) {
+     return StyleColorGamut::Srgb;
+@@ -292,6 +300,12 @@ bool Gecko_MediaFeatures_PrefersReducedTransparency(const Document* aDocument) {
+ 
+ StylePrefersColorScheme Gecko_MediaFeatures_PrefersColorScheme(
+     const Document* aDocument, bool aUseContent) {
++  // camoufox: per-profile prefers-color-scheme so every instance does not
++  // report the same forced theme (ui.systemUsesDarkTheme). (#8)
++  if (auto v = MaskConfig::GetString("cssMedia:prefersColorScheme")) {
++    return *v == "dark" ? StylePrefersColorScheme::Dark
++                        : StylePrefersColorScheme::Light;
++  }
+   auto scheme = aUseContent ? PreferenceSheet::ContentPrefs().mColorScheme
+                             : aDocument->PreferredColorScheme();
+   return scheme == ColorScheme::Dark ? StylePrefersColorScheme::Dark
+@@ -355,6 +369,11 @@ StyleDynamicRange Gecko_MediaFeatures_DynamicRange(const Document* aDocument) {
+ 
+ StyleDynamicRange Gecko_MediaFeatures_VideoDynamicRange(
+     const Document* aDocument) {
++  // camoufox: spoof video-dynamic-range so an HDR monitor is not a
++  // fingerprint; goapi defaults this to standard. (#8)
++  if (auto v = MaskConfig::GetString("cssMedia:dynamicRange")) {
++    return *v == "high" ? StyleDynamicRange::High : StyleDynamicRange::Standard;
++  }
+   if (aDocument->ShouldResistFingerprinting(RFPTarget::CSSVideoDynamicRange) ||
+       !StaticPrefs::layout_css_video_dynamic_range_allows_high()) {
+     return StyleDynamicRange::Standard;
