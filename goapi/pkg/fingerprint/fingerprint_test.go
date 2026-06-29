@@ -82,3 +82,31 @@ func TestVoiceSubset(t *testing.T) {
 		t.Fatal("expected windows voices")
 	}
 }
+
+// TestVoiceLangCoherence guards #13: each generated voice must carry its real
+// lang/localService, not a hardcoded en-US. Daniel (en-GB) and Karen (en-AU)
+// are essential macOS voices, so they are always present.
+func TestVoiceLangCoherence(t *testing.T) {
+	cfg := &config.Config{}
+	if err := Generate(cfg, Options{OS: "macos", Rand: rand.New(rand.NewPCG(3, 4))}); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"Daniel": "en-GB", "Karen": "en-AU", "Samantha": "en-US"}
+	seen := map[string]string{}
+	for _, v := range cfg.Voices {
+		if exp, ok := want[v.Name]; ok {
+			seen[v.Name] = v.Lang
+			if v.Lang != exp {
+				t.Errorf("voice %q lang = %q, want %q", v.Name, v.Lang, exp)
+			}
+		}
+		if !v.IsLocalService {
+			t.Errorf("voice %q should be local", v.Name)
+		}
+	}
+	for n := range want {
+		if _, ok := seen[n]; !ok {
+			t.Errorf("essential macOS voice %q not generated", n)
+		}
+	}
+}
