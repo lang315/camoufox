@@ -42,6 +42,17 @@ index f6e4457..0ee032a 100644
    if (!supported) {
      MediaCapabilitiesDecodingInfo info;
      info.mSupported = false;
+diff --git a/dom/media/mediacapabilities/moz.build b/dom/media/mediacapabilities/moz.build
+index 786b87a..e0cc052 100644
+--- a/dom/media/mediacapabilities/moz.build
++++ b/dom/media/mediacapabilities/moz.build
+@@ -13,4 +13,6 @@ UNIFIED_SOURCES += [
+ 
+ include("/ipc/chromium/chromium-config.mozbuild")
+ 
++LOCAL_INCLUDES += ["/camoucfg"]
++
+ FINAL_LIBRARY = "xul"
 diff --git a/dom/media/mediaelement/HTMLMediaElement.cpp b/dom/media/mediaelement/HTMLMediaElement.cpp
 index df8c944..1bbd6bd 100644
 --- a/dom/media/mediaelement/HTMLMediaElement.cpp
@@ -68,6 +79,17 @@ index df8c944..1bbd6bd 100644
    DecoderDoctorDiagnostics diagnostics;
    CanPlayStatus canPlay = GetCanPlay(aType, &diagnostics);
    diagnostics.StoreFormatDiagnostics(OwnerDoc(), aType, canPlay != CANPLAY_NO,
+diff --git a/dom/media/mediaelement/moz.build b/dom/media/mediaelement/moz.build
+index 34f3798..152e14f 100644
+--- a/dom/media/mediaelement/moz.build
++++ b/dom/media/mediaelement/moz.build
+@@ -35,4 +35,6 @@ LOCAL_INCLUDES += [
+     "/third_party/libwebrtc",
+ ]
+ 
++LOCAL_INCLUDES += ["/camoucfg"]
++
+ FINAL_LIBRARY = "xul"
 diff --git a/dom/media/mediasource/MediaSource.cpp b/dom/media/mediasource/MediaSource.cpp
 index a6eaa23..441f979 100644
 --- a/dom/media/mediasource/MediaSource.cpp
@@ -97,3 +119,14 @@ index a6eaa23..441f979 100644
    Maybe<MediaContainerType> containerType = MakeMediaContainerType(aType);
    if (!containerType) {
      return aRv.ThrowNotSupportedError("Unknown type");
+diff --git a/dom/media/mediasource/moz.build b/dom/media/mediasource/moz.build
+index 60574eb..616777c 100644
+--- a/dom/media/mediasource/moz.build
++++ b/dom/media/mediasource/moz.build
+@@ -41,4 +41,6 @@ TEST_DIRS += [
+ 
+ include("/ipc/chromium/chromium-config.mozbuild")
+ 
++LOCAL_INCLUDES += ["/camoucfg"]
++
+ FINAL_LIBRARY = "xul"
