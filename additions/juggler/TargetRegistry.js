@@ -21,8 +21,6 @@ const ALL_PERMISSIONS = [
 ];
 
 let globalTabAndWindowActivationChain = Promise.resolve();
-// This is a workaround for https://github.com/microsoft/playwright/issues/34586
-let didCreateFirstPage = false;
 let globalNewPageChain = Promise.resolve();
 
 class DownloadInterceptor {
@@ -58,7 +56,7 @@ class DownloadInterceptor {
       try {
         file.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0o600);
       } catch (e) {
-        dump(`WARNING: interceptDownloadRequest failed to create file: ${e}\n`);
+        dump(`WARNING: interceptDownloadRequest failed to create file: ${e}`);
         return false;
       }
     }
@@ -180,7 +178,6 @@ export class TargetRegistry {
     const domWindowTabListeners = new Map();
 
     const onOpenWindow = async (appWindow) => {
-
       let domWindow;
       if (appWindow instanceof Ci.nsIAppWindow) {
         domWindow = appWindow.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowInternal || Ci.nsIDOMWindow);
@@ -203,6 +200,19 @@ export class TargetRegistry {
         await helper.awaitEvent(domWindow, 'DOMContentLoaded');
       }
 
+      // Firefox 150+: chrome window may report readyState=complete before
+      // gBrowser is populated. Wait for it if missing.
+      if (!domWindow.gBrowser) {
+        await new Promise((resolve, reject) => {
+          const start = Date.now();
+          const tick = () => {
+            if (domWindow.gBrowser) return resolve();
+            if (Date.now() - start > 15000) return reject(new Error('gBrowser never populated'));
+            domWindow.setTimeout(tick, 50);
+          };
+          tick();
+        });
+      }
       if (!domWindow.gBrowser)
         return;
       const tabContainer = domWindow.gBrowser.tabContainer;
@@ -310,10 +320,6 @@ export class TargetRegistry {
   }
 
   async newPage({browserContextId}) {
-    // When creating the very first page, we cannot create multiple in parallel.
-    // See https://github.com/microsoft/playwright/issues/34586.
-    if (didCreateFirstPage)
-      return this._newPageInternal({browserContextId});
     const result = globalNewPageChain.then(() => this._newPageInternal({browserContextId}));
     globalNewPageChain = result.catch(error => { /* swallow errors to keep chain running */ });
     return result;
@@ -368,7 +374,6 @@ export class TargetRegistry {
       if (await target.hasFailedToOverrideTimezone())
         throw new Error('Failed to override timezone');
     }
-    didCreateFirstPage = true;
     return target.id();
   }
 
