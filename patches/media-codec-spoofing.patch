@@ -1,5 +1,5 @@
 diff --git a/dom/media/mediacapabilities/MediaCapabilities.cpp b/dom/media/mediacapabilities/MediaCapabilities.cpp
-index f6e4457..b51bcf9 100644
+index f6e4457..0ee032a 100644
 --- a/dom/media/mediacapabilities/MediaCapabilities.cpp
 +++ b/dom/media/mediacapabilities/MediaCapabilities.cpp
 @@ -34,6 +34,7 @@
@@ -10,15 +10,17 @@ index f6e4457..b51bcf9 100644
  
  mozilla::LazyLogModule sMediaCapabilitiesLog("MediaCapabilities");
  
-@@ -270,6 +271,29 @@ void MediaCapabilities::CreateMediaCapabilitiesDecodingInfo(
+@@ -270,6 +271,31 @@ void MediaCapabilities::CreateMediaCapabilitiesDecodingInfo(
                    aConfiguration.mAudio.Value().mContentType);
    }
  
 +  // camoufox: if the queried content type matches the per-OS codec config,
 +  // resolve with spoofed support/smooth/powerEfficient so a cross-OS profile
-+  // presents a coherent codec + HW-decode matrix (coherent with
-+  // canPlayType) instead of leaking the host capabilities (#6).
-+  {
++  // presents a coherent codec + HW-decode matrix (coherent with canPlayType)
++  // instead of leaking the host capabilities (#6). EME queries
++  // (keySystemConfiguration) fall through to the real resolver so the
++  // returned mediaKeySystemAccess stays correct and coherent.
++  if (!aConfiguration.mKeySystemConfiguration.WasPassed()) {
 +    nsAutoCString ctype;
 +    if (aConfiguration.mVideo.WasPassed()) {
 +      ctype = NS_ConvertUTF16toUTF8(aConfiguration.mVideo.Value().mContentType);
