@@ -22,6 +22,7 @@ launch.exe
 # Internal testing
 /extra-docs
 pythonlib/test*
+!pythonlib/tests/
 jsonvv/test*
 /.vscode
 /bundle/fonts/extra

@@ -186,6 +186,19 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		// real WebRTC calls that need mDNS connectivity.
 		prefs["media.peerconnection.ice.obfuscate_host_addresses"] = false
 	}
+	// The bundled settings/camoufox.cfg ships these at 0, which disables
+	// session history and leaves Page.GoBack/GoForward inert. Restore the
+	// Firefox defaults so navigation works (matches donutbrowser). A
+	// userPref overrides the cfg defaultPref.
+	prefs["browser.sessionhistory.max_entries"] = 50
+	prefs["browser.sessionhistory.max_total_viewers"] = -1
+	if lc.proxy != nil {
+		// HTTP/3 runs over UDP and is not tunneled by an HTTP CONNECT or
+		// SOCKS proxy, so QUIC requests would bypass the proxy and leak
+		// the real egress IP. Disable it whenever a proxy is in use.
+		prefs["network.http.http3.enable"] = false
+		prefs["network.http.http3.enabled"] = false
+	}
 	for k, v := range lc.firefoxUserPrefs {
 		prefs[k] = v
 	}
