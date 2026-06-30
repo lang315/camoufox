@@ -133,7 +133,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.target == 'macos'
         run: |
-          brew install ccache aria2 p7zip nasm yasm llvm@20 node gpatch
+          brew install ccache aria2 p7zip nasm yasm llvm@20 lld node gpatch
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -157,6 +157,19 @@ jobs:
           llvm_prefix=$(brew --prefix llvm@20)
           echo "MOZ_LLVM_PREFIX=$llvm_prefix" >> $GITHUB_ENV
           echo "$llvm_prefix/bin" >> $GITHUB_PATH
+          # FF150 selects lld as the macOS linker (clang >= 15); Xcode 26's
+          # default Apple linker is NOT recognized by FF's probe, so without a
+          # working lld configure dies "Failed to find an adequate linker".
+          # brew llvm@20's keg did not expose an ld64.lld that `clang
+          # -fuse-ld=lld` could find on macos-26, so install the standalone lld
+          # formula and put it on PATH ahead of clang's search.
+          lld_prefix=$(brew --prefix lld)
+          echo "$lld_prefix/bin" >> $GITHUB_PATH
+          echo "===== lld diagnostic ====="
+          ls "$llvm_prefix/bin" 2>/dev/null | grep -iE 'lld|ld64' || echo "(no lld in llvm@20 keg)"
+          ls "$lld_prefix/bin" 2>/dev/null | grep -iE 'lld|ld64' || echo "(no lld in lld keg)"
+          PATH="$lld_prefix/bin:$llvm_prefix/bin:$PATH" "$llvm_prefix/bin/clang" -fuse-ld=lld -Wl,--version 2>&1 | head -3 || echo "(lld probe exit $?)"
+          echo "===== end lld diagnostic ====="
           # macOS ships BSD patch, which rejects camoufox patches under strict
           # @@ hunk-count checking. Point scripts/patch.py at GNU patch (gpatch)
           # via CAMOU_PATCH so macOS applies the identical patch set. The hunks
