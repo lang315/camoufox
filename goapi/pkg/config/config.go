@@ -64,6 +64,10 @@ type Config struct {
 	ScreenPixelDepth  *uint32  `json:"screen.pixelDepth,omitempty"`
 	ScreenPageXOffset *float64 `json:"screen.pageXOffset,omitempty"`
 	ScreenPageYOffset *float64 `json:"screen.pageYOffset,omitempty"`
+	// screen.orientation (#20) — type + angle, kept coherent with the spoofed
+	// screen dimensions so the real host orientation doesn't leak.
+	ScreenOrientation      string  `json:"screen:orientation,omitempty"`
+	ScreenOrientationAngle *uint32 `json:"screen:orientationAngle,omitempty"`
 
 	// window.*
 	WindowScrollMinX        *int32   `json:"window.scrollMinX,omitempty"`
