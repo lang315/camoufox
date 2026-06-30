@@ -59,6 +59,7 @@ jobs:
 
       - name: Runtime spoof assertions (TestRuntimeSpoofs)
         run: |
+          set -o pipefail  # tee must not mask a go-test failure exit code
           cd goapi
           CAMOUFOX_BIN="${{ steps.bin.outputs.bin }}" \
             xvfb-run -a go test -run TestRuntimeSpoofs -v . 2>&1 | tee "$GITHUB_WORKSPACE/spoof-test.log"
