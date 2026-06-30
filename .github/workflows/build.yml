@@ -196,13 +196,18 @@ jobs:
             # sets --disable-bootstrap and --with-macos-sdk (xcrun), so
             # ./mach build uses Xcode's preinstalled clang/SDK instead.
             #
-            # Firefox 146 pins mac_sdk_min_version to 26.1 (Xcode 26).
-            # GitHub macOS runners ship Xcode 15/16 (SDK 14.5 / 15.x),
-            # so lower the minimum to match. Re-apply per leg via the
-            # unpatched tag below.
+            # FF150 pins mac_sdk_min_version() to "26.2" (macOS 26 / Xcode 26).
+            # GitHub macOS runners ship Xcode 16.4 (SDK 15.5), so lower the
+            # minimum so configure accepts the runner SDK. Version-agnostic:
+            # matches the mac_sdk_min_version return whatever its value, so a
+            # future FF bump won't silently no-op. (The old `s/26.1/14.5/` sed
+            # matched nothing on FF150's "26.2", leaving the gate in place ->
+            # configure died "SDK version 15.5 is too old, upgrade to 26.2".)
+            # Targets ONLY mac_sdk_min_version, not ios_sdk_min_version ("18.4").
             src_dir=$(ls -d camoufox-*/ | head -1)
-            sed -i.bak 's/return "26.1"/return "14.5"/' "${src_dir}build/moz.configure/toolchain.configure"
-            rm -f "${src_dir}build/moz.configure/toolchain.configure.bak"
+            tc="${src_dir}build/moz.configure/toolchain.configure"
+            perl -0pi -e 's/(def mac_sdk_min_version\(\):\s*\n\s*return )"[\d.]+"/${1}"14.5"/' "$tc"
+            grep -q 'return "14.5"' "$tc" || { echo "::error::mac_sdk_min_version lowering did not apply in $tc"; exit 1; }
             ( cd "$src_dir" && git add build/moz.configure/toolchain.configure && git commit --amend --no-edit && git tag -f unpatched )
             make set-target
           else
