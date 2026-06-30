@@ -1,0 +1,82 @@
+name: Smoke Fingerprint
+
+# Runtime verification of the device-faking spoofs against a real Camoufox
+# binary: pulls a linux build artifact, runs the deterministic per-field
+# assertions (TestRuntimeSpoofs) and the live detector-site smoke
+# (CreepJS / sannysoft / browserleaks), and uploads the results.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build run id holding CamoufoxBuilds-linux-x86_64"
+        required: true
+        default: "28422261406"
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.23"
+
+      - name: Headless Firefox runtime deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            unzip xvfb libgtk-3-0 libdbus-glib-1-2 libx11-xcb1 \
+            libxt6 libxcomposite1 libxdamage1 libxrandr2 libpci3 \
+            libasound2t64 || sudo apt-get install -y --no-install-recommends libasound2
+
+      - name: Download linux artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.run_id }}" -R "${{ github.repository }}" \
+            -n CamoufoxBuilds-linux-x86_64 -D dist
+          echo "--- dist ---"; ls -la dist/
+
+      - name: Unpack + locate firefox binary
+        id: bin
+        run: |
+          cd dist
+          zip=$(ls camoufox-*-lin.x86_64.zip 2>/dev/null | head -1)
+          if [ -z "$zip" ]; then zip=$(ls *.zip | head -1); fi
+          echo "package: $zip"
+          mkdir -p cf && unzip -q "$zip" -d cf
+          bin=$(find cf -maxdepth 3 -type f -name firefox | head -1)
+          if [ -z "$bin" ]; then bin=$(find cf -maxdepth 3 -type f -name camoufox | head -1); fi
+          if [ -z "$bin" ]; then echo "::error::no firefox/camoufox binary in package"; find cf -maxdepth 3 -type f | head -40; exit 1; fi
+          chmod +x "$bin" || true
+          abs="$GITHUB_WORKSPACE/dist/$bin"
+          echo "bin=$abs" >> "$GITHUB_OUTPUT"
+          echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
+
+      - name: Runtime spoof assertions (TestRuntimeSpoofs)
+        run: |
+          cd goapi
+          CAMOUFOX_BIN="${{ steps.bin.outputs.bin }}" \
+            xvfb-run -a go test -run TestRuntimeSpoofs -v . 2>&1 | tee "$GITHUB_WORKSPACE/spoof-test.log"
+
+      - name: Detector-site smoke (CreepJS / sannysoft / browserleaks)
+        run: |
+          cd goapi
+          CAMOUFOX_BIN="${{ steps.bin.outputs.bin }}" \
+            xvfb-run -a go run ./example/integration 2>&1 | tee "$GITHUB_WORKSPACE/smoke.log" || true
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-results
+          path: |
+            spoof-test.log
+            smoke.log
+            goapi/integration-results/
+          if-no-files-found: warn
+          retention-days: 14
