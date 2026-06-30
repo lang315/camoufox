@@ -127,14 +127,19 @@ func TestRuntimeSpoofs(t *testing.T) {
 	t.Run("webgl_renderer", func(t *testing.T) {
 		const expr = `(() => {
 			const gl = document.createElement('canvas').getContext('webgl');
+			if (!gl) return '__NOGL__';
 			const e = gl.getExtension('WEBGL_debug_renderer_info');
 			return JSON.stringify({
 				v: gl.getParameter(e.UNMASKED_VENDOR_WEBGL),
 				r: gl.getParameter(e.UNMASKED_RENDERER_WEBGL),
 			});
 		})()`
+		s := evalString(t, ctx, p, expr)
+		if s == "__NOGL__" {
+			t.Skip("no WebGL in this headless env (gl is null)")
+		}
 		var got struct{ V, R string }
-		if err := json.Unmarshal([]byte(evalString(t, ctx, p, expr)), &got); err != nil {
+		if err := json.Unmarshal([]byte(s), &got); err != nil {
 			t.Fatalf("decode: %v", err)
 		}
 		if cfg.WebGLVendor != "" && got.V != cfg.WebGLVendor {
@@ -301,6 +306,7 @@ func TestRuntimeSpoofs(t *testing.T) {
 			const c = document.createElement('canvas');
 			c.width = 64; c.height = 64;
 			const gl = c.getContext('webgl');
+			if (!gl) return '__NOGL__';
 			gl.clearColor(0.3, 0.6, 0.9, 1); gl.clear(gl.COLOR_BUFFER_BIT);
 			const px = new Uint8Array(64 * 64 * 4);
 			gl.readPixels(0, 0, 64, 64, gl.RGBA, gl.UNSIGNED_BYTE, px);
@@ -308,6 +314,9 @@ func TestRuntimeSpoofs(t *testing.T) {
 			return String(h);
 		})()`
 		h1 := evalString(t, ctx, p, hashExpr)
+		if h1 == "__NOGL__" {
+			t.Skip("no WebGL in this headless env (gl is null)")
+		}
 		h2 := evalString(t, ctx, p, hashExpr)
 		if h1 != h2 {
 			t.Errorf("readPixels hash not deterministic in-context: %s vs %s", h1, h2)
