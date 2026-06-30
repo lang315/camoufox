@@ -51,11 +51,13 @@ jobs:
 
   build:
     needs: matrix
-    # macOS legs run on macos-15 (Xcode 16 / SDK 15.x). The SDK is universal,
-    # so the x86_64 leg cross-compiles against it on the arm64 runner — needed
-    # because FF150's MacOSWebAuthnService.mm uses WebAuthn PRF symbols that
-    # only exist from the macOS 15 SDK.
-    runs-on: ${{ matrix.target == 'macos' && 'macos-15' || 'ubuntu-24.04' }}
+    # macOS legs run on macos-26 (Xcode 26 / SDK 26.x). FF150 hard-requires the
+    # macOS 26 SDK: mac_sdk_min_version() is "26.2", and the source actually uses
+    # macOS-26-only APIs (e.g. widget/cocoa/nsCocoaWindow.mm references
+    # NSGlassEffectView), so it cannot compile against an older SDK — macos-15
+    # (SDK 15.5) failed with "use of undeclared identifier 'NSGlassEffectView'".
+    # The SDK is universal, so the x86_64 leg cross-compiles on the arm64 runner.
+    runs-on: ${{ matrix.target == 'macos' && 'macos-26' || 'ubuntu-24.04' }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix.outputs.json) }}
@@ -131,7 +133,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: matrix.target == 'macos'
         run: |
-          brew install ccache aria2 p7zip nasm yasm llvm@17 node gpatch
+          brew install ccache aria2 p7zip nasm yasm llvm@20 node gpatch
           if ! command -v rustup >/dev/null 2>&1; then
             curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
@@ -147,9 +149,12 @@ jobs:
           # which macOS deliberately skips.
           "$HOME/.cargo/bin/cargo" install cbindgen --version '=0.29.1' --locked
           echo "CBINDGEN=$HOME/.cargo/bin/cbindgen" >> $GITHUB_ENV
-          # FF150 requires clang >=17. Xcode 15 ships clang 16, so use the brew
-          # LLVM toolchain via env vars that macos.mozconfig reads.
-          llvm_prefix=$(brew --prefix llvm@17)
+          # FF150 requires clang >=17 and is built upstream with clang ~19-20.
+          # Use brew llvm@20 (pre-installed on macos-26) via env vars that
+          # macos.mozconfig reads — closer to Mozilla's FF150 compiler than
+          # Apple clang, and avoids a from-source llvm@17 build (no bottle on
+          # macOS 26).
+          llvm_prefix=$(brew --prefix llvm@20)
           echo "MOZ_LLVM_PREFIX=$llvm_prefix" >> $GITHUB_ENV
           echo "$llvm_prefix/bin" >> $GITHUB_PATH
           # macOS ships BSD patch, which rejects camoufox patches under strict
@@ -207,19 +212,10 @@ jobs:
             # sets --disable-bootstrap and --with-macos-sdk (xcrun), so
             # ./mach build uses Xcode's preinstalled clang/SDK instead.
             #
-            # FF150 pins mac_sdk_min_version() to "26.2" (macOS 26 / Xcode 26).
-            # GitHub macOS runners ship Xcode 16.4 (SDK 15.5), so lower the
-            # minimum so configure accepts the runner SDK. Version-agnostic:
-            # matches the mac_sdk_min_version return whatever its value, so a
-            # future FF bump won't silently no-op. (The old `s/26.1/14.5/` sed
-            # matched nothing on FF150's "26.2", leaving the gate in place ->
-            # configure died "SDK version 15.5 is too old, upgrade to 26.2".)
-            # Targets ONLY mac_sdk_min_version, not ios_sdk_min_version ("18.4").
-            src_dir=$(ls -d camoufox-*/ | head -1)
-            tc="${src_dir}build/moz.configure/toolchain.configure"
-            perl -0pi -e 's/(def mac_sdk_min_version\(\):\s*\n\s*return )"[\d.]+"/${1}"14.5"/' "$tc"
-            grep -q 'return "14.5"' "$tc" || { echo "::error::mac_sdk_min_version lowering did not apply in $tc"; exit 1; }
-            ( cd "$src_dir" && git add build/moz.configure/toolchain.configure && git commit --amend --no-edit && git tag -f unpatched )
+            # macos-26 ships Xcode 26 with SDK 26.x (>= the "26.2" pinned by
+            # mac_sdk_min_version()), so the SDK gate passes natively and no
+            # toolchain.configure patching is needed. (macos-15 / SDK 15.5 both
+            # failed the gate and lacked macOS-26 APIs like NSGlassEffectView.)
             make set-target
           else
             make mozbootstrap
