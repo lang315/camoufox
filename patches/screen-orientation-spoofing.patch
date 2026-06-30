@@ -1,0 +1,38 @@
+diff --git a/dom/base/ScreenOrientation.cpp b/dom/base/ScreenOrientation.cpp
+index b2490af..2a2c497 100644
+--- a/dom/base/ScreenOrientation.cpp
++++ b/dom/base/ScreenOrientation.cpp
+@@ -17,6 +17,7 @@
+ #include "nsIDocShell.h"
+ #include "nsSandboxFlags.h"
+ #include "nsScreen.h"
++#include "MaskConfig.hpp"
+ 
+ using namespace mozilla;
+ using namespace mozilla::dom;
+@@ -721,6 +722,14 @@ uint16_t ScreenOrientation::DeviceAngle(CallerType aCallerType) const {
+ 
+ OrientationType ScreenOrientation::GetType(CallerType aCallerType,
+                                            ErrorResult& aRv) const {
++  // camoufox: spoof orientation so the real host orientation does not leak
++  // and stays coherent with the spoofed screen dimensions (#20).
++  if (auto v = MaskConfig::GetString("screen:orientation")) {
++    if (*v == "landscape-primary") return OrientationType::Landscape_primary;
++    if (*v == "landscape-secondary") return OrientationType::Landscape_secondary;
++    if (*v == "portrait-secondary") return OrientationType::Portrait_secondary;
++    return OrientationType::Portrait_primary;
++  }
+   Document* doc = GetResponsibleDocument();
+   BrowsingContext* bc = doc ? doc->GetBrowsingContext() : nullptr;
+   if (!bc) {
+@@ -739,6 +748,10 @@ OrientationType ScreenOrientation::GetType(CallerType aCallerType,
+ 
+ uint16_t ScreenOrientation::GetAngle(CallerType aCallerType,
+                                      ErrorResult& aRv) const {
++  // camoufox: spoof orientation angle, coherent with screen:orientation (#20).
++  if (auto v = MaskConfig::GetUint32("screen:orientationAngle")) {
++    return static_cast<uint16_t>(*v);
++  }
+   Document* doc = GetResponsibleDocument();
+   BrowsingContext* bc = doc ? doc->GetBrowsingContext() : nullptr;
+   if (!bc) {

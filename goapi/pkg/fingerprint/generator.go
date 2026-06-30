@@ -120,6 +120,19 @@ func Generate(cfg *config.Config, opts Options) error {
 			cfg.CSSPrefersColorScheme = "dark"
 		}
 	}
+
+	// screen.orientation (#20): derive from the spoofed dimensions so the real
+	// host orientation doesn't leak. Desktop presets are landscape (width >=
+	// height) → landscape-primary; angle 0 for the primary orientation.
+	if cfg.ScreenOrientation == "" {
+		cfg.ScreenOrientation = "landscape-primary"
+		if cfg.ScreenWidth != nil && cfg.ScreenHeight != nil && *cfg.ScreenHeight > *cfg.ScreenWidth {
+			cfg.ScreenOrientation = "portrait-primary"
+		}
+	}
+	if cfg.ScreenOrientationAngle == nil {
+		cfg.ScreenOrientationAngle = config.Uint32(0)
+	}
 	return nil
 }
 

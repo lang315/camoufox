@@ -148,6 +148,29 @@ func TestCSSMediaDefaults(t *testing.T) {
 	}
 }
 
+// TestScreenOrientation guards #20: orientation is derived from the spoofed
+// dims (desktop presets are landscape) with angle 0, and user overrides win.
+func TestScreenOrientation(t *testing.T) {
+	cfg := &config.Config{}
+	if err := Generate(cfg, Options{OS: "windows", Rand: rand.New(rand.NewPCG(4, 4))}); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ScreenOrientation != "landscape-primary" {
+		t.Errorf("orientation = %q, want landscape-primary (desktop)", cfg.ScreenOrientation)
+	}
+	if cfg.ScreenOrientationAngle == nil || *cfg.ScreenOrientationAngle != 0 {
+		t.Errorf("orientation angle should be 0")
+	}
+	// Portrait dims → portrait-primary.
+	portrait := &config.Config{ScreenWidth: config.Uint32(1080), ScreenHeight: config.Uint32(1920)}
+	if err := Generate(portrait, Options{OS: "windows", Rand: rand.New(rand.NewPCG(4, 4))}); err != nil {
+		t.Fatal(err)
+	}
+	if portrait.ScreenOrientation != "portrait-primary" {
+		t.Errorf("portrait dims → %q, want portrait-primary", portrait.ScreenOrientation)
+	}
+}
+
 // TestVoiceLangCoherence guards #13: each generated voice must carry its real
 // lang/localService, not a hardcoded en-US. Daniel (en-GB) and Karen (en-AU)
 // are essential macOS voices, so they are always present.
