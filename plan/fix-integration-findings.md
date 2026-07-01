@@ -27,7 +27,8 @@ But in `patches/playwright/0-playwright.patch` the interception block was insert
 `HTMLInputElement::InitColorPicker()` (the `<input type=color>` path). `<input type=file>`
 calls `InitFilePicker()`, which is unpatched → observer never notified.
 
-**Fix:** add the same guard block to `HTMLInputElement::InitFilePicker()`:
+**Attempted fix (necessary but INSUFFICIENT — reverted):** added the same guard block to
+`HTMLInputElement::InitFilePicker()`:
 ```cpp
 nsCOMPtr<nsPIDOMWindowOuter> win = doc->GetWindow();
 nsDocShell* docShell = win ? static_cast<nsDocShell*>(win->GetDocShell()) : nullptr;
@@ -36,10 +37,27 @@ if (docShell && docShell->IsFileInputInterceptionEnabled()) {
   return NS_OK;
 }
 ```
-(Keeping or removing the color-picker copy is a follow-up; color interception is harmless but
-unused.) Then drop the unconditional `t.Skip` in `upload_test.go:TestOnFileChooser`.
-**Confidence:** high — mirrors an existing working hunk, all downstream wiring present.
-**Verify:** rebuild → `go test -run TestOnFileChooser` passes.
+Built cleanly (hunk applied to real 150.0.2, offset -102) and the interception path IS reached:
+`FilePickerShown` fires. **But `TestOnFileChooser` still fails**, and the failure exposes a
+deeper blocker:
+
+- Clicking `<input type=file>` opens the picker synchronously *inside* the `mouseup` dispatch.
+  With interception this hits a Gecko nested event loop, so the `mouseup` RPC never returns.
+- `Page.fileChooserOpened` and the handler's `SetFiles` only flush at teardown (context cancel),
+  not during the click — the event is effectively serialized behind the blocked `mouseup`.
+- Symptoms across two CI smoke runs (build 28529782482): `dispatchMouseEvent mouseup: context
+  deadline exceeded` and `SetFiles: ... write |1: file already closed` (browser torn down first).
+  Firing the click in a goroutine did not help — the browser doesn't emit the event until
+  `mouseup` unblocks.
+
+So the misplaced hook was real, but relocating it is not enough: the juggler file-picker flow
+needs to return the click immediately (as upstream Playwright does) instead of nesting an event
+loop. That is deeper patch work + more rebuild cycles for a parity feature that `SetInputFiles`
+(direct upload, `TestSetInputFilesDirect` PASS) already covers.
+
+**Decision:** reverted the InitFilePicker patch (keeping it would ship a latent click-deadlock
+for anyone enabling `OnFileChooser`), left `TestOnFileChooser` skipped with the accurate reason.
+Reopen only if a consumer needs the file-chooser *event* API.
 
 ## Finding 3 — synthetic touch injection unavailable
 
@@ -62,10 +80,11 @@ absent in FF150. Mouse injection works only because the Playwright patch adds a 
 
 ## Cost / sequencing
 
-| Phase | Work | Verify | Cost |
+| Phase | Work | Verify | Outcome |
 |---|---|---|---|
-| 1 | smoke.yml full suite | local run ✅ | done |
-| 2 | filechooser hook → InitFilePicker | full rebuild + CI | 1 hunk + ~40min–4h build |
-| 3 | jugglerSendTouchEvent patch | FF150 source + rebuild | patch + build; low value |
+| 1 | smoke.yml full suite | local run + CI smoke ✅ | SHIPPED |
+| 2 | filechooser hook → InitFilePicker | CI build + smoke | REVERTED — hook reached but picker click deadlocks (Gecko nested loop); needs juggler flow work |
+| 3 | jugglerSendTouchEvent patch | FF150 source + rebuild | DEFERRED — low value; touch fingerprint already correct |
 
-Phase 2/3 share one rebuild. Neither is verifiable without it.
+Only Phase 1 shipped. Phases 2/3 both bottom out in FF-source patch work with rebuild cycles for
+parity features already covered by existing APIs (`SetInputFiles`, touch fingerprint spoof).
