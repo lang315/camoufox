@@ -91,6 +91,23 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
             elif os.path.exists(os.path.join(target_dir, path)):
                 os.remove(os.path.join(target_dir, path))
 
+        # macOS: `7z x` on the .dmg drops the Unix executable bit, so every
+        # Mach-O executable in the bundle (the main binary, plugin-container,
+        # and the gpu-/media-plugin-helper apps) comes out non-executable. The
+        # browser then can't spawn its child processes (posix_spawnp fails ->
+        # "main frame not attached"). Restore +x on the bundle executables —
+        # everything directly under a Contents/MacOS/ dir that isn't a dylib —
+        # before re-zipping (7z stores the Unix mode, so unzip preserves it).
+        if target == 'macos':
+            for root, _, files in os.walk(os.path.join(temp_dir, 'Camoufox.app')):
+                if os.path.basename(root) != 'MacOS':
+                    continue
+                for name in files:
+                    if name.endswith('.dylib'):
+                        continue
+                    fpath = os.path.join(root, name)
+                    os.chmod(fpath, os.stat(fpath).st_mode | 0o111)
+
         # Update package
         run(join(['7z', 'u', new_file, f'{temp_dir}/*', '-r', '-mx=9']))
 
