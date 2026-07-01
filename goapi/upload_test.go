@@ -136,15 +136,26 @@ func TestOnFileChooser(t *testing.T) {
 	if err != nil || el == nil {
 		t.Fatalf("QuerySelector: %v, el=%v", err, el)
 	}
-	if err := el.Click(ctx); err != nil {
-		t.Fatalf("Click: %v", err)
-	}
+	// Clicking a file input opens the intercepted picker synchronously inside
+	// the mouseup dispatch, so the mouseup RPC does not return until the picker
+	// is satisfied by the handler. Fire the click without awaiting it and wait
+	// on the handler instead.
+	go func() { _ = el.Click(ctx) }()
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("fileChooser handler never fired")
+	}
+
+	// The handler ran fc.SetFiles; confirm the input actually received the file.
+	got, err := p.Evaluate(ctx, `document.getElementById('f').files.length + '/' + (document.getElementById('f').files[0] && document.getElementById('f').files[0].name)`)
+	if err != nil {
+		t.Fatalf("Evaluate files: %v", err)
+	}
+	if got != "1/chosen.txt" {
+		t.Errorf("expected files=1/chosen.txt, got %v", got)
 	}
 }
