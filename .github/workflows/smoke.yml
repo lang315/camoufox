@@ -57,12 +57,17 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
-      - name: Runtime spoof assertions (TestRuntimeSpoofs)
+      - name: Integration suite (all goapi tests vs real binary)
+        # Runs the FULL suite against the real binary, not just TestRuntimeSpoofs:
+        # the other ~24 browser tests (navigation, DOM, forms, keyboard, storage,
+        # accessibility, ...) otherwise never execute against a real build —
+        # goapi.yml runs without CAMOUFOX_BIN so they all t.Skip. The touch and
+        # file-chooser tests self-skip on builds lacking those capabilities.
         run: |
           set -o pipefail  # tee must not mask a go-test failure exit code
           cd goapi
           CAMOUFOX_BIN="${{ steps.bin.outputs.bin }}" \
-            xvfb-run -a go test -run TestRuntimeSpoofs -v . 2>&1 | tee "$GITHUB_WORKSPACE/spoof-test.log"
+            xvfb-run -a go test -timeout 15m -v ./... 2>&1 | tee "$GITHUB_WORKSPACE/spoof-test.log"
 
       - name: Detector-site smoke (CreepJS / sannysoft / browserleaks)
         run: |

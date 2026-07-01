@@ -75,11 +75,10 @@ func TestSetInputFilesDirect(t *testing.T) {
 	}
 }
 
-// TestOnFileChooser tests branch B: OnFileChooser intercept.
-// This test is skipped because the Camoufox patch only hooks InitColorPicker,
-// not InitFilePicker — so Page.fileChooserOpened never fires for <input type="file">.
+// TestOnFileChooser tests branch B: OnFileChooser intercept. The playwright
+// patch hooks HTMLInputElement::InitFilePicker so clicking an <input type=file>
+// fires Page.fileChooserOpened instead of opening the native file dialog.
 func TestOnFileChooser(t *testing.T) {
-	t.Skip("Camoufox patches InitColorPicker only; file-input interception requires an InitFilePicker patch not present in this build")
 	if os.Getenv("CAMOUFOX_BIN") == "" {
 		t.Skip("set CAMOUFOX_BIN to run")
 	}
