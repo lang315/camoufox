@@ -38,12 +38,15 @@ runtime fingerprint spoofs.
 
 **Layer 2 — functional integration (`go test -timeout 9m -v ./...`, CAMOUFOX_BIN set):**
 `ok  github.com/lang315/camoufox/goapi  204.052s` — exit 0.
-Tally: **38 PASS / 0 FAIL / 3 SKIP** (browser suite + pkg/config + pkg/fingerprint + pkg/juggler).
-Skips are documented build-capability gaps, not failures:
-- `TestTouchscreenTap`, `TestTouchscreenTouchEvents` — build lacks `windowUtils.sendTouchEvent`
-  (synthetic touch injection). Touch *fingerprint* still verified: `TestRuntimeSpoofs/touch_trio` PASS.
-- `TestOnFileChooser` — Camoufox patches `InitColorPicker` only, no `InitFilePicker`
-  (file-chooser interception). Direct file-set `TestSetInputFilesDirect` PASS.
+Tally at the time of this run: **38 PASS / 0 FAIL / 3 SKIP** (browser suite + pkg/config +
+pkg/fingerprint + pkg/juggler). The 3 skips were later root-caused and fixed — see
+`plan/fix-integration-findings.md` Findings 2 (file-chooser: misplaced hook + goapi self-deadlock)
+and 3 (touch: FF150 replaced `sendTouchEvent` with `synthesizeTouchEvent`). The original,
+now-superseded reads were:
+- `TestTouchscreenTap`, `TestTouchscreenTouchEvents` — `windowUtils.sendTouchEvent` absent
+  (touch *fingerprint* was always fine: `TestRuntimeSpoofs/touch_trio` PASS).
+- `TestOnFileChooser` — interception hook only in `InitColorPicker`; direct file-set
+  `TestSetInputFilesDirect` PASS.
 
 **Layer 3 — fingerprint spoofs:** `TestRuntimeSpoofs` PASS, all 10 subtests
 (webgpu_absent, webgl_renderer, codec_hevc, codec_decodingInfo, css_media, intl_consistency,

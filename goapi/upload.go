@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/lang315/camoufox/goapi/pkg/juggler"
 )
@@ -85,15 +86,22 @@ func (p *Page) OnFileChooser(handler func(*FileChooser)) juggler.Subscription {
 
 		el := p.wrapObject(frameID, fce.ExecutionContextID, fce.Element.ObjectID)
 
-		// Determine whether the input accepts multiple files via JS.
-		var isMultiple bool
-		res, err := p.callFunction(context.Background(), fce.ExecutionContextID,
-			`function(el) { return el.multiple; }`,
-			[]juggler.CallFunctionArgument{{ObjectID: fce.Element.ObjectID}}, true)
-		if err == nil && res.Result != nil {
-			_ = json.Unmarshal(res.Result.Value, &isMultiple)
-		}
-
-		go handler(&FileChooser{Element: el, IsMultiple: isMultiple})
+		// The multiple-flag probe and the user handler both make blocking RPCs.
+		// This callback runs on the juggler readLoop goroutine, which must stay
+		// free to deliver responses (see EventHandler contract in dispatcher.go);
+		// blocking it here means the probe's own response can never arrive — a
+		// self-deadlock. Run the probe and handler off readLoop.
+		go func() {
+			pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			var isMultiple bool
+			res, err := p.callFunction(pctx, fce.ExecutionContextID,
+				`function(el) { return el.multiple; }`,
+				[]juggler.CallFunctionArgument{{ObjectID: fce.Element.ObjectID}}, true)
+			if err == nil && res.Result != nil {
+				_ = json.Unmarshal(res.Result.Value, &isMultiple)
+			}
+			handler(&FileChooser{Element: el, IsMultiple: isMultiple})
+		}()
 	})
 }

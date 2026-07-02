@@ -491,19 +491,21 @@ export class PageAgent {
   }
 
   async _dispatchTouchEvent({type, touchPoints, modifiers}) {
+    // FF150 removed nsIDOMWindowUtils.sendTouchEvent; Window.synthesizeTouchEvent
+    // (ChromeOnly) is the replacement — takes an array of SynthesizeTouchEventData
+    // and returns whether preventDefault was called.
     const frame = this._frameTree.mainFrame();
-    const defaultPrevented = frame.domWindow().windowUtils.sendTouchEvent(
+    const defaultPrevented = frame.domWindow().synthesizeTouchEvent(
       type.toLowerCase(),
-      touchPoints.map((point, id) => id),
-      touchPoints.map(point => point.x),
-      touchPoints.map(point => point.y),
-      touchPoints.map(point => point.radiusX === undefined ? 1.0 : point.radiusX),
-      touchPoints.map(point => point.radiusY === undefined ? 1.0 : point.radiusY),
-      touchPoints.map(point => point.rotationAngle === undefined ? 0.0 : point.rotationAngle),
-      touchPoints.map(point => point.force === undefined ? 1.0 : point.force),
-      touchPoints.map(point => 0),
-      touchPoints.map(point => 0),
-      touchPoints.map(point => 0),
+      touchPoints.map((point, id) => ({
+        identifier: id,
+        offsetX: point.x,
+        offsetY: point.y,
+        radiiX: point.radiusX === undefined ? 1 : point.radiusX,
+        radiiY: point.radiusY === undefined ? 1 : point.radiusY,
+        rotationAngle: point.rotationAngle === undefined ? 0 : point.rotationAngle,
+        pressure: point.force === undefined ? 1.0 : point.force,
+      })),
       modifiers);
     return {defaultPrevented};
   }

@@ -1,90 +1,61 @@
-# Fix plan — integration-testing findings (2026-07-01)
+# Fix plan — integration-testing findings (2026-07-01/02)
 
-Three findings from the full integration run (`plan/integration-testing.md`). One cheap+done,
-two need an FF150 source fetch + full browser rebuild to verify.
+Findings from the full integration run (`plan/integration-testing.md`), plus a follow-up
+adversarial audit ("check all") that overturned two initial conclusions.
 
-## Finding 1 — CI never runs full suite vs real binary  ✅ DONE (Phase 1)
+## Finding 1 — CI never runs full suite vs real binary  ✅ DONE
 
-`goapi.yml` runs `go test ./...` with **no** `CAMOUFOX_BIN` → all 25 browser tests `t.Skip`.
-`smoke.yml` set `CAMOUFOX_BIN` but ran only `-run TestRuntimeSpoofs`. So 24 feature tests never
-touched a real build in CI.
+`goapi.yml` runs `go test ./...` with no `CAMOUFOX_BIN` → all 25 browser tests `t.Skip`.
+`smoke.yml` set `CAMOUFOX_BIN` but ran only `-run TestRuntimeSpoofs`, so ~24 feature tests never
+touched a real build. `smoke.yml` now runs the full `go test -timeout 15m -v ./...`.
+Verified locally (38 PASS / 0 FAIL / 3 SKIP, 204s) and in CI (smoke 28543247273, success).
 
-**Fix:** `smoke.yml` step now runs `go test -timeout 15m -v ./...` (full suite) against the
-downloaded artifact instead of the spoof subset.
-**Evidence:** identical command run locally vs the real mac arm64 binary → 38 PASS / 0 FAIL /
-3 SKIP, 204s (see integration-testing.md run log). Verify-in-CT: next `smoke` dispatch.
+Known limitation (follow-up): `smoke.yml` is `workflow_dispatch`-only and takes a manual
+`run_id`, so real-binary coverage does not automatically gate PRs; `goapi.yml` still runs
+unit-only on push. Auto-triggering smoke after `build.yml` (workflow_run) is a separate task.
 
-## Finding 2 — file-chooser interception hook is misplaced
+## Finding 2 — file-chooser interception  ✅ FIXED (two bugs)
 
-`TestOnFileChooser` skips: `Page.fileChooserOpened` never fires for `<input type=file>`.
+`TestOnFileChooser` originally skipped: `Page.fileChooserOpened` never fired. Two independent
+bugs, both now fixed:
 
-Root cause (not a missing feature — a misplaced hunk). All machinery is wired:
-- juggler: `Protocol.js` `fileChooserOpened`, `PageAgent.js` `_filePickerShown` observer on
-  `juggler-file-picker-shown`, `PageHandler.js` `pageFileChooserOpened` emit.
-- C++: `docShell->IsFileInputInterceptionEnabled()` + `docShell->FilePickerShown(this)`.
+**Bug 2a — misplaced C++ hook.** The interception block sat in `HTMLInputElement::InitColorPicker`
+(the `<input type=color>` path); `<input type=file>` calls `InitFilePicker`, which was unpatched.
+All downstream machinery was already wired (juggler `fileChooserOpened` / `_filePickerShown`
+observer; `nsDocShell::FilePickerShown` / `IsFileInputInterceptionEnabled` / setter). Fix: add the
+same guard block to `InitFilePicker`. Applies clean to real 150.0.2 (offset +18, `patch -l`); CI
+build 28529782482 confirmed it compiles and the interception path is reached.
 
-But in `patches/playwright/0-playwright.patch` the interception block was inserted into
-`HTMLInputElement::InitColorPicker()` (the `<input type=color>` path). `<input type=file>`
-calls `InitFilePicker()`, which is unpatched → observer never notified.
+**Bug 2b — goapi self-deadlock (the real blocker; first misdiagnosed as a Gecko nested loop).**
+Juggler event handlers run *synchronously on the single readLoop goroutine* (contract in
+`pkg/juggler/dispatcher.go:48`; dispatch at `:238`). `OnFileChooser` (`upload.go`) made a
+*blocking* `callFunction` probe (`el.multiple`, with `context.Background()`) inside the handler,
+so readLoop blocked waiting for a response only readLoop could deliver → deadlock. That, not the
+browser, is why `mouseup` timed out and the event/SetFiles only flushed at teardown. Fix: run the
+probe + user handler in a goroutine off readLoop, with a real timeout. (The adversarial audit
+caught this after the hook patch had been wrongly reverted; the patch was correct.)
 
-**Attempted fix (necessary but INSUFFICIENT — reverted):** added the same guard block to
-`HTMLInputElement::InitFilePicker()`:
-```cpp
-nsCOMPtr<nsPIDOMWindowOuter> win = doc->GetWindow();
-nsDocShell* docShell = win ? static_cast<nsDocShell*>(win->GetDocShell()) : nullptr;
-if (docShell && docShell->IsFileInputInterceptionEnabled()) {
-  docShell->FilePickerShown(this);
-  return NS_OK;
-}
-```
-Built cleanly (hunk applied to real 150.0.2, offset -102) and the interception path IS reached:
-`FilePickerShown` fires. **But `TestOnFileChooser` still fails**, and the failure exposes a
-deeper blocker:
+`TestOnFileChooser` un-skipped; asserts the input receives the file after the chooser fires.
 
-- Clicking `<input type=file>` opens the picker synchronously *inside* the `mouseup` dispatch.
-  With interception this hits a Gecko nested event loop, so the `mouseup` RPC never returns.
-- `Page.fileChooserOpened` and the handler's `SetFiles` only flush at teardown (context cancel),
-  not during the click — the event is effectively serialized behind the blocked `mouseup`.
-- Symptoms across two CI smoke runs (build 28529782482): `dispatchMouseEvent mouseup: context
-  deadline exceeded` and `SetFiles: ... write |1: file already closed` (browser torn down first).
-  Firing the click in a goroutine did not help — the browser doesn't emit the event until
-  `mouseup` unblocks.
+## Finding 3 — synthetic touch injection  ✅ FIXED (JS-only)
 
-So the misplaced hook was real, but relocating it is not enough: the juggler file-picker flow
-needs to return the click immediately (as upstream Playwright does) instead of nesting an event
-loop. That is deeper patch work + more rebuild cycles for a parity feature that `SetInputFiles`
-(direct upload, `TestSetInputFilesDirect` PASS) already covers.
+`TestTouchscreenTap` / `TestTouchscreenTouchEvents` skipped: `windowUtils.sendTouchEvent is not a
+function`. FF150 removed `nsIDOMWindowUtils::sendTouchEvent` (confirmed against 150.0.2 source),
+but ships `Window.synthesizeTouchEvent()` (`dom/webidl/Window.webidl:677`, `[ChromeOnly]`,
+returns defaultPrevented) as the replacement — reachable from the already-privileged juggler.
+Fix: rewrite `PageAgent.js:_dispatchTouchEvent` to call `frame.domWindow().synthesizeTouchEvent(
+type, touchPoints.map(p => ({identifier, offsetX, offsetY, radiiX, radiiY, rotationAngle,
+pressure})), modifiers)`. JS-only juggler change (omni.ja repackage), no Gecko C++ compile. Base
+`SynthesizeEventData` carries `pressure`, so force maps cleanly. Touch skips removed.
 
-**Decision:** reverted the InitFilePicker patch (keeping it would ship a latent click-deadlock
-for anyone enabling `OnFileChooser`), left `TestOnFileChooser` skipped with the accurate reason.
-Reopen only if a consumer needs the file-chooser *event* API.
+## Sequencing / cost
 
-## Finding 3 — synthetic touch injection unavailable
+| # | Work | Verify | Status |
+|---|------|--------|--------|
+| 1 | smoke.yml full suite | local + CI smoke ✅ | DONE |
+| 2 | InitFilePicker hook + goapi probe-off-readLoop | rebuild + smoke | FIXED (pending CI confirm) |
+| 3 | PageAgent.js → synthesizeTouchEvent | rebuild + smoke | FIXED (pending CI confirm) |
 
-`TestTouchscreenTap` / `TestTouchscreenTouchEvents` skip: `windowUtils.sendTouchEvent is not a
-function`. The test already enables touch (`dom.w3c_touch_events.enabled=1` +
-`SetTouchOverride(true)`), so this is not persona/pref gating — the stock
-`nsIDOMWindowUtils::sendTouchEvent` juggler relies on (`PageAgent.js:_dispatchTouchEvent`) is
-absent in FF150. Mouse injection works only because the Playwright patch adds a *custom*
-`jugglerSendMouseEvent`; touch has no equivalent.
-
-**Fix options:**
-- (a) Add a patched `jugglerSendTouchEvent` to `nsIDOMWindowUtils.idl` + `nsDOMWindowUtils.cpp`
-  (mirror `jugglerSendMouseEvent`), point `PageAgent._dispatchTouchEvent` at it. Needs FF150
-  source to find the current touch-injection entry point.
-- (b) Keep documented skip. Touch *fingerprint* (`maxTouchPoints`, `ontouchstart`, `TouchEvent`)
-  is already correct; synthetic touch *injection* is a mobile-emulation driver-parity feature,
-  not a fingerprint leak. Lowest value of the three.
-
-**Recommendation:** (b) unless a consumer (donutbrowser) needs mobile touch automation.
-
-## Cost / sequencing
-
-| Phase | Work | Verify | Outcome |
-|---|---|---|---|
-| 1 | smoke.yml full suite | local run + CI smoke ✅ | SHIPPED |
-| 2 | filechooser hook → InitFilePicker | CI build + smoke | REVERTED — hook reached but picker click deadlocks (Gecko nested loop); needs juggler flow work |
-| 3 | jugglerSendTouchEvent patch | FF150 source + rebuild | DEFERRED — low value; touch fingerprint already correct |
-
-Only Phase 1 shipped. Phases 2/3 both bottom out in FF-source patch work with rebuild cycles for
-parity features already covered by existing APIs (`SetInputFiles`, touch fingerprint spoof).
+Findings 2 and 3 share one browser rebuild (both touch build-baked files: the playwright patch +
+`additions/juggler/content/PageAgent.js`). Touch caveat: `synthesizeTouchEvent` has no separate
+tilt/twist beyond the dict defaults we pass — semantically fine for tap/touchstart/move/end.
