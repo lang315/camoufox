@@ -61,8 +61,7 @@ jobs:
         # Runs the FULL suite against the real binary, not just TestRuntimeSpoofs:
         # the other ~24 browser tests (navigation, DOM, forms, keyboard, storage,
         # accessibility, ...) otherwise never execute against a real build —
-        # goapi.yml runs without CAMOUFOX_BIN so they all t.Skip. The touch and
-        # file-chooser tests self-skip on builds lacking those capabilities.
+        # goapi.yml runs without CAMOUFOX_BIN so they all t.Skip.
         run: |
           set -o pipefail  # tee must not mask a go-test failure exit code
           cd goapi

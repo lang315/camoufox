@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -66,9 +65,6 @@ document.addEventListener('touchstart', function(e) {
 	}
 
 	if err := p.Touchscreen().Tap(ctx, 100, 100); err != nil {
-		if strings.Contains(err.Error(), "sendTouchEvent is not a function") {
-			t.Skip("Camoufox build lacks windowUtils.sendTouchEvent; touch events unsupported on this platform")
-		}
 		t.Fatalf("Tap: %v", err)
 	}
 
@@ -140,9 +136,6 @@ window.getLog = function() { return log.join(','); };
 		func() error { return ts.TouchEnd(ctx, pt) },
 	} {
 		if err := fn(); err != nil {
-			if strings.Contains(err.Error(), "sendTouchEvent is not a function") {
-				t.Skip("Camoufox build lacks windowUtils.sendTouchEvent; touch events unsupported on this platform")
-			}
 			t.Fatalf("touch event: %v", err)
 		}
 	}
