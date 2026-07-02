@@ -12,6 +12,7 @@ import (
 	"time"
 
 	camoufox "github.com/lang315/camoufox/goapi"
+	"github.com/lang315/camoufox/goapi/pkg/proxy"
 )
 
 func main() {
@@ -27,11 +28,32 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
 
-	b, err := camoufox.Launch(ctx,
+	// CF_DISPLAY opts into a virtual X display (Xvfb) instead of true
+	// --headless. Camoufox recommends this for anti-detect runs: true
+	// headless mode carries tells (no WebGL, "headless" markers) that
+	// dedicated detectors flag.
+	opts := []camoufox.Option{
 		camoufox.WithExecutablePath(exe),
 		camoufox.WithOS(targetOS),
-		camoufox.WithHeadless(true),
-	)
+	}
+	if disp := os.Getenv("CF_DISPLAY"); disp != "" {
+		opts = append(opts, camoufox.WithVirtualDisplay(disp))
+		// llvmpipe (Xvfb software GL) is blocklisted for WebGL by
+		// default; force it on so Camoufox can attach its coherent
+		// WebGL vendor/renderer spoof. Without this, detectors see
+		// "no webgl context" — itself a bot tell.
+		opts = append(opts, camoufox.WithFirefoxUserPref("webgl.force-enabled", true))
+	} else {
+		opts = append(opts, camoufox.WithHeadless(true))
+	}
+	// CF_PROXY routes traffic through a proxy and enables GeoIP so the
+	// spoofed timezone/locale align with the exit IP (fixes the UTC +
+	// real-WebRTC-IP tells that a proxyless run leaks). Format:
+	// scheme://[user:pass@]host:port, e.g. socks5://127.0.0.1:9050.
+	if px := os.Getenv("CF_PROXY"); px != "" {
+		opts = append(opts, camoufox.WithProxy(proxy.Proxy{Server: px}), camoufox.WithGeoIP(true))
+	}
+	b, err := camoufox.Launch(ctx, opts...)
 	if err != nil {
 		log.Fatalf("launch: %v", err)
 	}

@@ -1,2 +1,8 @@
 ac_add_options --disable-maintenance-service
 ac_add_options --disable-update-agent
+# Disable the Windows launcher process. It re-spawns the real browser
+# without forwarding the juggler --juggler-pipe CRT fds 3/4, so a foreign
+# parent (the goapi launcher) cannot establish the Juggler pipe. Playwright's
+# Firefox build disables it for the same reason; the goapi launcher provides
+# the pipe to camoufox.exe directly via an lpReserved2 CRT-inheritance block.
+ac_add_options --disable-launcher-process

@@ -23,7 +23,7 @@ import (
 
 // Browser is a running Camoufox instance. Obtain one via Launch.
 type Browser struct {
-	cmd  *exec.Cmd
+	proc browserProc
 	conn *juggler.Connection
 	root *juggler.Session
 
@@ -156,17 +156,20 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		cmd.Stderr = io.Discard
 	}
 
-	if err := cmd.Start(); err != nil {
+	// startBrowser spawns the child and releases the parent's copy of
+	// the child-side pipe handles. On Windows this is a raw
+	// CreateProcessW that wires the juggler pipe to CRT fds 3/4; on Unix
+	// it is cmd.Start() with fd 3/4 inherited via ExtraFiles.
+	proc, err := startBrowser(cmd, lc.debug)
+	if err != nil {
 		_ = closePipes()
 		return nil, fmt.Errorf("camoufox: start: %w", err)
 	}
-	// Once the child holds its halves, release ours.
-	releaseChildSide(cmd)
 
 	pipe := juggler.NewPipe(parentRead, parentWrite, closePipes)
 	conn := juggler.NewConnection(pipe)
 	b := &Browser{
-		cmd:            cmd,
+		proc:           proc,
 		conn:           conn,
 		root:           conn.RootSession(),
 		debug:          lc.debug,
@@ -393,14 +396,14 @@ func (b *Browser) Close() error {
 	defer cancel()
 	_ = b.root.Call(ctx, "Browser.close", nil, nil)
 	_ = b.conn.Close()
-	if b.cmd != nil && b.cmd.Process != nil {
-		_ = b.cmd.Process.Signal(os.Interrupt)
+	if b.proc != nil {
+		_ = b.proc.Signal(os.Interrupt)
 		done := make(chan error, 1)
-		go func() { done <- b.cmd.Wait() }()
+		go func() { done <- b.proc.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
-			_ = b.cmd.Process.Kill()
+			_ = b.proc.Kill()
 			<-done
 		}
 	}
