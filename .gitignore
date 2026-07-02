@@ -89,3 +89,7 @@ node_modules/
 proxies.txt
 checks-bundle.js
 .env
+
+# Local build box: SSH helpers to a personal Windows PC / WSL build host.
+# Contains credentials — never commit.
+/local/
