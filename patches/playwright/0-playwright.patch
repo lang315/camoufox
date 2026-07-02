@@ -1520,6 +1520,20 @@ index 6e31658fba..20ca8b511d 100644
    if (IsPickerBlocked(doc)) {
      return NS_OK;
    }
+@@ -919,6 +927,13 @@ nsresult HTMLInputElement::InitFilePicker(FilePickerType aType) {
+     return NS_ERROR_FAILURE;
+   }
+ 
++  nsCOMPtr<nsPIDOMWindowOuter> win = doc->GetWindow();
++  nsDocShell* docShell = win ? static_cast<nsDocShell*>(win->GetDocShell()) : nullptr;
++  if (docShell && docShell->IsFileInputInterceptionEnabled()) {
++    docShell->FilePickerShown(this);
++    return NS_OK;
++  }
++
+   if (IsPickerBlocked(doc)) {
+     return NS_OK;
+   }
 diff --git a/dom/interfaces/base/nsIDOMWindowUtils.idl b/dom/interfaces/base/nsIDOMWindowUtils.idl
 index 1d90478329..8b7b9eecfe 100644
 --- a/dom/interfaces/base/nsIDOMWindowUtils.idl
