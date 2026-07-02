@@ -105,6 +105,10 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		cfg.Addons = append(cfg.Addons, lc.addons...)
 	}
 
+	// Detection-risk warnings (mirrors pythonlib LeakWarning). Evaluated
+	// after geo resolution + fingerprint so cfg reflects the final config.
+	emitLeakWarnings(os.Stderr, leakWarnings(cfg, lc.proxy != nil, lc.geoIPEnabled))
+
 	envVars, err := cfg.EnvVars(config.HostOS())
 	if err != nil {
 		return nil, err
