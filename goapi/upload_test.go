@@ -75,11 +75,11 @@ func TestSetInputFilesDirect(t *testing.T) {
 	}
 }
 
-// TestOnFileChooser tests branch B: OnFileChooser intercept.
-// This test is skipped because the Camoufox patch only hooks InitColorPicker,
-// not InitFilePicker — so Page.fileChooserOpened never fires for <input type="file">.
+// TestOnFileChooser tests branch B: OnFileChooser intercept. The playwright
+// patch hooks HTMLInputElement::InitFilePicker so clicking an <input type=file>
+// fires Page.fileChooserOpened, and OnFileChooser runs its blocking RPCs off the
+// juggler readLoop so the picker click completes without self-deadlocking.
 func TestOnFileChooser(t *testing.T) {
-	t.Skip("Camoufox patches InitColorPicker only; file-input interception requires an InitFilePicker patch not present in this build")
 	if os.Getenv("CAMOUFOX_BIN") == "" {
 		t.Skip("set CAMOUFOX_BIN to run")
 	}
@@ -137,15 +137,24 @@ func TestOnFileChooser(t *testing.T) {
 	if err != nil || el == nil {
 		t.Fatalf("QuerySelector: %v, el=%v", err, el)
 	}
-	if err := el.Click(ctx); err != nil {
-		t.Fatalf("Click: %v", err)
-	}
+	// Clicking a file input opens the intercepted picker; fire the click without
+	// awaiting it and wait on the handler instead.
+	go func() { _ = el.Click(ctx) }()
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
 	select {
 	case <-done:
-	case <-time.After(10 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("fileChooser handler never fired")
+	}
+
+	// The handler ran fc.SetFiles; confirm the input actually received the file.
+	got, err := p.Evaluate(ctx, `document.getElementById('f').files.length + '/' + (document.getElementById('f').files[0] && document.getElementById('f').files[0].name)`)
+	if err != nil {
+		t.Fatalf("Evaluate files: %v", err)
+	}
+	if got != "1/chosen.txt" {
+		t.Errorf("expected files=1/chosen.txt, got %v", got)
 	}
 }
