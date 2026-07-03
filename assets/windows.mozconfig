@@ -6,3 +6,10 @@ ac_add_options --disable-update-agent
 # Firefox build disables it for the same reason; the goapi launcher provides
 # the pipe to camoufox.exe directly via an lpReserved2 CRT-inheritance block.
 ac_add_options --disable-launcher-process
+# Force bundled-font support on. It defaults on for WINNT, but the
+# cross-compiled build did not load app/fonts/ (verified: bundled Mac
+# fonts present as files but not renderable), so a spoofed non-Windows OS
+# falls back to host Windows fonts and font-metric fingerprinting (CreepJS
+# "platform hints") reads the real host. Enabling this loads app/fonts/ so
+# the spoofed OS's fonts render with correct metrics.
+ac_add_options --enable-bundled-fonts
