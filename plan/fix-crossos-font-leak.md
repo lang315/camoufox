@@ -126,10 +126,36 @@ cross-compiled Windows build so the existing loader (already present in
 Combined with the already-set `gfx.bundled-fonts.activate=1` pref and the shipped
 font files, the spoofed-OS fonts should render with correct metrics.
 
-Caveat to verify after rebuild: Windows `FontSubstitutes` maps `Helvetica`→`Arial`
-at the GDI layer, and `system-ui-font-spoofing.patch` targets `"Helvetica"` for
-Mac. If the bundled Helvetica still loses to the substitution, `system-ui` (and
-CreepJS's platform-hint metric) may still fall back. Verification must check
-`platform hints` specifically, not just font presence — if it still leaks, the
-follow-up is to make the bundled font win over the substitute (or point the
-system-ui spoof at a bundled family that has no Windows substitute).
+## RESOLVED — two-part fix, both verified on the Windows binary
+
+The leak had two independent causes; fixing both clears it.
+
+**Part 1 — bundled fonts didn't load (mozconfig, needs rebuild).**
+`assets/windows.mozconfig` now passes `--enable-bundled-fonts`. Verified on the
+rebuilt binary: under macOS spoof `Helvetica Neue`/`PingFang`/`Lucida Grande`
+went from absent to present, and stay hidden under Windows spoof (allowlist
+scopes them). This was necessary but NOT sufficient on its own.
+
+**Part 2 — CreepJS "platform hints" reads CSS2 system fonts, not `system-ui`
+(goapi, no rebuild).**
+`getSystemFonts()` in CreepJS sets `el.style.font = 'caption' | 'menu' |
+'message-box' | 'small-caption' | 'status-bar' | 'icon'` and reads the resolved
+`getComputedStyle().fontFamily`, then maps `"Segoe UI" → Windows`. Those CSS2
+system fonts resolve via `nsXPLookAndFeel::GetFontValue`, which returns the
+host's native UI font ("Segoe UI") unless the `ui.font.<keyword>` pref is set.
+The existing `system-ui-font-spoofing.patch` only covers the `system-ui`
+generic, which CreepJS does not use — so it kept leaking.
+
+Fix (launch.go): set `ui.font.{caption,icon,menu,message-box,small-caption,
+status-bar}` to the spoofed OS's system font — `-apple-system` (macOS),
+`Segoe UI` (Windows), `Cantarell` (Linux) — derived from `navigator.platform`.
+No camoufox rebuild needed for this part.
+
+Verified end-to-end on the Windows binary spoofing macOS:
+CreepJS `platform hints` went from `Segoe UI:Windows` to **`-apple-system:Mac`**,
+with device `Mac (MacIntel) macOS Catalina`, WebGL `Intel Inc.` (no ANGLE),
+0% headless, and IPhey `Trustworthy`.
+
+Note: the `system-ui-font-spoofing.patch` change (Helvetica→Helvetica Neue) was
+investigated and reverted — CreepJS's platform hint does not use `system-ui`, so
+it was the wrong lever. The `ui.font.*` prefs are the correct fix.

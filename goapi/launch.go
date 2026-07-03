@@ -206,6 +206,20 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		prefs["network.http.http3.enable"] = false
 		prefs["network.http.http3.enabled"] = false
 	}
+	// Spoof the CSS2 system fonts (caption/menu/message-box/...) to match the
+	// spoofed OS. These resolve via LookAndFeel to the host's real UI font
+	// (e.g. "Segoe UI" on Windows) which CreepJS reads — via getComputedStyle
+	// on `font: menu` etc. — to detect the host OS. The ui.font.* prefs
+	// override that native lookup (nsXPLookAndFeel::GetFontValue). Without
+	// this a Windows host spoofing macOS still leaks "Segoe UI:Windows".
+	if sf := systemUIFont(cfg.NavigatorPlatform); sf != "" {
+		for _, k := range []string{
+			"ui.font.caption", "ui.font.icon", "ui.font.menu",
+			"ui.font.message-box", "ui.font.small-caption", "ui.font.status-bar",
+		} {
+			prefs[k] = sf
+		}
+	}
 	for k, v := range lc.firefoxUserPrefs {
 		prefs[k] = v
 	}
@@ -413,3 +427,18 @@ func (b *Browser) Close() error {
 // Info returns the result of Browser.getInfo (userAgent + version)
 // captured at launch.
 func (b *Browser) Info() juggler.BrowserGetInfoResult { return b.info }
+
+// systemUIFont maps navigator.platform to the CSS2 system-font family that a
+// real machine of that OS reports (what Firefox resolves `font: menu` to).
+// Empty means "leave the native lookup" (e.g. unknown platform).
+func systemUIFont(platform string) string {
+	switch {
+	case strings.Contains(platform, "Win"):
+		return "Segoe UI"
+	case strings.Contains(platform, "Mac"):
+		return "-apple-system"
+	case strings.Contains(platform, "Linux"):
+		return "Cantarell"
+	}
+	return ""
+}
