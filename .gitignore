@@ -99,3 +99,6 @@ checks-bundle.js
 /goapi/deepcheck.exe
 /goapi/uatest
 /goapi/uatest.exe
+
+# Local scratch: assistant system-prompt dump, not a repo file.
+/CLAUDE-FABLE-5.md
