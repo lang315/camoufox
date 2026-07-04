@@ -93,3 +93,9 @@ checks-bundle.js
 # Local build box: SSH helpers to a personal Windows PC / WSL build host.
 # Contains credentials — never commit.
 /local/
+
+# Compiled goapi example binaries (built ad-hoc for detection testing).
+/goapi/deepcheck
+/goapi/deepcheck.exe
+/goapi/uatest
+/goapi/uatest.exe

@@ -188,7 +188,7 @@ var probes = []probe{
 		},
 	},
 	{
-		Name: "iphey", URL: "https://iphey.com/", Settle: 20 * time.Second,
+		Name: "iphey", URL: "https://iphey.com/", Settle: 35 * time.Second,
 		Extract: `(() => { const t=document.body.innerText||'';
 			return { overall:(t.match(/\b(Trustworthy|Suspicious)\b/i)||[])[0]||'',
 			  snippet:t.replace(/\s+/g,' ').slice(0,300) }; })()`,
