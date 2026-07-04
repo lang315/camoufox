@@ -24,6 +24,7 @@ import (
 	"time"
 
 	camoufox "github.com/lang315/camoufox/goapi"
+	"github.com/lang315/camoufox/goapi/pkg/proxy"
 )
 
 type probe struct {
@@ -156,12 +157,28 @@ func main() {
 		rng := mathrand.New(mathrand.NewPCG(hi, lo))
 
 		ctx, cancel := context.WithTimeout(context.Background(), *timeout)
-		b, err := camoufox.Launch(ctx,
+		// CF_DISPLAY opts into a virtual X display (Xvfb) rather than
+		// true --headless, which detectors flag. See creepjs example.
+		lopts := []camoufox.Option{
 			camoufox.WithExecutablePath(bin),
 			camoufox.WithOS(*osFlag),
-			camoufox.WithHeadless(true),
 			camoufox.WithRand(rng),
-		)
+		}
+		if disp := os.Getenv("CF_DISPLAY"); disp != "" {
+			lopts = append(lopts, camoufox.WithVirtualDisplay(disp))
+			// Force WebGL on so llvmpipe (Xvfb software GL) isn't
+			// blocklisted; lets Camoufox spoof a coherent GPU rather
+			// than leaking "no webgl context". See creepjs example.
+			lopts = append(lopts, camoufox.WithFirefoxUserPref("webgl.force-enabled", true))
+		} else {
+			lopts = append(lopts, camoufox.WithHeadless(true))
+		}
+		// CF_PROXY routes traffic + enables GeoIP so timezone/locale
+		// align with the exit IP. Format: scheme://[user:pass@]host:port.
+		if px := os.Getenv("CF_PROXY"); px != "" {
+			lopts = append(lopts, camoufox.WithProxy(proxy.Proxy{Server: px}), camoufox.WithGeoIP(true))
+		}
+		b, err := camoufox.Launch(ctx, lopts...)
 		if err != nil {
 			log.Printf("  launch: %v", err)
 			cancel()
