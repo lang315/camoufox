@@ -23,7 +23,7 @@ import (
 
 // Browser is a running Camoufox instance. Obtain one via Launch.
 type Browser struct {
-	cmd  *exec.Cmd
+	proc browserProc
 	conn *juggler.Connection
 	root *juggler.Session
 
@@ -156,17 +156,20 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		cmd.Stderr = io.Discard
 	}
 
-	if err := cmd.Start(); err != nil {
+	// startBrowser spawns the child and releases the parent's copy of
+	// the child-side pipe handles. On Windows this is a raw
+	// CreateProcessW that wires the juggler pipe to CRT fds 3/4; on Unix
+	// it is cmd.Start() with fd 3/4 inherited via ExtraFiles.
+	proc, err := startBrowser(cmd, lc.debug)
+	if err != nil {
 		_ = closePipes()
 		return nil, fmt.Errorf("camoufox: start: %w", err)
 	}
-	// Once the child holds its halves, release ours.
-	releaseChildSide(cmd)
 
 	pipe := juggler.NewPipe(parentRead, parentWrite, closePipes)
 	conn := juggler.NewConnection(pipe)
 	b := &Browser{
-		cmd:            cmd,
+		proc:           proc,
 		conn:           conn,
 		root:           conn.RootSession(),
 		debug:          lc.debug,
@@ -202,6 +205,20 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		// the real egress IP. Disable it whenever a proxy is in use.
 		prefs["network.http.http3.enable"] = false
 		prefs["network.http.http3.enabled"] = false
+	}
+	// Spoof the CSS2 system fonts (caption/menu/message-box/...) to match the
+	// spoofed OS. These resolve via LookAndFeel to the host's real UI font
+	// (e.g. "Segoe UI" on Windows) which CreepJS reads — via getComputedStyle
+	// on `font: menu` etc. — to detect the host OS. The ui.font.* prefs
+	// override that native lookup (nsXPLookAndFeel::GetFontValue). Without
+	// this a Windows host spoofing macOS still leaks "Segoe UI:Windows".
+	if sf := systemUIFont(cfg.NavigatorPlatform); sf != "" {
+		for _, k := range []string{
+			"ui.font.caption", "ui.font.icon", "ui.font.menu",
+			"ui.font.message-box", "ui.font.small-caption", "ui.font.status-bar",
+		} {
+			prefs[k] = sf
+		}
 	}
 	for k, v := range lc.firefoxUserPrefs {
 		prefs[k] = v
@@ -393,14 +410,14 @@ func (b *Browser) Close() error {
 	defer cancel()
 	_ = b.root.Call(ctx, "Browser.close", nil, nil)
 	_ = b.conn.Close()
-	if b.cmd != nil && b.cmd.Process != nil {
-		_ = b.cmd.Process.Signal(os.Interrupt)
+	if b.proc != nil {
+		_ = b.proc.Signal(os.Interrupt)
 		done := make(chan error, 1)
-		go func() { done <- b.cmd.Wait() }()
+		go func() { done <- b.proc.Wait() }()
 		select {
 		case <-done:
 		case <-time.After(3 * time.Second):
-			_ = b.cmd.Process.Kill()
+			_ = b.proc.Kill()
 			<-done
 		}
 	}
@@ -410,3 +427,18 @@ func (b *Browser) Close() error {
 // Info returns the result of Browser.getInfo (userAgent + version)
 // captured at launch.
 func (b *Browser) Info() juggler.BrowserGetInfoResult { return b.info }
+
+// systemUIFont maps navigator.platform to the CSS2 system-font family that a
+// real machine of that OS reports (what Firefox resolves `font: menu` to).
+// Empty means "leave the native lookup" (e.g. unknown platform).
+func systemUIFont(platform string) string {
+	switch {
+	case strings.Contains(platform, "Win"):
+		return "Segoe UI"
+	case strings.Contains(platform, "Mac"):
+		return "-apple-system"
+	case strings.Contains(platform, "Linux"):
+		return "Cantarell"
+	}
+	return ""
+}
