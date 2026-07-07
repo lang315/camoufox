@@ -567,6 +567,19 @@ Next, build the Camoufox source code with the following command:
 make dir
 ```
 
+Before bootstrapping, install the system build dependencies with the helper
+script. It detects your platform and installs everything the build needs
+(Python ≥ 3.11, Rust, `aria2`, `p7zip`, `go`, `msitools`, `wget`, `sqlite`, and
+the core build tools) using the appropriate package manager — Homebrew on macOS,
+or `apt`/`dnf`/`pacman` on Linux:
+
+```bash
+bash scripts/install-deps.sh
+```
+
+> [!NOTE]
+> The dependency installer has so far only been tested on macOS.
+
 After that, you have to bootstrap your system to be able to build Camoufox. You only have to do this one time. It is done by running the following command:
 
 ```bash
