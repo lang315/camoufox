@@ -1,19 +1,18 @@
 diff --git a/dom/media/mediacapabilities/MediaCapabilities.cpp b/dom/media/mediacapabilities/MediaCapabilities.cpp
-index f6e4457..0ee032a 100644
 --- a/dom/media/mediacapabilities/MediaCapabilities.cpp
 +++ b/dom/media/mediacapabilities/MediaCapabilities.cpp
-@@ -34,6 +34,7 @@
- #include "mozilla/dom/WorkerRef.h"
- #include "mozilla/layers/KnowsCompositor.h"
+@@ -35,6 +35,7 @@
+ #include "mozilla/media/MediaUtils.h"
+ #include "mozilla/media/webrtc/CodecInfo.h"
  #include "nsContentUtils.h"
 +#include "MaskConfig.hpp"
- 
- mozilla::LazyLogModule sMediaCapabilitiesLog("MediaCapabilities");
- 
-@@ -270,6 +271,31 @@ void MediaCapabilities::CreateMediaCapabilitiesDecodingInfo(
-                   aConfiguration.mAudio.Value().mContentType);
-   }
- 
+ #include "nsIPrincipal.h"
+
+ namespace mozilla::dom {
+@@ -711,6 +712,31 @@
+     const MediaDecodingConfiguration& aConfiguration, ErrorResult& aRv,
+     Promise* aPromise, const mediacaps::BehaviorConfig& aBehavior) {
+   LOG("Processing {}", aConfiguration);
 +  // camoufox: if the queried content type matches the per-OS codec config,
 +  // resolve with spoofed support/smooth/powerEfficient so a cross-OS profile
 +  // presents a coherent codec + HW-decode matrix (coherent with canPlayType)
@@ -39,17 +38,17 @@ index f6e4457..0ee032a 100644
 +    }
 +  }
 +
-   if (!supported) {
-     MediaCapabilitiesDecodingInfo info;
-     info.mSupported = false;
+
+   const bool isWebRTC =
+       mediacaps::IsMediaTypeWebRTC(AsVariant(aConfiguration.mType));
 diff --git a/dom/media/mediacapabilities/moz.build b/dom/media/mediacapabilities/moz.build
 index 786b87a..e0cc052 100644
 --- a/dom/media/mediacapabilities/moz.build
 +++ b/dom/media/mediacapabilities/moz.build
 @@ -13,4 +13,6 @@ UNIFIED_SOURCES += [
- 
+
  include("/ipc/chromium/chromium-config.mozbuild")
- 
+
 +LOCAL_INCLUDES += ["/camoucfg"]
 +
  FINAL_LIBRARY = "xul"
@@ -62,12 +61,12 @@ index df8c944..1bbd6bd 100644
  #endif
  #include "xpcpublic.h"
 +#include "MaskConfig.hpp"
- 
+
  mozilla::LazyLogModule gMediaElementLog("HTMLMediaElement");
  mozilla::LazyLogModule gMediaElementEventsLog("HTMLMediaElementEvents");
 @@ -5543,6 +5544,13 @@ CanPlayStatus HTMLMediaElement::GetCanPlay(
  }
- 
+
  void HTMLMediaElement::CanPlayType(const nsAString& aType, nsAString& aResult) {
 +  // camoufox: answer from the per-OS codec config when present, so a
 +  // cross-OS profile does not leak the host's real decoder support (#6).
@@ -86,7 +85,7 @@ index 34f3798..152e14f 100644
 @@ -35,4 +35,6 @@ LOCAL_INCLUDES += [
      "/third_party/libwebrtc",
  ]
- 
+
 +LOCAL_INCLUDES += ["/camoucfg"]
 +
  FINAL_LIBRARY = "xul"
@@ -99,13 +98,13 @@ index a6eaa23..441f979 100644
  #include "nsString.h"
  #include "nsThreadUtils.h"
 +#include "MaskConfig.hpp"
- 
+
  struct JSContext;
  class JSObject;
 @@ -136,6 +137,16 @@ void MediaSource::IsTypeSupported(const nsAString& aType,
      return aRv.ThrowTypeError("Empty type");
    }
- 
+
 +  // camoufox: answer from the per-OS codec config so isTypeSupported stays
 +  // coherent with canPlayType; "" => unsupported (#6).
 +  if (auto spoof = MaskConfig::GetMediaCanPlayType(
@@ -124,9 +123,9 @@ index 60574eb..616777c 100644
 --- a/dom/media/mediasource/moz.build
 +++ b/dom/media/mediasource/moz.build
 @@ -41,4 +41,6 @@ TEST_DIRS += [
- 
+
  include("/ipc/chromium/chromium-config.mozbuild")
- 
+
 +LOCAL_INCLUDES += ["/camoucfg"]
 +
  FINAL_LIBRARY = "xul"
