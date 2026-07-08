@@ -197,6 +197,13 @@ async def run_tests(
     for i, p in enumerate(all_presets_flat):
         inject_timezone(p, TEST_TIMEZONES[i % len(TEST_TIMEZONES)])
         inject_webrtc_ip(p)
+        # checkCanvasPerturbation() (build-tester Task 4) needs a non-zero canvas:seed —
+        # Perturb no-ops on seed 0. Presets already carry a random non-zero seed
+        # (pythonlib/camoufox/fingerprints.py: randint(1, 4_294_967_295)), so this
+        # setdefault is defensive only. Expose window.__canvasSeedSet__ so the collector
+        # can confirm the seed was actually configured for this profile.
+        p["camouConfig"].setdefault("canvas:seed", 424242)
+        p["initScript"] += "\ntry { window.__canvasSeedSet__ = true; } catch (e) {}"
 
     # 4. Build profile entries
     per_context_entries = []
@@ -302,9 +309,12 @@ async def run_tests(
                     ),
                 )
 
-                # Inject only WebRTC IP for global profiles (CAMOU_CONFIG handles everything else)
+                # Inject WebRTC IP for global profiles (CAMOU_CONFIG handles everything else,
+                # including canvas:seed itself — but preset["initScript"] is never applied
+                # for global profiles, so __canvasSeedSet__ must be set here too).
                 await context.add_init_script(
-                    f"try {{ if (typeof window.setWebRTCIPv4 === 'function') window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}}"
+                    f"try {{ if (typeof window.setWebRTCIPv4 === 'function') window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}} "
+                    "try { window.__canvasSeedSet__ = true; } catch (e) {}"
                 )
 
                 page = await context.new_page()

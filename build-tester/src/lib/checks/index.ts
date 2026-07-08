@@ -64,6 +64,11 @@ export async function runAllChecks(
   const webrtc = await checkWebRTC();
   onPhaseComplete?.({ phase: "webrtc" });
 
+  // Phase 5b: Canvas perturbation check (quantization-robust, non-uniformity based)
+  const { checkCanvasPerturbation } = await import("./collectors");
+  const canvasPerturbation = await checkCanvasPerturbation();
+  onPhaseComplete?.({ phase: "canvasPerturbation" });
+
   // Phase 6: Stability - collect fingerprints again and compare
   const fingerprints2 = await collectFingerprints();
   const diffs: string[] = [];
@@ -90,6 +95,7 @@ export async function runAllChecks(
     extended,
     workers,
     webrtc,
+    canvasPerturbation,
     stability: { fingerprints2, stable, detail },
     selfDestruct,
   };
