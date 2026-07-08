@@ -46,6 +46,13 @@ def count_all_checks(profile: dict, results: dict, match_results: list) -> tuple
     if results.get("webrtc", {}).get("passed"):
         pass_count += 1
 
+    total_checks += 1
+    if results.get("canvasPerturbation", {}).get("passed"):
+        pass_count += 1
+    total_checks += 1
+    if results.get("webrtcLinkLocal", {}).get("passed"):
+        pass_count += 1
+
     # Stability
     total_checks += 1
     if results.get("stability", {}).get("stable"):
