@@ -405,3 +405,48 @@ export async function checkWebRTC(): Promise<WebRTCResult> {
 
   return result;
 }
+
+import type { CanvasPerturbationResult } from "../types";
+const CPX = 256, FILL = 128;
+function solidCtx(): CanvasRenderingContext2D {
+  const c = document.createElement("canvas"); c.width = CPX; c.height = CPX;
+  const x = c.getContext("2d", { willReadFrequently: true })!;
+  x.fillStyle = `rgb(${FILL},${FILL},${FILL})`; x.fillRect(0, 0, CPX, CPX); return x;
+}
+function nonUniform(b: Uint8ClampedArray | Uint8Array): boolean {
+  let ref = -1;
+  for (let i = 0; i < b.length; i++) { if ((i & 3) === 3) continue;
+    if (ref < 0) ref = b[i]; else if (b[i] !== ref) return true; }
+  return false;
+}
+async function blobData(bl: Blob): Promise<Uint8ClampedArray> {
+  const bmp = await createImageBitmap(bl);
+  const c = document.createElement("canvas"); c.width = bmp.width; c.height = bmp.height;
+  const x = c.getContext("2d")!; x.drawImage(bmp, 0, 0);
+  return x.getImageData(0, 0, bmp.width, bmp.height).data;
+}
+export async function checkCanvasPerturbation(): Promise<CanvasPerturbationResult> {
+  const s = { getImageData:{perturbed:false,deterministic:false}, toDataURL:{perturbed:false,deterministic:false},
+              offscreenBlob:{perturbed:false,deterministic:false}, webgl:{perturbed:false,deterministic:false} };
+  try { const a = solidCtx().getImageData(0,0,CPX,CPX).data, b = solidCtx().getImageData(0,0,CPX,CPX).data;
+        s.getImageData.perturbed = nonUniform(a); s.getImageData.deterministic = a.every((v,i)=>v===b[i]); } catch {}
+  try { const u1 = solidCtx().canvas.toDataURL("image/png"), u2 = solidCtx().canvas.toDataURL("image/png");
+        const im = new Image(); im.src = u1; await im.decode();
+        const dc = document.createElement("canvas"); dc.width=CPX; dc.height=CPX;
+        const dx = dc.getContext("2d")!; dx.drawImage(im,0,0);
+        s.toDataURL.perturbed = nonUniform(dx.getImageData(0,0,CPX,CPX).data); s.toDataURL.deterministic = u1===u2; } catch {}
+  try { const oc = new OffscreenCanvas(CPX,CPX); const ox = oc.getContext("2d")!;
+        ox.fillStyle=`rgb(${FILL},${FILL},${FILL})`; ox.fillRect(0,0,CPX,CPX);
+        const d1 = await blobData(await oc.convertToBlob({type:"image/png"}));
+        const d2 = await blobData(await oc.convertToBlob({type:"image/png"}));
+        s.offscreenBlob.perturbed = nonUniform(d1); s.offscreenBlob.deterministic = d1.every((v,i)=>v===d2[i]); } catch {}
+  try { const gc = document.createElement("canvas"); gc.width=CPX; gc.height=CPX;
+        const gl = gc.getContext("webgl")!; gl.clearColor(FILL/255,FILL/255,FILL/255,1); gl.clear(gl.COLOR_BUFFER_BIT);
+        const p1 = new Uint8Array(CPX*CPX*4), p2 = new Uint8Array(CPX*CPX*4);
+        gl.readPixels(0,0,CPX,CPX,gl.RGBA,gl.UNSIGNED_BYTE,p1); gl.readPixels(0,0,CPX,CPX,gl.RGBA,gl.UNSIGNED_BYTE,p2);
+        s.webgl.perturbed = nonUniform(p1); s.webgl.deterministic = p1.every((v,i)=>v===p2[i]); } catch {}
+  const seedPresent = !!(window as any).__canvasSeedSet__;
+  const all = Object.values(s);
+  const passed = seedPresent && all.every(x=>x.perturbed && x.deterministic);
+  return { passed, surfaces: s, seedPresent, detail: passed ? "all 4 surfaces non-uniform + deterministic" : JSON.stringify({seedPresent, s}) };
+}
