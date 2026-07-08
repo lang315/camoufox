@@ -115,10 +115,10 @@ index 0000000000..0000000001 100644
      if (hasIPv4) {
        return NS_ConvertUTF16toUTF8(ipv4Value).get();
      }
-diff --git a/dom/media/webrtc/jsapi/WebRTCIPManager.h b/dom/media/webrtc/jsapi/WebRTCIPManager.h
+diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
 index 0000000000..0000000002 100644
---- a/dom/media/webrtc/jsapi/WebRTCIPManager.h
-+++ b/dom/media/webrtc/jsapi/WebRTCIPManager.h
+--- a/dom/base/WebRTCIPManager.h
++++ b/dom/base/WebRTCIPManager.h
 @@ -25,6 +25,12 @@ class WebRTCIPManager {
    static bool GetIPv6(uint32_t userContextId, nsAString& outIPv6);
    static void SetIPv6(uint32_t userContextId, const nsAString& ipv6);
@@ -133,10 +133,10 @@ index 0000000000..0000000002 100644
    static bool IsFunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj);
    static void DisableFunction(uint32_t userContextId);
  };
-diff --git a/dom/media/webrtc/jsapi/WebRTCIPManager.cpp b/dom/media/webrtc/jsapi/WebRTCIPManager.cpp
+diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 index 0000000000..0000000003 100644
---- a/dom/media/webrtc/jsapi/WebRTCIPManager.cpp
-+++ b/dom/media/webrtc/jsapi/WebRTCIPManager.cpp
+--- a/dom/base/WebRTCIPManager.cpp
++++ b/dom/base/WebRTCIPManager.cpp
 @@ -90,6 +90,46 @@ void WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
    DisableIPv6Function(userContextId);
  }
