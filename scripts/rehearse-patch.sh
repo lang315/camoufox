@@ -7,7 +7,9 @@ command -v gpatch >/dev/null || { echo "need gpatch"; exit 3; }
 PATCH="${1:?usage: rehearse-patch.sh <patch-basename>}"
 ROOT="$(git rev-parse --show-toplevel)"; PDIR="$ROOT/patches"
 WORK="$ROOT/.rehearse/$PATCH"; TREE="$WORK/tree"
-HG="https://hg.mozilla.org/releases/mozilla-release/raw-file/FIREFOX_152_0_4_RELEASE"
+# shellcheck disable=SC1091
+source "$ROOT/upstream.sh"   # single source of the FF pin (version=X.Y.Z, release=...)
+HG="https://hg.mozilla.org/releases/mozilla-release/raw-file/FIREFOX_${version//./_}_RELEASE"
 PB="${CAMOU_PATCH:-gpatch}"
 pf(){ local n="$1"; [ -f "$PDIR/$n" ] && echo "$PDIR/$n" || find "$PDIR" -name "$n" | head -1; }
 edited(){ awk '/^--- \/dev\/null/{s=1;next} /^\+\+\+ b\//{if(!s)print substr($0,7);s=0}' "$1"; }
@@ -15,18 +17,21 @@ created(){ awk '/^--- \/dev\/null/{g=1;next} /^\+\+\+ b\//{if(g)print substr($0,
 TPATCH="$(pf "$PATCH")"; [ -f "$TPATCH" ] || { echo "patch not found: $PATCH"; exit 3; }
 mapfile -t TARGET_EDIT < <(edited "$TPATCH")
 mapfile -t TARGET_NEW  < <(created "$TPATCH")
+declare -A NEW_SET; for nf in "${TARGET_NEW[@]}"; do NEW_SET["$nf"]=1; done
 mapfile -t ORDER < <(ls "$PDIR"/**/*.patch | xargs -n1 basename | sort -u)
+# prereqs = earlier-order patches that edit a file $PATCH also edits (parse each candidate once)
 PREREQS=()
 for p in "${ORDER[@]}"; do [ "$p" = "$PATCH" ] && break
+  [ "${#TARGET_EDIT[@]}" -gt 0 ] || break
   ppath="$(pf "$p")"
-  for tf in "${TARGET_EDIT[@]}"; do edited "$ppath" | grep -qxF "$tf" && { PREREQS+=("$ppath"); break; }; done
+  edited "$ppath" | grep -qxFf <(printf '%s\n' "${TARGET_EDIT[@]}") && PREREQS+=("$ppath")
 done
 rm -rf "$WORK"; mkdir -p "$TREE"; WRONG=0
 declare -A SEEN
 for src in "${PREREQS[@]}" "$TPATCH"; do
   while read -r f; do
     [ -z "$f" ] && continue; [ -n "${SEEN[$f]:-}" ] && continue; SEEN[$f]=1
-    for nf in "${TARGET_NEW[@]}"; do [ "$f" = "$nf" ] && continue 2; done
+    [ -n "${NEW_SET[$f]:-}" ] && continue   # patch creates it — never fetch
     mkdir -p "$TREE/$(dirname "$f")"
     code=$($FETCH -w '%{http_code}' -o "$TREE/$f" "$HG/$f" 2>/dev/null || echo 000)
     if [ "$code" = 404 ]; then

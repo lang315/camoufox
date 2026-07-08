@@ -19,7 +19,17 @@ from certificate import (
     print_certificate,
     print_profile_result,
 )
-from constants import BOLD, FIREFOX_WEBGL_PREFS, RED, RESET, TEST_TIMEZONES, WEBRTC_TEST_IP, grade_color
+from constants import (
+    BOLD,
+    CANVAS_SEED_INIT_SCRIPT,
+    FIREFOX_WEBGL_PREFS,
+    RED,
+    RESET,
+    TEST_TIMEZONES,
+    WEBRTC_TEST_IP,
+    WEBRTC_TEST_LOCAL_IP,
+    grade_color,
+)
 from grading import (
     adjust_cross_os_font_checks,
     compute_cross_profile,
@@ -203,7 +213,7 @@ async def run_tests(
         # setdefault is defensive only. Expose window.__canvasSeedSet__ so the collector
         # can confirm the seed was actually configured for this profile.
         p["camouConfig"].setdefault("canvas:seed", 424242)
-        p["initScript"] += "\ntry { window.__canvasSeedSet__ = true; } catch (e) {}"
+        p["initScript"] += "\n" + CANVAS_SEED_INIT_SCRIPT
 
     # 4. Build profile entries
     per_context_entries = []
@@ -295,7 +305,7 @@ async def run_tests(
             try:
                 # webrtc:localipv4 drives the B1 GetLocalIPv4 branch (see checkWebRTCLinkLocal,
                 # build-tester Task 5) — must match window.__expectedWebRTC__.local below.
-                preset["camouConfig"]["webrtc:localipv4"] = "10.11.12.13"
+                preset["camouConfig"]["webrtc:localipv4"] = WEBRTC_TEST_LOCAL_IP
                 env = {**dict(os.environ), "CAMOU_CONFIG": json.dumps(preset["camouConfig"])}
                 browser = await firefox.launch(
                     executable_path=binary_path,
@@ -319,8 +329,8 @@ async def run_tests(
                 # B1 local-IP branch and the setWebRTCIPv4 public spoof should produce.
                 await context.add_init_script(
                     f"try {{ if (typeof window.setWebRTCIPv4 === 'function') window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}} "
-                    "try { window.__canvasSeedSet__ = true; } catch (e) {}"
-                    f"try {{ window.__expectedWebRTC__ = {json.dumps({'local': '10.11.12.13', 'public': WEBRTC_TEST_IP})}; }} catch(e) {{}}"
+                    + CANVAS_SEED_INIT_SCRIPT
+                    + f"try {{ window.__expectedWebRTC__ = {json.dumps({'local': WEBRTC_TEST_LOCAL_IP, 'public': WEBRTC_TEST_IP})}; }} catch(e) {{}}"
                 )
 
                 page = await context.new_page()
