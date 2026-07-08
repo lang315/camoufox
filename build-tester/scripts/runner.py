@@ -177,6 +177,7 @@ async def run_tests(
     secret: str,
     save_cert: Optional[str],
     no_cert: bool,
+    json_path: Optional[str] = None,
 ) -> int:
     project_dir = Path(__file__).parent.parent
 
@@ -366,5 +367,11 @@ async def run_tests(
             cert_text = build_certificate_text(cert, cross_profile, overall_grade)
             Path(save_cert).write_text(cert_text, encoding="utf-8")
             print(f"Certificate saved to: {save_cert}")
+
+    if json_path:
+        import json
+        with open(json_path, "w") as fh:
+            json.dump(full_result, fh, indent=2)
+        print(f"wrote raw results to {json_path}")
 
     return 0 if total_passed == total_checks_sum else 1
