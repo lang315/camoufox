@@ -75,12 +75,21 @@ export interface CanvasPerturbationResult {
   detail: string;
 }
 
+export interface WebRTCLinkLocalResult {
+  passed: boolean;
+  skipped: boolean;
+  candidates: string[];
+  expectedLocal: string;
+  detail: string;
+}
+
 export interface TestResults {
   fingerprints: FingerprintData;
   core: Record<string, Record<string, CheckResult>>;
   extended: Record<string, Record<string, CheckResult>>;
   workers: Record<string, Record<string, CheckResult>>;
   webrtc: WebRTCResult;
+  webrtcLinkLocal: WebRTCLinkLocalResult;
   canvasPerturbation: CanvasPerturbationResult;
   stability: { fingerprints2: FingerprintData; stable: boolean; detail: string };
   selfDestruct?: Record<string, CheckResult>; // per-context only; absent for global profiles

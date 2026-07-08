@@ -450,3 +450,28 @@ export async function checkCanvasPerturbation(): Promise<CanvasPerturbationResul
   const passed = seedPresent && all.every(x=>x.perturbed && x.deterministic);
   return { passed, surfaces: s, seedPresent, detail: passed ? "all 4 surfaces non-uniform + deterministic" : JSON.stringify({seedPresent, s}) };
 }
+
+import type { WebRTCLinkLocalResult } from "../types";
+export async function checkWebRTCLinkLocal(): Promise<WebRTCLinkLocalResult> {
+  const exp = (window as any).__expectedWebRTC__;
+  const res: WebRTCLinkLocalResult = { passed:false, skipped:false, candidates:[], expectedLocal: exp?.local ?? "", detail:"" };
+  if (!exp) { res.skipped = true; res.passed = true; res.detail = "skipped (no __expectedWebRTC__)"; return res; }
+  try {
+    if (typeof RTCPeerConnection === "undefined") { res.skipped = true; res.passed = true; res.detail = "no RTCPeerConnection"; return res; }
+    const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
+    const ips = new Set<string>();
+    const done = new Promise<void>((r) => { const t = setTimeout(r, 6000);
+      pc.onicecandidate = (e) => { if (!e.candidate) { clearTimeout(t); r(); return; }
+        const m = e.candidate.candidate.match(/(?:\d{1,3}\.){3}\d{1,3}/); if (m) ips.add(m[0]);
+        if (e.candidate.address) ips.add(e.candidate.address); }; });
+    pc.createDataChannel("x"); await pc.setLocalDescription(await pc.createOffer()); await done; pc.close();
+    res.candidates = Array.from(ips);
+    const host = /^(?:127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|fe80:)/i;
+    const localEmitted = res.candidates.includes(exp.local);          // ONLY the GetLocalIPv4 branch emits this
+    const leakedHost = res.candidates.some((ip) => host.test(ip) && ip !== exp.local);
+    res.passed = localEmitted && !leakedHost && res.candidates.length > 0;
+    res.detail = res.passed ? `local spoof emitted (${res.candidates.join(",")})`
+      : `FAIL localEmitted=${localEmitted} leakedHost=${leakedHost} cands=${res.candidates.join(",")}`;
+  } catch (e:any) { res.detail = "webrtc check failed: " + e.message; }
+  return res;
+}

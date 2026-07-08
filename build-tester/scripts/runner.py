@@ -293,6 +293,9 @@ async def run_tests(
 
             browser = None
             try:
+                # webrtc:localipv4 drives the B1 GetLocalIPv4 branch (see checkWebRTCLinkLocal,
+                # build-tester Task 5) — must match window.__expectedWebRTC__.local below.
+                preset["camouConfig"]["webrtc:localipv4"] = "10.11.12.13"
                 env = {**dict(os.environ), "CAMOU_CONFIG": json.dumps(preset["camouConfig"])}
                 browser = await firefox.launch(
                     executable_path=binary_path,
@@ -312,9 +315,12 @@ async def run_tests(
                 # Inject WebRTC IP for global profiles (CAMOU_CONFIG handles everything else,
                 # including canvas:seed itself — but preset["initScript"] is never applied
                 # for global profiles, so __canvasSeedSet__ must be set here too).
+                # __expectedWebRTC__ tells checkWebRTCLinkLocal (build-tester Task 5) what the
+                # B1 local-IP branch and the setWebRTCIPv4 public spoof should produce.
                 await context.add_init_script(
                     f"try {{ if (typeof window.setWebRTCIPv4 === 'function') window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}} "
                     "try { window.__canvasSeedSet__ = true; } catch (e) {}"
+                    f"try {{ window.__expectedWebRTC__ = {json.dumps({'local': '10.11.12.13', 'public': WEBRTC_TEST_IP})}; }} catch(e) {{}}"
                 )
 
                 page = await context.new_page()
