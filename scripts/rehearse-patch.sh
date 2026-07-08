@@ -12,8 +12,9 @@ PB="${CAMOU_PATCH:-gpatch}"
 pf(){ local n="$1"; [ -f "$PDIR/$n" ] && echo "$PDIR/$n" || find "$PDIR" -name "$n" | head -1; }
 edited(){ awk '/^--- \/dev\/null/{s=1;next} /^\+\+\+ b\//{if(!s)print substr($0,7);s=0}' "$1"; }
 created(){ awk '/^--- \/dev\/null/{g=1;next} /^\+\+\+ b\//{if(g)print substr($0,7);g=0}' "$1"; }
-mapfile -t TARGET_EDIT < <(edited "$PDIR/$PATCH")
-mapfile -t TARGET_NEW  < <(created "$PDIR/$PATCH")
+TPATCH="$(pf "$PATCH")"; [ -f "$TPATCH" ] || { echo "patch not found: $PATCH"; exit 3; }
+mapfile -t TARGET_EDIT < <(edited "$TPATCH")
+mapfile -t TARGET_NEW  < <(created "$TPATCH")
 mapfile -t ORDER < <(ls "$PDIR"/**/*.patch | xargs -n1 basename | sort -u)
 PREREQS=()
 for p in "${ORDER[@]}"; do [ "$p" = "$PATCH" ] && break
@@ -22,7 +23,7 @@ for p in "${ORDER[@]}"; do [ "$p" = "$PATCH" ] && break
 done
 rm -rf "$WORK"; mkdir -p "$TREE"; WRONG=0
 declare -A SEEN
-for src in "${PREREQS[@]}" "$PDIR/$PATCH"; do
+for src in "${PREREQS[@]}" "$TPATCH"; do
   while read -r f; do
     [ -z "$f" ] && continue; [ -n "${SEEN[$f]:-}" ] && continue; SEEN[$f]=1
     for nf in "${TARGET_NEW[@]}"; do [ "$f" = "$nf" ] && continue 2; done
@@ -37,11 +38,11 @@ for src in "${PREREQS[@]}" "$PDIR/$PATCH"; do
 done
 cd "$TREE"
 for p in "${PREREQS[@]}"; do "$PB" -p1 --forward -l --binary -i "$p" >/dev/null 2>&1 || true; done
-OUT="$WORK/apply.out"; set +e; "$PB" -p1 --forward -l --binary -i "$PDIR/$PATCH" >"$OUT" 2>&1; RC=$?; set -e
+OUT="$WORK/apply.out"; set +e; "$PB" -p1 --forward -l --binary -i "$TPATCH" >"$OUT" 2>&1; RC=$?; set -e
 REJ=$(find "$TREE" -name '*.rej' | wc -l | tr -d ' ')
 SKIP=$(grep -ciE 'can.?t find file|ignored|Skipping' "$OUT" || true)
-FUZZ=$(grep -oE 'with fuzz [0-9]+' "$OUT" | grep -oE '[0-9]+' | sort -rn | head -1); FUZZ=${FUZZ:-0}
-OFF=$(grep -oE 'offset -?[0-9]+' "$OUT" | grep -oE -- '-?[0-9]+' | tr -d - | sort -rn | head -1); OFF=${OFF:-0}
+FUZZ=$(grep -oE 'with fuzz [0-9]+' "$OUT" | grep -oE '[0-9]+' | sort -rn | head -1 || true); FUZZ=${FUZZ:-0}
+OFF=$(grep -oE 'offset -?[0-9]+' "$OUT" | grep -oE -- '-?[0-9]+' | tr -d - | sort -rn | head -1 || true); OFF=${OFF:-0}
 echo "=== $PATCH: rc=$RC rejects=$REJ skipped=$SKIP wrongpath=$WRONG fuzz=$FUZZ max|offset|=$OFF ==="
 grep -E 'Hunk|FAILED|ignored|offset|fuzz|find file' "$OUT" || true
-[ "$REJ" = 0 ] && [ "$SKIP" = 0 ] && [ "$WRONG" = 0 ] && [ "$FUZZ" = 0 ] && [ "$OFF" -le 2 ]
+[ "$RC" = 0 ] && [ "$REJ" = 0 ] && [ "$SKIP" = 0 ] && [ "$WRONG" = 0 ] && [ "$FUZZ" = 0 ] && [ "$OFF" -le 2 ]
