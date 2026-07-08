@@ -369,7 +369,6 @@ async def run_tests(
             print(f"Certificate saved to: {save_cert}")
 
     if json_path:
-        import json
         with open(json_path, "w") as fh:
             json.dump(full_result, fh, indent=2)
         print(f"wrote raw results to {json_path}")
