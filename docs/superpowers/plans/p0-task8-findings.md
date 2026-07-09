@@ -62,6 +62,33 @@ Committing (1)+(2) without (3) flips webrtc2 from **silent skip** (build green, 
 **hard reject at make-dir** (build broken). Left as-is until (3) lands with it, so the build stays
 green. The reverted patch is unchanged on the branch.
 
+## DONE (2026-07-09) — all three defects fixed; make-dir-faithful rehearsal green
+
+Resolved with the post-prereq reconstruction technique proven on canvas Task 7 (commit 55f85bf):
+generate/anchor against the tree `make dir` actually presents to webrtc2 — vanilla FF152 with the
+earlier patches applied, incl. `webrtc-ip-spoofing.patch` (webrtc1), which CREATES
+`dom/base/WebRTCIPManager.{h,cpp}` and ADDS `isSpecialIP`/`getMaskForIP` to `PeerConnectionImpl.cpp`.
+The "needs a build host" caveat above was wrong — `curl hg` + applying prereqs locally is enough.
+
+- (1) all-zero `index` lines: **removed** from every edit hunk.
+- (2) malformed `@@` counts: **regenerated** via `diff -u` (correct by construction).
+- (3) fabricated context: **re-anchored** to real post-prereq source — the `HashFunctions.h`
+  include now sits after `mozilla/RustRegex.h` (no `<verify>` placeholder), and the
+  `WebRTCIPManager.h` decls anchor on the real `GetIPv6` + Doxygen structure (not the draft's wrong
+  Get/Set order). PeerConnectionImpl hunks re-anchored to real `isSpecialIP`/`getMaskForIP` lines.
+
+**Extra fix (was a latent Task 9 compile error):** webrtc2 introduces the first
+`MaskConfig::GetString` call into `WebRTCIPManager.cpp`, whose webrtc1-created include list has no
+`#include "MaskConfig.hpp"` (webrtc1's own `GetIPv4`/`GetIPv6` use only `RoverfoxStorageManager`).
+Added that include hunk.
+
+**Evidence — `scripts/rehearse-patch.sh webrtc-ip-spoofing2.patch`** (fetches FF152, applies the
+prereqs incl. webrtc1, then the target):
+`rc=0 rejects=0 skipped=0 wrongpath=0 fuzz=0 max|offset|=0`.
+
+**Still build-env only:** `make build` compile-verify + build-tester `webrtcLinkLocal` (B1 local IP
+`10.11.12.13` emitted, no host leak) on a fresh binary — Task 9.
+
 ## Harness improvements landed this task (verified)
 - Treat files a prereq **creates** (`/dev/null`) as never-fetch / never-wrongpath — so a patch that
   edits a prereq-created file (webrtc2 edits `WebRTCIPManager.*`) isn't falsely flagged wrongpath.
