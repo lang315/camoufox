@@ -1,9 +1,8 @@
 diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
 new file mode 100644
-index 0000000000..0000000001
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,168 @@
+@@ -0,0 +1,162 @@
 +#include "CanvasSeedManager.h"
 +#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
@@ -168,10 +167,9 @@ index 0000000000..0000000001
 +} // namespace mozilla
 diff --git a/dom/base/CanvasSeedManager.h b/dom/base/CanvasSeedManager.h
 new file mode 100644
-index 0000000000..0000000002
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.h
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,66 @@
 +#ifndef mozilla_dom_CanvasSeedManager_h
 +#define mozilla_dom_CanvasSeedManager_h
 +
@@ -239,30 +237,28 @@ index 0000000000..0000000002
 +
 +#endif  // mozilla_dom_CanvasSeedManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index 0000000000..0000000003 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -201,6 +201,7 @@ EXPORTS.mozilla.dom += [
+@@ -151,6 +151,7 @@
+     "BodyUtil.h",
      "BorrowedAttrInfo.h",
-     "BrowsingContext.h",
-     "BrowsingContextGroup.h",
+     "CacheExpirationTime.h",
 +    "CanvasSeedManager.h",
      "CCGCScheduler.h",
-     "ChildIterator.h",
-     "ChildProcessMessageManager.h",
-@@ -350,6 +351,7 @@ UNIFIED_SOURCES += [
+     "CharacterData.h",
+     "CharacterDataBuffer.h",
+@@ -346,6 +347,7 @@
      "BodyConsumer.cpp",
      "BodyUtil.cpp",
-     "BrowsingContext.cpp",
+     "BorrowedAttrInfo.cpp",
 +    "CanvasSeedManager.cpp",
      "CCGCScheduler.cpp",
-     "Comment.cpp",
-     "ContentIterator.cpp",
+     "CharacterData.cpp",
+     "CharacterDataBuffer.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 0000000000..0000000004 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -244,6 +244,7 @@
+@@ -243,6 +243,7 @@
  #include "nsICookieService.h"
  #include "nsID.h"
  #include "nsIDOMStorageManager.h"
@@ -270,10 +266,14 @@ index 0000000000..0000000004 100644
  #include "FontSpacingSeedManager.h"
  #include "nsDocShell.h"
  #include "mozilla/OriginAttributes.h"
-@@ -7486,6 +7487,25 @@ void nsGlobalWindowInner::SetFontSpacingSeed(uint32_t seed, ErrorResult& aRv) {
-   }
- }
-
+@@ -7748,6 +7749,25 @@
+       JS::Rooted<JS::Value> undef(cx, JS::UndefinedValue());
+       JS_SetProperty(cx, global, "setFontSpacingSeed", undef);
+       JS_DeleteProperty(cx, global, "setFontSpacingSeed");
++    }
++  }
++}
++
 +void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
 +  uint32_t userContextId = 0;
 +  if (BrowsingContext* bc = GetBrowsingContext()) {
@@ -289,49 +289,40 @@ index 0000000000..0000000004 100644
 +      JS::Rooted<JS::Value> undef(cx, JS::UndefinedValue());
 +      JS_SetProperty(cx, global, "setCanvasSeed", undef);
 +      JS_DeleteProperty(cx, global, "setCanvasSeed");
-+    }
-+  }
-+}
-+
- void nsGlobalWindowInner::StoreSharedWorker(SharedWorker* aSharedWorker) {
-   MOZ_ASSERT(aSharedWorker);
-   MOZ_ASSERT(!mSharedWorkers.Contains(aSharedWorker));
+     }
+   }
+ }
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index 0000000000..0000000005 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -683,6 +683,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -686,6 +686,9 @@
    // Font spacing seed for privacy-preserving font fingerprinting
    void SetFontSpacingSeed(uint32_t seed, mozilla::ErrorResult& aRv);
-
+ 
 +  // Canvas pixel perturbation seed for privacy-preserving canvas readback
 +  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
 +
    void StoreSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
-
+ 
    void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index 0000000000..0000000006 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
-@@ -895,6 +895,12 @@ partial interface Window {
-   [Throws, Func="mozilla::dom::FontSpacingSeedManager::IsFunctionEnabledForWebIDL"]
-   undefined setFontSpacingSeed(unsigned long seed);
- };
+@@ -974,4 +974,10 @@
+ partial interface Window {
+   [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
+   readonly attribute DocumentPictureInPicture documentPictureInPicture;
++};
 +
 +// Canvas pixel perturbation seed for privacy-preserving canvas readback
 +partial interface Window {
 +  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
 +  undefined setCanvasSeed(unsigned long seed);
-+};
-
- // Mozilla-internal interface for use in browser chrome and toolkit code
- // that wants access to the test functionality declared on Window.
+ };
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
-index 0000000000..0000000007 100644
 --- a/dom/canvas/CanvasRenderingContext2D.cpp
 +++ b/dom/canvas/CanvasRenderingContext2D.cpp
-@@ -57,6 +57,7 @@
+@@ -58,6 +58,7 @@
  #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
  #include "mozilla/dom/DOMMatrix.h"
  #include "mozilla/dom/Document.h"
@@ -339,122 +330,56 @@ index 0000000000..0000000007 100644
  #include "mozilla/dom/BrowsingContext.h"
  #include "mozilla/dom/FontFaceSet.h"
  #include "mozilla/dom/FontFaceSetImpl.h"
-@@ -5180,6 +5181,21 @@ already_AddRefed<ImageData> CanvasRenderingContext2D::GetImageData(
-   // (existing snapshot/copy code that fills `data` array with RGBA8 pixels)
-   // <verify exact line in FF150 source — keep this hunk near the end of
-   //  GetImageData, after pixels are copied into the JS-visible array.>
+@@ -2278,6 +2279,24 @@
+       *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
+       *out_imageSize = data->GetSize();
+       ret = SurfaceToPackedBGRA(data);
++      // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
++      // Covers toDataURL / toBlob / OffscreenCanvas.convertToBlob (BGRA packed).
++      {
++        Document* seedDoc = mCanvasElement ? mCanvasElement->OwnerDoc() : nullptr;
++        if (!seedDoc && mOffscreenCanvas) {
++          if (auto* win = mOffscreenCanvas->GetOwnerWindow()) {
++            seedDoc = win->GetExtantDoc();
++          }
++        }
++        uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++        if (seed != 0 && ret) {
++          CanvasSeedManager::Perturb(
++              ret.get(),
++              static_cast<size_t>(out_imageSize->width) * out_imageSize->height * 4,
++              seed, CanvasSeedManager::GetNoiseDensity(),
++              CanvasSeedManager::GetNoiseStrength());
++        }
++      }
+     }
+   }
+ 
+@@ -6752,6 +6771,23 @@
+                         aWidth * 4, SurfaceFormat::R8G8B8A8,
+                         dstWriteRect.Size());
+     }
 +
-+  // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
-+  if (mCanvasElement) {
-+    if (Document* doc = mCanvasElement->GetOwnerDocument()) {
-+      uint32_t seed = CanvasSeedManager::SeedFromDocument(doc);
-+      if (seed != 0 && data && length > 0) {
-+        CanvasSeedManager::Perturb(
-+            reinterpret_cast<uint8_t*>(data),
-+            length,
-+            seed,
++    // Camoufox canvas perturbation on the JS-visible RGBA buffer. No-op when
++    // seed == 0. Placeholder path already broke out above, so it is untouched.
++    {
++      Document* seedDoc = mCanvasElement ? mCanvasElement->OwnerDoc() : nullptr;
++      if (!seedDoc && mOffscreenCanvas) {
++        if (auto* win = mOffscreenCanvas->GetOwnerWindow()) {
++          seedDoc = win->GetExtantDoc();
++        }
++      }
++      uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++      if (seed != 0) {
++        CanvasSeedManager::Perturb(data, len.value(), seed,
 +            CanvasSeedManager::GetNoiseDensity(),
 +            CanvasSeedManager::GetNoiseStrength());
 +      }
 +    }
-+  }
-
-   return imageData.forget();
- }
-diff --git a/dom/canvas/HTMLCanvasElement.cpp b/dom/canvas/HTMLCanvasElement.cpp
-index 0000000000..0000000008 100644
---- a/dom/canvas/HTMLCanvasElement.cpp
-+++ b/dom/canvas/HTMLCanvasElement.cpp
-@@ -50,6 +50,7 @@
- #include "mozilla/dom/BlobImpl.h"
- #include "mozilla/dom/CanvasCaptureMediaStream.h"
- #include "mozilla/dom/CanvasRenderingContext2D.h"
-+#include "mozilla/dom/CanvasSeedManager.h"
- #include "mozilla/dom/File.h"
- #include "mozilla/dom/HTMLCanvasElementBinding.h"
- #include "mozilla/dom/ImageBitmap.h"
-@@ -710,6 +711,24 @@ nsresult HTMLCanvasElement::ExtractData(JSContext* aCx,
-   // After: the DataSourceSurface is mapped for encoding. Apply
-   // perturbation in-place on the mapping so the encoder (libpng /
-   // libjpeg) reads the perturbed pixels.
-+  if (snapshot) {
-+    uint32_t seed = CanvasSeedManager::SeedFromDocument(OwnerDoc());
-+    if (seed != 0) {
-+      gfx::DataSourceSurface::ScopedMap map(snapshot,
-+                                            gfx::DataSourceSurface::READ_WRITE);
-+      if (map.IsMapped()) {
-+        uint8_t* bytes = map.GetData();
-+        const int32_t stride = map.GetStride();
-+        const gfx::IntSize size = snapshot->GetSize();
-+        const size_t len = static_cast<size_t>(stride) * size.height;
-+        CanvasSeedManager::Perturb(
-+            bytes, len, seed,
-+            CanvasSeedManager::GetNoiseDensity(),
-+            CanvasSeedManager::GetNoiseStrength());
-+      }
-+    }
-+  }
-+  // <verify ExtractData entrypoint name vs FF150; the snapshot/Map flow
-+  //  may live in gfxUtils::EncodeSnapshot — adjust hunk target accordingly.>
-   return ImageEncoder::ExtractData(aType, aOptions, aSize, aUsingCustomOptions,
-                                    aStream);
- }
-diff --git a/dom/canvas/OffscreenCanvas.cpp b/dom/canvas/OffscreenCanvas.cpp
-index 0000000000..0000000009 100644
---- a/dom/canvas/OffscreenCanvas.cpp
-+++ b/dom/canvas/OffscreenCanvas.cpp
-@@ -10,6 +10,7 @@
- #include "GLContext.h"
- #include "ImageBitmap.h"
- #include "ImageBitmapRenderingContext.h"
-+#include "mozilla/dom/CanvasSeedManager.h"
- #include "OffscreenCanvasDisplayHelper.h"
- #include "OffscreenCanvasRenderingContext2D.h"
- #include "mozilla/CycleCollectedJSContext.h"
-@@ -642,6 +643,18 @@ mozilla::dom::Document* OffscreenCanvas::GetDocument() const {
-   return nullptr;
- }
-
-+uint32_t OffscreenCanvas::GetCanvasSeed() const {
-+  // Main-thread case: walk to the owning document.
-+  if (Document* doc = GetDocument()) {
-+    return CanvasSeedManager::SeedFromDocument(doc);
-+  }
-+  // Worker case: pull userContextId from WorkerPrivate's origin attrs.
-+  if (WorkerPrivate* wp = GetCurrentThreadWorkerPrivate()) {
-+    return CanvasSeedManager::GetSeed(wp->GetOriginAttributes().mUserContextId);
-+  }
-+  return 0;
-+}
-+
- bool OffscreenCanvas::IsChrome() const {
-   if (NS_IsMainThread()) {
-     nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetOwnerGlobal());
-@@ -780,6 +793,21 @@ already_AddRefed<Promise> OffscreenCanvas::ConvertToBlob(
-   // existing encode path — between snapshot and ImageEncoder::ExtractData,
-   // apply perturbation when GetCanvasSeed() != 0. Pattern identical to
-   // HTMLCanvasElement::ExtractData above.
-+  RefPtr<gfx::DataSourceSurface> dataSurface = snapshot
-+      ? snapshot->GetDataSurface() : nullptr;
-+  if (dataSurface) {
-+    uint32_t seed = GetCanvasSeed();
-+    if (seed != 0) {
-+      gfx::DataSourceSurface::ScopedMap map(
-+          dataSurface, gfx::DataSourceSurface::READ_WRITE);
-+      if (map.IsMapped()) {
-+        const gfx::IntSize size = dataSurface->GetSize();
-+        const size_t len = static_cast<size_t>(map.GetStride()) * size.height;
-+        CanvasSeedManager::Perturb(map.GetData(), len, seed,
-+            CanvasSeedManager::GetNoiseDensity(),
-+            CanvasSeedManager::GetNoiseStrength());
-+      }
-+    }
-+  }
-   return ImageEncoder::ExtractDataAsync(aType, aOptions, aUsingCustomOptions,
-                                         dataSurface, encodeCompleteCallback);
- }
+   } while (false);
+ 
+   readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index c7721c3..eb17ee6 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
 @@ -16,6 +16,7 @@
@@ -465,16 +390,14 @@ index c7721c3..eb17ee6 100644
  #include "gfxCrashReporterUtils.h"
  #include "js/PropertyAndElement.h"  // JS_DefineElement
  #include "js/ScalarType.h"          // js::Scalar::Type
-@@ -5441,6 +5442,22 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+@@ -5237,6 +5238,19 @@
+               GetCookieJarSettings(), PrincipalOrNull(), range->data(),
                range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
                alphaChannelOffset, hasAlphaChannel);
-         }
++        }
 +        // camoufox: deterministic per-seed WebGL readback perturbation.
 +        // RFP is disabled in camoufox, so the Randomize branch above is inert.
-+        // Apply the CanvasSeedManager noise (the same engine the 2D path uses)
-+        // to the client-visible default-FBO pixels, so a rendered-3D pixel
-+        // hash cannot be read back un-noised. Offscreen/worker contexts have
-+        // no owner document and stay unperturbed for now.
++        // Offscreen/worker contexts have no owner document and stay unperturbed.
 +        if (dom::Document* seedDoc = GetOwnerDoc()) {
 +          const uint32_t seed =
 +              dom::CanvasSeedManager::SeedFromDocument(seedDoc);
@@ -484,7 +407,6 @@ index c7721c3..eb17ee6 100644
 +                dom::CanvasSeedManager::GetNoiseDensity(),
 +                dom::CanvasSeedManager::GetNoiseStrength());
 +          }
-+        }
+         }
        }
      }
-   });

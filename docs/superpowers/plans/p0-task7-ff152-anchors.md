@@ -85,3 +85,54 @@ Task 4's collector probes `offscreenBlob` via `OffscreenCanvas.convertToBlob` �
 `GetImageBuffer` (covered here). `getImageData`/`toDataURL`/`webgl` all map to the anchors above.
 So all four collector surfaces become reachable once these two hunks land — no P3-deferred worker
 gap for the *encode* path (true off-main-thread worker `getImageData` remains P3).
+
+## DONE (2026-07-09) — patch re-anchored against real FF152, applies clean
+
+`patches/canvas-spoofing.patch` fully rewritten from the real FF152.0.4 source (fetched via
+`curl hg.mozilla.org`, the earlier "no hg access" assumption was stale). What changed vs the
+fabricated draft:
+
+- **Dropped every all-zero `index 000..00N` line on the edit hunks** (the F3 silent-skip defect —
+  same bug as webrtc2; gpatch read them as "create → already exists → Skipping"). New-file hunks
+  keep `--- /dev/null` + `new file mode 100644` (correct creation form).
+- **Fixed the malformed creation `@@` counts** — the draft's `CanvasSeedManager.cpp`/`.h` headers
+  claimed `+1,168`/`+1,72` over 162/66-line bodies (masked because the whole hunk was being
+  skipped). Regenerated from the real bodies via `diff -u`.
+- **Removed** the `dom/canvas/HTMLCanvasElement.cpp` hunk (path is 404 in FF152 — real file is
+  `dom/html/`) and both `dom/canvas/OffscreenCanvas.cpp` hunks (`GetDocument()`/`GetCanvasSeed()`
+  are fictional). `OffscreenCanvasRenderingContext2D` inherits `CanvasRenderingContext2D`, so the
+  base-class `GetImageBuffer`/`GetImageDataArray` anchors cover offscreen 2D encode + readback.
+- **Rewrote the two 2D hunks at verified anchors:** `GetImageBuffer` after
+  `ret = SurfaceToPackedBGRA(data)` (BGRA, `w*h*4`); `GetImageDataArray` inside the
+  `do{}while(false)` after the Swizzle/Unpremultiply into `data` (RGBA, `len.value()`), where the
+  `Placeholder` early-break naturally excludes the placeholder path.
+- **Seed resolution** mirrors real in-file patterns (no fictional `OffscreenCanvas::GetDocument`):
+  `mCanvasElement->OwnerDoc()` (html, cf. line 1298) else
+  `mOffscreenCanvas->GetOwnerWindow()->GetExtantDoc()` (offscreen main-thread, cf. line 5389) →
+  `CanvasSeedManager::SeedFromDocument` (0-safe; worker → null → no-op = P3).
+- **Anchored the `setCanvasSeed` WebIDL setter on vanilla-stable symbols**
+  (`nsGlobalWindowInner::StoreSharedWorker` decl+def, Window.webidl EOF) rather than the draft's
+  `SetFontSpacingSeed` neighbour — so the *setter* hunks carry no cross-patch coupling.
+- **Kept** the `ClientWebGLContext::ReadPixels` hunk, re-anchored to the real FF152 context (after
+  the `RandomizeElements`/`hasAlphaChannel` block, non-Placeholder branch).
+
+## Anchoring target = the POST-PREREQ tree, not vanilla
+
+The patch is generated against the tree `make dir` actually presents to `canvas-spoofing.patch`:
+vanilla FF152 with the three earlier patches that touch these files applied first
+(`0-playwright.patch`, `anti-font-fingerprinting.patch`, `audio-fingerprint-manager.patch`).
+This matters for the two `#include` hunks: `anti-font` inserts `#include "FontSpacingSeedManager.h"`
+immediately after `nsIDOMStorageManager.h`, and a prereq inserts `#include "mozilla/dom/BrowsingContext.h"`
+immediately after `mozilla/dom/Document.h` — i.e. right at the include anchors. A vanilla-generated
+diff there rejects in `make dir` (the trailing context no longer matches). Generating against the
+post-prereq tree makes every hunk match exactly. (A first pass anchored on vanilla passed a vanilla
+dry-run but the make-dir-faithful rehearsal caught both include hunks rejecting — the reason this
+step is gated by `rehearse-patch.sh`, which applies the prereqs, and not by a bare vanilla apply.)
+
+**Evidence — `scripts/rehearse-patch.sh canvas-spoofing.patch` (fetches FF152 + applies the 3
+prereqs, then the target):**
+`rc=0 rejects=0 skipped=0 wrongpath=0 fuzz=0 max|offset|=0` — the strict gate, fully green.
+
+**Still build-env only:** `make build` compile-verify (semantic gate — real signatures) and
+build-tester `checkCanvasPerturbation` green on a fresh binary (Task 9). No further re-anchoring
+needed.
