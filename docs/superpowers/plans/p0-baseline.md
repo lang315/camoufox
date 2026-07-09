@@ -38,3 +38,31 @@ Once Task 7/8 land, a fresh CI build's make-dir log must show `canvas-spoofing.p
 `webrtc-ip-spoofing2.patch` applying with **no** "can't find file" / "Hunk ignored" lines (use
 `scripts/rehearse-patch.sh` first to guarantee this before burning the build), and build-tester must
 report `canvasPerturbation.passed=true` + `webrtcLinkLocal.passed=true`.
+
+## Runtime validation (2026-07-09) — real macOS-arm64 binary
+
+Ran `build-tester` (8 profiles) against `CamoufoxBuilds-macos-arm64` (run 28953374857,
+HEAD 084d0cb). Overall grade A, 1041/1064. New-collector results:
+
+- **canvasPerturbation: passed=false on ALL 8 profiles** — `seedPresent=true` but every surface
+  (getImageData/toDataURL/offscreenBlob/webgl) `perturbed=false, deterministic=true`. The canvas
+  seed IS injected, yet readback is uniform → **the canvas spoof is inert at runtime**, empirically
+  confirming Task 6 (the fabricated hunks are skipped; no Perturb call runs). The Task 4 collector
+  is validated: it correctly detects the inert state and the seed presence.
+- **webrtcLinkLocal:**
+  - per-context profiles: `skipped=true` (no `__expectedWebRTC__` injected there) — the RB5
+    skip-when-unconfigured fix works (no false negative).
+  - **global profiles: passed=false.** Candidates = the spoofed public IPv4 `203.0.113.1` (so the
+    pre-existing public-IP mask WORKS) **plus a real global IPv6 (host's actual address)**, and the
+    B1 fabricated local `10.11.12.13` is **absent** (`localEmitted=false`). So **B1's local-IP
+    replacement is still inert** — the retarget (Task 2) alone did not make webrtc2 effective; Task 8
+    must confirm the patch actually applies (F3 all-zero `index` "already exists → skipping") and that
+    `webrtc:localipv4` is wired.
+
+### New actionable findings (feed the handoff)
+- **Task 8:** B1 local-IP spoof does not fire at runtime → verify webrtc2 actually applies (drop the
+  all-zero `index` lines) and that a private candidate is gathered so `getMaskForIP`'s isLocal branch runs.
+- **P2 / collector gap:** a real global IPv6 leaks over WebRTC and the `checkWebRTCLinkLocal`
+  `leakedHost` regex (IPv4-private + fe80 only) does NOT flag it. Extend the collector to fail on any
+  candidate that is neither the spoofed public nor local value; and the spoofing itself must mask
+  global IPv6 (currently only IPv4 public + fe80 are handled).
