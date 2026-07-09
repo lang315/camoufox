@@ -146,7 +146,7 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
  #include "nsPrintfCString.h"
  #include "nsGlobalWindowInner.h"
  #include "nsDocShell.h"
-@@ -70,6 +70,56 @@
+@@ -70,6 +71,52 @@
    DisableIPv6Function(userContextId);
  }
  
@@ -155,16 +155,14 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 +  nsString key;
 +  key.AppendLiteral(u"webrtc_localipv4_");
 +  key.AppendInt(userContextId);
-+  nsCString val;
-+  if (!RoverfoxStorageManager::GetString(key, val)) {
-+    if (auto v = MaskConfig::GetString("webrtc:localipv4")) {
-+      out.AssignASCII(v.value().c_str());
-+      return !out.IsEmpty();
-+    }
-+    return false;
++  if (RoverfoxStorageManager::GetString(key, out)) {
++    return true;
 +  }
-+  CopyUTF8toUTF16(val, out);
-+  return true;
++  if (auto v = MaskConfig::GetString("webrtc:localipv4")) {
++    out.AssignASCII(v.value().c_str());
++    return !out.IsEmpty();
++  }
++  return false;
 +}
 +
 +/* static */ void WebRTCIPManager::SetLocalIPv4(uint32_t userContextId,
@@ -172,7 +170,7 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 +  nsString key;
 +  key.AppendLiteral(u"webrtc_localipv4_");
 +  key.AppendInt(userContextId);
-+  RoverfoxStorageManager::PutString(key, NS_ConvertUTF16toUTF8(ipv4));
++  RoverfoxStorageManager::PutString(key, ipv4);
 +}
 +
 +/* static */ bool WebRTCIPManager::GetLocalIPv6(uint32_t userContextId,
@@ -180,16 +178,14 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 +  nsString key;
 +  key.AppendLiteral(u"webrtc_localipv6_");
 +  key.AppendInt(userContextId);
-+  nsCString val;
-+  if (!RoverfoxStorageManager::GetString(key, val)) {
-+    if (auto v = MaskConfig::GetString("webrtc:localipv6")) {
-+      out.AssignASCII(v.value().c_str());
-+      return !out.IsEmpty();
-+    }
-+    return false;
++  if (RoverfoxStorageManager::GetString(key, out)) {
++    return true;
 +  }
-+  CopyUTF8toUTF16(val, out);
-+  return true;
++  if (auto v = MaskConfig::GetString("webrtc:localipv6")) {
++    out.AssignASCII(v.value().c_str());
++    return !out.IsEmpty();
++  }
++  return false;
 +}
 +
 +/* static */ void WebRTCIPManager::SetLocalIPv6(uint32_t userContextId,
@@ -197,7 +193,7 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 +  nsString key;
 +  key.AppendLiteral(u"webrtc_localipv6_");
 +  key.AppendInt(userContextId);
-+  RoverfoxStorageManager::PutString(key, NS_ConvertUTF16toUTF8(ipv6));
++  RoverfoxStorageManager::PutString(key, ipv6);
 +}
 +
  /* static */ bool
