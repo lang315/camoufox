@@ -26,6 +26,10 @@ for p in "${ORDER[@]}"; do [ "$p" = "$PATCH" ] && break
   ppath="$(pf "$p")"
   edited "$ppath" | grep -qxFf <(printf '%s\n' "${TARGET_EDIT[@]}") && PREREQS+=("$ppath")
 done
+# Files a prereq CREATES (from /dev/null) must not be fetched or flagged wrongpath —
+# the prereq apply creates them (e.g. webrtc2 edits WebRTCIPManager.{h,cpp} that
+# webrtc-ip-spoofing.patch creates).
+for p in "${PREREQS[@]}"; do while read -r cf; do [ -n "$cf" ] && NEW_SET["$cf"]=1; done < <(created "$p"); done
 rm -rf "$WORK"; mkdir -p "$TREE"; WRONG=0
 declare -A SEEN
 for src in "${PREREQS[@]}" "$TPATCH"; do
@@ -43,6 +47,7 @@ for src in "${PREREQS[@]}" "$TPATCH"; do
 done
 cd "$TREE"
 for p in "${PREREQS[@]}"; do "$PB" -p1 --forward -l --binary -i "$p" >/dev/null 2>&1 || true; done
+find . -name '*.rej' -delete   # prereq applies are best-effort; only $TPATCH's rejects count
 OUT="$WORK/apply.out"; set +e; "$PB" -p1 --forward -l --binary -i "$TPATCH" >"$OUT" 2>&1; RC=$?; set -e
 REJ=$(find "$TREE" -name '*.rej' | wc -l | tr -d ' ')
 SKIP=$(grep -ciE 'can.?t find file|ignored|Skipping' "$OUT" || true)
