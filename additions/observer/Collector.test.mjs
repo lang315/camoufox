@@ -21,4 +21,17 @@ assert.ok(fired >= 1, "subscribers notified on ingest");
 
 c.clear();
 assert.equal(c.snapshot().length, 0, "clear wipes memory");
+
+// Bounded requests: cap enforced, oldest dropped.
+const cap = new Collector(3);
+for (let i = 0; i < 10; i++) cap.ingestNet(1, "x.com", "h", "https://x.com/" + i, "GET", i);
+const capRow = cap.snapshot().find(r => r.key.site === "x.com");
+assert.equal(capRow.requests.length, 3, "requests capped at maxRequestsPerKey");
+assert.equal(capRow.requests[0].url, "https://x.com/7", "oldest evicted (drop-oldest)");
+assert.equal(capRow.requests[2].url, "https://x.com/9", "newest retained");
+// snapshot returns copies, not live refs
+const snapA = cap.snapshot();
+snapA[0].requests.push({ tampered: true });
+assert.equal(cap.snapshot().find(r => r.key.site === "x.com").requests.length, 3, "snapshot is a copy; mutating it does not affect Collector");
+
 console.log("COLLECTOR PASS");

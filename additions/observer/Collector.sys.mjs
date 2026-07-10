@@ -22,7 +22,13 @@ export class Collector {
     if (r.requests.length > this._cap) r.requests.shift();  // bounded, memory-only
     r.lastTs = ts; this._emit();
   }
-  snapshot() { return [...this._rows.values()]; }
+  snapshot() {
+    return [...this._rows.values()].map(r => ({
+      key: { site: r.key.site, userContextId: r.key.userContextId },
+      surfaces: { ...r.surfaces },
+      requests: r.requests.slice(),
+    }));
+  }
   subscribe(fn) { this._subs.add(fn); return () => this._subs.delete(fn); }
   clear() { this._rows.clear(); this._emit(); }
   _emit() { for (const fn of this._subs) { try { fn(); } catch {} } }
