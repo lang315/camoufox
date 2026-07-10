@@ -45,6 +45,7 @@ def main():
         "--no-cert", action="store_true",
         help="Skip certificate generation",
     )
+    parser.add_argument("--json", metavar="PATH", help="Dump raw full_result JSON to this file")
     args = parser.parse_args()
 
     profile_count = max(1, min(8, args.profile_count))
@@ -75,6 +76,7 @@ def main():
             secret=args.secret,
             save_cert=args.save_cert,
             no_cert=args.no_cert,
+            json_path=args.json,
         )
     )
     sys.exit(exit_code)
