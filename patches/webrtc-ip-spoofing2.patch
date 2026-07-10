@@ -35,7 +35,7 @@ diff --git a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp b/dom/media/webrtc/js
  #include "WebRTCIPManager.h"
  #include "nsDocShell.h"
  #include "nsContentUtils.h"
-@@ -3436,8 +3437,36 @@
+@@ -3436,10 +3437,38 @@
    // Check if an IP should not be masked (special addresses)
    return (ip == "0.0.0.0" || ip == "127.0.0.1" || 
            ip == "::" || ip == "::1" || 
@@ -49,19 +49,19 @@ diff --git a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp b/dom/media/webrtc/js
 +}
 +
 +bool isLinkLocalIPv6(const std::string& ip) {
-+  // fe80::/10 — first 10 bits = 1111111010. ASCII-prefix shortcut is
-+  // safe because Firefox normalizes IPv6 candidates to lowercase
-+  // canonical form before they reach our regex.
++  // fe80::/10 - first 10 bits = 1111111010. Firefox normally hands us
++  // lowercase canonical IPv6, but we accept uppercase defensively so a
++  // non-normalized candidate cannot slip a host address through.
 +  return ip.length() >= 4 &&
 +         (ip[0] == 'f' || ip[0] == 'F') &&
 +         (ip[1] == 'e' || ip[1] == 'E') &&
 +         (ip[2] == '8' || ip[2] == '9' ||
 +          ip[2] == 'a' || ip[2] == 'A' ||
 +          ip[2] == 'b' || ip[2] == 'B');
-+}
-+
-+// Per-context-stable fabricated link-local. Same userContextId →
-+// same address. Different userContextId → different address.
+ }
+ 
++// Per-context-stable fabricated link-local. Same userContextId ->
++// same address. Different userContextId -> different address.
 +std::string FabricateLinkLocalIPv6(uint32_t userContextId) {
 +  uint64_t h = mozilla::HashGeneric(userContextId, 0xDEADBEEFu);
 +  char buf[40];
@@ -71,50 +71,56 @@ diff --git a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp b/dom/media/webrtc/js
 +           static_cast<unsigned>((h >> 16) & 0xFFFF),
 +           static_cast<unsigned>(h & 0xFFFF));
 +  return std::string(buf);
- }
- 
++}
++
  bool isPrivateIP(const std::string& ip) {
-@@ -3467,19 +3496,38 @@
+   // Check if an IP is on a private network
+   // Use colons AND no periods to avoid IPv4:port false positives
+@@ -3466,23 +3495,34 @@
+   // Get the corresponding mask for an ip address
    if (isSpecialIP(ip)) {
      return ip;  // dont mask special IPs
-   }
-+  // Link-local IPv6 — fabricate per-context value.
++  }
++  // Link-local IPv6 - fabricate a per-context value instead of leaking the
++  // MAC-derived host address.
 +  if (isLinkLocalIPv6(ip)) {
 +    return FabricateLinkLocalIPv6(userContextId);
-+  }
+   }
    // Use colons AND no periods to avoid IPv4:port false positives
    bool isIPv6 = (ip.find(':') != std::string::npos) && (ip.find('.') == std::string::npos);
  
 -  // Get IP addresses from WebRTCIPManager for this user context
-+  // Prefer the configured local address when the candidate is RFC1918 /
-+  // ULA. Falls back to the public spoof if no local key is set, so
-+  // existing deployments keep the historical behavior.
+-  nsString ipv4Value, ipv6Value;
+-  bool hasIPv4 = WebRTCIPManager::GetIPv4(userContextId, ipv4Value);
+-  bool hasIPv6 = WebRTCIPManager::GetIPv6(userContextId, ipv6Value);
+-  
+-  if (isIPv6) {
+-    if (hasIPv6) {
+-      return NS_ConvertUTF16toUTF8(ipv6Value).get();
++  // Prefer the configured LOCAL address for RFC1918 / ULA candidates, else the
++  // public spoof. Fetch only the family actually returned, so each candidate
++  // does at most one storage lookup instead of four.
 +  const bool isLocal = isPrivateIP(ip);
-+
-   nsString ipv4Value, ipv6Value;
-+  nsString localIPv4Value, localIPv6Value;
-   bool hasIPv4 = WebRTCIPManager::GetIPv4(userContextId, ipv4Value);
-   bool hasIPv6 = WebRTCIPManager::GetIPv6(userContextId, ipv6Value);
-+  bool hasLocalIPv4 =
-+      WebRTCIPManager::GetLocalIPv4(userContextId, localIPv4Value);
-+  bool hasLocalIPv6 =
-+      WebRTCIPManager::GetLocalIPv6(userContextId, localIPv6Value);
-   
-   if (isIPv6) {
-+    if (isLocal && hasLocalIPv6) {
-+      return NS_ConvertUTF16toUTF8(localIPv6Value).get();
++  nsString value;
++  if (isIPv6) {
++    if (isLocal && WebRTCIPManager::GetLocalIPv6(userContextId, value)) {
++      return NS_ConvertUTF16toUTF8(value).get();
 +    }
-     if (hasIPv6) {
-       return NS_ConvertUTF16toUTF8(ipv6Value).get();
++    if (WebRTCIPManager::GetIPv6(userContextId, value)) {
++      return NS_ConvertUTF16toUTF8(value).get();
      }
    } else {
-+    if (isLocal && hasLocalIPv4) {
-+      return NS_ConvertUTF16toUTF8(localIPv4Value).get();
-+    }
-     if (hasIPv4) {
-       return NS_ConvertUTF16toUTF8(ipv4Value).get();
+-    if (hasIPv4) {
+-      return NS_ConvertUTF16toUTF8(ipv4Value).get();
++    if (isLocal && WebRTCIPManager::GetLocalIPv4(userContextId, value)) {
++      return NS_ConvertUTF16toUTF8(value).get();
      }
-
++    if (WebRTCIPManager::GetIPv4(userContextId, value)) {
++      return NS_ConvertUTF16toUTF8(value).get();
++    }
+   }
+   // return original ip if no mask is available
+   return ip;
 diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
 --- a/dom/base/WebRTCIPManager.h
 +++ b/dom/base/WebRTCIPManager.h
@@ -134,7 +140,15 @@ diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
    /**
     * Check if the setWebRTCIPv4 function has been used and should be disabled for a context.
     * @param userContextId The user context ID
-
+@@ -95,6 +102,8 @@
+ private:
+   static nsString IPv4KeyForUserContext(uint32_t userContextId);
+   static nsString IPv6KeyForUserContext(uint32_t userContextId);
++  static nsString LocalIPv4KeyForUserContext(uint32_t userContextId);
++  static nsString LocalIPv6KeyForUserContext(uint32_t userContextId);
+   static nsString IPv4DisabledKeyForUserContext(uint32_t userContextId);
+   static nsString IPv6DisabledKeyForUserContext(uint32_t userContextId);
+ };
 diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 --- a/dom/base/WebRTCIPManager.cpp
 +++ b/dom/base/WebRTCIPManager.cpp
@@ -146,15 +160,36 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
  #include "nsPrintfCString.h"
  #include "nsGlobalWindowInner.h"
  #include "nsDocShell.h"
-@@ -70,6 +71,52 @@
+@@ -29,6 +30,22 @@
+ }
+ 
+ /* static */ nsString
++WebRTCIPManager::LocalIPv4KeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"webrtc_localipv4_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++/* static */ nsString
++WebRTCIPManager::LocalIPv6KeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"webrtc_localipv6_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++/* static */ nsString
+ WebRTCIPManager::IPv4DisabledKeyForUserContext(uint32_t userContextId) {
+   nsString key;
+   key.AppendLiteral(u"webrtc_ipv4_disabled_");
+@@ -70,6 +87,44 @@
    DisableIPv6Function(userContextId);
  }
  
 +/* static */ bool WebRTCIPManager::GetLocalIPv4(uint32_t userContextId,
 +                                                nsAString& out) {
-+  nsString key;
-+  key.AppendLiteral(u"webrtc_localipv4_");
-+  key.AppendInt(userContextId);
++  nsString key = LocalIPv4KeyForUserContext(userContextId);
 +  if (RoverfoxStorageManager::GetString(key, out)) {
 +    return true;
 +  }
@@ -167,17 +202,13 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 +
 +/* static */ void WebRTCIPManager::SetLocalIPv4(uint32_t userContextId,
 +                                                const nsAString& ipv4) {
-+  nsString key;
-+  key.AppendLiteral(u"webrtc_localipv4_");
-+  key.AppendInt(userContextId);
++  nsString key = LocalIPv4KeyForUserContext(userContextId);
 +  RoverfoxStorageManager::PutString(key, ipv4);
 +}
 +
 +/* static */ bool WebRTCIPManager::GetLocalIPv6(uint32_t userContextId,
 +                                                nsAString& out) {
-+  nsString key;
-+  key.AppendLiteral(u"webrtc_localipv6_");
-+  key.AppendInt(userContextId);
++  nsString key = LocalIPv6KeyForUserContext(userContextId);
 +  if (RoverfoxStorageManager::GetString(key, out)) {
 +    return true;
 +  }
@@ -190,9 +221,7 @@ diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 +
 +/* static */ void WebRTCIPManager::SetLocalIPv6(uint32_t userContextId,
 +                                                const nsAString& ipv6) {
-+  nsString key;
-+  key.AppendLiteral(u"webrtc_localipv6_");
-+  key.AppendInt(userContextId);
++  nsString key = LocalIPv6KeyForUserContext(userContextId);
 +  RoverfoxStorageManager::PutString(key, ipv6);
 +}
 +

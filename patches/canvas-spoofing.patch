@@ -2,10 +2,11 @@ diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,158 @@
 +#include "CanvasSeedManager.h"
 +#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
++#include "mozilla/HashFunctions.h"
 +#include "nsGlobalWindowInner.h"
 +#include "xpcpublic.h"
 +#include "mozilla/dom/BrowsingContext.h"
@@ -88,19 +89,14 @@ new file mode 100644
 +  return !disabled;
 +}
 +
-+// xxhash32 of the first kHashBytes of buf (or the whole buf if smaller).
++// Hash of the first kHashBytes of buf (or the whole buf if smaller).
 +// Mixes content into the per-context seed so identical canvases on
 +// different contexts diverge AND so resizing the same drawing keeps
 +// the noise pattern coherent.
 +static uint32_t HashContent(const uint8_t* buf, size_t len) {
 +  constexpr size_t kHashBytes = 1024;
 +  const size_t n = (len < kHashBytes) ? len : kHashBytes;
-+  uint32_t h = 0x811C9DC5u;            // FNV-1a 32-bit
-+  for (size_t i = 0; i < n; ++i) {
-+    h ^= buf[i];
-+    h *= 0x01000193u;
-+  }
-+  return h;
++  return mozilla::HashBytes(buf, n);
 +}
 +
 +/* static */ void
@@ -330,55 +326,64 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
  #include "mozilla/dom/BrowsingContext.h"
  #include "mozilla/dom/FontFaceSet.h"
  #include "mozilla/dom/FontFaceSetImpl.h"
-@@ -2278,6 +2279,24 @@
+@@ -2259,6 +2260,22 @@
+   return NS_OK;
+ }
+ 
++// Resolve the owning Document for canvas seed lookup: html canvas via its
++// element, offscreen (main-thread) via its owner window. Worker offscreen has
++// no Document, so this returns null and perturbation becomes a no-op.
++static Document* CanvasSeedDocumentFor(HTMLCanvasElement* aCanvasElement,
++                                       OffscreenCanvas* aOffscreenCanvas) {
++  if (aCanvasElement) {
++    return aCanvasElement->OwnerDoc();
++  }
++  if (aOffscreenCanvas) {
++    if (auto* win = aOffscreenCanvas->GetOwnerWindow()) {
++      return win->GetExtantDoc();
++    }
++  }
++  return nullptr;
++}
++
+ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+     mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
+     int32_t* out_format, gfx::IntSize* out_imageSize) {
+@@ -2278,6 +2295,17 @@
        *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
        *out_imageSize = data->GetSize();
        ret = SurfaceToPackedBGRA(data);
 +      // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
 +      // Covers toDataURL / toBlob / OffscreenCanvas.convertToBlob (BGRA packed).
-+      {
-+        Document* seedDoc = mCanvasElement ? mCanvasElement->OwnerDoc() : nullptr;
-+        if (!seedDoc && mOffscreenCanvas) {
-+          if (auto* win = mOffscreenCanvas->GetOwnerWindow()) {
-+            seedDoc = win->GetExtantDoc();
-+          }
-+        }
-+        uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
-+        if (seed != 0 && ret) {
-+          CanvasSeedManager::Perturb(
-+              ret.get(),
-+              static_cast<size_t>(out_imageSize->width) * out_imageSize->height * 4,
-+              seed, CanvasSeedManager::GetNoiseDensity(),
-+              CanvasSeedManager::GetNoiseStrength());
-+        }
++      Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++      uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++      if (seed != 0 && ret) {
++        CanvasSeedManager::Perturb(
++            ret.get(),
++            static_cast<size_t>(out_imageSize->width) * out_imageSize->height * 4,
++            seed, CanvasSeedManager::GetNoiseDensity(),
++            CanvasSeedManager::GetNoiseStrength());
 +      }
      }
    }
  
-@@ -6752,6 +6771,23 @@
+@@ -6751,6 +6779,16 @@
+       UnpremultiplyData(src, srcStride, SurfaceFormat::A8R8G8B8_UINT32, dst,
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
-     }
++    }
 +
 +    // Camoufox canvas perturbation on the JS-visible RGBA buffer. No-op when
 +    // seed == 0. Placeholder path already broke out above, so it is untouched.
-+    {
-+      Document* seedDoc = mCanvasElement ? mCanvasElement->OwnerDoc() : nullptr;
-+      if (!seedDoc && mOffscreenCanvas) {
-+        if (auto* win = mOffscreenCanvas->GetOwnerWindow()) {
-+          seedDoc = win->GetExtantDoc();
-+        }
-+      }
-+      uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
-+      if (seed != 0) {
-+        CanvasSeedManager::Perturb(data, len.value(), seed,
-+            CanvasSeedManager::GetNoiseDensity(),
-+            CanvasSeedManager::GetNoiseStrength());
-+      }
-+    }
++    Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++    uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++    if (seed != 0) {
++      CanvasSeedManager::Perturb(data, len.value(), seed,
++          CanvasSeedManager::GetNoiseDensity(),
++          CanvasSeedManager::GetNoiseStrength());
+     }
    } while (false);
  
-   readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
