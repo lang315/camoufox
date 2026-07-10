@@ -18,10 +18,14 @@ TEST_TIMEZONES = [
 ]
 
 WEBRTC_TEST_IP = "203.0.113.1"
+WEBRTC_TEST_LOCAL_IP = "10.11.12.13"
+# Init snippet that flags to checkCanvasPerturbation that a canvas:seed was configured.
+CANVAS_SEED_INIT_SCRIPT = "try { window.__canvasSeedSet__ = true; } catch (e) {}"
 
 FIREFOX_WEBGL_PREFS = {
     "webgl.force-enabled": True,
     "webgl.enable-webgl2": True,
+    "media.peerconnection.ice.obfuscate_host_addresses": False,
 }
 
 CATEGORY_LABELS = {

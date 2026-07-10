@@ -102,3 +102,6 @@ checks-bundle.js
 
 # Local scratch: assistant system-prompt dump, not a repo file.
 /CLAUDE-FABLE-5.md
+
+.rehearse/
+*.rej

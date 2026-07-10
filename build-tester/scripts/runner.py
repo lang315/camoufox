@@ -19,7 +19,17 @@ from certificate import (
     print_certificate,
     print_profile_result,
 )
-from constants import BOLD, FIREFOX_WEBGL_PREFS, RED, RESET, TEST_TIMEZONES, WEBRTC_TEST_IP, grade_color
+from constants import (
+    BOLD,
+    CANVAS_SEED_INIT_SCRIPT,
+    FIREFOX_WEBGL_PREFS,
+    RED,
+    RESET,
+    TEST_TIMEZONES,
+    WEBRTC_TEST_IP,
+    WEBRTC_TEST_LOCAL_IP,
+    grade_color,
+)
 from grading import (
     adjust_cross_os_font_checks,
     compute_cross_profile,
@@ -177,6 +187,7 @@ async def run_tests(
     secret: str,
     save_cert: Optional[str],
     no_cert: bool,
+    json_path: Optional[str] = None,
 ) -> int:
     project_dir = Path(__file__).parent.parent
 
@@ -196,6 +207,13 @@ async def run_tests(
     for i, p in enumerate(all_presets_flat):
         inject_timezone(p, TEST_TIMEZONES[i % len(TEST_TIMEZONES)])
         inject_webrtc_ip(p)
+        # checkCanvasPerturbation() (build-tester Task 4) needs a non-zero canvas:seed —
+        # Perturb no-ops on seed 0. Presets already carry a random non-zero seed
+        # (pythonlib/camoufox/fingerprints.py: randint(1, 4_294_967_295)), so this
+        # setdefault is defensive only. Expose window.__canvasSeedSet__ so the collector
+        # can confirm the seed was actually configured for this profile.
+        p["camouConfig"].setdefault("canvas:seed", 424242)
+        p["initScript"] += "\n" + CANVAS_SEED_INIT_SCRIPT
 
     # 4. Build profile entries
     per_context_entries = []
@@ -285,6 +303,9 @@ async def run_tests(
 
             browser = None
             try:
+                # webrtc:localipv4 drives the B1 GetLocalIPv4 branch (see checkWebRTCLinkLocal,
+                # build-tester Task 5) — must match window.__expectedWebRTC__.local below.
+                preset["camouConfig"]["webrtc:localipv4"] = WEBRTC_TEST_LOCAL_IP
                 env = {**dict(os.environ), "CAMOU_CONFIG": json.dumps(preset["camouConfig"])}
                 browser = await firefox.launch(
                     executable_path=binary_path,
@@ -301,9 +322,15 @@ async def run_tests(
                     ),
                 )
 
-                # Inject only WebRTC IP for global profiles (CAMOU_CONFIG handles everything else)
+                # Inject WebRTC IP for global profiles (CAMOU_CONFIG handles everything else,
+                # including canvas:seed itself — but preset["initScript"] is never applied
+                # for global profiles, so __canvasSeedSet__ must be set here too).
+                # __expectedWebRTC__ tells checkWebRTCLinkLocal (build-tester Task 5) what the
+                # B1 local-IP branch and the setWebRTCIPv4 public spoof should produce.
                 await context.add_init_script(
-                    f"try {{ if (typeof window.setWebRTCIPv4 === 'function') window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}}"
+                    f"try {{ if (typeof window.setWebRTCIPv4 === 'function') window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}} "
+                    + CANVAS_SEED_INIT_SCRIPT
+                    + f"try {{ window.__expectedWebRTC__ = {json.dumps({'local': WEBRTC_TEST_LOCAL_IP, 'public': WEBRTC_TEST_IP})}; }} catch(e) {{}}"
                 )
 
                 page = await context.new_page()
@@ -366,5 +393,10 @@ async def run_tests(
             cert_text = build_certificate_text(cert, cross_profile, overall_grade)
             Path(save_cert).write_text(cert_text, encoding="utf-8")
             print(f"Certificate saved to: {save_cert}")
+
+    if json_path:
+        with open(json_path, "w") as fh:
+            json.dump(full_result, fh, indent=2)
+        print(f"wrote raw results to {json_path}")
 
     return 0 if total_passed == total_checks_sum else 1
