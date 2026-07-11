@@ -43,6 +43,7 @@ function register() {
   });
 
   gCollector = new Collector();
+  gCollector.subscribe(() => Services.obs.notifyObservers(null, "camoufox-observer:update", null));
   gNetHook = new NetHook(gCollector);
   gNetHook.start();
 }
