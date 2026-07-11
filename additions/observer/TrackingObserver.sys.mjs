@@ -1,4 +1,5 @@
 import { Collector } from "./Collector.sys.mjs";
+import { NetHook } from "./NetHook.sys.mjs";
 
 // Env-based arm switch for now; Task 9 replaces this with a compile-time
 // build flag so a default (unarmed) profile registers nothing. Mirrors
@@ -9,6 +10,7 @@ function isArmed() {
 }
 
 let gCollector = null;
+let gNetHook = null;
 
 // Shared with TrackingObserverParent.sys.mjs, which has no other way to
 // reach the singleton Collector instantiated below.
@@ -41,8 +43,8 @@ function register() {
   });
 
   gCollector = new Collector();
-  // Task 5's NetHook feeds Collector.ingestNet(...) once it lands; stubbed
-  // out here since it's out of scope for this task.
+  gNetHook = new NetHook(gCollector);
+  gNetHook.start();
 }
 
 export class TrackingObserver {
