@@ -2993,11 +2993,12 @@ diff --git a/toolkit/toolkit.mozbuild b/toolkit/toolkit.mozbuild
 index f3c59b0856..70bf13928f 100644
 --- a/toolkit/toolkit.mozbuild
 +++ b/toolkit/toolkit.mozbuild
-@@ -154,6 +154,7 @@ if CONFIG["ENABLE_WEBDRIVER"]:
+@@ -154,6 +154,8 @@ if CONFIG["ENABLE_WEBDRIVER"]:
          "/remote",
          "/testing/firefox-ui",
          "/testing/marionette",
 +        "/juggler",
++        "/observer",
          "/toolkit/components/telemetry/tests/marionette",
      ]
  
