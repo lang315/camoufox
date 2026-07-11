@@ -17,6 +17,11 @@ SOURCES += [
     "AccessObserver.cpp",
 ]
 
+# Compile-time gate for the tracking-observer instrumentation. ON for this
+# branch's build; flip to False (both this and the dom/canvas/moz.build
+# DEFINES) to produce a default binary with the ring buffer compiled out.
+DEFINES["MOZ_CAMOU_OBSERVE"] = True
+
 LOCAL_INCLUDES += [
     "/camoucfg",
 ]

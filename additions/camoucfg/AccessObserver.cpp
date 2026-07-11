@@ -1,4 +1,6 @@
 #include "AccessObserver.hpp"
+
+#ifdef MOZ_CAMOU_OBSERVE
 #include <array>
 #include <mutex>
 #include <atomic>
@@ -81,3 +83,21 @@ std::string AccessObserver::DrainJSON() {
 }
 
 }  // namespace camoufox
+
+#else  // !MOZ_CAMOU_OBSERVE — instrumentation compiled out, callers still link.
+
+namespace camoufox {
+
+bool AccessObserver::IsArmed() { return false; }
+
+void AccessObserver::ForceArmForTest(bool /* armed */) {}
+
+void AccessObserver::Record(uint32_t /* userContextId */,
+                            const std::string& /* site */,
+                            SurfaceId /* surface */, uint64_t /* tsMillis */) {}
+
+std::string AccessObserver::DrainJSON() { return "[]"; }
+
+}  // namespace camoufox
+
+#endif  // MOZ_CAMOU_OBSERVE

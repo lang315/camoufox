@@ -1,5 +1,9 @@
 // Standalone unit test — NOT compiled into xul. Build with:
-//   clang++ -std=c++17 -DCAMOU_OBSERVE_TEST test_access_observer.cpp AccessObserver.cpp -o /tmp/aotest
+//   clang++ -std=c++17 -DMOZ_CAMOU_OBSERVE test_access_observer.cpp AccessObserver.cpp -o /tmp/aotest
+// (Omit -DMOZ_CAMOU_OBSERVE to compile against the no-op OFF path; the
+// asserts on record content will then fail since Record()/DrainJSON() are
+// inert — that variant is for confirming the OFF path compiles, not for
+// running this test to completion.)
 #include "AccessObserver.hpp"
 #include <cassert>
 #include <cstdio>
