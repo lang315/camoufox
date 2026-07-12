@@ -96,12 +96,15 @@ diff --git a/browser/installer/package-manifest.in b/browser/installer/package-m
 index 83e52b260c..3ab0c47c71 100644
 --- a/browser/installer/package-manifest.in
 +++ b/browser/installer/package-manifest.in
-@@ -204,6 +204,9 @@
+@@ -204,6 +204,12 @@
  @RESPATH@/chrome/remote.manifest
  #endif
- 
+
 +@RESPATH@/chrome/juggler@JAREXT@
 +@RESPATH@/chrome/juggler.manifest
++
++@RESPATH@/chrome/camoufox@JAREXT@
++@RESPATH@/chrome/camoufox.manifest
 +
  ; Modules
  @RESPATH@/browser/modules/*
