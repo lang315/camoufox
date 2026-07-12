@@ -352,14 +352,13 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
  }
  
  UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
-@@ -2278,6 +2298,33 @@
+@@ -2278,6 +2298,31 @@
        *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
        *out_imageSize = data->GetSize();
        ret = SurfaceToPackedBGRA(data);
 +      // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
 +      // Covers toDataURL / toBlob / OffscreenCanvas.convertToBlob (BGRA packed).
 +      Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
-+#ifdef MOZ_CAMOU_OBSERVE
 +      // Camoufox tracking-observer: record the read (no-op when disarmed).
 +      if (camoufox::AccessObserver::IsArmed() && seedDoc) {
 +        uint32_t uctx = 0;
@@ -374,7 +373,6 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
 +            camoufox::SurfaceId::Canvas,
 +            static_cast<uint64_t>(PR_Now() / 1000));
 +      }
-+#endif
 +      uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
 +      if (seed != 0 && ret) {
 +        CanvasSeedManager::Perturb(
@@ -386,7 +384,7 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
      }
    }
  
-@@ -6751,6 +6798,32 @@
+@@ -6751,7 +6796,31 @@
        UnpremultiplyData(src, srcStride, SurfaceFormat::A8R8G8B8_UINT32, dst,
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
@@ -395,7 +393,6 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
 +    // Camoufox canvas perturbation on the JS-visible RGBA buffer. No-op when
 +    // seed == 0. Placeholder path already broke out above, so it is untouched.
 +    Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
-+#ifdef MOZ_CAMOU_OBSERVE
 +    // Camoufox tracking-observer: record the read (no-op when disarmed).
 +    if (camoufox::AccessObserver::IsArmed() && seedDoc) {
 +      uint32_t uctx = 0;
@@ -409,16 +406,16 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
 +          uctx, std::string(baseDomain.get()),
 +          camoufox::SurfaceId::Canvas,
 +          static_cast<uint64_t>(PR_Now() / 1000));
-+    }
-+#endif
+     }
 +    uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
 +    if (seed != 0) {
 +      CanvasSeedManager::Perturb(data, len.value(), seed,
 +          CanvasSeedManager::GetNoiseDensity(),
 +          CanvasSeedManager::GetNoiseStrength());
-     }
++    }
    } while (false);
  
+   readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
@@ -433,7 +430,7 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
  #include "gfxCrashReporterUtils.h"
  #include "js/PropertyAndElement.h"  // JS_DefineElement
  #include "js/ScalarType.h"          // js::Scalar::Type
-@@ -5238,6 +5242,35 @@
+@@ -5238,6 +5242,33 @@
                range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
                alphaChannelOffset, hasAlphaChannel);
          }
@@ -441,7 +438,6 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
 +        // RFP is disabled in camoufox, so the Randomize branch above is inert.
 +        // Offscreen/worker contexts have no owner document and stay unperturbed.
 +        if (dom::Document* seedDoc = GetOwnerDoc()) {
-+#ifdef MOZ_CAMOU_OBSERVE
 +          // Camoufox tracking-observer: record the read (no-op when disarmed).
 +          if (camoufox::AccessObserver::IsArmed() && seedDoc) {
 +            uint32_t uctx = 0;
@@ -456,7 +452,6 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
 +                camoufox::SurfaceId::Canvas,
 +                static_cast<uint64_t>(PR_Now() / 1000));
 +          }
-+#endif
 +          const uint32_t seed =
 +              dom::CanvasSeedManager::SeedFromDocument(seedDoc);
 +          if (seed != 0) {
@@ -469,18 +464,3 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
        }
      }
    });
-diff --git a/dom/canvas/moz.build b/dom/canvas/moz.build
---- a/dom/canvas/moz.build
-+++ b/dom/canvas/moz.build
-@@ -193,6 +193,11 @@
- 
- USE_LIBS += ["translator"]  # Grab the Angle shader translator.
- 
-+# Camoufox tracking-observer: gate for the AccessObserver::Record() calls
-+# added to CanvasRenderingContext2D.cpp / ClientWebGLContext.cpp readback
-+# paths by canvas-spoofing.patch.
-+DEFINES["MOZ_CAMOU_OBSERVE"] = True
-+
- FINAL_LIBRARY = "xul"
- LOCAL_INCLUDES += [
-     "/dom/base",
