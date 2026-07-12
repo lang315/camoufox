@@ -1,9 +1,9 @@
 import { Collector } from "./Collector.sys.mjs";
 import { NetHook } from "./NetHook.sys.mjs";
 
-// Env-based arm switch for now; Task 9 replaces this with a compile-time
-// build flag so a default (unarmed) profile registers nothing. Mirrors
-// AccessObserver::IsArmed() in additions/camoucfg/AccessObserver.cpp.
+// Env-based arm switch: a default (unarmed) profile registers nothing.
+// Mirrors the cached CAMOU_OBSERVE gate in AccessObserver::IsArmed()
+// (additions/camoucfg/AccessObserver.hpp).
 function isArmed() {
   const v = Services.env.get("CAMOU_OBSERVE");
   return !!v && v !== "0";

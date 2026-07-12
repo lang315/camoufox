@@ -21,6 +21,11 @@ export class NetHook {
     // READ ONLY. Never setRequestHeader/cancel/redirectTo/setResponseHeader
     // or otherwise mutate the channel here.
     const li = ch.loadInfo;
+    // Skip browser-internal traffic (favicon/telemetry/update/system loads) so
+    // the audit rows reflect page-triggered requests, not chrome noise.
+    if (!li || li.loadingPrincipal?.isSystemPrincipal) {
+      return;
+    }
     const u = li?.originAttributes?.userContextId ?? 0;
     const host = ch.URI.host;
     // Top site: walk to the top browsing context's document principal.

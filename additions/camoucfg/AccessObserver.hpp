@@ -10,7 +10,8 @@
 // Header-only (like MaskConfig.hpp / MouseTrajectories.hpp) — the camoucfg dir
 // is NOT a compiled build target, so any out-of-line .cpp definition here never
 // links into XUL. All state and functions are therefore inline. Single shared
-// ring buffer across all TUs via C++17 inline variables. Gated at runtime by
+// bounded buffer across all TUs via C++17 inline variables (on overflow it
+// drops the NEWEST records — not a ring; see Record()). Gated at runtime by
 // the CAMOU_OBSERVE env var, read once (cached) — disarmed default path is a
 // single predicted-not-taken branch, no per-call getenv.
 
