@@ -449,7 +449,7 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
 +            }
 +            camoufox::AccessObserver::Record(
 +                uctx, std::string(baseDomain.get()),
-+                camoufox::SurfaceId::Canvas,
++                camoufox::SurfaceId::WebGL,
 +                static_cast<uint64_t>(PR_Now() / 1000));
 +          }
 +          const uint32_t seed =
