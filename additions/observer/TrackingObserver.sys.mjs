@@ -28,8 +28,12 @@ function register() {
     "resource://gre/modules/ActorManagerParent.sys.mjs"
   );
 
+  // Actor name MUST match the exported class names (TrackingObserverParent /
+  // TrackingObserverChild). Firefox resolves `${ActorName}Child` from the
+  // child esModule; a mismatch makes the child silently never instantiate
+  // (no drain, no capture) — verified at runtime.
   ActorManagerParent.addJSWindowActors({
-    CamoufoxObserver: {
+    TrackingObserver: {
       parent: {
         esModuleURI: "resource://gre/modules/TrackingObserverParent.sys.mjs",
       },

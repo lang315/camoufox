@@ -28,12 +28,27 @@ export class NetHook {
     }
     const u = li?.originAttributes?.userContextId ?? 0;
     const host = ch.URI.host;
-    // Top site: walk to the top browsing context's document principal.
+    // Site = eTLD+1. For a top-level document load the top principal still
+    // points at the previous doc (about:blank / null principal) when this
+    // fires, which yielded a null-principal GUID; use the request URI itself
+    // there. For subresources the top principal is valid by now; fall back to
+    // the request URI if not.
     let site = host;
     try {
-      const top = li?.browsingContext?.top?.currentWindowGlobal?.documentPrincipal;
-      if (top) site = top.baseDomain || site;
-    } catch {}
+      if (li.externalContentPolicyType === Ci.nsIContentPolicy.TYPE_DOCUMENT) {
+        site = Services.eTLD.getBaseDomain(ch.URI);
+      } else {
+        const topP = li?.browsingContext?.top?.currentWindowGlobal?.documentPrincipal;
+        site =
+          topP?.isContentPrincipal && topP.baseDomain
+            ? topP.baseDomain
+            : Services.eTLD.getBaseDomain(ch.URI);
+      }
+    } catch {
+      try {
+        site = Services.eTLD.getBaseDomain(ch.URI);
+      } catch {}
+    }
     this._c.ingestNet(u, site, host, ch.URI.spec, ch.requestMethod, Date.now());
   }
   get QueryInterface() {
