@@ -1,14 +1,24 @@
 export class Collector {
-  constructor(maxRequestsPerKey = 500) {
+  constructor(maxRequestsPerKey = 500, maxRows = 512) {
     this._rows = new Map();        // "site|userContextId" → row
     this._subs = new Set();
     this._cap = maxRequestsPerKey;
+    this._maxRows = maxRows;
   }
   _key(site, u) { return `${site}|${u}`; }
   _row(site, u) {
     const k = this._key(site, u);
     let r = this._rows.get(k);
-    if (!r) { r = { key: { site, userContextId: u }, surfaces: {}, requests: [] }; this._rows.set(k, r); }
+    if (!r) {
+      // Bounded rows: distinct (site,userContextId) keys capped, drop-oldest
+      // (Map preserves insertion order) so a long armed session can't grow
+      // memory without limit.
+      if (this._rows.size >= this._maxRows) {
+        this._rows.delete(this._rows.keys().next().value);
+      }
+      r = { key: { site, userContextId: u }, surfaces: {}, requests: [] };
+      this._rows.set(k, r);
+    }
     return r;
   }
   ingestAccess(u, site, surface, ts) {

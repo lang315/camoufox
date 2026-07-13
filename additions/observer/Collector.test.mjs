@@ -34,4 +34,17 @@ const snapA = cap.snapshot();
 snapA[0].requests.push({ tampered: true });
 assert.equal(cap.snapshot().find(r => r.key.site === "x.com").requests.length, 3, "snapshot is a copy; mutating it does not affect Collector");
 
+// Bounded rows: distinct-key cap enforced, oldest row evicted (drop-oldest).
+const rowCap = new Collector(500, 2);
+rowCap.ingestAccess(0, "a.com", 1, 1);
+rowCap.ingestAccess(0, "b.com", 1, 2);
+rowCap.ingestAccess(0, "c.com", 1, 3);   // 3rd distinct key → evicts a.com
+const rsnap = rowCap.snapshot();
+assert.equal(rsnap.length, 2, "rows capped at maxRows");
+assert.ok(!rsnap.find(r => r.key.site === "a.com"), "oldest row evicted");
+assert.ok(rsnap.find(r => r.key.site === "c.com"), "newest row retained");
+// Re-touching an existing key must not evict (only new keys can).
+rowCap.ingestAccess(0, "c.com", 1, 4);
+assert.equal(rowCap.snapshot().length, 2, "re-touch of live key does not grow/evict");
+
 console.log("COLLECTOR PASS");

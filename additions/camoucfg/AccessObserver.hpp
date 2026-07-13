@@ -12,8 +12,9 @@
 // links into XUL. All state and functions are therefore inline. Single shared
 // bounded buffer across all TUs via C++17 inline variables (on overflow it
 // drops the NEWEST records — not a ring; see Record()). Gated at runtime by
-// the CAMOU_OBSERVE env var, read once (cached) — disarmed default path is a
-// single predicted-not-taken branch, no per-call getenv.
+// the CAMOU_OBSERVE env var, read once (cached) — the disarmed default path is
+// a relaxed atomic load plus a cached static-bool check (no per-call getenv), so
+// its cost is negligible though not literally a single branch.
 
 namespace camoufox {
 
@@ -28,7 +29,7 @@ struct AccessRecord {
   uint32_t userContextId;
   uint64_t tsMillis;
   uint16_t surface;
-  char site[64];  // POD, fixed — no allocation on the hot path
+  char site[64];  // POD, fixed — record storage needs no heap (caller owns the site string)
 };
 
 constexpr size_t kCapacity = 4096;

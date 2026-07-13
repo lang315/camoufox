@@ -47,7 +47,18 @@ function register() {
   });
 
   gCollector = new Collector();
-  gCollector.subscribe(() => Services.obs.notifyObservers(null, "camoufox-observer:update", null));
+  // Coalesce burst ingests into one panel refresh — each snapshot() the panel
+  // takes deep-copies every row, and per-request update granularity isn't worth
+  // that cost. Leading edge suppressed; one notify per 250ms window.
+  let notifyPending = false;
+  gCollector.subscribe(() => {
+    if (notifyPending) return;
+    notifyPending = true;
+    setTimeout(() => {
+      notifyPending = false;
+      Services.obs.notifyObservers(null, "camoufox-observer:update", null);
+    }, 250);
+  });
   gNetHook = new NetHook(gCollector);
   gNetHook.start();
 }

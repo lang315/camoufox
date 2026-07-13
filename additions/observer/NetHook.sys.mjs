@@ -21,9 +21,14 @@ export class NetHook {
     // READ ONLY. Never setRequestHeader/cancel/redirectTo/setResponseHeader
     // or otherwise mutate the channel here.
     const li = ch.loadInfo;
-    // Skip browser-internal traffic (favicon/telemetry/update/system loads) so
-    // the audit rows reflect page-triggered requests, not chrome noise.
-    if (!li || li.loadingPrincipal?.isSystemPrincipal) {
+    // Skip browser-internal traffic (favicon/telemetry/update/system loads) and
+    // null-principal loads (sandboxed/opaque origins) so the audit rows reflect
+    // page-triggered requests, not chrome or opaque noise.
+    if (
+      !li ||
+      li.loadingPrincipal?.isSystemPrincipal ||
+      li.loadingPrincipal?.isNullPrincipal
+    ) {
       return;
     }
     const u = li?.originAttributes?.userContextId ?? 0;
