@@ -46,16 +46,6 @@
   }
 
   /**
-   * Compute median of array.
-   * @param {number[]} arr - Array of numbers.
-   * @returns {number}
-   */
-  function median(arr) {
-    const sorted = arr.slice().sort((a, b) => a - b);
-    return percentile(sorted, 50);
-  }
-
-  /**
    * Compute sample variance of array.
    * @param {number[]} arr - Array of numbers.
    * @returns {number}
@@ -68,10 +58,32 @@
   }
 
   /**
-   * Time a tight loop of canvas.toDataURL() operations.
-   * @param {number} iterations - Number of toDataURL() calls per trial.
-   * @param {number} trials - Number of trials.
-   * @returns {{median: number, p95: number, variance: number, n: number} | null}
+   * Time a tight loop of `op`, `iterations` calls per trial, over `trials` trials.
+   * Sorts the per-trial durations once and derives median + p95 from it.
+   * @param {() => void} op - The operation to time (called `iterations`× per trial).
+   * @param {number} iterations
+   * @param {number} trials
+   * @returns {{median: number, p95: number, variance: number, n: number}}
+   */
+  function timeTrials(op, iterations, trials) {
+    const trialTimes = [];
+    for (let trial = 0; trial < trials; trial++) {
+      const start = performance.now();
+      for (let i = 0; i < iterations; i++) op();
+      trialTimes.push(performance.now() - start);
+    }
+    const sorted = trialTimes.slice().sort((a, b) => a - b);
+    return {
+      median: percentile(sorted, 50),
+      p95: percentile(sorted, 95),
+      variance: variance(trialTimes),
+      n: trials,
+    };
+  }
+
+  /**
+   * Time canvas.toDataURL() — the 2D canvas readback emit site.
+   * @returns {{median, p95, variance, n} | null}
    */
   function timeCanvasToDataURL(iterations, trials) {
     try {
@@ -80,62 +92,25 @@
       canvas.height = 256;
       const ctx = canvas.getContext('2d');
       if (!ctx) return null;
-
       // Fill canvas with some data so toDataURL() isn't a no-op.
       ctx.fillStyle = 'rgba(100, 150, 200, 0.8)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      const trialTimes = [];
-      for (let trial = 0; trial < trials; trial++) {
-        const start = performance.now();
-        for (let i = 0; i < iterations; i++) {
-          canvas.toDataURL('image/png');
-        }
-        const end = performance.now();
-        trialTimes.push(end - start);
-      }
-
-      const sorted = trialTimes.slice().sort((a, b) => a - b);
-      return {
-        median: median(trialTimes),
-        p95: percentile(sorted, 95),
-        variance: variance(trialTimes),
-        n: trials
-      };
+      return timeTrials(() => canvas.toDataURL('image/png'), iterations, trials);
     } catch (e) {
       return null;
     }
   }
 
   /**
-   * Time a tight loop of WebGL gl.getParameter(gl.VENDOR) operations.
-   * @param {number} iterations - Number of getParameter() calls per trial.
-   * @param {number} trials - Number of trials.
-   * @returns {{median: number, p95: number, variance: number, n: number} | null}
+   * Time gl.getParameter(gl.VENDOR) — a non-instrumented control op.
+   * @returns {{median, p95, variance, n} | null}
    */
   function timeWebGLGetParameter(iterations, trials) {
     try {
       const canvas = document.createElement('canvas');
       const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
       if (!gl) return null;
-
-      const trialTimes = [];
-      for (let trial = 0; trial < trials; trial++) {
-        const start = performance.now();
-        for (let i = 0; i < iterations; i++) {
-          gl.getParameter(gl.VENDOR);
-        }
-        const end = performance.now();
-        trialTimes.push(end - start);
-      }
-
-      const sorted = trialTimes.slice().sort((a, b) => a - b);
-      return {
-        median: median(trialTimes),
-        p95: percentile(sorted, 95),
-        variance: variance(trialTimes),
-        n: trials
-      };
+      return timeTrials(() => gl.getParameter(gl.VENDOR), iterations, trials);
     } catch (e) {
       return null;
     }

@@ -1,3 +1,5 @@
+// Mirrors the SurfaceId enum in additions/camoucfg/AccessObserver.hpp — keep in
+// sync when adding a surface (no C++→JS codegen bridge across that boundary).
 const SURFACE_NAMES = { 1: "canvas", 2: "webgl", 3: "webrtc", 4: "navigator", 5: "screen", 6: "fonts", 7: "audio" };
 const HIGHLIGHT = new Set(["facebook.com", "instagram.com", "threads.net"]);
 
