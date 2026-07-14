@@ -9,6 +9,7 @@ with Files("**"):
 
 EXPORTS += [
     "AccessObserver.hpp",
+    "AccessObserverDom.hpp",
     "MaskConfig.hpp",
     "MouseTrajectories.hpp",
 ]
