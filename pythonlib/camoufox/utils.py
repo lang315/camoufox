@@ -133,7 +133,14 @@ def _load_properties(path: Optional[Path] = None) -> Dict[str, str]:
     Loads the properties.json file.
     """
     if path:
-        prop_file = str(path.parent / "properties.json")
+        prop_path = path.parent / "properties.json"
+        if not prop_path.exists() and OS_NAME == 'mac':
+            # macOS .app bundle: the binary is in Contents/MacOS but
+            # properties.json ships in Contents/Resources (see get_path).
+            alt = path.parent.parent / "Resources" / "properties.json"
+            if alt.exists():
+                prop_path = alt
+        prop_file = str(prop_path)
     else:
         prop_file = get_path("properties.json")
     with open(prop_file, "rb") as f:
