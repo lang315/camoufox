@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union, cast
 import numpy as np
 import orjson
 from browserforge.fingerprints import Fingerprint, Screen
+from platformdirs import user_cache_dir
 from screeninfo import get_monitors
 from typing_extensions import TypeAlias
 from ua_parser import user_agent_parser
@@ -46,8 +47,9 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
     Generates a runtime fontconfig that resolves bundled font paths absolutely.
     The bundled fonts.conf uses prefix="cwd" relative paths which break when
     Playwright's working directory differs from the browser install directory.
-    Writes a patched copy to ~/.cache/camoufox/fontconfig/ (deterministic,
-    only regenerated when content changes).
+    Writes a patched copy under the platform cache dir
+    (user_cache_dir("camoufox")/fontconfig/), deterministic, only regenerated
+    when content changes.
     """
     import hashlib
 
@@ -62,7 +64,7 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
         f'<dir>{fonts_dir}</dir>',
     )
 
-    cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'camoufox', 'fontconfig')
+    cache_dir = os.path.join(user_cache_dir("camoufox"), 'fontconfig')
     os.makedirs(cache_dir, exist_ok=True)
 
     content_hash = hashlib.sha256(conf_content.encode()).hexdigest()[:12]
