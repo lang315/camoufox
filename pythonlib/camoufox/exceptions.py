@@ -194,3 +194,14 @@ class CamoufoxNotInstalled(FileNotFoundError):
     """
 
     ...
+
+
+class NotWritableError(Exception):
+    """
+    Raised when a directory Camoufox must write to (HOME, the platform cache
+    dir) is not writable. Without this check, launching on a read-only
+    filesystem hangs for ~180s inside the browser subprocess instead of
+    failing with a clear error.
+    """
+
+    ...

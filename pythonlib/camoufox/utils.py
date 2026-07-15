@@ -20,6 +20,7 @@ from .exceptions import (
     InvalidOS,
     InvalidPropertyType,
     NonFirefoxFingerprint,
+    NotWritableError,
 )
 from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset
 from .geolocation import geoip_allowed, get_geolocation
@@ -74,6 +75,36 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
             f.write(conf_content)
 
     return runtime_conf
+
+
+def _check_writable_dirs(env: Optional[Dict[str, Union[str, float, bool]]] = None) -> None:
+    """
+    Pre-flight check: raises NotWritableError if HOME or the platform cache
+    dir (platformdirs.user_cache_dir("camoufox")) is not writable.
+
+    Camoufox needs to write to both at launch (glxtest, fontconfig, profile
+    creation). On a read-only filesystem, the browser subprocess silently
+    hangs for ~180s instead of failing; this catches it before spawning.
+    See: https://github.com/daijro/camoufox/issues/572
+    """
+    home = str((env or environ).get('HOME') or os.path.expanduser('~'))
+    cache_dir = user_cache_dir("camoufox")
+
+    for label, target in (('HOME', home), ('cache directory', cache_dir)):
+        existing = target
+        while not os.path.exists(existing):
+            parent = os.path.dirname(existing)
+            if parent == existing:
+                break
+            existing = parent
+        if not os.access(existing, os.W_OK):
+            raise NotWritableError(
+                f"Camoufox needs write access to the {label} ('{target}'), but "
+                f"'{existing}' is not writable. Launching would otherwise hang for "
+                "several minutes instead of failing clearly. Make the directory "
+                "writable, or set the HOME environment variable to a writable "
+                "directory before launching."
+            )
 
 
 def get_env_vars(
@@ -534,6 +565,10 @@ def launch_options(
         **launch_options (Dict[str, Any]):
             Additional Firefox launch options.
     """
+    # Fail fast with a clear error if HOME / the cache dir aren't writable,
+    # instead of hanging inside the browser subprocess (#572).
+    _check_writable_dirs(env)
+
     # Build the config
     if config is None:
         config = {}
