@@ -272,31 +272,40 @@ diff --git a/layout/style/FontFaceSet.cpp b/layout/style/FontFaceSet.cpp
 index xxxxxxxxxx..yyyyyyyyyy 100644
 --- a/layout/style/FontFaceSet.cpp
 +++ b/layout/style/FontFaceSet.cpp
-@@ -30,4 +30,7 @@
+@@ -30,4 +30,8 @@
  #include "mozilla/dom/Document.h"
 +#include "mozilla/dom/BrowsingContext.h"
++#include "AccessObserverDom.hpp"
 +#include "mozilla/dom/FontListManager.h"
 +#include "nsGlobalWindowInner.h"
  #include "mozilla/dom/DocumentInlines.h"
  #include "mozilla/dom/Event.h"
  #include "mozilla/dom/FontFaceImpl.h"
-@@ -139,2 +142,10 @@
+@@ -139,2 +142,14 @@
                                              ErrorResult& aRv) {
 +  // Per-context font list filtering
 +  uint32_t fontListCtxId = 0;
 +  if (nsGlobalWindowInner* owner = GetOwnerWindow()) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        owner ? owner->GetExtantDoc() : nullptr, camoufox::SurfaceId::Fonts);
++  }
 +    if (auto* bc = owner->GetBrowsingContext()) {
 +      fontListCtxId = bc->OriginAttributesRef().mUserContextId;
 +    }
 +  }
 +  AutoFontListContext autoFontListCtx(fontListCtxId);
    FlushUserFontSet();
-@@ -169,3 +178,11 @@
+@@ -169,3 +178,15 @@
  bool FontFaceSet::Check(const nsACString& aFont, const nsAString& aText,
                          ErrorResult& aRv) {
 +  // Per-context font list filtering
 +  uint32_t fontListCtxId = 0;
 +  if (nsGlobalWindowInner* owner = GetOwnerWindow()) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        owner ? owner->GetExtantDoc() : nullptr, camoufox::SurfaceId::Fonts);
++  }
 +    if (auto* bc = owner->GetBrowsingContext()) {
 +      fontListCtxId = bc->OriginAttributesRef().mUserContextId;
 +    }

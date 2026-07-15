@@ -8,6 +8,8 @@ with Files("**"):
     BUG_COMPONENT = ("Core", "DOM: UI Events & Focus Handling")
 
 EXPORTS += [
+    "AccessObserver.hpp",
+    "AccessObserverDom.hpp",
     "MaskConfig.hpp",
     "MouseTrajectories.hpp",
 ]

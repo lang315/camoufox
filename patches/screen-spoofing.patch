@@ -265,16 +265,17 @@ diff --git a/dom/base/nsScreen.cpp b/dom/base/nsScreen.cpp
 index 78849001c5..dc329c8424 100644
 --- a/dom/base/nsScreen.cpp
 +++ b/dom/base/nsScreen.cpp
-@@ -12,6 +12,8 @@
+@@ -12,6 +12,9 @@
  #include "mozilla/dom/DocumentInlines.h"
  #include "mozilla/widget/ScreenManager.h"
  #include "nsCOMPtr.h"
 +#include "ScreenDimensionManager.h"
++#include "AccessObserverDom.hpp"
 +#include "nsContentUtils.h"
  #include "nsDeviceContext.h"
  #include "nsGlobalWindowInner.h"
  #include "nsGlobalWindowOuter.h"
-@@ -73,6 +75,26 @@ nsDeviceContext* nsScreen::GetDeviceContext() const {
+@@ -73,6 +75,30 @@ nsDeviceContext* nsScreen::GetDeviceContext() const {
  }
  
  CSSIntRect nsScreen::GetRect() {
@@ -283,6 +284,10 @@ index 78849001c5..dc329c8424 100644
 +    if (nsPIDOMWindowInner* inner = outer->GetCurrentInnerWindow()) {
 +      nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(inner);
 +      if (win) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        inner ? inner->GetExtantDoc() : nullptr, camoufox::SurfaceId::Screen);
++  }
 +        uint32_t userContextId = mozilla::dom::ScreenDimensionManager::GetUserContextIdFromWindow(win);
 +        int32_t w = 0, h = 0;
 +        if (mozilla::dom::ScreenDimensionManager::GetDimensions(userContextId, &w, &h)) {
@@ -301,7 +306,7 @@ index 78849001c5..dc329c8424 100644
    // Return window inner rect to prevent fingerprinting.
    if (ShouldResistFingerprinting(RFPTarget::ScreenRect)) {
      return GetTopWindowInnerRectForRFP();
-@@ -105,6 +127,24 @@ CSSIntRect nsScreen::GetRect() {
+@@ -105,6 +127,28 @@ CSSIntRect nsScreen::GetRect() {
  }
  
  CSSIntRect nsScreen::GetAvailRect() {
@@ -310,6 +315,10 @@ index 78849001c5..dc329c8424 100644
 +    if (nsPIDOMWindowInner* inner = outer->GetCurrentInnerWindow()) {
 +      nsGlobalWindowInner* win = nsGlobalWindowInner::Cast(inner);
 +      if (win) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        inner ? inner->GetExtantDoc() : nullptr, camoufox::SurfaceId::Screen);
++  }
 +        uint32_t userContextId = mozilla::dom::ScreenDimensionManager::GetUserContextIdFromWindow(win);
 +        int32_t w = 0, h = 0;
 +        if (mozilla::dom::ScreenDimensionManager::GetDimensions(userContextId, &w, &h)) {

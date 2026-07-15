@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src chrome://camoufox/content/tracking-panel.js chrome://camoufox/content/tracking.js; style-src 'self'; object-src 'none'">
+  <title>Camoufox Tracking Observer</title>
+  <link rel="stylesheet" href="chrome://camoufox/content/tracking.css">
+</head>
+<body>
+  <h1>Camoufox Tracking Observer</h1>
+  <div id="rows"></div>
+
+  <div class="blind-spots">
+    <h2>Not observable (reads invisible to this tool)</h2>
+    <p>
+      The following properties are not tracked by this observer because they are cached by the JavaScript engine or are un-spoofed by design:
+      <strong>timezone</strong>, <strong>locale/Intl</strong> (engine-cached);
+      <strong>navigator.vendor</strong>, <strong>navigator.plugins</strong>, <strong>navigator.deviceMemory</strong>,
+      <strong>navigator.userAgentData</strong>, <strong>navigator.mediaDevices.enumerateDevices</strong>,
+      <strong>navigator.getBattery</strong>, <strong>navigator.connection</strong> (un-spoofed).
+    </p>
+  </div>
+
+  <script type="module" src="chrome://camoufox/content/tracking-panel.js"></script>
+</body>
+</html>

@@ -189,12 +189,13 @@ diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
 index 318d2edba8..12feb91573 100644
 --- a/dom/base/Navigator.cpp
 +++ b/dom/base/Navigator.cpp
-@@ -6,6 +6,10 @@
+@@ -6,6 +6,11 @@
  
  // Needs to be first.
  #include "Navigator.h"
 +// Camoufox: per-context + global navigator spoofing
 +#include "NavigatorManager.h"
++#include "AccessObserverDom.hpp"
 +#include "MaskConfig.hpp"
 +#include "nsJSUtils.h"
  
@@ -219,9 +220,13 @@ index 318d2edba8..12feb91573 100644
  namespace mozilla::dom {
  
  static const nsLiteralCString kVibrationPermissionType = "vibration"_ns;
-@@ -262,5 +278,17 @@ void Navigator::Invalidate() {
+@@ -262,5 +278,21 @@ void Navigator::Invalidate() {
  void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
                               ErrorResult& aRv) const {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        mWindow ? mWindow->GetExtantDoc() : nullptr, camoufox::SurfaceId::Navigator);
++  }
 +  // Camoufox: per-context user agent
 +  if (mWindow) {
 +    uint32_t userContextId = 0;
@@ -249,11 +254,15 @@ index 318d2edba8..12feb91573 100644
    nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
  
    nsresult rv = GetAppVersion(
-@@ -423,6 +456,24 @@
+@@ -423,6 +456,28 @@
 
  void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
                              ErrorResult& aRv) const {
 +  EnsureGlobalTimezoneInitialized();
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        mWindow ? mWindow->GetExtantDoc() : nullptr, camoufox::SurfaceId::Navigator);
++  }
 +  // Camoufox: per-context navigator platform
 +  if (mWindow) {
 +    uint32_t userContextId = 0;
@@ -274,10 +283,14 @@ index 318d2edba8..12feb91573 100644
    if (mWindow) {
      BrowsingContext* bc = mWindow->GetBrowsingContext();
      nsString customPlatform;
-@@ -448,6 +482,23 @@ void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
+@@ -448,6 +482,27 @@ void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
  
  void Navigator::GetOscpu(nsAString& aOSCPU, CallerType aCallerType,
                           ErrorResult& aRv) const {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        mWindow ? mWindow->GetExtantDoc() : nullptr, camoufox::SurfaceId::Navigator);
++  }
 +  // Camoufox: per-context navigator oscpu
 +  if (mWindow) {
 +    uint32_t userContextId = 0;
@@ -298,11 +311,15 @@ index 318d2edba8..12feb91573 100644
    if (aCallerType != CallerType::System) {
      // If fingerprinting resistance is on, we will spoof this value. See
      // nsRFPService.h for details about spoofed values.
-@@ -683,6 +729,22 @@ bool Navigator::GlobalPrivacyControl() {
+@@ -683,6 +729,26 @@ bool Navigator::GlobalPrivacyControl() {
  }
  
  uint64_t Navigator::HardwareConcurrency() {
 +  EnsureGlobalTimezoneInitialized();
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        mWindow ? mWindow->GetExtantDoc() : nullptr, camoufox::SurfaceId::Navigator);
++  }
 +  // Camoufox: per-context hardware concurrency
 +  if (mWindow) {
 +    uint32_t userContextId = 0;
