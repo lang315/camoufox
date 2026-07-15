@@ -441,7 +441,8 @@ export class PageTarget {
   }
 
   async activateAndRun(callback = () => {}, { muteNotificationsPopup = false } = {}) {
-    const ownerWindow = this._tab.linkedBrowser.ownerGlobal;
+    // Firefox 152: `ownerGlobal` may be null here; fall back to `defaultView`.
+    const ownerWindow = this._tab.linkedBrowser.ownerGlobal || this._tab.linkedBrowser.ownerDocument.defaultView;
     const tabBrowser = ownerWindow.gBrowser;
     // Serialize all tab-switching commands per tabbed browser
     // to disallow concurrent tab switching.
