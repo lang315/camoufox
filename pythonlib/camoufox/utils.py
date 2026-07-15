@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union, cast
 import numpy as np
 import orjson
 from browserforge.fingerprints import Fingerprint, Screen
+from platformdirs import user_cache_dir
 from screeninfo import get_monitors
 from typing_extensions import TypeAlias
 from ua_parser import user_agent_parser
@@ -19,6 +20,7 @@ from .exceptions import (
     InvalidOS,
     InvalidPropertyType,
     NonFirefoxFingerprint,
+    NotWritableError,
 )
 from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset
 from .geolocation import geoip_allowed, get_geolocation
@@ -46,8 +48,9 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
     Generates a runtime fontconfig that resolves bundled font paths absolutely.
     The bundled fonts.conf uses prefix="cwd" relative paths which break when
     Playwright's working directory differs from the browser install directory.
-    Writes a patched copy to ~/.cache/camoufox/fontconfig/ (deterministic,
-    only regenerated when content changes).
+    Writes a patched copy under the platform cache dir
+    (user_cache_dir("camoufox")/fontconfig/), deterministic, only regenerated
+    when content changes.
     """
     import hashlib
 
@@ -62,7 +65,7 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
         f'<dir>{fonts_dir}</dir>',
     )
 
-    cache_dir = os.path.join(os.path.expanduser('~'), '.cache', 'camoufox', 'fontconfig')
+    cache_dir = os.path.join(user_cache_dir("camoufox"), 'fontconfig')
     os.makedirs(cache_dir, exist_ok=True)
 
     content_hash = hashlib.sha256(conf_content.encode()).hexdigest()[:12]
@@ -72,6 +75,36 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
             f.write(conf_content)
 
     return runtime_conf
+
+
+def _check_writable_dirs(env: Optional[Dict[str, Union[str, float, bool]]] = None) -> None:
+    """
+    Pre-flight check: raises NotWritableError if HOME or the platform cache
+    dir (platformdirs.user_cache_dir("camoufox")) is not writable.
+
+    Camoufox needs to write to both at launch (glxtest, fontconfig, profile
+    creation). On a read-only filesystem, the browser subprocess silently
+    hangs for ~180s instead of failing; this catches it before spawning.
+    See: https://github.com/daijro/camoufox/issues/572
+    """
+    home = str((env or environ).get('HOME') or os.path.expanduser('~'))
+    cache_dir = user_cache_dir("camoufox")
+
+    for label, target in (('HOME', home), ('cache directory', cache_dir)):
+        existing = target
+        while not os.path.exists(existing):
+            parent = os.path.dirname(existing)
+            if parent == existing:
+                break
+            existing = parent
+        if not os.access(existing, os.W_OK):
+            raise NotWritableError(
+                f"Camoufox needs write access to the {label} ('{target}'), but "
+                f"'{existing}' is not writable. Launching would otherwise hang for "
+                "several minutes instead of failing clearly. Make the directory "
+                "writable, or set the HOME environment variable to a writable "
+                "directory before launching."
+            )
 
 
 def get_env_vars(
@@ -133,7 +166,14 @@ def _load_properties(path: Optional[Path] = None) -> Dict[str, str]:
     Loads the properties.json file.
     """
     if path:
-        prop_file = str(path.parent / "properties.json")
+        prop_path = path.parent / "properties.json"
+        if not prop_path.exists() and OS_NAME == 'mac':
+            # macOS .app bundle: the binary is in Contents/MacOS but
+            # properties.json ships in Contents/Resources (see get_path).
+            alt = path.parent.parent / "Resources" / "properties.json"
+            if alt.exists():
+                prop_path = alt
+        prop_file = str(prop_path)
     else:
         prop_file = get_path("properties.json")
     with open(prop_file, "rb") as f:
@@ -224,6 +264,19 @@ def get_screen_cons(headless: Optional[bool] = None) -> Optional[Screen]:
     # Use the dimensions from the monitor with greatest screen real estate
     monitor = max(monitors, key=lambda m: m.width * m.height)
     return Screen(max_width=monitor.width, max_height=monitor.height)
+
+
+def _real_display_present(
+    env: Dict[str, Union[str, float, bool]], virtual_display: Optional[str]
+) -> bool:
+    """
+    True if env['DISPLAY'] refers to a real, pre-existing X11 display.
+
+    A self-spawned Xvfb (headless='virtual') is not a real monitor -- it must
+    not be used to derive Screen constraints for fingerprint generation, or a
+    degenerate/fake Xvfb resolution poisons browserforge's output (#242).
+    """
+    return 'DISPLAY' in env and not virtual_display
 
 
 def update_fonts(config: Dict[str, Any], target_os: str) -> None:
@@ -525,6 +578,10 @@ def launch_options(
         **launch_options (Dict[str, Any]):
             Additional Firefox launch options.
     """
+    # Fail fast with a clear error if HOME / the cache dir aren't writable,
+    # instead of hanging inside the browser subprocess (#572).
+    _check_writable_dirs(env)
+
     # Build the config
     if config is None:
         config = {}
@@ -603,7 +660,7 @@ def launch_options(
     if not _used_preset and fingerprint is None:
         # Default: BrowserForge synthetic generation (infinite unique fingerprints)
         fingerprint = generate_fingerprint(
-            screen=screen or get_screen_cons(headless or 'DISPLAY' in env),
+            screen=screen or get_screen_cons(headless or _real_display_present(env, virtual_display)),
             window=window,
             os=os,
         )

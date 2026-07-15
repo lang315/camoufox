@@ -22,12 +22,17 @@ class VirtualDisplay:
 
     xvfb_args = (
         # fmt: off
-        "-screen", "0", "1x1x24",
+        # 1920x1080 gives any normally-sized browser window room to render at
+        # full size -- a 1x1 screen clamps window resizes to 1x1, leaving
+        # screenshots/video blank or mispositioned (#458).
+        "-screen", "0", "1920x1080x24",
         "-ac",
         "-nolisten", "tcp",
         "-extension", "RENDER",
         "+extension", "GLX",
-        "-extension", "COMPOSITE",
+        # COMPOSITE must stay enabled: record_video captures via offscreen
+        # compositing, which comes out blank if this extension is off (#93).
+        "+extension", "COMPOSITE",
         "-extension", "XVideo",
         "-extension", "XVideo-MotionCompensation",
         "-extension", "XINERAMA",

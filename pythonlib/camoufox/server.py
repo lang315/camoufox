@@ -1,4 +1,7 @@
+import atexit
+import signal
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Dict, NoReturn, Tuple, Union
 
@@ -40,6 +43,20 @@ def get_nodejs() -> str:
     return _nodejs
 
 
+def _terminate(process: subprocess.Popen) -> None:
+    """
+    Terminate a subprocess, escalating to kill() if it doesn't exit promptly.
+    """
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait()
+
+
 def launch_server(**kwargs) -> NoReturn:
     """
     Launch a Playwright server. Takes the same arguments as `Camoufox()`.
@@ -59,6 +76,15 @@ def launch_server(**kwargs) -> NoReturn:
         stdin=subprocess.PIPE,
         text=True,
     )
+
+    # Ensure the Node child is never orphaned: terminate it whenever this
+    # process exits, including via SIGINT (KeyboardInterrupt, handled by
+    # atexit during normal interpreter shutdown) and SIGTERM (which Python
+    # does not translate into an exception by default, so it's handled
+    # explicitly below).
+    atexit.register(_terminate, process)
+    signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
+
     # Write data to stdin and close the stream
     if process.stdin:
         process.stdin.write(base64.b64encode(data).decode())
