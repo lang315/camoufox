@@ -362,7 +362,8 @@ export class PageHandler {
       }
     }
 
-    const win = browsingContext.topChromeWindow.ownerGlobal;
+    // Firefox 152: `ownerGlobal` may be null here; topChromeWindow is already the window.
+    const win = browsingContext.topChromeWindow.ownerGlobal || browsingContext.topChromeWindow;
     const canvas = win.document.createElementNS('http://www.w3.org/1999/xhtml', 'canvas');
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
