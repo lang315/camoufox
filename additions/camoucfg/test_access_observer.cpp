@@ -49,7 +49,6 @@ int main() {
   AccessObserver::Record(3, "dedup.com", SurfaceId::Canvas, 1);
   std::string two = AccessObserver::DrainJSON();
   assert(two.find("},{") != std::string::npos);  // two distinct records
-  (void)AccessObserver::DrainJSON();
 
   // Disarmed => Record is a no-op.
   AccessObserver::ForceArmForTest(false);
