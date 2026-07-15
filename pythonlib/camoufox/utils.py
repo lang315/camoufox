@@ -266,6 +266,19 @@ def get_screen_cons(headless: Optional[bool] = None) -> Optional[Screen]:
     return Screen(max_width=monitor.width, max_height=monitor.height)
 
 
+def _real_display_present(
+    env: Dict[str, Union[str, float, bool]], virtual_display: Optional[str]
+) -> bool:
+    """
+    True if env['DISPLAY'] refers to a real, pre-existing X11 display.
+
+    A self-spawned Xvfb (headless='virtual') is not a real monitor -- it must
+    not be used to derive Screen constraints for fingerprint generation, or a
+    degenerate/fake Xvfb resolution poisons browserforge's output (#242).
+    """
+    return 'DISPLAY' in env and not virtual_display
+
+
 def update_fonts(config: Dict[str, Any], target_os: str) -> None:
     """
     Updates the fonts for the target OS.
@@ -647,7 +660,7 @@ def launch_options(
     if not _used_preset and fingerprint is None:
         # Default: BrowserForge synthetic generation (infinite unique fingerprints)
         fingerprint = generate_fingerprint(
-            screen=screen or get_screen_cons(headless or 'DISPLAY' in env),
+            screen=screen or get_screen_cons(headless or _real_display_present(env, virtual_display)),
             window=window,
             os=os,
         )
