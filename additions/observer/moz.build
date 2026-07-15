@@ -1,0 +1,13 @@
+EXTRA_JS_MODULES += [
+    "Collector.sys.mjs",
+    "NetHook.sys.mjs",
+    "TrackingObserver.sys.mjs",
+    "TrackingObserverChild.sys.mjs",
+    "TrackingObserverParent.sys.mjs",
+]
+
+XPCOM_MANIFESTS += [
+    "components.conf",
+]
+
+JAR_MANIFESTS += ["jar.mn"]
