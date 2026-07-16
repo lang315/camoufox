@@ -49,17 +49,15 @@ index d0aebdf965..01472ec205 100644
 
    mAcceptLanguagesIsDirty = false;
 
-@@ -2098,6 +2112,11 @@ nsresult nsHttpHandler::SetAcceptLanguages() {
-
- nsresult nsHttpHandler::SetAcceptEncodings(const char* aAcceptEncodings,
-                                            bool isSecure, bool isDictionary) {
-+  nsCString encodingOverride;
-+  if (auto value = MaskConfig::GetString("headers.Accept-Encoding")) {
-+    encodingOverride.Assign(nsCString(value.value().c_str()));
-+    aAcceptEncodings = encodingOverride.get();
-+  }
+@@ -2101,6 +2115,11 @@ nsresult nsHttpHandler::SetAcceptEncodings(const char* aAcceptEncodings,
    if (isDictionary) {
      mDictionaryAcceptEncodings = aAcceptEncodings;
    } else if (isSecure) {
++    nsCString encodingOverride;
++    if (auto value = MaskConfig::GetString("headers.Accept-Encoding")) {
++      encodingOverride.Assign(nsCString(value.value().c_str()));
++      aAcceptEncodings = encodingOverride.get();
++    }
      mHttpsAcceptEncodings = aAcceptEncodings;
    } else {
+     // use legacy list if a secure override is not specified

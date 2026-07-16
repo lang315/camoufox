@@ -206,10 +206,17 @@ class HumanizeMouseTrajectory {
         std::max(getMinTime() + 2, static_cast<int>(std::pow(totalLength, 0.25) * 20)));
 
     std::vector<std::vector<double>> res;
+    int lastIndex = static_cast<int>(points.size()) - 1;
     for (int i = 0; i < targetPoints; i++) {
-      double t = static_cast<double>(i) / (targetPoints - 1);
-      double easedT = easeOutQuad(t);
-      int index = static_cast<int>(easedT * (points.size() - 1));
+      // Always terminate exactly on the destination point: pin the final
+      // sample to the last index instead of deriving it from the eased
+      // parameter, so the trajectory never lands a fraction of an index
+      // short due to float truncation.
+      int index = (i == targetPoints - 1)
+                      ? lastIndex
+                      : static_cast<int>(easeOutQuad(static_cast<double>(i) /
+                                                     (targetPoints - 1)) *
+                                         lastIndex);
       res.push_back(points[index]);
     }
     return res;
