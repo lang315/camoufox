@@ -62,6 +62,13 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.matrix.outputs.json) }}
 
+    env:
+      # Persist ccache across runs (see "Cache ccache" step). Without this, every
+      # Firefox build is cold (~4-5h, near the 6h GitHub cap); the default ccache
+      # dir is overridden to a workspace path so actions/cache can save/restore it.
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: "2G"
+
     steps:
       - name: Maximize build space
         if: matrix.target != 'macos'
@@ -186,6 +193,18 @@ jobs:
             mozbuild-${{ matrix.target }}-${{ matrix.arch }}-
             mozbuild-${{ matrix.target }}-
 
+      - name: Cache ccache
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.ccache
+          # ccache is content-addressed, so a stale restore is safe and still
+          # gives a high hit rate — restore-keys fall back to the newest ccache
+          # for this leg even when patches (and thus the exact key) change.
+          key: ccache-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh') }}
+          restore-keys: |
+            ccache-${{ matrix.target }}-${{ matrix.arch }}-
+            ccache-${{ matrix.target }}-
+
       - name: Cache Firefox source tarball
         uses: actions/cache@v6
         with:
@@ -246,6 +265,10 @@ jobs:
 
       - name: Build
         run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
+
+      - name: ccache stats
+        if: always()
+        run: ccache -s || true
 
       - name: List build artifacts
         if: always()
