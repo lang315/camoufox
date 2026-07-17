@@ -62,6 +62,18 @@ def launch_server(**kwargs) -> NoReturn:
     Launch a Playwright server. Takes the same arguments as `Camoufox()`.
     Prints the websocket endpoint to the console.
     """
+    # Playwright's launchServer has no persistent-context mode, so these two
+    # options cannot be honored in server mode. Fail loudly with guidance
+    # instead of crashing later with a cryptic "unexpected keyword argument"
+    # from launch_options() (#161).
+    if kwargs.get('persistent_context') or kwargs.get('user_data_dir'):
+        raise ValueError(
+            "launch_server() does not support persistent_context / user_data_dir: "
+            "Playwright's launchServer has no persistent-context mode. Use "
+            "Camoufox(persistent_context=True, user_data_dir=...) for a persistent "
+            "instance, or drop these arguments to launch an ephemeral server."
+        )
+
     config = launch_options(**kwargs)
     nodejs = get_nodejs()
 
