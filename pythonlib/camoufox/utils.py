@@ -356,6 +356,25 @@ def set_into(target: Dict[str, Any], key: str, value: Any) -> None:
         target[key] = value
 
 
+# geoip-derived timezone/locale must not override an explicit user config (#589).
+GEO_USER_OVERRIDE_KEYS = ('timezone', 'locale:language', 'locale:region', 'locale:script')
+
+
+def merge_geo_config(config: Dict[str, Any], geo_config: Dict[str, Any]) -> None:
+    """
+    Merges geoip-derived ``geo_config`` into ``config``.
+
+    User-supplied values for timezone/locale keys win over the geoip guess
+    (#589: ``geoip=True`` must not override an explicit ``config`` timezone);
+    all other geo keys (latitude, longitude, ...) are taken from geoip.
+    """
+    for key, value in geo_config.items():
+        if key in GEO_USER_OVERRIDE_KEYS:
+            config.setdefault(key, value)
+        else:
+            config[key] = value
+
+
 def is_domain_set(
     config: Dict[str, Any],
     *properties: str,
@@ -729,11 +748,7 @@ def launch_options(
 
         geolocation = get_geolocation(geoip, geoip_db=geoip_db)
         geo_config = geolocation.as_config()
-        for key, value in geo_config.items():
-            if key in ('timezone', 'locale:language', 'locale:region', 'locale:script'):
-                config.setdefault(key, value)
-            else:
-                config[key] = value
+        merge_geo_config(config, geo_config)
 
     # Raise a warning when a proxy is being used without spoofing geolocation.
     # This is a very bad idea; the warning cannot be ignored with i_know_what_im_doing.
