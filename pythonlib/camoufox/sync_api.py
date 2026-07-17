@@ -101,17 +101,28 @@ def NewBrowser(
     else:
         virtual_display = None
 
-    if not from_options:
-        from_options = launch_options(headless=headless, debug=debug, **kwargs)
+    try:
+        if not from_options:
+            from_options = launch_options(
+                headless=headless, debug=debug, **kwargs
+            )
 
-    # Persistent context
-    if persistent_context:
-        context = playwright.firefox.launch_persistent_context(**from_options)
-        return sync_attach_vd(context, virtual_display)
+        # Persistent context
+        if persistent_context:
+            context = playwright.firefox.launch_persistent_context(**from_options)
+            return sync_attach_vd(context, virtual_display)
 
-    # Browser
-    browser = playwright.firefox.launch(**from_options)
-    return sync_attach_vd(browser, virtual_display)
+        # Browser
+        browser = playwright.firefox.launch(**from_options)
+        return sync_attach_vd(browser, virtual_display)
+    except BaseException:
+        # A launch failure here (bad options, InvalidProxy, missing browser, ...)
+        # must not leak the Xvfb we just spawned -- sync_attach_vd(), the only
+        # place that wires virtual_display.kill() into browser.close(), is never
+        # reached in that case (#363).
+        if virtual_display:
+            virtual_display.kill()
+        raise
 
 
 def _proxy_url_with_creds(proxy: Dict[str, str]) -> str:
