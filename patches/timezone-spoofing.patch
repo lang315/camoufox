@@ -314,13 +314,20 @@ index 96ed101921..aa78f0fe26 100644
  
  static bool ComputeLocalTime(time_t local, struct tm* ptm) {
    // Neither localtime_s nor localtime_r are required to act as if tzset has
-@@ -256,6 +257,12 @@ js::DateTimeInfo::DateTimeInfo() {
+@@ -256,6 +257,19 @@ js::DateTimeInfo::DateTimeInfo() {
  
  js::DateTimeInfo::~DateTimeInfo() = default;
  
 +js::DateTimeInfo::DateTimeInfo(const char* timezone) : DateTimeInfo() {
 +#if JS_HAS_INTL_API
 +  timeZoneOverride_ = timezone ? std::string(timezone) : std::string();
++  // #657: override instances never run updateTimeZone(), so their DST/offset
++  // range caches must be initialized here. Stock Firefox's RefPtr override ctor
++  // did exactly this; Playwright removed that ctor, so without an explicit reset
++  // the caches hold uninitialized garbage and getTimezoneOffset() intermittently
++  // returns garbage in freshly-created Web Workers.
++  utcToLocalStandardOffsetSeconds_ = SecondsPerDay;
++  resetState();
 +#endif
 +}
 +
