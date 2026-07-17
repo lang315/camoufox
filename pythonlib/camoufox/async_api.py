@@ -99,20 +99,34 @@ async def AsyncNewBrowser(
     else:
         virtual_display = None
 
-    if not from_options:
-        from_options = await asyncio.get_event_loop().run_in_executor(
-            None,
-            partial(launch_options, headless=headless, debug=debug, **kwargs),
-        )
+    try:
+        if not from_options:
+            from_options = await asyncio.get_event_loop().run_in_executor(
+                None,
+                partial(
+                    launch_options,
+                    headless=headless,
+                    debug=debug,
+                    **kwargs,
+                ),
+            )
 
-    # Persistent context
-    if persistent_context:
-        context = await playwright.firefox.launch_persistent_context(**from_options)
-        return await async_attach_vd(context, virtual_display)
+        # Persistent context
+        if persistent_context:
+            context = await playwright.firefox.launch_persistent_context(**from_options)
+            return await async_attach_vd(context, virtual_display)
 
-    # Browser
-    browser = await playwright.firefox.launch(**from_options)
-    return await async_attach_vd(browser, virtual_display)
+        # Browser
+        browser = await playwright.firefox.launch(**from_options)
+        return await async_attach_vd(browser, virtual_display)
+    except BaseException:
+        # A launch failure here (bad options, InvalidProxy, missing browser, ...)
+        # must not leak the Xvfb we just spawned -- async_attach_vd(), the only
+        # place that wires virtual_display.kill() into browser.close(), is never
+        # reached in that case (#363).
+        if virtual_display:
+            virtual_display.kill()
+        raise
 
 
 def _proxy_url_with_creds(proxy: Dict[str, str]) -> str:

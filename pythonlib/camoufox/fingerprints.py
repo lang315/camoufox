@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import warnings
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from random import choice, randint, randrange, random, sample, shuffle
@@ -12,6 +13,7 @@ from browserforge.fingerprints import (
     ScreenFingerprint,
 )
 
+from camoufox.ip import valid_ipv6
 from camoufox.pkgman import load_yaml
 from camoufox.webgl import sample_webgl
 
@@ -260,9 +262,19 @@ def get_random_preset(
     return choice(candidates)  # nosec
 
 
-def from_preset(preset: Dict, ff_version: Optional[str] = None) -> Dict[str, Any]:
+def from_preset(
+    preset: Dict,
+    ff_version: Optional[str] = None,
+    fonts_spacing_seed: Optional[int] = None,
+    audio_seed: Optional[int] = None,
+    canvas_seed: Optional[int] = None,
+) -> Dict[str, Any]:
     """
     Convert a real fingerprint preset to CAMOU_CONFIG format.
+
+    fonts_spacing_seed / audio_seed / canvas_seed pin the respective noise
+    seeds for a reproducible fingerprint (#328). Leave unset (default) to
+    randomize them, as before.
     """
     config: Dict[str, Any] = {}
 
@@ -311,10 +323,13 @@ def from_preset(preset: Dict, ff_version: Optional[str] = None) -> Dict[str, Any
     if webgl.get('unmaskedRenderer'):
         config['webGl:renderer'] = webgl['unmaskedRenderer']
 
-    # Generate unique random seeds per launch (1 to 2^32-1, excluding 0 which is a no-op in C++)
-    config['fonts:spacing_seed'] = randint(1, 4_294_967_295)  # nosec
-    config['audio:seed'] = randint(1, 4_294_967_295)  # nosec
-    config['canvas:seed'] = randint(1, 4_294_967_295)  # nosec
+    # Use the pinned seed when provided, otherwise generate a random one per launch
+    # (1 to 2^32-1, excluding 0 which is a no-op in C++)
+    config['fonts:spacing_seed'] = (
+        fonts_spacing_seed if fonts_spacing_seed is not None else randint(1, 4_294_967_295)  # nosec
+    )
+    config['audio:seed'] = audio_seed if audio_seed is not None else randint(1, 4_294_967_295)  # nosec
+    config['canvas:seed'] = canvas_seed if canvas_seed is not None else randint(1, 4_294_967_295)  # nosec
 
     if preset.get('timezone'):
         config['timezone'] = preset['timezone']
@@ -407,7 +422,11 @@ def _build_init_script(values: Dict[str, Any]) -> str:
 
     # WebRTC IP
     ip = values.get('webrtcIP')
-    if ip:
+    if ip and valid_ipv6(ip):
+        lines.append(
+            f'  if (typeof w.setWebRTCIPv6 === "function") w.setWebRTCIPv6({_json.dumps(ip)});'
+        )
+    elif ip:
         lines.append(
             f'  if (typeof w.setWebRTCIPv4 === "function") w.setWebRTCIPv4({_json.dumps(ip)});'
         )
@@ -685,6 +704,35 @@ def handle_screenXY(camoufox_data: Dict[str, Any], fp_screen: ScreenFingerprint)
         camoufox_data['window.screenY'] = randrange(screenY, 0)  # nosec
 
 
+def clamp_window_to_screen(camoufox_data: Dict[str, Any]) -> None:
+    """
+    Clamp window dimensions to the screen (#118).
+
+    Browserforge's raw fingerprints can yield window.outerWidth > screen.width
+    or window.outerHeight > screen.availHeight -- a window bigger than the
+    screen is a physical impossibility and a detectable tell.
+    """
+    screen_width = camoufox_data.get('screen.width')
+    outer_width = camoufox_data.get('window.outerWidth')
+    if screen_width and outer_width and outer_width > screen_width:
+        outer_width = screen_width
+        camoufox_data['window.outerWidth'] = outer_width
+
+    screen_avail_height = camoufox_data.get('screen.availHeight')
+    outer_height = camoufox_data.get('window.outerHeight')
+    if screen_avail_height and outer_height and outer_height > screen_avail_height:
+        outer_height = screen_avail_height
+        camoufox_data['window.outerHeight'] = outer_height
+
+    inner_width = camoufox_data.get('window.innerWidth')
+    if inner_width and outer_width and inner_width > outer_width:
+        camoufox_data['window.innerWidth'] = outer_width
+
+    inner_height = camoufox_data.get('window.innerHeight')
+    if inner_height and outer_height and inner_height > outer_height:
+        camoufox_data['window.innerHeight'] = outer_height
+
+
 def from_browserforge(fingerprint: Fingerprint, ff_version: Optional[str] = None) -> Dict[str, Any]:
     """
     Converts a Browserforge fingerprint to a Camoufox config.
@@ -697,6 +745,7 @@ def from_browserforge(fingerprint: Fingerprint, ff_version: Optional[str] = None
         ff_version=ff_version,
     )
     handle_screenXY(camoufox_data, fingerprint.screen)
+    clamp_window_to_screen(camoufox_data)
 
     return camoufox_data
 
@@ -724,15 +773,39 @@ def handle_window_size(fp: Fingerprint, outer_width: int, outer_height: int) -> 
     sc.outerHeight = outer_height
 
 
+def _generate_with_screen_fallback(**config) -> Fingerprint:
+    """
+    Calls FP_GENERATOR.generate(), retrying once without the `screen` constraint
+    if it raises ValueError (#141).
+
+    A small real monitor can produce a Screen(max_width=..., max_height=...)
+    constraint so restrictive that no fingerprint/header combination satisfies
+    it; browserforge 1.2.4 raises instead of relaxing the constraint itself.
+    """
+    try:
+        return FP_GENERATOR.generate(**config)
+    except ValueError as e:
+        if not config.get('screen'):
+            raise
+        warnings.warn(
+            "Browserforge could not generate a fingerprint matching the screen "
+            f"constraint ({e}); retrying without it.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        config = {**config, 'screen': None}
+        return FP_GENERATOR.generate(**config)
+
+
 def generate_fingerprint(window: Optional[Tuple[int, int]] = None, **config) -> Fingerprint:
     """
     Generates a Firefox fingerprint with Browserforge.
     """
     if window:  # User-specified outer window size
-        fingerprint = FP_GENERATOR.generate(**config)
+        fingerprint = _generate_with_screen_fallback(**config)
         handle_window_size(fingerprint, *window)
         return fingerprint
-    return FP_GENERATOR.generate(**config)
+    return _generate_with_screen_fallback(**config)
 
 
 if __name__ == "__main__":
