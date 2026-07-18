@@ -4,6 +4,12 @@
 
 const uuidGen = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
 
+// Camoufox: cap juggler event waits so a missed ack (mouse/wheel/drag dispatch)
+// can't hang the process-wide activation chain forever (#225/#224/#262/#196/#331).
+// Generous, matching Playwright's default action timeout; the happy path resolves
+// as soon as the event fires.
+const DEFAULT_JUGGLER_EVENT_TIMEOUT_MS = 30000;
+
 export class Helper {
   decorateAsEventEmitter(objectToDecorate) {
     const { EventEmitter } = ChromeUtils.importESModule('resource://gre/modules/EventEmitter.sys.mjs');
@@ -23,13 +29,22 @@ export class Helper {
     return allBrowsingContexts;
   }
 
-  awaitTopic(topic) {
-    return new Promise(resolve => {
+  awaitTopic(topic, timeoutMs = DEFAULT_JUGGLER_EVENT_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      let timer;
       const listener = () => {
+        if (timer)
+          clearTimeout(timer);
         Services.obs.removeObserver(listener, topic);
         resolve();
       }
       Services.obs.addObserver(listener, topic);
+      if (timeoutMs) {
+        timer = setTimeout(() => {
+          Services.obs.removeObserver(listener, topic);
+          reject(new Error(`Timed out after ${timeoutMs}ms waiting for topic "${topic}"`));
+        }, timeoutMs);
+      }
     });
   }
 
@@ -191,14 +206,30 @@ export class EventWatcher {
     this._pendingPromises = [];
   }
 
-  async ensureEvent(aEventName, predicate) {
+  async ensureEvent(aEventName, predicate, timeoutMs = DEFAULT_JUGGLER_EVENT_TIMEOUT_MS) {
     if (typeof aEventName !== 'string')
       throw new Error('ERROR: ensureEvent expects a "string" as its first argument');
     while (true) {
       const result = this.getEvent(aEventName, predicate);
       if (result)
         return result;
-      await new Promise((resolve, reject) => this._pendingPromises.push({resolve, reject}));
+      // Camoufox: bound this wait so a missed ack can't hang the (process-wide)
+      // activation chain forever (#225 et al). Resolves immediately when
+      // _onEvent fires; rejects after timeoutMs so the chain is released.
+      await new Promise((resolve, reject) => {
+        const entry = {resolve, reject};
+        this._pendingPromises.push(entry);
+        if (timeoutMs) {
+          const timer = setTimeout(() => {
+            const i = this._pendingPromises.indexOf(entry);
+            if (i !== -1)
+              this._pendingPromises.splice(i, 1);
+            reject(new Error(`Timed out after ${timeoutMs}ms waiting for juggler event "${aEventName}"`));
+          }, timeoutMs);
+          entry.resolve = () => { clearTimeout(timer); resolve(); };
+          entry.reject = (e) => { clearTimeout(timer); reject(e); };
+        }
+      });
     }
   }
 
