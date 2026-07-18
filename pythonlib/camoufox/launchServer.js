@@ -1,7 +1,21 @@
-// Workaround that accesses Playwright's undocumented `launchServer` method in Python
-// Without having to use the Node.js Playwright library.
+// Workaround that accesses Playwright's `launchServer` method in Python
+// Without having to install the Node.js Playwright library.
 
-const { BrowserServerLauncherImpl } = require(`${process.cwd()}/lib/browserServerImpl.js`)
+const path = require('path')
+
+// The driver shipped with playwright-python is a copy of playwright-core, so its
+// entrypoint exposes `launchServer`. Resolve through the entrypoint rather than lib/
+// internals, whose layout is private and changes between releases: 1.60 bundled
+// lib/browserServerImpl.js away, which broke this script.
+const driverPackage = process.argv[2]
+
+let playwright
+try {
+    playwright = require(path.join(driverPackage, 'index.js'))
+} catch (error) {
+    console.error(`Error loading the Playwright driver from ${driverPackage}:`, error.message)
+    process.exit(1)
+}
 
 function collectData() {
     return new Promise((resolve) => {
@@ -22,10 +36,7 @@ collectData().then((options) => {
     console.time('Server launched');
     console.info('Launching server...');
     
-    const server = new BrowserServerLauncherImpl('firefox')
-    
-    // Call Playwright's `launchServer` method
-    server.launchServer(options).then(browserServer => {
+    playwright.firefox.launchServer(options).then(browserServer => {
         console.timeEnd('Server launched');
         console.log('Websocket endpoint:\x1b[93m', browserServer.wsEndpoint(), '\x1b[0m');
         // Continue forever

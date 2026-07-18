@@ -1,5 +1,6 @@
 import os
 import sys
+from functools import wraps
 from os import environ
 from os.path import abspath
 from pathlib import Path
@@ -22,7 +23,7 @@ from .exceptions import (
     NonFirefoxFingerprint,
     NotWritableError,
 )
-from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset
+from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_window_dimensions, set_media_devices_defaults
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
@@ -417,6 +418,64 @@ def warn_manual_config(config: Dict[str, Any]) -> None:
         LeakWarning.warn('viewport', False)
 
 
+_WINDOW_DIM_KEYS = (
+    'window.outerWidth',
+    'window.outerHeight',
+    'window.innerWidth',
+    'window.innerHeight',
+    'document.body.clientWidth',
+    'document.body.clientHeight',
+)
+
+
+def spoofs_window_dimensions(from_options: Dict[str, Any]) -> bool:
+    """
+    Whether the CAMOU_CONFIG in a set of launch options spoofs any window
+    dimension. The config is chunked across CAMOU_CONFIG_<n> env vars, so
+    reassemble it in index order before looking.
+    """
+    env = from_options.get('env') or {}
+    chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
+    if not chunks:
+        return False
+    blob = ''.join(v for _, v in sorted(chunks))
+    return any(key in blob for key in _WINDOW_DIM_KEYS)
+
+
+def attach_no_viewport_default(target: Any) -> Any:
+    """
+    Default new_page()/new_context() to no_viewport=True.
+
+    Playwright applies a 1280x720 viewport by default, which makes Juggler ask
+    the content window to become 1280x720 (TargetRegistry.updateViewportSize).
+    When Camoufox is pinning the window to a spoofed size, that request can
+    never be satisfied, and awaitViewportDimensions has no timeout -- so the
+    second new_page() hangs forever (daijro/camoufox#666).
+
+    With no_viewport, Juggler measures the window instead of resizing it, so the
+    handshake resolves immediately and the page reports the spoofed dimensions
+    exactly. Explicit viewport=/no_viewport= from the caller always wins.
+    """
+    for name in ('new_page', 'new_context'):
+        original = getattr(target, name, None)
+        if original is None:
+            continue
+
+        def wrap(original: Any) -> Any:
+            @wraps(original)
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                if 'viewport' not in kwargs and 'no_viewport' not in kwargs:
+                    kwargs['no_viewport'] = True
+                # Works for both sync and async: async returns the coroutine
+                # unawaited, and the caller awaits it as usual.
+                return original(*args, **kwargs)
+
+            return wrapper
+
+        setattr(target, name, wrap(original))
+    return target
+
+
 async def async_attach_vd(
     browser: Any, virtual_display: Optional[VirtualDisplay] = None
 ) -> Any:  # type: ignore
@@ -637,6 +696,13 @@ def launch_options(
     if not i_know_what_im_doing:
         warn_manual_config(config)
 
+    # Snapshot which domains the USER set before fingerprint generation fills in
+    # the rest. The post-generation BrowserForge-correction fixes below must
+    # only touch generated values, never override what the user passed.
+    _user_set_navigator = is_domain_set(config, 'navigator.')
+    _user_set_screen_window = is_domain_set(config, 'screen.', 'window.')
+    _user_set_media_devices = is_domain_set(config, 'mediaDevices:')
+
     # Assert the target OS is valid
     if os:
         check_valid_os(os)
@@ -693,6 +759,14 @@ def launch_options(
 
     target_os = get_target_os(config)
 
+    # Correct BrowserForge fingerprint inconsistencies that leak as headless /
+    # impossible-geometry tells, unless the user is driving these themselves.
+    if not _user_set_navigator:
+        fix_navigator_arch(config, target_os)
+    if not _user_set_screen_window:
+        fix_screen_no_taskbar(config, target_os)
+        clamp_window_dimensions(config)
+
     # Set a random window.history.length
     set_into(config, 'window.history.length', randrange(1, 6))  # nosec
 
@@ -721,6 +795,11 @@ def launch_options(
             config['voices'] = _generate_random_voice_subset(os_name_v)
         except Exception:
             pass
+
+    # Default mediaDevices to one mic + one camera so headless contexts don't
+    # expose an empty enumerateDevices() list (a headless tell).
+    if not _user_set_media_devices:
+        set_media_devices_defaults(config)
 
     # Set random seeds for fingerprint noise (per launch)
     set_into(config, 'fonts:spacing_seed', randint(1, 4_294_967_295))  # nosec

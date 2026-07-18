@@ -103,6 +103,7 @@
   { "property": "forceScopeAccess", "type": "bool" },
 
   { "property": "disableTheming", "type": "bool" },
+  { "property": "disableInstantAnimations", "type": "bool" },
   { "property": "memorysaver", "type": "bool" },
   { "property": "addons", "type": "array" },
   { "property": "certificatePaths", "type": "array" },
