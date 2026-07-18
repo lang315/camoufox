@@ -90,18 +90,18 @@ index 1cfa4b8497..bdf8d7202e 100644
 +    // Set default size
 +    window.resizeTo(1280, 1040);
 +
-+    // Hijack the outer window size
-+    let outerWidth, outerHeight;
-+    if ((outerWidth = ChromeUtils.camouGetInt("window.outerWidth"))) {
++    // Hijack outer size — resolve both dims, then one resizeTo. resizeTo is async, so
++    // reading window.outer* back between two calls returns a stale value and reverts a dim (#192).
++    let outerWidth = ChromeUtils.camouGetInt("window.outerWidth"), outerHeight = ChromeUtils.camouGetInt("window.outerHeight");
++    if (outerWidth) {
 +      document.documentElement.style.setProperty('width', outerWidth + 'px');
 +      browser.style.setProperty('width', outerWidth + 'px');
-+      window.resizeTo(outerWidth, window.outerHeight);
 +    }
-+    if ((outerHeight = ChromeUtils.camouGetInt("window.outerHeight"))) {
++    if (outerHeight) {
 +      document.documentElement.style.setProperty('height', outerHeight + 'px');
 +      browser.style.setProperty('height', outerHeight + 'px');
-+      window.resizeTo(window.outerWidth, outerHeight);
 +    }
++    window.resizeTo(outerWidth || 1280, outerHeight || 1040);
 +    browser.style.setProperty('box-sizing', 'content-box');
 +
 +    // Hijack the inner window size
