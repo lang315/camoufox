@@ -99,13 +99,13 @@ index 1cfa4b8497..bdf8d7202e 100644
 +    // caps .browserStack, which caps the content viewport, which makes Juggler's
 +    // awaitViewportDimensions handshake unsatisfiable for any larger viewport.
 +    // That await has no timeout, so it hangs forever (daijro/camoufox#666).
-+    let outerWidth, outerHeight;
-+    if ((outerWidth = ChromeUtils.camouGetInt("window.outerWidth"))) {
-+      window.resizeTo(outerWidth, window.outerHeight);
-+    }
-+    if ((outerHeight = ChromeUtils.camouGetInt("window.outerHeight"))) {
-+      window.resizeTo(window.outerWidth, outerHeight);
-+    }
++    let outerWidth = ChromeUtils.camouGetInt("window.outerWidth");
++    let outerHeight = ChromeUtils.camouGetInt("window.outerHeight");
++    // Resolve both dims, then a single resizeTo. resizeTo is async, so reading
++    // window.outer* back between two calls returns a stale value and reverts a
++    // dimension (#192). Values are already spoofed in C++, so resize is enough.
++    if (outerWidth || outerHeight)
++      window.resizeTo(outerWidth || 1280, outerHeight || 1040);
 +    browser.style.setProperty('box-sizing', 'content-box');
 +
 +    // Hijack the inner window size
