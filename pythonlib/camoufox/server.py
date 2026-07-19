@@ -79,12 +79,16 @@ def launch_server(**kwargs) -> NoReturn:
 
     data = orjson.dumps(to_camel_case_dict(config))
 
+    # The Playwright driver's package directory, which bundles playwright-core.
+    driver_package = Path(nodejs).parent / "package"
+
     process = subprocess.Popen(  # nosec
         [
             nodejs,
             str(LAUNCH_SCRIPT),
+            str(driver_package),
         ],
-        cwd=Path(nodejs).parent / "package",
+        cwd=driver_package,
         stdin=subprocess.PIPE,
         text=True,
     )
@@ -97,13 +101,12 @@ def launch_server(**kwargs) -> NoReturn:
     atexit.register(_terminate, process)
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
-    # Write data to stdin and close the stream
-    if process.stdin:
-        process.stdin.write(base64.b64encode(data).decode())
-        process.stdin.close()
-
-    # Wait forever
-    process.wait()
+    # Write data to stdin, close the stream, and wait forever.
+    # communicate() tolerates the pipe closing early if the server exits before reading
+    # its config, keeping that error visible instead of masking it with an OSError.
+    process.communicate(input=base64.b64encode(data).decode())
 
     # Add an explicit return statement to satisfy the NoReturn type hint
-    raise RuntimeError("Server process terminated unexpectedly")
+    raise RuntimeError(
+        f"Server process terminated unexpectedly with exit code {process.returncode}"
+    )

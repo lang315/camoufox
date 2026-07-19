@@ -81,6 +81,9 @@ export class PageHandler {
 
     this._isDragging = false;
     this._lastMousePosition = { x: 0, y: 0 };
+    // Camoufox: last position an actual mousemove landed on. Used as the
+    // start point for the humanized cursor trajectory (humanize=True).
+    this._lastTrackedPos = { x: 0, y: 0 };
 
     this._reportedFrameIds = new Set();
     this._networkEventsForUnreportedFrameIds = new Map();
@@ -362,8 +365,8 @@ export class PageHandler {
       }
     }
 
-    // Firefox 152: `ownerGlobal` may be null here; topChromeWindow is already the window.
-    const win = browsingContext.topChromeWindow.ownerGlobal || browsingContext.topChromeWindow;
+    // Firefox 152 removed `ownerGlobal`; `topChromeWindow` is already the chrome window.
+    const win = browsingContext.topChromeWindow;
     const canvas = win.document.createElementNS('http://www.w3.org/1999/xhtml', 'canvas');
     canvas.width = canvasWidth;
     canvas.height = canvasHeight;
@@ -451,7 +454,24 @@ export class PageHandler {
 
   async ['Page.reload']() {
     await this._pageTarget.activateAndRun(() => {
-      const doc = this._pageTarget._tab.linkedBrowser.ownerDocument;
+      const browser = this._pageTarget._tab.linkedBrowser;
+      // Camoufox: Firefox 146's Browser:Reload command is a no-op on about:blank
+      // (no history entry to reload). Fall back to a forced reloadWithFlags via
+      // browsingContext so the load event still fires and init scripts run.
+      try {
+        const uri = browser.currentURI?.spec;
+        if (uri === 'about:blank' || !uri) {
+          const bc = browser.browsingContext;
+          if (bc && typeof bc.reload === 'function') {
+            const Ci = Components.interfaces;
+            bc.reload(Ci.nsIWebNavigation.LOAD_FLAGS_NONE);
+            return;
+          }
+        }
+      } catch (e) {
+        dump(`juggler: reload-fallback failed: ${e}\n`);
+      }
+      const doc = browser.ownerDocument;
       doc.getElementById('Browser:Reload').doCommand();
     });
   }
@@ -506,13 +526,14 @@ export class PageHandler {
         await helper.awaitTopic('apz-repaints-flushed');
 
       const watcher = new EventWatcher(this._pageEventSink, types, this._pendingEventWatchers);
-      const promises = [];
-      for (const type of types) {
+      // Dispatch a single synthesized mouse event to the renderer and return a
+      // promise that resolves once the renderer acks it.
+      const sendOne = (eventType, eventX, eventY) => {
         // This dispatches to the renderer synchronously.
         const jugglerEventId = win.windowUtils.jugglerSendMouseEvent(
-          type,
-          x + boundingBox.left,
-          y + boundingBox.top,
+          eventType,
+          eventX + boundingBox.left,
+          eventY + boundingBox.top,
           button,
           clickCount,
           modifiers,
@@ -525,7 +546,33 @@ export class PageHandler {
           win.windowUtils.DEFAULT_MOUSE_POINTER_ID /* pointerIdentifier */,
           false /* disablePointerEvent */
         );
-        promises.push(watcher.ensureEvent(type, eventObject => eventObject.jugglerEventId === jugglerEventId));
+        return watcher.ensureEvent(eventType, eventObject => eventObject.jugglerEventId === jugglerEventId);
+      };
+
+      const promises = [];
+      for (const type of types) {
+        // Camoufox: when humanize is enabled, expand a direct mousemove into a
+        // human-like trajectory of intermediate mousemoves generated in C++
+        // (ChromeUtils.camouGetMouseTrajectory / MouseTrajectories.hpp).
+        if (type === 'mousemove' && ChromeUtils.camouGetBool('humanize', false)) {
+          const trajectory = ChromeUtils.camouGetMouseTrajectory(this._lastTrackedPos.x, this._lastTrackedPos.y, x, y);
+          // Dispatch intermediate points sequentially with a short delay. The
+          // first/last pairs are skipped: the last pair is the exact
+          // destination, which is dispatched explicitly below.
+          for (let i = 2; i < trajectory.length - 2; i += 2) {
+            const currentX = trajectory[i];
+            const currentY = trajectory[i + 1];
+            // Skip movement that is out of bounds
+            if (currentX < 0 || currentY < 0 || currentX > boundingBox.width || currentY > boundingBox.height)
+              continue;
+            await sendOne('mousemove', currentX, currentY);
+            await new Promise(resolve => setTimeout(resolve, 10));
+          }
+          // Always finish exactly on the requested destination.
+          promises.push(sendOne('mousemove', x, y));
+        } else {
+          promises.push(sendOne(type, x, y));
+        }
       }
       await Promise.all(promises);
       await watcher.dispose();
@@ -538,7 +585,8 @@ export class PageHandler {
       this._pageTarget.ensureContextMenuClosed();
       // If someone asks us to dispatch mouse event outside of viewport, then we normally would drop it.
       const boundingBox = this._pageTarget._linkedBrowser.getBoundingClientRect();
-      if (x < 0 || y < 0 || x > boundingBox.width || y > boundingBox.height) {
+      // Treat exact-edge coordinates as out-of-viewport: a mousemove at x==width or y==height fires as an exit event instead of eMouseMove, so the hit-renderer signal never arrives and every later input event hangs behind it forever.
+      if (x < 0 || y < 0 || x >= boundingBox.width || y >= boundingBox.height) {
         if (type !== 'mousemove')
           return;
 
@@ -585,6 +633,9 @@ export class PageHandler {
 
         const watcher = new EventWatcher(this._pageEventSink, ['dragstart', 'juggler-drag-finalized'], this._pendingEventWatchers);
         await sendEvents(['mousemove']);
+        // Camoufox: remember where the cursor landed so the next humanized
+        // move starts its trajectory from the real previous position.
+        this._lastTrackedPos = { x, y };
 
         // The order of events after 'mousemove' is sent:
         // 1. [dragstart] - might or might NOT be emitted
