@@ -22,9 +22,6 @@
 > [!NOTE]
 > Browser development is active at [github.com/CloverLabsAI/camoufox](https://github.com/CloverLabsAI/camoufox) and [github.com/VulpineOS/VulpineOS](https://github.com/VulpineOS/VulpineOS).<br>This repo is being used to merge checkpoint releases and should be treated as the master copy.
 
-> [!NOTE]
-> To make use of the alpha Camoufox releases, use the [`cloverlabs-camoufox`](https://pypi.org/project/cloverlabs-camoufox/) pip package.
-
 ---
 
 # Sponsors
@@ -198,14 +195,14 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://go.nodemaven.com/daijro" target="_blank">
-        <img width="380" alt="nodemaven" src="https://github.com/user-attachments/assets/3c4075dd-105a-4ed4-a68a-e8cb127bedfa"/>
+      <a href="https://go.nodemaven.com/daijronew" target="_blank">
+        <img width="380" alt="nodemaven" src="https://github.com/user-attachments/assets/49608eb7-7c1b-4904-bdf8-53e69c7eda8c"/>
       </a>
     </td>
     <td valign="middle">
-      <a href="https://go.nodemaven.com/daijro">NodeMaven</a>: The most reliable proxy provider with the Highest Quality IP on the market.<br>
+      <a href="https://go.nodemaven.com/daijronew">NodeMaven</a>: The most reliable proxy provider with the Highest Quality IP on the market.<br>
       Best solution for automation, web scraping, SEO research, and social media management.<br>
-      <a href="https://go.nodemaven.com/daijro">NodeMaven</a> offers:<br>
+      <a href="https://go.nodemaven.com/daijronew">NodeMaven</a> offers:<br>
       • Sticky sessions up to 7 days<br>
       • 99.9% uptime<br>
       • IP filtering: all proxies have fraud score <97%<br>
@@ -591,6 +588,8 @@ Finally you can build and package Camoufox the following command:
 ```bash
 python3 multibuild.py --target linux windows macos --arch x86_64 arm64 i686
 ```
+
+For new builds, `i686` is supported only for Windows. Unsupported target/architecture combinations are skipped.
 
 <details>
 <summary>

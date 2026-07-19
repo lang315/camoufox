@@ -123,12 +123,17 @@ def _generate_random_font_subset(target_os: str) -> List[str]:
     return result
 
 
-# OS voice lists loaded from voices.json
-_OS_VOICES_CACHE: Optional[Dict[str, List[str]]] = None
+# OS voice lists loaded from voices.json, parsed into "Name:lang:type" tuples.
+_OS_VOICES_CACHE: Optional[Dict[str, List[Tuple[str, str, str]]]] = None
 
 
-def _load_os_voices() -> Dict[str, List[str]]:
-    """Load OS voice lists from voices.json, extracting voice names."""
+def _load_os_voices() -> Dict[str, List[Tuple[str, str, str]]]:
+    """Load OS voice lists from voices.json as (name, lang, type) tuples.
+
+    Each entry is "Name:lang:type" (type is "local" or "remote"). Voice names
+    may contain parens/commas but not colons, so a last-two-colons split is
+    safe.
+    """
     global _OS_VOICES_CACHE
     if _OS_VOICES_CACHE is not None:
         return _OS_VOICES_CACHE
@@ -136,10 +141,23 @@ def _load_os_voices() -> Dict[str, List[str]]:
     with open(voices_path, 'rb') as f:
         import orjson
         raw = orjson.loads(f.read())
-    # Extract voice names from "Name:locale:type" format
     _OS_VOICES_CACHE = {}
     for os_key, entries in raw.items():
-        _OS_VOICES_CACHE[os_key] = [e.split(':')[0] for e in entries]
+        parsed: List[Tuple[str, str, str]] = []
+        for entry in entries:
+            last = entry.rfind(':')
+            if last < 0:
+                continue
+            vtype = entry[last + 1:]
+            before = entry[:last]
+            langsep = before.rfind(':')
+            if langsep < 0:
+                continue
+            lang = before[langsep + 1:]
+            name = before[:langsep]
+            if name and lang:
+                parsed.append((name, lang, vtype))
+        _OS_VOICES_CACHE[os_key] = parsed
     return _OS_VOICES_CACHE
 
 
@@ -153,13 +171,56 @@ _ESSENTIAL_VOICES_WINDOWS = [
     'Microsoft Mark - English (United States)',
 ]
 
+# Real Firefox speechSynthesis URI prefixes per backend.
+#   macOS NSSpeechSynthesizer -> "urn:moz-tts:osx:<dotted-slug>"
+#   Windows SAPI              -> "urn:moz-tts:sapi:<dotted-slug>"
+#   Linux speech-dispatcher   -> "urn:moz-tts:speechd:<escaped-name>?<lang>"
+_VOICE_URI_PREFIX = {
+    'mac': 'urn:moz-tts:osx:',
+    'win': 'urn:moz-tts:sapi:',
+    'lin': 'urn:moz-tts:speechd:',
+}
 
-def _generate_random_voice_subset(target_os: str) -> List[str]:
-    """
-    Generate a random subset of speech voices for the given OS.
-    macOS: random 40-80% of non-essential + essential always included.
-    Windows: all voices (too few to subset meaningfully).
-    Linux: empty list (no native speech voices).
+
+def _voice_uri_slug(name: str) -> str:
+    """Stable dotted slug for mac/win URIs (shape-plausible, not catalog-exact)."""
+    return re.sub(r'^\.|\.$', '', re.sub(r'[^a-z0-9]+', '.', name.lower()))
+
+
+def _voice_uri(os_key: str, name: str, lang: str) -> str:
+    """Build a voiceUri matching what real Firefox emits for the OS backend."""
+    if os_key == 'lin':
+        # Firefox's SpeechDispatcherService.cpp builds:
+        #   "urn:moz-tts:speechd:" + NS_EscapeURL(name, OnlyNonASCII|Spaces) + "?" + lang
+        # i.e. spaces -> %20 and non-ASCII bytes -> %XX, ASCII punctuation intact.
+        escaped = []
+        for ch in name:
+            if ch == ' ':
+                escaped.append('%20')
+            elif ord(ch) <= 0x7F:
+                escaped.append(ch)
+            else:
+                escaped.append(''.join(f'%{b:02X}' for b in ch.encode('utf-8')))
+        return f"{_VOICE_URI_PREFIX['lin']}{''.join(escaped)}?{lang}"
+    return f"{_VOICE_URI_PREFIX.get(os_key, '')}{_voice_uri_slug(name)}"
+
+
+def _generate_random_voice_subset(
+    target_os: str, locale: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Generate the speech voice list for the given OS as MaskConfig objects.
+
+    Returns a list of {lang, name, voiceUri, isDefault, isLocalService} dicts,
+    the shape MaskConfig::MVoices() requires (it silently drops any entry
+    missing a field, so raw name strings would register nothing).
+
+    Without this override, Firefox registers the HOST machine's
+    speech-dispatcher / SAPI / NSSpeech voices, leaking the OS the wrapper
+    actually runs on. We therefore emit a list for EVERY target OS:
+      macOS:   essential voices + a random 40-80% of the rest.
+      Windows: full SAPI set (subsetting a fixed list reads as suspicious).
+      Linux:   full espeak-ng base-language set (~131 voices) as enumerated
+               by speech-dispatcher — the fixed list a Linux Firefox exposes.
     """
     os_voices_data = _load_os_voices()
     os_key = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}.get(target_os, 'mac')
@@ -168,25 +229,201 @@ def _generate_random_voice_subset(target_os: str) -> List[str]:
     if not full_list:
         return []
 
-    # Windows has too few voices to subset — return all
-    if target_os == 'windows':
-        return list(full_list)
-
-    # macOS: random 40-80% subset
-    essential = set(_ESSENTIAL_VOICES_MACOS)
-    result = [v for v in full_list if v in essential]
-    non_essential = [v for v in full_list if v not in essential]
-
-    pct = 40 + int(random() * 41)  # 40-80%
-    count = round((pct / 100) * len(non_essential))
-
-    if count < len(non_essential):
-        selected = sample(non_essential, count)
+    if os_key in ('win', 'lin'):
+        # Fixed lists across installs (SAPI / espeak-ng) — ship the whole set.
+        selected = list(full_list)
     else:
-        selected = non_essential
-    result.extend(selected)
+        # macOS: essential voices + random 40-80% of the rest.
+        essential = set(_ESSENTIAL_VOICES_MACOS)
+        result = [v for v in full_list if v[0] in essential]
+        non_essential = [v for v in full_list if v[0] not in essential]
+        pct = 40 + int(random() * 41)  # 40-80%
+        count = round((pct / 100) * len(non_essential))
+        if count < len(non_essential):
+            result.extend(sample(non_essential, count))
+        else:
+            result.extend(non_essential)
+        selected = result
 
+    voices: List[Dict[str, Any]] = [
+        {
+            'name': name,
+            'lang': lang,
+            'voiceUri': _voice_uri(os_key, name, lang),
+            'isDefault': False,
+            'isLocalService': vtype == 'local',
+        }
+        for (name, lang, vtype) in selected
+    ]
+
+    # Mark a default voice matching the spoofed locale prefix so it lines up
+    # with Intl.DateTimeFormat().resolvedOptions().locale (CreepJS flags a
+    # voiceLangMismatch otherwise).
+    if voices:
+        prefix = locale.split('-')[0].lower() if locale else 'en'
+        idx = next(
+            (i for i, v in enumerate(voices) if locale and v['lang'].lower() == locale.lower()),
+            -1,
+        )
+        if idx < 0:
+            idx = next(
+                (i for i, v in enumerate(voices) if v['lang'].split('-')[0].lower() == prefix),
+                -1,
+            )
+        if idx < 0:
+            idx = 0
+        voices[idx]['isDefault'] = True
+
+    return voices
+
+
+def _normalize_preset_voices(
+    voices: Any, target_os: str
+) -> List[Dict[str, Any]]:
+    """Coerce a preset's `speechVoices` into MaskConfig voice objects.
+
+    Presets historically store voices as "Name:lang:type" strings, which the
+    C++ MaskConfig::MVoices() silently drops (it needs full objects). Convert
+    them; pass through entries that are already objects.
+    """
+    os_key = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}.get(target_os, 'mac')
+    result: List[Dict[str, Any]] = []
+    for entry in voices:
+        if isinstance(entry, dict):
+            result.append(entry)
+            continue
+        last = entry.rfind(':')
+        if last < 0:
+            continue
+        vtype = entry[last + 1:]
+        before = entry[:last]
+        langsep = before.rfind(':')
+        if langsep < 0:
+            continue
+        lang = before[langsep + 1:]
+        name = before[:langsep]
+        if not name or not lang:
+            continue
+        result.append(
+            {
+                'name': name,
+                'lang': lang,
+                'voiceUri': _voice_uri(os_key, name, lang),
+                'isDefault': False,
+                'isLocalService': vtype == 'local',
+            }
+        )
+    if result and not any(v['isDefault'] for v in result):
+        result[0]['isDefault'] = True
     return result
+
+
+def fix_navigator_arch(config: Dict[str, Any], target_os: str) -> None:
+    """Force navigator.platform AND navigator.oscpu to match the UA's arch.
+
+    ~8% of Linux Firefox fingerprints in the BrowserForge pool report
+    "Linux armv81" for platform/oscpu while the UA says "Linux x86_64". That
+    arch mismatch is itself a CreepJS lie signal (CreepJS cross-checks oscpu,
+    platform, and the UA arch). Mac/Windows pools are consistent and need no
+    correction.
+    """
+    if target_os != 'lin':
+        return
+    ua = config.get('navigator.userAgent')
+    if not ua:
+        return
+    target = ''
+    if 'Linux x86_64' in ua:
+        target = 'Linux x86_64'
+    elif 'Linux i686' in ua:
+        target = 'Linux i686'
+    if not target:
+        return
+    if config.get('navigator.platform') != target:
+        config['navigator.platform'] = target
+    if config.get('navigator.oscpu') != target:
+        config['navigator.oscpu'] = target
+
+
+def fix_screen_no_taskbar(config: Dict[str, Any], target_os: str) -> None:
+    """Ensure screen.availHeight < screen.height so CreepJS's noTaskbar flag
+    (screen.height == availHeight and screen.width == availWidth) doesn't flip.
+
+    Every desktop OS keeps some chrome visible (Mac menu bar ~25px, Win taskbar
+    ~40px, Linux panel ~27px); the BrowserForge pool occasionally ships
+    fingerprints with identical screen/avail values which leak as a headless
+    tell. Also clamp window.outerHeight (and innerHeight) to the new avail so
+    the window isn't taller than the available area.
+    """
+    sw = config.get('screen.width')
+    sh = config.get('screen.height')
+    aw = config.get('screen.availWidth')
+    ah = config.get('screen.availHeight')
+    if not (sw and sh and aw == sw and ah == sh):
+        return
+    taskbar = 40 if target_os == 'win' else 25 if target_os == 'mac' else 27
+    new_avail = sh - taskbar
+    config['screen.availHeight'] = new_avail
+    oh = config.get('window.outerHeight')
+    if oh and oh > new_avail:
+        ih = config.get('window.innerHeight')
+        chrome = oh - ih if ih else 0
+        config['window.outerHeight'] = new_avail
+        if ih:
+            config['window.innerHeight'] = new_avail - chrome
+
+
+def clamp_window_dimensions(config: Dict[str, Any]) -> None:
+    """Enforce inner <= outer <= avail <= screen on BOTH axes.
+
+    The browser faithfully reports whatever we inject, so a BrowserForge
+    fingerprint that ships e.g. outerWidth > screen.width or innerWidth >
+    outerWidth leaks as an impossible geometry. Shrink each level down to its
+    container, preserving the chrome delta between outer and inner where
+    possible. Complements fix_screen_no_taskbar (which only clamps height).
+    """
+    for axis in ('Width', 'Height'):
+        screen = config.get(f'screen.{axis.lower()}')
+        avail = config.get(f'screen.avail{axis}')
+        outer = config.get(f'window.outer{axis}')
+        inner = config.get(f'window.inner{axis}')
+
+        # avail must not exceed screen
+        if screen and avail and avail > screen:
+            config[f'screen.avail{axis}'] = screen
+        avail_clamped = config.get(f'screen.avail{axis}', screen)
+
+        # outer must not exceed avail (or screen if avail is unknown)
+        outer_cap = avail_clamped if avail_clamped is not None else screen
+        if outer and outer_cap and outer > outer_cap:
+            chrome = max(0, outer - inner) if inner else 0
+            config[f'window.outer{axis}'] = outer_cap
+            if inner:
+                config[f'window.inner{axis}'] = max(1, outer_cap - chrome)
+
+        # inner must not exceed outer
+        outer_clamped = config.get(f'window.outer{axis}', outer)
+        inner_now = config.get(f'window.inner{axis}')
+        if inner_now and outer_clamped and inner_now > outer_clamped:
+            config[f'window.inner{axis}'] = outer_clamped
+
+
+def set_media_devices_defaults(config: Dict[str, Any]) -> None:
+    """Spoof navigator.mediaDevices.enumerateDevices() so headless contexts
+    expose a plausible device list.
+
+    A real desktop browser without explicit mic permission reports one
+    audioinput + one videoinput; an empty list is a headless tell. The patched
+    MediaDevices::FilterExposedDevices reads mediaDevices:{enabled,micros,
+    webcams,speakers}. Default to one of each input kind unless the caller
+    already set any mediaDevices: key.
+    """
+    if any(k.startswith('mediaDevices:') for k in config):
+        return
+    config['mediaDevices:enabled'] = True
+    config['mediaDevices:micros'] = 1
+    config['mediaDevices:webcams'] = 1
+    config['mediaDevices:speakers'] = 0
 
 
 def _select_presets_file(ff_version: Optional[Any] = None) -> Path:
@@ -361,7 +598,9 @@ def from_preset(
         config['voices'] = _generate_random_voice_subset(target_os)
     except Exception:
         if preset.get('speechVoices'):
-            config['voices'] = preset['speechVoices']
+            config['voices'] = _normalize_preset_voices(
+                preset['speechVoices'], target_os
+            )
 
     return config
 
@@ -443,10 +682,13 @@ def _build_init_script(values: Dict[str, Any]) -> str:
             f'  if (typeof w.setFontList === "function") w.setFontList({_json.dumps(joined)});'
         )
 
-    # Speech voices (comma-separated)
+    # Speech voices (comma-separated names). config['voices'] holds MaskConfig
+    # voice objects; extract the display name from each (tolerating a legacy
+    # list of plain name strings).
     voices = values.get('speechVoices')
     if voices and len(voices) > 0:
-        joined = ','.join(voices)
+        names = [v['name'] if isinstance(v, dict) else v for v in voices]
+        joined = ','.join(names)
         lines.append(
             f'  if (typeof w.setSpeechVoices === "function") w.setSpeechVoices({_json.dumps(joined)});'
         )

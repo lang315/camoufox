@@ -855,7 +855,10 @@ class ResponseStorage {
     }
     let encodings = [];
     // Note: fulfilled request comes with decoded body right away.
-    if ((request.httpChannel instanceof Ci.nsIEncodedChannel) && request.httpChannel.contentEncodings && !request.httpChannel.applyConversion && !request._fulfilled) {
+    // Note: ORB's compressed-media sniffing (browser.opaqueResponseBlocking) decodes
+    // the body in the parent process without clearing applyConversion, so
+    // hasContentDecompressed is the only signal that we already have plain bytes.
+    if ((request.httpChannel instanceof Ci.nsIEncodedChannel) && request.httpChannel.contentEncodings && !request.httpChannel.applyConversion && !request.httpChannel.hasContentDecompressed && !request._fulfilled) {
       const encodingHeader = request.httpChannel.getResponseHeader("Content-Encoding");
       encodings = encodingHeader.split(/\s*\t*,\s*\t*/);
     }
