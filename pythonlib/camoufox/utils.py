@@ -626,8 +626,15 @@ def launch_options(
             Note: If you are running linux, passing headless='virtual' to Camoufox & AsyncCamoufox
             will use Xvfb.
         main_world_eval (Optional[bool]):
-            Whether to enable running scripts in the main world.
-            To use this, prepend "mw:" to the script: page.evaluate("mw:" + script).
+            Deprecated / no-op on FF152 builds. Historically this ran scripts in the
+            page's main world via a "mw:" script prefix. On FF152 the default
+            page.evaluate already reaches the page's main-world globals (e.g.
+            page.evaluate("() => window.someGlobal") returns page-declared globals),
+            so the flag is unnecessary and reads no config. The "mw:" prefix is now
+            just a JavaScript label: it is a harmless no-op for expressions but makes
+            top-level lexical declarations fail ("lexical declarations can't appear in
+            a single-statement context") because let/const/class cannot be a labeled
+            statement's body. Omit the prefix and evaluate the script directly.
         executable_path (Optional[Union[str, Path]]):
             Custom Camoufox browser executable path.
         browser (Optional[str]):
