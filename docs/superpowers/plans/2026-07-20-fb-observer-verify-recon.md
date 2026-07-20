@@ -4,167 +4,192 @@
 
 **Goal:** Prove the built-in Tracking Observer records fingerprint reads at runtime, then drive it against Facebook's real fingerprinting code (local Meta Pixel/SDK surrogate) to produce a recon report of which surfaces FB consults — and a leak-evidence table that scopes the follow-on spoof work (Plan B).
 
-**Architecture:** A small Python/Playwright harness under `build-tester/observer/` that arms the *existing* binary with `CAMOU_OBSERVE=1`, drives probe pages, and reads the observer's records back by scraping the `chrome://camoufox` panel DOM. No browser rebuild — Plan A runs entirely against the already-built `cfx_sync4` binary. Plan B (spoofing the confirmed leaks) is deferred and gets its own plan once Task 6 produces the evidence.
+**Architecture:** A small Python harness under `build-tester/observer/` that arms the *existing* binary with `CAMOU_OBSERVE=1` and drives it via **Marionette** (Firefox's native automation channel, compiled into this ENABLE_WEBDRIVER build). Marionette gives a **chrome-privileged** execution context, so the harness reads the observer's records directly with `getCollector().snapshot()` — the `chrome://camoufox` panel is *not* reachable from a content tab, so panel-scraping does not work; the chrome context is how we read back. No browser rebuild — Plan A runs entirely against the pre-built `cfx_sync4` binary. Plan B (spoofing the confirmed leaks) is deferred and gets its own plan once Task 6 produces the evidence.
 
-**Tech Stack:** Python 3.11+, Playwright (`playwright==1.55.0`, async API), the existing `build-tester/scripts/` plumbing (`server.start_http_server`), the pre-built `cfx_sync4` Camoufox binary.
+**Tech Stack:** Python 3.12, `marionette_driver` (already installed in `build-tester/.venv`), the pre-built `cfx_sync4` Camoufox binary. Playwright is **not** used in Plan A.
+
+## Why Marionette (not Playwright)
+
+Task 1's first implementation attempt (Playwright, chrome:// panel scrape) hit a hard block: **content tabs cannot navigate to `chrome://` at all** — verified against a known Firefox chrome resource, it is categorical, not a misconfiguration; and the panel was built privileged-only (no `contentaccessible=yes`). The records live in the parent-process `Collector`, reachable only from chrome scope. Marionette's `using_context('chrome')` provides exactly that, build-free. This was spiked and proven: a canvas read on an http page produced `{"surfaces":{"1":1,...}}` via `getCollector().snapshot()`, and the same snapshot carried captured network `requests` (the observer's NetHook), including cross-origin ones.
 
 ## Global Constraints
 
-- **No browser rebuild in Plan A.** Every task runs against the pre-built binary at `/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox` (override via `--binary`). If that path is gone, re-download the beta.28 CI artifact first (out of plan scope).
-- **Playwright pin:** the `build-tester` venv must use `playwright==1.55.0` (newer → false 0/0 regression on camoufox-152). Reuse `build-tester/.venv` if present.
-- **Observer arming:** set env `CAMOU_OBSERVE=1`. Off/`0` = observer does nothing. Always pass a realistic `CAMOU_CONFIG` too, so the spoof getters (which host the `Record()` calls) are on the live path.
+- **No browser rebuild in Plan A.** Every task runs against the pre-built binary at `/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox` (override via env `CFX_BIN`). If that path is gone, re-download the beta.28 CI artifact first (out of plan scope).
+- **Dependency:** `marionette_driver` (installed in `build-tester/.venv` via `uv pip install`). Add it to `build-tester/requirements.txt`. Run everything with `build-tester/.venv/bin/python`.
+- **Observer arming:** set env `CAMOU_OBSERVE=1` *before* Marionette launches the binary (the child inherits `os.environ`). Off/absent/`0` = observer does nothing. Always also set a realistic `CAMOU_CONFIG`, so the spoof getters that host the `Record()` calls are on the live path.
+- **Readout:** Marionette chrome context → `ChromeUtils.importESModule("resource://gre/modules/TrackingObserver.sys.mjs").getCollector().snapshot()`. Returns rows `{key:{site,userContextId}, surfaces:{id:count}, requests:[{host,url,method,ts}]}`. Surface ids: `1 canvas, 2 webgl, 3 webrtc, 4 navigator, 5 screen, 6 fonts, 7 audio`.
+- **WebGL in headless:** pass `FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True, "media.peerconnection.ice.obfuscate_host_addresses": False}` as Marionette prefs (spike showed webgl does not record without GL forced on). If `Marionette(prefs=…)` does not apply them, build the profile with `mozprofile` and pass `profile=…`.
 - **Facebook target policy:** the local `fbevents.js` + `sdk.js` surrogate is the primary stimulus. At most **one** manual, human-paced, logged-out, no-interaction facebook.com load as a spot-check. **No automated loops against facebook.com.**
 - **Honest scope caveat** (verbatim in the Task 6 report): observer sees presence + drain-window count at the JS/WebIDL boundary only — not values/hashes/scoring; blind to TLS/JA3/H2/TCP, WASM, workers/service-workers, pure-CSS `@media`, timing side-channels, server-side scoring. "Silence ≠ not read" for anything unhooked.
+- **Cosmetic noise to ignore:** `marionette_driver`'s `__del__` cleanup prints `ImportError: sys.meta_path is None` tracebacks during interpreter shutdown, and `mozinfo` emits a `SyntaxWarning: invalid escape`. Both are harmless — do not chase them; assert on the printed result line, not a clean stderr.
 - **Branch:** `feat/fb-fingerprint-observer`. Commits end with:
   ```
   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
   Claude-Session: https://claude.ai/code/session_01Y9Fmes3gzm8FB7Y3ajKjfv
   ```
-- **SurfaceId ground truth** (`additions/camoucfg/AccessObserver.hpp` / `content/tracking.js`): `1 canvas, 2 webgl, 3 webrtc, 4 navigator, 5 screen, 6 fonts, 7 audio`.
 
 ---
 
 ## File Structure
 
-- `build-tester/observer/harness.py` — shared: arm+launch, serve a dir, `read_snapshot()` (panel scrape). Consumed by every later task.
+- `build-tester/observer/harness.py` — shared: `Session` (Marionette launch/arm/navigate/eval/snapshot/cookies) + `serve(dir)`. Consumed by every later task.
 - `build-tester/observer/probe_all_surfaces.html` — page that touches all 7 wired surfaces.
 - `build-tester/observer/test_observer_records.py` — Task 2 functional test (7-surface truth table).
-- `build-tester/observer/run_timing_parity.py` — Task 3 (wraps the existing `timing_parity_probe.js`).
+- `build-tester/observer/run_timing_parity.py` — Task 3 (drives the existing `timing_parity_probe.js` armed vs unarmed).
 - `build-tester/observer/fb_surrogate.html` — Task 4 Meta Pixel + SDK stimulus page.
-- `build-tester/observer/recon_fb.py` — Task 4 driver (observer snapshot + Playwright network/cookie capture) → JSON.
+- `build-tester/observer/recon_fb.py` — Task 4 driver (snapshot surfaces + requests + cookies) → JSON.
 - `build-tester/observer/probe_leaks.html` + `probe_leaks.py` — Task 5 un-spoofed-leak evidence probe.
 - `build-tester/observer/REPORT.md` — Task 6 committed recon report + leak-evidence table + scope caveat.
 
 ---
 
-## Task 1: Readout helper (arm → touch canvas → read one record)
+## Task 1: Marionette readout harness (arm → touch canvas → read one record)
 
-The one genuinely-unverified mechanism: reading records back headless. Prove the smallest end-to-end slice and expose it as `read_snapshot()` so later tasks don't care how it works.
+Build `harness.py` (the shared `Session`) and prove the smallest end-to-end slice: an armed canvas read is visible via the chrome-context snapshot.
 
 **Files:**
 - Create: `build-tester/observer/harness.py`
 - Create: `build-tester/observer/test_readout.py`
+- Modify: `build-tester/requirements.txt` (add `marionette_driver`)
 
-**Interfaces:**
-- Produces: `async launch_armed(pw, binary, camou_config: dict|None) -> Browser`; `serve(dir) -> (port, stop)`; `async read_snapshot(context) -> list[dict]` where each dict is `{"site": str, "surfaces": {name: count}}`.
+**Interfaces (later tasks depend on these exact signatures):**
+- `serve(directory) -> (port:int, stop:callable)`
+- `class Session(camou_config: dict|None = None, arm: bool = True, binary: str|None = None, prefs: dict|None = None)` — context manager; methods: `navigate(url)`, `eval_content(js) -> any` (content context), `wait_done(timeout=30) -> bool` (polls `window.__done__`), `snapshot() -> list[dict]` where each dict is `{"site": str, "surfaces": {name:count}, "requests": [ {host,url,method,ts} ]}`, `cookies() -> list[{name,host}]`.
 
-- [ ] **Step 1: Write the failing test**
+- [ ] **Step 1: Write the failing test** (`build-tester/observer/test_readout.py`)
 
 ```python
-# build-tester/observer/test_readout.py
-import asyncio, os, sys
+import os, sys
 from pathlib import Path
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
-from playwright.async_api import async_playwright
+sys.path.insert(0, str(HERE))
 import harness
-
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
 
 CANVAS_POKE = """
 const c = document.createElement('canvas'); c.width=200; c.height=50;
 const x = c.getContext('2d'); x.textBaseline='top'; x.font='14px Arial';
 x.fillText('camoufox-observer-probe', 2, 2);
-c.toDataURL();  // canvas readback → SurfaceId::Canvas Record()
-window.__done__ = true;
+c.toDataURL();
+window.__done__ = true; return true;
 """
 
-async def main():
-    async with async_playwright() as pw:
-        browser = await harness.launch_armed(pw, BIN, camou_config={"canvas:seed": 424242})
-        ctx = await browser.new_context()
-        page = await ctx.new_page()
-        await page.goto("about:blank")
-        await page.evaluate(CANVAS_POKE)
-        await page.wait_for_timeout(800)  # > one 500ms drain cycle
-        snap = await harness.read_snapshot(ctx)
-        await browser.close()
-        assert any("canvas" in row["surfaces"] for row in snap), f"no canvas record: {snap}"
-        print("PASS: canvas recorded ->", snap)
+def main():
+    port, stop = harness.serve(HERE)
+    try:
+        with harness.Session(camou_config={"canvas:seed": 424242}) as s:
+            s.navigate(f"http://127.0.0.1:{port}/")   # real origin, not about:blank
+            s.eval_content(CANVAS_POKE)
+            snap = s.snapshot()
+    finally:
+        stop()
+    assert any("canvas" in row["surfaces"] for row in snap), f"no canvas record: {snap}"
+    print("PASS: canvas recorded ->", snap)
 
-asyncio.run(main())
+main()
 ```
 
 - [ ] **Step 2: Run it to confirm it fails**
 
 Run: `cd build-tester && ./.venv/bin/python observer/test_readout.py`
-Expected: FAIL — `ModuleNotFoundError: harness` (or `AttributeError`), because `harness.py` doesn't exist yet.
+Expected: FAIL — `ModuleNotFoundError: harness`.
 
 - [ ] **Step 3: Implement `harness.py`**
 
 ```python
-# build-tester/observer/harness.py
-import functools, http.server, json, os, socketserver, threading
-from pathlib import Path
+import functools, http.server, json, os, socketserver, threading, time
 
-PANEL_URL = "chrome://camoufox/content/tracking.html"
+BIN_DEFAULT = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
+SURFACE_NAMES = {1:"canvas",2:"webgl",3:"webrtc",4:"navigator",5:"screen",6:"fonts",7:"audio"}
+FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True,
+                       "media.peerconnection.ice.obfuscate_host_addresses": False}
 
-async def launch_armed(pw, binary, camou_config=None):
-    env = {**dict(os.environ), "CAMOU_OBSERVE": "1"}
-    if camou_config is not None:
-        env["CAMOU_CONFIG"] = json.dumps(camou_config)
-    return await pw.firefox.launch(executable_path=binary, headless=True, env=env)
+_SNAP_JS = ("try{var {getCollector}=ChromeUtils.importESModule("
+            "'resource://gre/modules/TrackingObserver.sys.mjs');var c=getCollector();"
+            "return c?JSON.stringify(c.snapshot()):'[]';}catch(e){return 'ERR:'+e;}")
+_COOKIE_JS = ("try{let o=[];for(let c of Services.cookies.cookies){o.push({name:c.name,host:c.host});}"
+              "return JSON.stringify(o);}catch(e){return 'ERR:'+e;}")
 
 def serve(directory):
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
-    httpd = socketserver.TCPServer(("127.0.0.1", 0), handler)
+    h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
+    httpd = socketserver.TCPServer(("127.0.0.1", 0), h)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd.server_address[1], httpd.shutdown
 
-async def read_snapshot(context):
-    """Scrape the chrome://camoufox panel DOM (rows built by content/tracking.js renderRows:
-    .row > .site + .badge('name:count'))."""
-    panel = await context.new_page()
-    try:
-        await panel.goto(PANEL_URL, wait_until="domcontentloaded", timeout=10000)
-    except Exception as e:
-        raise RuntimeError(
-            f"panel readout failed ({e}). Fallback options if chrome:// nav is blocked: "
-            "(a) launch binary via subprocess with browser.startup.homepage=PANEL_URL and "
-            "screenshot/dump; (b) add a test-only privileged drain — but that needs a rebuild "
-            "(out of Plan A scope). Resolve before Task 2."
-        )
-    await panel.wait_for_timeout(800)
-    rows = await panel.eval_on_selector_all("#rows .row", """els => els.map(el => ({
-        site: el.querySelector('.site')?.textContent || '',
-        badges: [...el.querySelectorAll('.badge')].map(b => b.textContent),
-    }))""")
-    await panel.close()
-    out = []
-    for r in rows:
-        surfaces = {}
-        for b in r["badges"]:
-            name, _, cnt = b.partition(":")
-            surfaces[name] = int(cnt or 0)
-        out.append({"site": r["site"], "surfaces": surfaces})
-    return out
+class Session:
+    def __init__(self, camou_config=None, arm=True, binary=None, prefs=None):
+        self.camou_config = camou_config
+        self.arm = arm
+        self.binary = binary or os.environ.get("CFX_BIN", BIN_DEFAULT)
+        self.prefs = {**FIREFOX_WEBGL_PREFS, **(prefs or {})}
+        self.m = None
+
+    def __enter__(self):
+        if self.arm: os.environ["CAMOU_OBSERVE"] = "1"
+        else: os.environ.pop("CAMOU_OBSERVE", None)
+        if self.camou_config is not None:
+            os.environ["CAMOU_CONFIG"] = json.dumps(self.camou_config)
+        from marionette_driver.marionette import Marionette
+        self.m = Marionette(bin=self.binary, headless=True, prefs=self.prefs)
+        self.m.start_session()
+        return self
+
+    def __exit__(self, *a):
+        try: self.m.delete_session()
+        except Exception: pass
+
+    def navigate(self, url): self.m.navigate(url)
+    def eval_content(self, js): return self.m.execute_script(js)
+
+    def wait_done(self, timeout=30):
+        for _ in range(int(timeout / 0.3)):
+            time.sleep(0.3)
+            try:
+                if self.m.execute_script("return !!window.__done__;"): return True
+            except Exception: pass
+        return False
+
+    def snapshot(self):
+        time.sleep(1.2)  # let the observer's 500ms actor drain feed the parent Collector
+        with self.m.using_context("chrome"):
+            raw = self.m.execute_script(_SNAP_JS)
+        if raw.startswith("ERR:"): raise RuntimeError("snapshot: " + raw)
+        out = []
+        for r in json.loads(raw):
+            surfaces = {SURFACE_NAMES.get(int(k), k): v for k, v in r["surfaces"].items()}
+            out.append({"site": r["key"]["site"], "surfaces": surfaces, "requests": r.get("requests", [])})
+        return out
+
+    def cookies(self):
+        with self.m.using_context("chrome"):
+            raw = self.m.execute_script(_COOKIE_JS)
+        return json.loads(raw) if not raw.startswith("ERR:") else []
 ```
+
+Also append `marionette_driver` to `build-tester/requirements.txt`.
 
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cd build-tester && ./.venv/bin/python observer/test_readout.py`
-Expected: `PASS: canvas recorded -> [...]`.
-If the panel `goto` raises: this is the readout-mechanism unknown surfacing. Investigate with systematic-debugging (is chrome:// reachable at all? does the panel render for a real profile?) and implement the documented fallback before proceeding. Do **not** fake the record.
+Expected: `PASS: canvas recorded -> [...]` (a row whose `surfaces` contains `canvas`). Ignore the shutdown-time `__del__` tracebacks and the `mozinfo` warning. If `Marionette(prefs=…)` raises about an unexpected kwarg, switch to building a profile via `mozprofile.Profile(preferences=self.prefs)` and pass `Marionette(bin=…, profile=…)`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add build-tester/observer/harness.py build-tester/observer/test_readout.py
-git commit -m "test(observer): headless readout helper via chrome://camoufox panel scrape"
+git add build-tester/observer/harness.py build-tester/observer/test_readout.py build-tester/requirements.txt
+git commit -m "test(observer): Marionette chrome-context readout harness (canvas record)"
 ```
 
 ---
 
 ## Task 2: Seven-surface truth table (functional regression test)
 
-Resolve the stale-README discrepancy: prove all 7 wired surfaces actually record at runtime.
+Resolve the stale-README discrepancy: prove which of the 7 wired surfaces record at runtime.
 
 **Files:**
 - Create: `build-tester/observer/probe_all_surfaces.html`
 - Create: `build-tester/observer/test_observer_records.py`
 
-**Interfaces:**
-- Consumes: `harness.launch_armed / serve / read_snapshot` from Task 1.
+**Interfaces:** Consumes `harness.Session / serve` from Task 1.
 
 - [ ] **Step 1: Write the probe page** (`build-tester/observer/probe_all_surfaces.html`)
 
@@ -174,7 +199,7 @@ Resolve the stale-README discrepancy: prove all 7 wired surfaces actually record
   const log = {};
   try { const c=document.createElement('canvas'); c.width=200;c.height=50;
     const x=c.getContext('2d'); x.font='14px Arial'; x.fillText('probe',2,2); c.toDataURL(); log.canvas=1; } catch(e){ log.canvas='ERR:'+e; }
-  try { const g=document.createElement('canvas').getContext('webgl');
+  try { const g=document.createElement('canvas').getContext('webgl') || document.createElement('canvas').getContext('experimental-webgl');
     g.getParameter(g.VENDOR); const ext=g.getExtension('WEBGL_debug_renderer_info');
     if(ext) g.getParameter(ext.UNMASKED_RENDERER_WEBGL); log.webgl=1; } catch(e){ log.webgl='ERR:'+e; }
   try { const pc=new RTCPeerConnection(); pc.createDataChannel('x');
@@ -185,7 +210,9 @@ Resolve the stale-README discrepancy: prove all 7 wired surfaces actually record
     for (const f of ['NoSuchFont123','Impact','Webdings','Papyrus']) { x.font='16px '+f; x.measureText('mix wq'); }
     if (document.fonts && document.fonts.check) document.fonts.check('16px Impact'); log.fonts=1; } catch(e){ log.fonts='ERR:'+e; }
   try { const ac=new (window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100);
-    const o=ac.createOscillator(); o.connect(ac.destination); o.start(); await ac.startRendering(); log.audio=1; } catch(e){ log.audio='ERR:'+e; }
+    const o=ac.createOscillator(); o.connect(ac.destination); o.start();
+    const an=ac.createAnalyser(); o.connect(an); const buf=new Float32Array(an.frequencyBinCount); an.getFloatFrequencyData(buf);
+    await ac.startRendering(); log.audio=1; } catch(e){ log.audio='ERR:'+e; }
   window.__probeLog__ = log; window.__done__ = true;
 })();
 </script></body>
@@ -194,29 +221,22 @@ Resolve the stale-README discrepancy: prove all 7 wired surfaces actually record
 - [ ] **Step 2: Write the failing test** (`build-tester/observer/test_observer_records.py`)
 
 ```python
-import asyncio, os, sys
+import sys
 from pathlib import Path
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
-from playwright.async_api import async_playwright
+sys.path.insert(0, str(HERE))
 import harness
 
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
 EXPECTED = {"canvas","webgl","webrtc","navigator","screen","fonts","audio"}
 
-async def main():
+def main():
     port, stop = harness.serve(HERE)
     try:
-        async with async_playwright() as pw:
-            browser = await harness.launch_armed(pw, BIN, camou_config={"canvas:seed": 424242})
-            ctx = await browser.new_context()
-            page = await ctx.new_page()
-            await page.goto(f"http://127.0.0.1:{port}/probe_all_surfaces.html")
-            await page.wait_for_function("!!window.__done__", timeout=30000)
-            probe_log = await page.evaluate("window.__probeLog__")
-            await page.wait_for_timeout(900)
-            snap = await harness.read_snapshot(ctx)
-            await browser.close()
+        with harness.Session(camou_config={"canvas:seed": 424242}) as s:
+            s.navigate(f"http://127.0.0.1:{port}/probe_all_surfaces.html")
+            s.wait_done(30)
+            probe_log = s.eval_content("return window.__probeLog__;")
+            snap = s.snapshot()
     finally:
         stop()
     recorded = set()
@@ -227,18 +247,18 @@ async def main():
     assert not missing, f"surfaces NOT recorded: {sorted(missing)} | probe={probe_log} | snap={snap}"
     print("PASS: all 7 surfaces recorded")
 
-asyncio.run(main())
+main()
 ```
 
 - [ ] **Step 3: Run to verify it fails or reveals gaps**
 
 Run: `cd build-tester && ./.venv/bin/python observer/test_observer_records.py`
-Expected initially: may FAIL listing surfaces not recorded. For each missing surface, first check `probe_log` — if the poke itself errored (`ERR:...`), fix the poke (wrong API). If the poke succeeded but no record appeared, that's a real observer gap: note it in the truth table and the report (do not force a pass).
+Expected initially: may FAIL listing surfaces not recorded. For each missing surface, check `probe_log`: if the poke errored (`ERR:…`), fix the poke (wrong API / headless GL). WebGL: confirm `FIREFOX_WEBGL_PREFS` is applied (Task 1 harness sets them by default). If the poke succeeded but no record appeared, that is a real observer gap.
 
 - [ ] **Step 4: Iterate pokes until the table is truthful, then it passes**
 
-Adjust `probe_all_surfaces.html` pokes so every surface that *is* wired records. The assertion passes only when all 7 record. If a surface genuinely never records despite a valid poke, downgrade the assertion for that surface to a printed `KNOWN-GAP` line (with a code comment citing the evidence) rather than a false pass — and carry it into Task 6.
-Expected final: `PASS: all 7 surfaces recorded` (or an explicit, justified KNOWN-GAP list).
+Fix `probe_all_surfaces.html` pokes so every wired surface that *can* record does. If a surface genuinely never records despite a valid, non-erroring poke (e.g. audio may hook a specific node call), downgrade that one to a printed `KNOWN-GAP: <surface> (poke ok, no record)` line with a code comment citing the evidence — never a false pass — and carry it into Task 6.
+Expected final: `PASS: all 7 surfaces recorded`, or an explicit justified KNOWN-GAP list with the rest asserted.
 
 - [ ] **Step 5: Commit**
 
@@ -251,55 +271,51 @@ git commit -m "test(observer): 7-surface runtime truth table (resolves stale can
 
 ## Task 3: Timing-parity gate (detectability regression)
 
-Wrap the existing `timing_parity_probe.js` in a runnable armed-vs-unarmed comparison so the anti-detection property is a checked gate, not a comment.
+Drive the existing `timing_parity_probe.js` armed vs unarmed on the same binary; assert armed stays within the unarmed band.
 
 **Files:**
 - Create: `build-tester/observer/run_timing_parity.py`
 - Reference: `build-tester/observer/timing_parity_probe.js` (unchanged)
 
-- [ ] **Step 1: Write the runner** (drives the probe twice, same binary)
+**Interfaces:** Consumes `harness.Session` with `arm=True|False`.
+
+- [ ] **Step 1: Write the runner**
 
 ```python
-import asyncio, os, sys, statistics
+import statistics, sys
 from pathlib import Path
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
-from playwright.async_api import async_playwright
+sys.path.insert(0, str(HERE))
 import harness
 
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
 PROBE = (HERE / "timing_parity_probe.js").read_text()
 
-async def measure(pw, armed):
-    env = {**dict(os.environ)}
-    if armed: env["CAMOU_OBSERVE"] = "1"
-    else: env.pop("CAMOU_OBSERVE", None)
-    b = await pw.firefox.launch(executable_path=BIN, headless=True, env=env)
-    p = await (await b.new_context()).new_page()
-    await p.goto("about:blank")
-    r = await p.evaluate(PROBE + "\n; window.__timingResult__")
-    await b.close()
-    return r
+def measure(arm):
+    with harness.Session(arm=arm) as s:
+        s.navigate("about:blank")
+        s.eval_content(PROBE)                       # IIFE sets window.__timingResult__
+        return s.eval_content("return window.__timingResult__;")
 
-async def main():
-    async with async_playwright() as pw:
-        unarmed = [await measure(pw, False) for _ in range(3)]
-        armed   = [await measure(pw, True)  for _ in range(3)]
-    def med(runs, op): return statistics.median(x[op]["median"] for x in runs if x and x[op])
+def main():
+    unarmed = [measure(False) for _ in range(3)]
+    armed   = [measure(True)  for _ in range(3)]
+    def med(runs, op): return statistics.median(x[op]["median"] for x in runs if x and x.get(op))
+    ok = True
     for op in ("toDataURL","getParameter"):
         u, a = med(unarmed, op), med(armed, op)
         ratio = a / u if u else float("nan")
         print(f"{op}: unarmed={u:.4f}ms armed={a:.4f}ms ratio={ratio:.3f}")
-        assert ratio < 1.5, f"{op} armed {ratio:.2f}x slower — ring-buffer hot path too heavy"
+        if not (ratio < 1.5): ok = False
+    assert ok, "armed run measurably slower than unarmed band — ring-buffer hot path too heavy"
     print("PASS: timing parity within band")
 
-asyncio.run(main())
+main()
 ```
 
 - [ ] **Step 2: Run it**
 
 Run: `cd build-tester && ./.venv/bin/python observer/run_timing_parity.py`
-Expected: PASS with ratios near 1.0 (threshold 1.5× is deliberately loose for a 3-run macOS sample; tighten only if stable). If armed is >1.5× slower, that is a real detectability finding — record it, do not relax the threshold to force a pass.
+Expected: PASS, ratios near 1.0 (1.5× threshold is deliberately loose for a 3-run macOS sample). If armed is >1.5× slower, that is a real detectability finding — record it in Task 6; do not relax the threshold to force a pass.
 
 - [ ] **Step 3: Commit**
 
@@ -312,13 +328,13 @@ git commit -m "test(observer): armed-vs-unarmed timing-parity gate"
 
 ## Task 4: Facebook stimulus recon (local Pixel + SDK surrogate)
 
-Drive Meta's real fingerprinting code with zero facebook.com exposure; capture which surfaces it reads (observer) plus its network/cookie envelope (Playwright).
+Drive Meta's real fingerprinting code with zero facebook.com exposure; capture which surfaces it reads (observer snapshot) plus its network/cookie envelope (same snapshot's `requests` + chrome cookie read).
 
 **Files:**
 - Create: `build-tester/observer/fb_surrogate.html`
 - Create: `build-tester/observer/recon_fb.py`
 
-- [ ] **Step 1: Write the surrogate page** (loads Meta's own distributable code)
+- [ ] **Step 1: Write the surrogate page**
 
 ```html
 <!doctype html><meta charset=utf-8><title>fb surrogate</title><body>
@@ -332,61 +348,52 @@ fbq('init','000000000000000');  // dummy pixel id — collection code still runs
 fbq('track','PageView');
 </script>
 <script async defer src="https://connect.facebook.net/en_US/sdk.js"></script>
-<script>window.__done__ = true;</script>
+<script>setTimeout(()=>{window.__done__=true;}, 2500);</script>
 </body>
 ```
 
-- [ ] **Step 2: Write the recon driver** (observer snapshot + network/cookie capture)
+- [ ] **Step 2: Write the recon driver**
 
 ```python
-import asyncio, json, os, sys
+import json, sys
 from pathlib import Path
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
-from playwright.async_api import async_playwright
+sys.path.insert(0, str(HERE))
 import harness
 
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
-
-async def main():
+def main():
     port, stop = harness.serve(HERE)
-    reqs = []
     try:
-        async with async_playwright() as pw:
-            browser = await harness.launch_armed(pw, BIN, camou_config={"canvas:seed": 424242})
-            ctx = await browser.new_context()
-            ctx.on("request", lambda r: reqs.append({"url": r.url, "method": r.method}))
-            page = await ctx.new_page()
-            await page.goto(f"http://127.0.0.1:{port}/fb_surrogate.html", wait_until="networkidle", timeout=45000)
-            await page.wait_for_timeout(1500)  # let fbevents/sdk load + fingerprint + drain
-            snap = await harness.read_snapshot(ctx)
-            cookies = await ctx.cookies()
-            await browser.close()
+        with harness.Session(camou_config={"canvas:seed": 424242}) as s:
+            s.navigate(f"http://127.0.0.1:{port}/fb_surrogate.html")
+            s.wait_done(30)
+            snap = s.snapshot()
+            cookies = s.cookies()
     finally:
         stop()
-    fb_hosts = sorted({r["url"].split("/")[2] for r in reqs if "facebook" in r["url"] or "fbcdn" in r["url"]})
+    all_reqs = [r for row in snap for r in row["requests"]]
+    fb_hosts = sorted({r["host"] for r in all_reqs if "facebook" in r["host"] or "fbcdn" in r["host"] or "fbcdn.net" in r["url"]})
     out = {
-        "observer_surfaces": snap,
+        "observer_surfaces": [{"site": r["site"], "surfaces": r["surfaces"]} for r in snap],
         "fb_request_hosts": fb_hosts,
-        "fb_request_count": sum(1 for r in reqs if "facebook" in r["url"] or "fbcdn" in r["url"]),
+        "fb_request_count": sum(1 for r in all_reqs if "facebook" in r["host"] or "fbcdn" in r["host"]),
         "cookie_names": sorted({c["name"] for c in cookies}),
     }
     (HERE / "recon_fb.json").write_text(json.dumps(out, indent=2))
     print(json.dumps(out, indent=2))
-    assert snap or fb_hosts, "surrogate produced no observer rows AND no FB requests — check network egress"
+    assert snap, "surrogate produced no observer rows — check network egress to connect.facebook.net"
 
-asyncio.run(main())
+main()
 ```
 
 - [ ] **Step 3: Run it**
 
 Run: `cd build-tester && ./.venv/bin/python observer/recon_fb.py`
-Expected: JSON with `observer_surfaces` (surfaces Meta's code touched) + `fb_request_hosts` (e.g. `connect.facebook.net`) + `cookie_names`. Requires network egress to `connect.facebook.net`. If offline/blocked, note it and defer this task (the surrogate needs Meta's real JS). Do not fabricate rows.
+Expected: JSON with `observer_surfaces` (surfaces Meta's code touched), `fb_request_hosts` (e.g. `connect.facebook.net`), `cookie_names`. Requires egress to `connect.facebook.net`. If offline/blocked, note it and defer — the surrogate needs Meta's real JS. Do not fabricate rows.
 
 - [ ] **Step 4 (optional, manual): one facebook.com spot-check**
 
-Only if the operator chooses. Manually (not in a loop) run:
-`CAMOU_OBSERVE=1 CAMOU_CONFIG='{"canvas:seed":424242}' <binary>`, browse to facebook.com once logged-out, open `chrome://camoufox/content/tracking.html`, and eyeball whether the surrogate's surface set matches. Record the outcome in the report. Skip if unsure — the surrogate is authoritative for "what Meta's code reads."
+Only if the operator chooses. Manually (not in a loop): `CAMOU_OBSERVE=1 CAMOU_CONFIG='{"canvas:seed":424242}' <binary>`, browse to facebook.com once logged-out, then in a separate Marionette chrome-context session (or the same one) read `getCollector().snapshot()`. Record whether the surface set matches the surrogate. Skip if unsure — the surrogate is authoritative for "what Meta's code reads."
 
 - [ ] **Step 5: Commit**
 
@@ -405,7 +412,7 @@ Confirm which candidate surfaces actually return a real, device-varying value on
 - Create: `build-tester/observer/probe_leaks.html`
 - Create: `build-tester/observer/probe_leaks.py`
 
-- [ ] **Step 1: Write the probe page** (dumps raw candidate values)
+- [ ] **Step 1: Write the probe page**
 
 ```html
 <!doctype html><meta charset=utf-8><title>leak probe</title><body><script>
@@ -424,35 +431,28 @@ Confirm which candidate surfaces actually return a real, device-varying value on
 </script></body>
 ```
 
-- [ ] **Step 2: Write the probe driver** (compare two different presets → device-varying?)
+- [ ] **Step 2: Write the probe driver** (two different presets → device-varying?)
 
 ```python
-import asyncio, json, os, sys
+import json, sys
 from pathlib import Path
 HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE.parent / "scripts"))
-from playwright.async_api import async_playwright
+sys.path.insert(0, str(HERE))
 import harness
 
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
-
-async def read_leaks(pw, camou_config):
+def read_leaks(camou_config):
     port, stop = harness.serve(HERE)
     try:
-        b = await harness.launch_armed(pw, BIN, camou_config=camou_config)
-        p = await (await b.new_context()).new_page()
-        await p.goto(f"http://127.0.0.1:{port}/probe_leaks.html")
-        await p.wait_for_function("!!window.__done__", timeout=30000)
-        leaks = await p.evaluate("window.__leaks__")
-        await b.close()
-        return leaks
+        with harness.Session(camou_config=camou_config) as s:
+            s.navigate(f"http://127.0.0.1:{port}/probe_leaks.html")
+            s.wait_done(30)
+            return s.eval_content("return window.__leaks__;")
     finally:
         stop()
 
-async def main():
-    async with async_playwright() as pw:
-        a = await read_leaks(pw, {"canvas:seed": 1})
-        b = await read_leaks(pw, {"canvas:seed": 2, "navigator.oscpu": "Windows NT 10.0; Win64; x64"})
+def main():
+    a = read_leaks({"canvas:seed": 1})
+    b = read_leaks({"canvas:seed": 2, "navigator.oscpu": "Windows NT 10.0; Win64; x64"})
     table = {}
     for k in a:
         table[k] = {"config_a": a[k], "config_b": b[k],
@@ -460,17 +460,17 @@ async def main():
                                 "CONSTANT" if a[k]==b[k] else "VARIES")}
     (HERE / "leak_evidence.json").write_text(json.dumps(table, indent=2))
     print(json.dumps(table, indent=2))
-    # Not an assertion of pass/fail — this is the evidence that scopes Plan B.
+    assert table, "probe produced no verdicts"
     leaking = [k for k,v in table.items() if v["verdict"] not in ("ABSENT","CONSTANT")]
     print("PLAN-B SPOOF CANDIDATES (leak a real value):", leaking or "none")
 
-asyncio.run(main())
+main()
 ```
 
 - [ ] **Step 3: Run it**
 
 Run: `cd build-tester && ./.venv/bin/python observer/probe_leaks.py`
-Expected: a per-surface verdict table. Interpretation for Plan B: `ABSENT` → skip (Firefox doesn't expose it; e.g. likely `userAgentData`, `connection`). `CONSTANT` → likely skip (e.g. `vendor=""`), unless it's a constant that itself leaks Firefox-ness. `VARIES` or a real non-empty value with no MaskConfig key → Plan B spoof candidate (expected: `deviceMemory`, possibly `plugins`). Note `battery`/`devices` already have MaskConfig keys → observe-only in Plan B.
+Expected: a per-surface verdict table. Interpretation for Plan B: `ABSENT` → skip (Firefox doesn't expose it; likely `userAgentData`, `connection`). `CONSTANT` → likely skip (e.g. `vendor=""`), unless the constant itself leaks Firefox-ness. `VARIES`, or a real non-empty value with no MaskConfig key → Plan B spoof candidate (expected: `deviceMemory`, possibly `plugins`). `battery`/`devices` already have MaskConfig keys → observe-only in Plan B.
 
 - [ ] **Step 4: Commit**
 
@@ -483,19 +483,19 @@ git commit -m "recon(observer): un-spoofed-leak evidence table (scopes Plan B sp
 
 ## Task 6: Recon report (deliverable)
 
-Assemble Tasks 2/4/5 outputs into one honest report — the actual answer to "how does FB track the browser, and where does camoufox leak."
+Assemble Tasks 2/4/5 outputs into one honest report — the answer to "how does FB track the browser, and where does camoufox leak."
 
 **Files:**
 - Create: `build-tester/observer/REPORT.md`
 
 - [ ] **Step 1: Write the report** pulling in the committed JSON artifacts. Sections:
-  1. **Runtime gate result** — the 7-surface truth table from Task 2 (which surfaces record; any KNOWN-GAP).
+  1. **Runtime gate** — the 7-surface truth table from Task 2 (which surfaces record; any KNOWN-GAP), plus the readout method (Marionette chrome context; why not the panel).
   2. **What Meta's code reads** — `recon_fb.json` observer surfaces + FB hosts + cookie names; the optional facebook.com spot-check outcome if run.
-  3. **Leak evidence** — `leak_evidence.json` verdicts; the explicit Plan-B spoof candidate list (confirmed leaks) vs skip list (absent/constant) vs observe-only list (already-spoofed battery/mediaDevices).
-  4. **Scope caveat** — the Global-Constraints scope paragraph verbatim ("presence + count only … silence ≠ not read … blind to TLS/JA3/WASM/workers/CSS/timing/server-side").
+  3. **Leak evidence** — `leak_evidence.json` verdicts; the explicit Plan-B spoof-candidate list (confirmed leaks) vs skip list (absent/constant) vs observe-only list (already-spoofed battery/mediaDevices).
+  4. **Scope caveat** — the Global-Constraints scope paragraph verbatim.
   5. **Timing parity** — Task 3 ratios.
 
-- [ ] **Step 2: Sanity-check the report** against the JSON files (numbers match; no claim beyond the evidence).
+- [ ] **Step 2: Sanity-check** the report against the JSON files (numbers match; no claim beyond the evidence).
 
 - [ ] **Step 3: Commit**
 
@@ -508,10 +508,10 @@ git commit -m "recon(observer): FB fingerprint recon report + Plan-B scope"
 
 ## After Plan A
 
-Task 5's `leak_evidence.json` + Task 4's `recon_fb.json` are the inputs to **Plan B** (Phase 3: observe + spoof the confirmed leaks). Do not write Plan B until these exist — its task list (which MaskConfig keys, which getters, which pythonlib fields) is determined by the evidence, and every Plan-B spoof is gated by `build-tester ≥ 1000` (playwright==1.55.0) to avoid the lie-detection regression that broke it to 0/0 once before.
+Task 5's `leak_evidence.json` + Task 4's `recon_fb.json` are the inputs to **Plan B** (Phase 3: observe + spoof the confirmed leaks). Do not write Plan B until these exist — its task list (which MaskConfig keys, which getters, which pythonlib fields) is determined by the evidence, and every Plan-B spoof is gated by `build-tester ≥ 1000` (with the `playwright==1.55.0` pin that Plan B's build-tester runs require) to avoid the lie-detection regression that broke it to 0/0 once before.
 
 ## Self-Review
 
-- **Spec coverage:** Plan A = spec Phase 1 (Tasks 1-3) + Phase 2 (Task 4) + the Phase-3 evidence gate (Task 5) + honest-scope deliverable (Task 6). Spec Phase 3 spoofs = Plan B (deferred by design, evidence-gated). ✓
-- **Placeholder scan:** readout method is real code (panel scrape) with a documented fallback path, not a TODO; exploratory tasks (4, 5) have "produces non-empty report" success criteria, not fake asserts. ✓
-- **Type consistency:** every task consumes `harness.launch_armed/serve/read_snapshot` with the Task-1 signatures; `read_snapshot` returns `[{"site","surfaces":{name:count}}]` used uniformly. ✓
+- **Spec coverage:** Plan A = spec Phase 1 (Tasks 1-3) + Phase 2 (Task 4) + the Phase-3 evidence gate (Task 5) + honest-scope deliverable (Task 6). Spec Phase 3 spoofs = Plan B (deferred, evidence-gated). ✓
+- **Placeholder scan:** readout is Marionette chrome-context — spiked and proven, not a TODO; exploratory tasks (4, 5) carry a smoke `assert` (non-empty) plus their real deliverable (the JSON), not fake fixed-value asserts. ✓
+- **Type consistency:** every task uses `harness.Session` / `harness.serve` with the Task-1 signatures; `snapshot()` returns `[{"site","surfaces":{name:count},"requests":[…]}]` used uniformly; surface-id→name mapping lives once in `harness.SURFACE_NAMES`. ✓
