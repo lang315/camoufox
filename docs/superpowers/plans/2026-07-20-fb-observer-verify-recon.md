@@ -22,6 +22,7 @@ Task 1's first implementation attempt (Playwright, chrome:// panel scrape) hit a
 - **Facebook target policy:** the local `fbevents.js` + `sdk.js` surrogate is the primary stimulus. At most **one** manual, human-paced, logged-out, no-interaction facebook.com load as a spot-check. **No automated loops against facebook.com.**
 - **Honest scope caveat** (verbatim in the Task 6 report): observer sees presence + drain-window count at the JS/WebIDL boundary only — not values/hashes/scoring; blind to TLS/JA3/H2/TCP, WASM, workers/service-workers, pure-CSS `@media`, timing side-channels, server-side scoring. "Silence ≠ not read" for anything unhooked.
 - **Cosmetic noise to ignore:** `marionette_driver`'s `__del__` cleanup prints `ImportError: sys.meta_path is None` tracebacks during interpreter shutdown, and `mozinfo` emits a `SyntaxWarning: invalid escape`. Both are harmless — do not chase them; assert on the printed result line, not a clean stderr.
+- **Marionette content-eval Xray gotcha (verified in Task 2):** `eval_content`/`execute_script` runs in a sandbox with an Xray view of the content `window`, so a property the PAGE set on itself (`window.__done__`, `window.__timingResult__`, `window.__leaks__`) reads back `undefined` via plain `window.X` — read it as `window.wrappedJSObject.X`. `harness.wait_done()` already does this. And a value set INSIDE one `eval_content` call does not persist to a later separate `eval_content` (fresh sandbox) — set page globals via a page `<script>` and read them via `wrappedJSObject`, mirroring Task 2's probe page.
 - **Branch:** `feat/fb-fingerprint-observer`. Commits end with:
   ```
   Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
@@ -274,12 +275,24 @@ git commit -m "test(observer): 7-surface runtime truth table (resolves stale can
 Drive the existing `timing_parity_probe.js` armed vs unarmed on the same binary; assert armed stays within the unarmed band.
 
 **Files:**
+- Create: `build-tester/observer/timing_probe.html`
 - Create: `build-tester/observer/run_timing_parity.py`
 - Reference: `build-tester/observer/timing_parity_probe.js` (unchanged)
 
 **Interfaces:** Consumes `harness.Session` with `arm=True|False`.
 
-- [ ] **Step 1: Write the runner**
+- [ ] **Step 1: Write the timing page + runner**
+
+The probe must run as a page `<script>` (not via `eval_content`), so it sets `window.__timingResult__` on the real window — a value set inside an `eval_content` sandbox does not persist to a later separate read (see the Marionette Xray note in Global Constraints). Create `build-tester/observer/timing_probe.html`:
+
+```html
+<!doctype html><meta charset=utf-8><title>timing</title><body>
+<script src="timing_parity_probe.js"></script>
+<script>window.__done__ = true;</script>
+</body>
+```
+
+Then `build-tester/observer/run_timing_parity.py`:
 
 ```python
 import statistics, sys
@@ -288,13 +301,17 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 import harness
 
-PROBE = (HERE / "timing_parity_probe.js").read_text()
-
 def measure(arm):
-    with harness.Session(arm=arm) as s:
-        s.navigate("about:blank")
-        s.eval_content(PROBE)                       # IIFE sets window.__timingResult__
-        return s.eval_content("return window.__timingResult__;")
+    port, stop = harness.serve(HERE)
+    try:
+        with harness.Session(arm=arm) as s:
+            s.navigate(f"http://127.0.0.1:{port}/timing_probe.html")
+            s.wait_done(30)
+            # page <script> set __timingResult__ on the real window; read it through
+            # the Marionette Xray boundary via wrappedJSObject.
+            return s.eval_content("return window.wrappedJSObject.__timingResult__;")
+    finally:
+        stop()
 
 def main():
     unarmed = [measure(False) for _ in range(3)]
@@ -446,7 +463,9 @@ def read_leaks(camou_config):
         with harness.Session(camou_config=camou_config) as s:
             s.navigate(f"http://127.0.0.1:{port}/probe_leaks.html")
             s.wait_done(30)
-            return s.eval_content("return window.__leaks__;")
+            # __leaks__ is set by the page's own <script>; read it across the
+            # Marionette Xray boundary via wrappedJSObject (see Global Constraints).
+            return s.eval_content("return window.wrappedJSObject.__leaks__;")
     finally:
         stop()
 
