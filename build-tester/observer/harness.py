@@ -45,10 +45,15 @@ class Session:
     def eval_content(self, js): return self.m.execute_script(js)
 
     def wait_done(self, timeout=30):
+        # window.wrappedJSObject: Marionette content-context execute_script Xray-wraps
+        # window by default, so plain window.__done__ reads the native-only Xray view
+        # and is always undefined for a page-script expando -- verified empirically
+        # (window.foo=42 set by page script reads back None via window.foo, 42 via
+        # window.wrappedJSObject.foo). See marionette_driver's execute_script docstring.
         for _ in range(int(timeout / 0.3)):
             time.sleep(0.3)
             try:
-                if self.m.execute_script("return !!window.__done__;"): return True
+                if self.m.execute_script("return !!window.wrappedJSObject.__done__;"): return True
             except Exception: pass
         return False
 
