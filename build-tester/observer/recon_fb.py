@@ -14,6 +14,7 @@ def main():
             cookies = s.cookies()
     finally:
         stop()
+    assert snap, "surrogate produced no observer rows — check network egress to connect.facebook.net"
     all_reqs = [r for row in snap for r in row["requests"]]
     fb_hosts = sorted({r["host"] for r in all_reqs if "facebook" in r["host"] or "fbcdn" in r["host"] or "fbcdn.net" in r["url"]})
     out = {
@@ -24,6 +25,5 @@ def main():
     }
     (HERE / "recon_fb.json").write_text(json.dumps(out, indent=2))
     print(json.dumps(out, indent=2))
-    assert snap, "surrogate produced no observer rows — check network egress to connect.facebook.net"
 
 main()
