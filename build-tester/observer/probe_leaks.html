@@ -1,0 +1,14 @@
+<!doctype html><meta charset=utf-8><title>leak probe</title><body><script>
+(async () => {
+  const r = {};
+  r.deviceMemory = ('deviceMemory' in navigator) ? navigator.deviceMemory : '<<absent>>';
+  r.plugins = [...navigator.plugins].map(p=>p.name);
+  r.mimeTypes = [...navigator.mimeTypes].map(m=>m.type);
+  r.vendor = navigator.vendor;
+  r.userAgentData = ('userAgentData' in navigator) ? JSON.stringify(navigator.userAgentData) : '<<absent>>';
+  r.connection = ('connection' in navigator) ? (navigator.connection && navigator.connection.effectiveType || 'present') : '<<absent>>';
+  try { r.battery = (typeof navigator.getBattery==='function') ? 'callable' : '<<absent>>'; } catch(e){ r.battery='ERR'; }
+  try { r.devices = (await navigator.mediaDevices.enumerateDevices()).map(d=>d.kind+':'+d.label); } catch(e){ r.devices='ERR:'+e; }
+  window.__leaks__ = r; window.__done__ = true;
+})();
+</script></body>
