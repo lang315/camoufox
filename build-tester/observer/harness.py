@@ -55,7 +55,7 @@ class Session:
             try:
                 if self.m.execute_script("return !!window.wrappedJSObject.__done__;"): return True
             except Exception: pass
-        return False
+        raise TimeoutError(f"window.__done__ not set within {timeout}s")
 
     def snapshot(self):
         time.sleep(1.2)  # let the observer's 500ms actor drain feed the parent Collector
