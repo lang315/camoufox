@@ -457,31 +457,41 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 import harness
 
-def read_leaks(camou_config):
-    port, stop = harness.serve(HERE)
-    try:
-        with harness.Session(camou_config=camou_config) as s:
-            s.navigate(f"http://127.0.0.1:{port}/probe_leaks.html")
-            s.wait_done(30)
-            # __leaks__ is set by the page's own <script>; read it across the
-            # Marionette Xray boundary via wrappedJSObject (see Global Constraints).
-            return s.eval_content("return window.wrappedJSObject.__leaks__;")
-    finally:
-        stop()
+# What makes a surface a Plan-B spoof candidate is NOT "does it vary between two configs"
+# (an un-spoofed surface returns the SAME real device value regardless of config, so a
+# config-comparison would mislabel it "constant" and miss it). It is: the surface returns
+# a present, non-empty REAL value AND camoufox has no MaskConfig key to spoof it.
+# MaskConfig coverage (settings/properties.json): only battery:* and mediaDevices:* have
+# keys (already spoofable -> observe-only in Plan B). deviceMemory / plugins / mimeTypes /
+# vendor / userAgentData / connection have NO key -> a present non-empty value there leaks
+# the real device value.
+HAS_KEY = {"battery", "devices"}   # 'devices' == navigator.mediaDevices.enumerateDevices
+
+def empty(v):
+    return v is None or v == "<<absent>>" or v == "" or v == []
 
 def main():
-    a = read_leaks({"canvas:seed": 1})
-    b = read_leaks({"canvas:seed": 2, "navigator.oscpu": "Windows NT 10.0; Win64; x64"})
-    table = {}
-    for k in a:
-        table[k] = {"config_a": a[k], "config_b": b[k],
-                    "verdict": ("ABSENT" if a[k]=="<<absent>>" else
-                                "CONSTANT" if a[k]==b[k] else "VARIES")}
+    port, stop = harness.serve(HERE)
+    try:
+        with harness.Session(camou_config={"canvas:seed": 1}) as s:
+            s.navigate(f"http://127.0.0.1:{port}/probe_leaks.html")
+            s.wait_done(30)
+            # __leaks__ is set by the page's own <script>; read across the Marionette
+            # Xray boundary via wrappedJSObject (see Global Constraints).
+            vals = s.eval_content("return window.wrappedJSObject.__leaks__;")
+    finally:
+        stop()
+    assert vals, "probe produced no values"
+    table = {k: {"value": vals[k], "present": vals[k] != "<<absent>>",
+                 "empty": empty(vals[k]), "has_maskconfig_key": k in HAS_KEY} for k in vals}
     (HERE / "leak_evidence.json").write_text(json.dumps(table, indent=2))
     print(json.dumps(table, indent=2))
-    assert table, "probe produced no verdicts"
-    leaking = [k for k,v in table.items() if v["verdict"] not in ("ABSENT","CONSTANT")]
-    print("PLAN-B SPOOF CANDIDATES (leak a real value):", leaking or "none")
+    candidates = [k for k in table if table[k]["present"] and not table[k]["empty"]
+                  and not table[k]["has_maskconfig_key"]]
+    print("PLAN-B SPOOF CANDIDATES (present real value, no MaskConfig key):", candidates or "none")
+    print("SKIP (absent/empty):", [k for k in table if table[k]["empty"]] or "none")
+    print("OBSERVE-ONLY (already has MaskConfig key):",
+          sorted(k for k in table if table[k]["has_maskconfig_key"]))
 
 main()
 ```
@@ -489,7 +499,7 @@ main()
 - [ ] **Step 3: Run it**
 
 Run: `cd build-tester && ./.venv/bin/python observer/probe_leaks.py`
-Expected: a per-surface verdict table. Interpretation for Plan B: `ABSENT` → skip (Firefox doesn't expose it; likely `userAgentData`, `connection`). `CONSTANT` → likely skip (e.g. `vendor=""`), unless the constant itself leaks Firefox-ness. `VARIES`, or a real non-empty value with no MaskConfig key → Plan B spoof candidate (expected: `deviceMemory`, possibly `plugins`). `battery`/`devices` already have MaskConfig keys → observe-only in Plan B.
+Expected: a per-surface table of the actual FF152 values + three printed lists. `PLAN-B SPOOF CANDIDATES` = present, non-empty, no MaskConfig key (expected: `deviceMemory`, possibly `plugins`/`mimeTypes`). `SKIP` = absent or empty (expected: `userAgentData`/`connection` absent, `vendor` likely `""`). `OBSERVE-ONLY` = `battery`/`devices` (already have MaskConfig keys → Plan B adds a `Record()` hook, no new spoof). The committed `leak_evidence.json` carries the raw values for Task 6 / Plan B. Report the ACTUAL lists — do not assume the expected ones; the point is to discover the real FF152 values.
 
 - [ ] **Step 4: Commit**
 
