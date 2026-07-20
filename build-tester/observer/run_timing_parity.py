@@ -25,7 +25,12 @@ def main():
     for op in ("toDataURL","getParameter"):
         u, a = med(unarmed, op), med(armed, op)
         if u <= 1e-6:
-            print(f"SKIP: {op} unmeasurable (both arms floored to 0 by privacy.reduceTimerPrecision; not an instrumented path)")
+            if a <= 1e-6:
+                print(f"SKIP: {op} unmeasurable in both arms (floored to 0 by privacy.reduceTimerPrecision; not an instrumented path)")
+                continue
+            # unarmed floored but armed measurable => armed overhead made it measurable: the strongest possible signal
+            print(f"FINDING: {op} unmeasurable unarmed but armed={a:.4f}ms — armed overhead made a previously-immeasurable op measurable")
+            ok = False; measured += 1
             continue
         ratio = a / u
         measured += 1
