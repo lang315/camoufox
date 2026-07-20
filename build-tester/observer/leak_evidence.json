@@ -1,0 +1,62 @@
+{
+  "deviceMemory": {
+    "value": "<<absent>>",
+    "present": false,
+    "empty": true,
+    "has_maskconfig_key": false
+  },
+  "plugins": {
+    "value": [
+      "PDF Viewer",
+      "Chrome PDF Viewer",
+      "Chromium PDF Viewer",
+      "Microsoft Edge PDF Viewer",
+      "WebKit built-in PDF"
+    ],
+    "present": true,
+    "empty": false,
+    "has_maskconfig_key": false
+  },
+  "mimeTypes": {
+    "value": [
+      "application/pdf",
+      "text/pdf"
+    ],
+    "present": true,
+    "empty": false,
+    "has_maskconfig_key": false
+  },
+  "vendor": {
+    "value": "",
+    "present": true,
+    "empty": true,
+    "has_maskconfig_key": false
+  },
+  "userAgentData": {
+    "value": "<<absent>>",
+    "present": false,
+    "empty": true,
+    "has_maskconfig_key": false
+  },
+  "connection": {
+    "value": "<<absent>>",
+    "present": false,
+    "empty": true,
+    "has_maskconfig_key": false
+  },
+  "battery": {
+    "value": "<<absent>>",
+    "present": false,
+    "empty": true,
+    "has_maskconfig_key": true
+  },
+  "devices": {
+    "value": [
+      "audioinput:",
+      "videoinput:"
+    ],
+    "present": true,
+    "empty": false,
+    "has_maskconfig_key": true
+  }
+}
