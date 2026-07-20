@@ -1,2 +1,3 @@
 cloverlabs-camoufox
 playwright
+marionette_driver
