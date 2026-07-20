@@ -1,4 +1,4 @@
-import functools, http.server, json, os, socket, socketserver, threading, time
+import functools, http.server, json, os, socketserver, threading, time
 
 BIN_DEFAULT = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
 SURFACE_NAMES = {1:"canvas",2:"webgl",3:"webrtc",4:"navigator",5:"screen",6:"fonts",7:"audio"}
@@ -30,9 +30,10 @@ class Session:
         else: os.environ.pop("CAMOU_OBSERVE", None)
         if self.camou_config is not None:
             os.environ["CAMOU_CONFIG"] = json.dumps(self.camou_config)
+        else:
+            os.environ.pop("CAMOU_CONFIG", None)
         from marionette_driver.marionette import Marionette
-        _s = socket.socket(); _s.bind(("127.0.0.1", 0)); free_port = _s.getsockname()[1]; _s.close()
-        self.m = Marionette(bin=self.binary, port=free_port, headless=True, prefs=self.prefs)
+        self.m = Marionette(bin=self.binary, port=0, headless=True, prefs=self.prefs)
         self.m.start_session()
         return self
 
