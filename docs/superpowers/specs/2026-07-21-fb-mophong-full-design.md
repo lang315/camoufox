@@ -1,258 +1,146 @@
 # FB Tracking "Mô Phỏng Đầy Đủ" — Design Spec
 
 **Date:** 2026-07-21
-**Status:** revised after 4-agent adversarial review (see §Review log)
+**Status:** re-grounded after empirical measurement (see §Measurement log) — the
+first two drafts' dpr-fix premise was overturned by measuring the real launch path.
 **Depends on:** Plan A (FB observer verify + recon, PR #34, branch `feat/fb-fingerprint-observer`)
 
 ## Goal
 
 Make camoufox present a coherent, real-browser identity against Facebook's
-**observed** client-side tracking: close the devicePixelRatio + window-geometry
-coherence gaps FB reads, audit the rest of FB's read surface for **cross-layer**
-internal coherence, document the identity/cookie-linkage hygiene FB's persistent
-cookies demand, and spot-check the behavioral surface the homepage never
-exercised.
+**observed** client-side tracking, grounded in what the real `pythonlib` launch
+actually produces — not in what a non-representative harness suggested. Concretely:
+build a coherence audit that launches the real Playwright path, fix the genuine
+incoherences it finds (window geometry), document the identity/cookie hygiene FB's
+persistent cookies demand, and spot-check the behavioral surface.
 
-Evidence-first: every workstream traces to a fact measured against the real
-browser. The adversarial review below overturned the first draft's fix — read
-§"The dpr mechanism" before touching code.
+## Measurement log (why this spec was rewritten)
 
-## Grounding evidence
+Every device axis was measured against the real `camoufox` pythonlib + Playwright
+launch (editable install, `executable_path` → the local beta.28 binary, headful
+where the host's real value differs so a leak can't hide). Scripts in
+`build-tester/observer/`.
 
-Live recon — real `https://www.facebook.com/`, logged out, one navigation, n=1
-(`build-tester/observer/recon_fb_live.json`):
+- **dpr is NOT a leak — dropped.** Through the real pythonlib launch, `window.devicePixelRatio`
+  is coherent and host-independent: NewContext synthetic = 1, a preset claiming dpr=2 = 2,
+  default `Camoufox()` = 1 — on a Retina host whose real dpr is 2, and `getter == matchMedia`
+  in every case. The earlier "dpr leaks host 2.0" result came from a **Marionette** probe,
+  which bypasses Juggler's `overrideDPPX`/`device_scale_factor` — the exact channel that
+  controls dpr for real users. No real pythonlib user leaks dpr. **The dpr-fix workstream
+  had no genuine scope and is removed.** (Also confirmed: forcing the `window.devicePixelRatio`
+  MaskConfig key produces a getter-vs-matchMedia split-brain — a second reason not to.)
+- **Window geometry IS incoherent — the real target.** Multi-sample (4×/OS, headless, the
+  real scraping mode) via `Camoufox(os=…)`:
+  - **Windows: 3/4 broken** — `outerWidth = availWidth + 16 > screen.width` (e.g. screen 1920,
+    outer 1936). A window reported wider than its own screen is physically impossible.
+  - **macOS: 3/4 broken** — the synthetic screen is frequently `960×540` (implausibly small for
+    a Mac), so the fixed headless window (`inner 1280×720`) and `outer 1728` dwarf it.
+  - **Linux: 0/4** — clean.
+  The config-level clamp `clamp_window_dimensions` (`fingerprints.py:376`) IS called
+  (`utils.py:775`, gated only by `not _user_set_screen_window`) and `window.outerWidth` IS a
+  spoofed key (`fingerprint-injection.patch`), yet the runtime still reports impossible
+  geometry — so the fix requires root-causing the config→runtime gap, not just re-running a clamp.
 
-- **Device surfaces read:** `canvas`×1, `webgl`×1, `screen`×1, `navigator`×2.
-- **Cookies set** (`.facebook.com`): `datr`, `sb`, `fr` (identity/anti-abuse/ad
-  linkage) + `dpr`, `wd` (device signals: devicePixelRatio, window dimensions)
-  + `ps_l`, `ps_n` (login-state).
-- **Requests:** `static.xx.fbcdn.net`×22, `www.facebook.com`×5, `www.instagram.com`×1.
-
-> **Caveat (carried forward from `build-tester/observer/REPORT.md:72`):** this is
-> one logged-out load. It is thin and likely unrepresentative of Meta's full
-> tracking surface — a registered pixel firing `/tr`, or a logged-in/challenge
-> flow, may read more. The per-surface counts are a categorical bucket
-> (`SURFACE_NAMES` in `harness.py`), **not** per-property: `navigator:2` means
-> "navigator was touched twice", not "these two properties". Do not read this as
-> "FB reads only canvas/webgl/screen/navigator."
-
-dpr leak (`build-tester/observer/probe_dpr.py`, **headful** — headless forces
-dpr=1.0 and masks it): a Windows-1080p config still reports the host's dpr=2.0.
-**Caveat:** this probe drives Marionette + `CAMOU_CONFIG`, which **bypasses the
-Playwright/Juggler layer** — so it measures only the MaskConfig channel, not a
-real `Camoufox()` launch. See below.
-
-Split-brain proof (`build-tester/observer/probe_split.py`, **headful**, host
-dpr=2, forcing the MaskConfig key `window.devicePixelRatio=1`):
-
-```
-{"getter": 1, "mm_1dppx": false, "mm_2dppx": true, "mm_min15": true}
-```
-
-The JS getter reads the forced `1`, but `matchMedia('(resolution: 2dppx)')` still
-matches the host `2`. **The MaskConfig key patches only the JS getter and leaves
-every layout-derived surface at the host value.**
-
-## The dpr mechanism (corrected)
-
-camoufox has **two independent dpr channels** that do not talk to each other:
-
-1. **JS-getter channel** — `patches/fingerprint-injection.patch:124` early-returns
-   `MaskConfig::GetDouble("window.devicePixelRatio")` from
-   `nsGlobalWindowInner::GetDevicePixelRatio`, *before* `GetPresContextForRatio`.
-   Changes only `window.devicePixelRatio` the number.
-2. **Layout channel** — `additions/juggler/TargetRegistry.js:611`
-   (`overrideDPPX = zoom * (deviceScaleFactor || _initialDPPX)`), a Gecko
-   `BrowsingContext` RDM override that drives `nsPresContext`'s CSS-to-device
-   scale — which is what `matchMedia('(resolution)')`, CSS `resolution`,
-   canvas backing-store, and `Page.screenshot` scaling all read.
-
-The first draft mapped the preset dpr onto channel 1 (the MaskConfig key). The
-review + `probe_split.py` prove that manufactures a **page-verifiable
-contradiction** (getter ≠ matchMedia) that is **strictly worse** than the
-host-passthrough leak — pre-fix, both channels read the same host presContext
-value, so they at least agreed.
-
-**The correct fix drives channel 2.** Because `GetDevicePixelRatio` falls through
-to `GetPresContextForRatio` when the MaskConfig key is unset, setting
-`overrideDPPX` (via Playwright `device_scale_factor`) moves **both** the getter
-and matchMedia together → coherent. `additions/juggler/protocol/PageHandler.js:339`
-(`overrideDPPX || window.devicePixelRatio`) confirms the layout channel already
-takes precedence for privileged reads. So: **set `device_scale_factor`, leave the
-MaskConfig `window.devicePixelRatio` key unset.**
-
-**Why WS2 is still needed** (the leak is real despite channel 2 existing): there
-are three fingerprint→config paths and only one wires dpr correctly —
-
-| Path | Entry | dpr → `device_scale_factor`? |
-|---|---|---|
-| `from_browserforge()` (synthetic) | `Camoufox(fingerprint=…)` | **No** — `browserforge.yml:40` mapping is commented out |
-| `from_preset()` (real scraped) | `Camoufox(fingerprint_preset=…)` | **No** — hand-rolled `fingerprints.py:502-598`, never reads dpr |
-| `generate_context_fingerprint()` | `NewContext()` / `AsyncNewContext()` | preset branch **yes** (`fingerprints.py:731-732,861-863`); synthetic branch **no** — hardcodes `devicePixelRatio: None` at `fingerprints.py:803` |
-
-`plan/device-faking-targets.md:56` (#24) already claims "dpr already tracked" —
-true **only** for the `NewContext()` preset branch. This spec narrows that claim:
-the default `Camoufox()` launch (both `from_preset` and `from_browserforge`) and
-the synthetic `NewContext()` branch still leak.
-
-## Decision (revised)
-
-**WS2 drives each fingerprint path's dpr into `context_options['device_scale_factor']`**
-(→ `overrideDPPX` → coherent across getter + matchMedia + layout + screenshots).
-Do **not** use the `window.devicePixelRatio` MaskConfig key. Build-free
-(`device_scale_factor`/`overrideDPPX` are already compiled into Juggler).
+This confirms, again, the project's saturation finding: the genuine device-coherence
+surface is nearly closed. The one real gap is window geometry.
 
 ## Workstreams
 
-### WS1 — Cross-layer coherence audit (test-only)
+### WS1 — Coherence audit harness (test)
 
 **File:** `build-tester/observer/audit_coherence.py` (new)
 
-Launch via the **real Playwright `Camoufox()`** path (the editable pythonlib
-install per `build-tester/run_tests.sh:60-61` — **not** `requirements.txt`'s stale
-`cloverlabs-camoufox==0.6.0`, which is a different package). Marionette cannot be
-used: it bypasses Juggler and so cannot observe the `overrideDPPX`/matchMedia
-channel where the bug lives. Read FB's surface back via `page.evaluate` and
-assert:
+Launch via the **real Playwright `Camoufox()` / `NewContext()`** path (editable pythonlib
+install per `build-tester/run_tests.sh:60-61` — not the stale `requirements.txt` pin;
+`executable_path` → the local binary; `ff_version=152` to skip the not-installed-browser
+check; place `settings/properties.json` next to the binary so `validate_config` finds it).
+Multi-sample per OS; for each, `page.evaluate` FB's read surface and assert:
 
-1. **dpr cross-layer coherence (the load-bearing assert):**
-   `window.devicePixelRatio === claimedDpr` **AND**
-   `matchMedia('(resolution: ' + claimedDpr + 'dppx)').matches === true`. Both
-   arms required — the second is what catches the split-brain. **Fails before WS2**
-   for the leaking paths, passes after.
-2. **All three paths:** run assertion 1 for `fingerprint=` (synthetic),
-   `fingerprint_preset=` (real preset), and `NewContext()` — each has different
-   wiring (table above), so each is a distinct case.
-3. **Window geometry (`wd` cookie):** `window.outerWidth/outerHeight/innerWidth/`
-   `innerHeight/screenX/screenY` are present and satisfy
-   `inner ≤ outer ≤ avail ≤ screen` on both axes. (0/312 presets carry these;
-   `from_preset()` never sets them → host passthrough today — same bug class as dpr.)
-4. **screen/dpr sanity:** `availWidth/Height ≤ width/height`; the claimed dpr is a
-   plausible scale factor (rounds to a real OS DPI step, or `width×dpr` is
-   integral) — some presets carry back-computed irrational dpr (`1.7647…`) that is
-   itself a rare tell.
-5. **navigator consistency:** `platform` ↔ `userAgent` OS ↔ `oscpu`;
-   `maxTouchPoints === 0` when `platform ∈ {MacIntel, Linux x86_64}`;
-   `hardwareConcurrency` in a per-OS plausible range.
+1. **Geometry nesting:** `inner ≤ outer ≤ avail ≤ screen` on **both** axes. (Fails today for
+   Windows/macOS — the failing test that drives WS2/WS3.)
+2. **dpr coherence:** `window.devicePixelRatio == expected` (1 synthetic, preset value for
+   presets) **and** `matchMedia('(resolution: …dppx)')` agrees. (Passes today — a regression
+   guard, catching any future split-brain.)
+3. **navigator consistency:** `platform` ↔ `userAgent` OS ↔ `oscpu`; `maxTouchPoints == 0`
+   for desktop `MacIntel`/`Linux x86_64`.
 
-Assertion 5's property choice is superset coverage, **not** evidence-traced (the
-recon is categorical, not per-property — see grounding caveat). WebGL-renderer↔OS
-coherence and canvas/webgl determinism are **not** re-checked here:
-determinism is already gated by `build-tester/src/lib/checks/collectors.ts:434-456`;
-renderer↔OS is data-gated (per the saturation audit) — observe-only.
+Report a per-OS pass/fail truth table + committed JSON. Headless is the primary mode (real
+scraping); dpr assertions additionally verified headful once (headless floors dpr to 1).
 
-**Feasibility (Task 1, step 1):** confirm the editable `camoufox` package launches
-the local `/tmp` binary via Playwright (point it at the binary; `build-tester/`
-scripts already `from camoufox.fingerprints import …` successfully, so import is
-proven). If a full Playwright launch is genuinely impossible in the harness, the
-fallback is (a) a pure-Python assert that `from_preset()`/`generate_context_`
-`fingerprint()` **emit** a non-None `device_scale_factor`/dpr for a dpr-bearing
-preset — call the real functions, do **not** re-implement the yml mapping — **plus**
-(b) a Marionette end-to-end. But (b) cannot see the matchMedia channel, so the
-fallback is explicitly weaker and must be labeled as not covering assertion 1's
-second arm.
+**Verify:** run it → geometry fails for Windows/macOS pre-fix, all green post-WS2/WS3.
 
-**Verify:** run the audit → assertion 1 (both arms) FAIL pre-WS2 for the leaking
-paths, PASS post-WS2; others pass. Committed truth table + JSON.
+### WS2 — Fix window-geometry incoherence (root-cause + fix)
 
-### WS2 — dpr-fix (via device_scale_factor / overrideDPPX)
+**Files:** `pythonlib/camoufox/fingerprints.py` / `utils.py` (the clamp + browserforge
+mapping). This is a **systematic-debugging** task, not a pre-scripted edit — the config clamp
+is already called yet runtime geometry is still impossible, so Task 1 first instruments
+config-vs-runtime to locate the gap. Leads: is `window.outerWidth` populated for the synthetic
+path (browserforge may omit it, as it did dpr)? Is a real-window chrome offset (~16px) added
+after the spoof? Does `clamp_window_dimensions`'s `outer > outer_cap` check use the right cap
+when `avail == screen`? Fix so `outerWidth ≤ screen.width` holds at **runtime**.
 
-**Files:** `pythonlib/camoufox/fingerprints.py` — wire each leaking path's dpr into
-`context_options['device_scale_factor']`:
-- synthetic `generate_context_fingerprint`: replace the hardcoded
-  `'devicePixelRatio': None` (`:803`) with the generated screen's dpr;
-- `from_preset()` (`:502-598`): thread `preset['screen']['devicePixelRatio']` into
-  the emitted config the same way the working `NewContext` preset branch does;
-- confirm the default `Camoufox()` launch path actually applies
-  `device_scale_factor` to the context it creates (trace it — if the default
-  launch never makes a context with this option, that path needs the wiring too).
+**Verify:** WS1 geometry assertion flips FAIL→PASS for Windows; the existing `build-tester`
+fingerprint suite (≥1000) does not regress.
 
-Do **not** map the `window.devicePixelRatio` MaskConfig key (the split-brain
-trap). Leave `browserforge.yml:40` commented, with a note pointing here.
+### WS3 — Fix implausible headless screens (macOS `960×540`)
 
-**Verify:** (a) WS1 assertion 1 (both arms) flips FAIL→PASS for every path;
-(b) **headful, host-dpr ≠ preset-dpr:** launch a dpr=1 preset on this Retina host →
-`window.devicePixelRatio === 1` **and** `matchMedia('(resolution: 1dppx)').matches`
-`=== true` (the single most important test — proves coherence, not just the getter);
-(c) regression: the existing `build-tester` fingerprint suite still ≥1000
-(note: it is Marionette-based and cannot itself catch a matchMedia split — (a)/(b)
-are the real gate). Evidence: all three.
+**Files:** `pythonlib/camoufox/fingerprints.py` / `utils.py` (screen generation —
+`get_screen_cons`, the headless screen constraint at `utils.py:755`). Determine whether the
+tiny macOS screen is a browserforge data quirk or a headless `get_screen_cons` behavior, then
+ensure generated/selected screens are ≥ the headless window (no `screen < inner`). Reject or
+regenerate implausibly-small desktop screens.
 
-### WS3 — Identity/cookie hygiene + reconciliation (docs)
+**Verify:** WS1 geometry passes for macOS across samples; no regression.
+
+### WS4 — Identity/cookie hygiene (docs)
 
 **File:** `docs/observer/fb-identity-hygiene.md` (new)
 
-Operational playbook for FB's linkage cookies (`datr`/`sb`/`fr`) — the ephemeral
-default (`persistent_context=False`, `sync_api.py:87`) already handles the common
-case. Rules, each mapped to a verified pythonlib kwarg (grep-checked, no invented
-flags): one identity = one fresh profile; distinct `user_data_dir` per identity if
-persisting; one egress IP per identity (`proxy=`) — `datr` + IP correlate; don't
-route TLS through a ClientHello-rewriting proxy (genuine FF JA3 is a strength,
-`plan/device-faking-targets.md:140,218`); post-WS2, `dpr`/`wd` cohere with the
-profile.
+Playbook for FB's linkage cookies (`datr`/`sb`/`fr`) — the ephemeral default
+(`persistent_context=False`, `sync_api.py:87`) already handles the common case. Rules mapped
+to verified pythonlib kwargs (grep-checked): one identity = one fresh profile; distinct
+`user_data_dir` if persisting; one egress IP per identity (`proxy=`); don't route TLS through
+a ClientHello-rewriting proxy (genuine FF JA3 is a strength, `plan/device-faking-targets.md:140,218`).
+Also note (provenance): dpr is confirmed coherent via `overrideDPPX` (narrows
+`device-faking-targets.md:56` #24), and `docs/observer/README.md:106` still carries a stale
+"canvas-only observer" claim (all 7 surfaces are wired).
 
-Also (cheap, provenance): note that `plan/device-faking-targets.md:56` #24's
-"dpr already tracked" is now narrowed (true only for `NewContext` preset), and
-that `docs/observer/README.md:106` still claims a stale "canvas-only" observer
-scope (all 7 surfaces are wired — `recon_fb_live.json` proves it). Fix or flag.
+**Verify:** every option name exists in `pythonlib`.
 
-**Verify:** every option name exists in `pythonlib` (grep-checked).
-
-### WS4 — Behavioral spot-check (recon addendum, shrunk)
+### WS5 — Behavioral spot-check (recon addendum)
 
 **File:** `build-tester/observer/recon_fb_behavioral.py` (new, small)
 
-Per the review, this is **downgraded from a headline workstream to a spot-check**:
-audio/font fingerprinting (`OfflineAudioContext`, glyph metrics) fire at page load
-without a gesture, and WebRTC needs an actual call feature — so a logged-out
-scroll/hover pass will **probably** report "nothing new beyond WS1's recon", which
-is a valid, honestly-reported negative, not a finding to chase. One logged-out
-interaction pass + longer settle; if it surfaces nothing, that closes the question
-cheaply rather than leaving it open.
+One logged-out interaction pass (scroll + hover) + longer settle vs `recon_fb_live.py`, to see
+whether `audio`/`fonts`/`webrtc` (untouched on the homepage) activate and whether a `/tr`
+beacon fires. A still-light result is a valid, honestly-reported negative.
 
-**Verify:** `recon_fb_behavioral.json` (surface delta vs homepage); honest negative
-if that's the result.
+**Verify:** `recon_fb_behavioral.json` (surface delta); honest negative if that's the result.
 
 ## Global constraints
 
-- **Build-free.** No rebuild, no new patch — the fix routes through the
-  already-compiled `overrideDPPX`/`device_scale_factor` channel. WS2 is
-  pythonlib-only (`fingerprints.py`), persists as a normal edit (not the
-  regenerated `camoufox-*/` tree).
-- **WS1 must use the editable pythonlib install** (`run_tests.sh` path), launched
-  via **real Playwright**, not Marionette — the bug is invisible to Marionette.
-- **Recon is logged-out only:** no credentials, single session, no automated loops.
-- **Evidence in the PR:** each workstream's verification output. WS2's real gate is
-  WS1 assertion 1 (both arms) + the headful matchMedia test — the Marionette
-  fingerprint suite is a regression backstop only.
+- **Build-free.** No rebuild, no new C++ patch. All fixes are pythonlib-level (`fingerprints.py`/
+  `utils.py`); they persist as normal edits (not the regenerated `camoufox-*/` tree). If root-
+  causing WS2/WS3 shows the fix genuinely needs a C++/Juggler change or touches the `no_viewport`/
+  #666 window-strategy, that is a STOP-and-escalate, not a forced patch.
+- **WS1 uses the editable pythonlib + real Playwright**, not Marionette — Marionette bypasses
+  Juggler and mismeasured dpr; it is banned as a coherence oracle here.
+- **Recon logged-out only:** no credentials, single session, no automated loops.
+- **Evidence in the PR:** each workstream's verification output (the audit truth table is WS2/WS3's
+  real gate; the Marionette fingerprint suite is a regression backstop only).
 - Repo `lang315/camoufox`; standard commit/PR footers.
 
 ## Out of scope
 
+- No dpr code change (measured coherent).
 - No login/credentialed FB flows.
-- No new C++/patches, no rebuild. (If tracing reveals the default `Camoufox()`
-  launch genuinely cannot carry `device_scale_factor` without a Juggler/C++
-  change, that is a STOP-and-escalate — it breaks the build-free premise.)
+- No new C++/patches, no rebuild.
 - WebGL-renderer↔OS coherence (data-gated; observe-only).
-- Canvas/webgl determinism (already covered by `collectors.ts:434-456`).
-- `TargetRegistry.js.bak` stale-copy cleanup (noted, not in scope).
+- Canvas/webgl determinism (already covered by `build-tester/src/lib/checks/collectors.ts:434-456`).
 
-## Review log (4-agent adversarial pass, 2026-07-21)
+## Measurement scripts (grounding, committed under `build-tester/observer/`)
 
-- **CRITICAL, all 4 agents + `probe_split.py`:** first-draft WS2 (MaskConfig key)
-  is a getter-only override → page-verifiable split-brain vs matchMedia, worse than
-  the leak. → Fix redirected to the `overrideDPPX`/`device_scale_factor` layer.
-- **CRITICAL, 3 agents:** WS2's `browserforge.yml` edit misses `from_preset()` and
-  the synthetic `:803` hardcode → the flagship "real preset" path still leaks. →
-  WS2 rescoped to `fingerprints.py`, all three paths; WS1 tests each.
-- **IMPORTANT:** WS1/WS2 verification was same-layer circular (never probed
-  matchMedia); Marionette can't see the Juggler channel; build-tester installs a
-  stale package. → WS1 uses editable install + real Playwright + a matchMedia
-  assertion.
-- **IMPORTANT:** `wd`-cookie window geometry is the same host-passthrough bug for
-  presets; navigator `maxTouchPoints`/`hardwareConcurrency` unchecked; some preset
-  dpr values are implausible. → added to WS1.
-- **IMPORTANT:** n=1 recon over-generalized; assertion 3 not evidence-traced;
-  contradicts `device-faking-targets.md:56` #24. → caveats added, #24 narrowed.
-- **MINOR:** WS4 likely theater; stale `README.md`; `.bak` clutter. → WS4 shrunk;
-  README/`.bak` noted in WS3/out-of-scope.
+`probe_dpr.py` (Marionette dpr — the misleading result that bypasses Juggler),
+`probe_split.py` (MaskConfig-key getter-vs-matchMedia split-brain), `geom_multi.py`
+(real-pythonlib multi-sample: dpr coherent + geometry impossible for Windows/macOS).
+These are the evidence for every claim above.
