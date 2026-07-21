@@ -1,0 +1,15 @@
+{
+  "observer_surfaces": [
+    {
+      "site": "127.0.0.1",
+      "surfaces": {
+        "navigator": 1
+      }
+    }
+  ],
+  "fb_request_hosts": [
+    "connect.facebook.net"
+  ],
+  "fb_request_count": 3,
+  "cookie_names": []
+}

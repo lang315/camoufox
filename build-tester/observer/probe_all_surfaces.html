@@ -1,0 +1,29 @@
+<!doctype html><meta charset=utf-8><title>observer probe</title><body><script>
+(async () => {
+  const log = {};
+  try { const c=document.createElement('canvas'); c.width=200;c.height=50;
+    const x=c.getContext('2d'); x.font='14px Arial'; x.fillText('probe',2,2); c.toDataURL(); log.canvas=1; } catch(e){ log.canvas='ERR:'+e; }
+  try { const g=document.createElement('canvas').getContext('webgl') || document.createElement('canvas').getContext('experimental-webgl');
+    g.getParameter(g.VENDOR); const ext=g.getExtension('WEBGL_debug_renderer_info');
+    if(ext) g.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+    // The observer's only WebGL Record() site is in the pixel-readback path
+    // (ClientWebGLContext.cpp, alongside the RFP canvas-noise readback), not in
+    // getParameter -- so a real readPixels() call is needed to hit it.
+    g.clearColor(0.2,0.4,0.6,1.0); g.clear(g.COLOR_BUFFER_BIT);
+    const px=new Uint8Array(4*g.drawingBufferWidth*g.drawingBufferHeight);
+    g.readPixels(0,0,g.drawingBufferWidth,g.drawingBufferHeight,g.RGBA,g.UNSIGNED_BYTE,px);
+    log.webgl=1; } catch(e){ log.webgl='ERR:'+e; }
+  try { const pc=new RTCPeerConnection(); pc.createDataChannel('x');
+    await pc.createOffer().then(o=>pc.setLocalDescription(o)); log.webrtc=1; } catch(e){ log.webrtc='ERR:'+e; }
+  try { void navigator.userAgent; void navigator.platform; void navigator.hardwareConcurrency; void navigator.oscpu; log.navigator=1; } catch(e){ log.navigator='ERR:'+e; }
+  try { void screen.width; void screen.height; void screen.colorDepth; log.screen=1; } catch(e){ log.screen='ERR:'+e; }
+  try { const x=document.createElement('canvas').getContext('2d');
+    for (const f of ['NoSuchFont123','Impact','Webdings','Papyrus']) { x.font='16px '+f; x.measureText('mix wq'); }
+    if (document.fonts && document.fonts.check) document.fonts.check('16px Impact'); log.fonts=1; } catch(e){ log.fonts='ERR:'+e; }
+  try { const ac=new (window.OfflineAudioContext||window.webkitOfflineAudioContext)(1,44100,44100);
+    const o=ac.createOscillator(); o.connect(ac.destination); o.start();
+    const an=ac.createAnalyser(); o.connect(an); const buf=new Float32Array(an.frequencyBinCount); an.getFloatFrequencyData(buf);
+    await ac.startRendering(); log.audio=1; } catch(e){ log.audio='ERR:'+e; }
+  window.__probeLog__ = log; window.__done__ = true;
+})();
+</script></body>
