@@ -1,9 +1,16 @@
-"""Real-pythonlib geometry + dpr measurement (the decisive one that re-grounded
-the spec). Multi-sample per OS, HEADLESS = real scraping mode, via Camoufox().
-Proves: dpr is coherent through the real launch (=1 headless), and window geometry
-is impossible for Windows/macOS (outer>screen / tiny macOS screens) while Linux is
-clean. Requires: editable pythonlib (`uv pip install -e ../pythonlib -p .venv`) and
-settings/properties.json copied next to the binary (validate_config reads it)."""
+"""Real-pythonlib geometry + dpr measurement, multi-sample per OS, HEADLESS =
+real scraping mode, via Camoufox(). Result on current pythonlib: dpr AND window
+geometry are both coherent for all OSes (12/12).
+
+HISTORY: this script once appeared to show impossible geometry (outer>screen,
+tiny macOS screens). That was a STALE-VENV artifact -- cloverlabs-camoufox==0.6.0
+physically shadowed the editable .pth redirect and ran pre-#647/#666 code
+(importlib.metadata still reported the editable version, masking it). Not a bug.
+
+Setup (order matters -- mirror build-tester/run_tests.sh:60):
+  uv pip uninstall cloverlabs-camoufox -p .venv     # FIRST, or you exercise stale code
+  uv pip install -e ../pythonlib -p .venv
+  cp ../settings/properties.json <binary_dir>/properties.json   # validate_config reads it"""
 from camoufox.sync_api import Camoufox
 
 BIN = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
