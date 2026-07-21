@@ -1,0 +1,26 @@
+{
+  "url": "https://www.facebook.com/",
+  "surfaces_touched": {
+    "canvas": 1,
+    "navigator": 2,
+    "screen": 1,
+    "webgl": 1
+  },
+  "request_host_counts": {
+    "static.xx.fbcdn.net": 22,
+    "www.facebook.com": 5,
+    "www.instagram.com": 1
+  },
+  "cookie_names": [
+    "datr",
+    "dpr",
+    "fr",
+    "ps_l",
+    "ps_n",
+    "sb",
+    "wd"
+  ],
+  "cookie_hosts": [
+    ".facebook.com"
+  ]
+}
