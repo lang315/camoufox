@@ -36,7 +36,7 @@ def main():
     results = [arm("A_noconfig", None), arm("B_win1080p", WIN)]
     for label, r in results:
         print(f"{label}: dpr={r['dpr']} screen={r['sw']}x{r['sh']} platform={r['plat']}")
-    a = dict(results)["A_noconfig"]; b = dict(results)["B_win1080p"]
+    d = dict(results); a, b = d["A_noconfig"], d["B_win1080p"]
     print("---")
     print(f"host real dpr (arm A) = {a['dpr']}")
     print(f"spoofed-arm dpr (arm B) = {b['dpr']}")

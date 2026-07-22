@@ -29,7 +29,7 @@ def coherence_fails(d, expected_dpr):
         f.append(f"width nest: inner={d['iw']} outer={d['ow']} avail={d['aw']} screen={d['sw']}")
     if not (d["ih"] <= d["oh"] <= d["ah"] <= d["sh"]):
         f.append(f"height nest: inner={d['ih']} outer={d['oh']} avail={d['ah']} screen={d['sh']}")
-    if expected_dpr is not None and abs(d["dpr"] - expected_dpr) > 0.05:
+    if abs(d["dpr"] - expected_dpr) > 0.05:
         f.append(f"dpr {d['dpr']} != expected {expected_dpr}")
     if not d["mmCoherent"]:
         f.append(f"dpr getter {d['dpr']} disagrees with matchMedia (split-brain)")

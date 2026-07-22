@@ -4,7 +4,7 @@ HERE = Path(__file__).parent
 sys.path.insert(0, str(HERE))
 import harness
 
-EXPECTED = {"canvas","webgl","webrtc","navigator","screen","fonts","audio"}
+EXPECTED = set(harness.SURFACE_NAMES.values())
 
 def main():
     port, stop = harness.serve(HERE)
@@ -19,8 +19,7 @@ def main():
             snap = s.snapshot()
     finally:
         stop()
-    recorded = set()
-    for row in snap: recorded |= set(row["surfaces"])
+    recorded = {s for row in snap for s in row["surfaces"]}
     print("probe page results:", probe_log)
     print("observer recorded:", sorted(recorded))
     missing = EXPECTED - recorded
