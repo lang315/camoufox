@@ -11,9 +11,10 @@ Setup (order matters -- mirror build-tester/run_tests.sh:60):
   uv pip uninstall cloverlabs-camoufox -p .venv     # FIRST, or you exercise stale code
   uv pip install -e ../pythonlib -p .venv
   cp ../settings/properties.json <binary_dir>/properties.json   # validate_config reads it"""
+import os
 from camoufox.sync_api import Camoufox
 
-BIN = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
+BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
 JS = ("() => ({sw:screen.width, sh:screen.height, aw:screen.availWidth, ah:screen.availHeight,"
       " ow:outerWidth, oh:outerHeight, iw:innerWidth, ih:innerHeight, dpr:devicePixelRatio})")
 

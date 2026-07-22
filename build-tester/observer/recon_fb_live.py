@@ -21,10 +21,9 @@ def main():
     assert snap, f"no observer rows from {URL} -- blocked, or no surface read before settle"
     all_reqs = [r for row in snap for r in row["requests"]]
     hosts = collections.Counter(r["host"] for r in all_reqs)
-    surfaces = {}
+    surfaces = collections.Counter()
     for row in snap:
-        for name, n in row["surfaces"].items():
-            surfaces[name] = surfaces.get(name, 0) + n
+        surfaces.update(row["surfaces"])
     out = {
         "url": URL,
         "surfaces_touched": dict(sorted(surfaces.items())),
@@ -32,7 +31,8 @@ def main():
         "cookie_names": sorted({c["name"] for c in cookies}),
         "cookie_hosts": sorted({c["host"] for c in cookies}),
     }
-    (HERE / "recon_fb_live.json").write_text(json.dumps(out, indent=2))
-    print(json.dumps(out, indent=2))
+    blob = json.dumps(out, indent=2)
+    (HERE / "recon_fb_live.json").write_text(blob)
+    print(blob)
 
 main()

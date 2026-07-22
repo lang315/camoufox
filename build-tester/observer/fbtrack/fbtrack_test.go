@@ -49,8 +49,13 @@ func TestBeaconParams(t *testing.T) {
 	if v.Get("cd[currency]") != "USD" || v.Get("cd[value]") != "9.99" {
 		t.Errorf("custom-data not flattened to cd[...]: %v", v)
 	}
-	if _, err := url.Parse(b.URL()); err != nil {
-		t.Errorf("beacon URL not parseable: %v", err)
+	u, err := url.Parse(b.URL())
+	if err != nil {
+		t.Fatalf("beacon URL not parseable: %v", err)
+	}
+	q := u.Query()
+	if q.Get("id") != b.PixelID || q.Get("ev") != b.Event || q.Get("dl") != b.DocLocation || q.Get("cd[currency]") != "USD" {
+		t.Errorf("beacon URL dropped params, RawQuery=%q", u.RawQuery)
 	}
 }
 

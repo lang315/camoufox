@@ -33,9 +33,6 @@ func randInt(n int64) int64 {
 	return v.Int64()
 }
 
-// unixMillis is the creationTime field format fbevents uses (13-digit ms).
-func unixMillis(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecond) }
-
 // FBP builds the _fbp cookie value: fb.<subdomainIndex>.<creationTime>.<payload>
 //
 // subdomainIndex is fbevents' public-suffix probe result (1 for a normal
@@ -43,13 +40,13 @@ func unixMillis(t time.Time) int64 { return t.UnixNano() / int64(time.Millisecon
 // common case. The payload is a random integer (10 digits, matching observed fbp).
 func FBP(subdomainIndex int, t time.Time) string {
 	payload := 1_000_000_000 + randInt(9_000_000_000) // 10-digit, like observed fbp
-	return fmt.Sprintf("fb.%d.%d.%d", subdomainIndex, unixMillis(t), payload)
+	return fmt.Sprintf("fb.%d.%d.%d", subdomainIndex, t.UnixMilli(), payload)
 }
 
 // FBC builds the _fbc cookie value from an fbclid URL parameter:
 // fb.<subdomainIndex>.<creationTime>.<fbclid>
 func FBC(subdomainIndex int, t time.Time, fbclid string) string {
-	return fmt.Sprintf("fb.%d.%d.%s", subdomainIndex, unixMillis(t), fbclid)
+	return fmt.Sprintf("fb.%d.%d.%s", subdomainIndex, t.UnixMilli(), fbclid)
 }
 
 // EventID reproduces fbevents' eid (browser+server dedup key), documented format
@@ -101,7 +98,7 @@ func (b Beacon) Values() url.Values {
 	v.Set("dl", b.DocLocation)
 	v.Set("rl", b.Referrer)
 	v.Set("if", strconv.FormatBool(b.InFrame))
-	v.Set("ts", strconv.FormatInt(unixMillis(time.Now()), 10))
+	v.Set("ts", strconv.FormatInt(time.Now().UnixMilli(), 10))
 	v.Set("sw", strconv.Itoa(b.ScreenW))
 	v.Set("sh", strconv.Itoa(b.ScreenH))
 	if b.Version != "" {
