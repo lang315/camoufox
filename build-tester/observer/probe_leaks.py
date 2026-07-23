@@ -31,10 +31,10 @@ def main():
     assert vals, "probe produced no values"
     table = {k: {"value": vals[k], "present": vals[k] != "<<absent>>",
                  "empty": empty(vals[k]), "has_maskconfig_key": k in HAS_KEY} for k in vals}
-    (HERE / "leak_evidence.json").write_text(json.dumps(table, indent=2))
-    print(json.dumps(table, indent=2))
-    candidates = [k for k in table if table[k]["present"] and not table[k]["empty"]
-                  and not table[k]["has_maskconfig_key"]]
+    blob = json.dumps(table, indent=2)
+    (HERE / "leak_evidence.json").write_text(blob)
+    print(blob)
+    candidates = [k for k in table if not table[k]["empty"] and not table[k]["has_maskconfig_key"]]
     print("PLAN-B SPOOF CANDIDATES (present real value, no MaskConfig key):", candidates or "none")
     print("SKIP (absent/empty):", [k for k in table if table[k]["empty"]] or "none")
     print("OBSERVE-ONLY (already has MaskConfig key):",
