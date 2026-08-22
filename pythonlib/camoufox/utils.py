@@ -282,6 +282,32 @@ def _real_display_present(
     return 'DISPLAY' in env and not virtual_display
 
 
+def _caller_pinned_screen(
+    screen: Optional[Screen],
+    window: Optional[Tuple[int, int]],
+    fingerprint: Optional[Fingerprint],
+    fingerprint_preset: Optional[Any],
+) -> bool:
+    """True when the caller chose the screen themselves, so we must not replace it.
+
+    `_user_set_screen_window` only inspects config dict KEYS, so it cannot see these
+    kwargs. That is fine for the other fixups, which only ever shrink and therefore
+    cannot violate a `max_*` constraint -- but resample_screen_for_dpr1 REPLACES the
+    screen, and did silently discard an explicit `screen=Screen(...)` until this guard
+    existed. A pinned fingerprint, preset dict, or window is the same request: that
+    exact device.
+
+    Kept as a named predicate rather than inline so it is testable without a browser
+    binary; the launch_options-level test that covers it can only run where one exists.
+    """
+    return (
+        screen is not None
+        or window is not None
+        or fingerprint is not None
+        or isinstance(fingerprint_preset, dict)
+    )
+
+
 def _should_constrain_to_host_display(
     headless: Optional[Union[bool, str]],
     env: Dict[str, Union[str, float, bool]],
@@ -766,17 +792,8 @@ def launch_options(
     # The dpr the chosen screen dimensions are CSS pixels FOR. from_browserforge /
     # from_preset drop it, so capture it here for resample_screen_for_dpr1().
     _source_dpr: Optional[float] = None
-    # Whether the caller pinned the screen themselves. Captured BEFORE `fingerprint` is
-    # reassigned below. resample_screen_for_dpr1 REPLACES the screen rather than shrinking
-    # it, unlike the other fixups, so it must not run over a caller's explicit choice:
-    # a `screen=Screen(max_width=...)` constraint would be violated outright, and a
-    # pinned fingerprint/preset/window is a request for that exact device.
-    _user_pinned_screen = (
-        screen is not None
-        or window is not None
-        or fingerprint is not None
-        or isinstance(fingerprint_preset, dict)
-    )
+    # Captured BEFORE `fingerprint` is reassigned below.
+    _user_pinned_screen = _caller_pinned_screen(screen, window, fingerprint, fingerprint_preset)
     if fingerprint is not None:
         # User passed a custom BrowserForge fingerprint
         if not i_know_what_im_doing:
