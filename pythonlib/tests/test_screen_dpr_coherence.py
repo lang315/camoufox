@@ -146,6 +146,67 @@ def test_noop_when_screen_absent():
 
 
 # ---------------------------------------------------------------------------
+# Degradation and caching. Both of these survived mutation testing in review:
+# deleting the empty-pool guard, and dropping the presets file from the cache key,
+# each left the suite green while breaking a documented guarantee.
+# ---------------------------------------------------------------------------
+
+
+def test_noop_when_the_bundle_has_no_dpr1_screens():
+    """Pre-v150 presets carry no dpr~1 entries for any OS, so this must degrade to a
+    clean no-op. Without the guard it is IndexError from choice([]) at launch time."""
+    c = _cfg()
+    before = dict(c)
+    resample_screen_for_dpr1(c, "mac", source_dpr=2, ff_version=140)
+    assert c == before
+
+
+def test_empty_pool_for_one_version_does_not_poison_another():
+    """The cache is keyed on the resolved presets FILE for exactly this reason."""
+    resample_screen_for_dpr1(_cfg(), "mac", source_dpr=2, ff_version=140)  # empty pool
+    valid = real_dpr1_screens("macos")
+    c = _cfg()
+    resample_screen_for_dpr1(c, "mac", source_dpr=2, ff_version=152)
+    assert (c["screen.width"], c["screen.height"]) in valid
+
+
+# ---------------------------------------------------------------------------
+# Composition. Every test above drives a hand-built 4-key dict; that is what let a
+# real availTop incoherence through review. These run the resample over a genuine
+# from_browserforge config, alongside the fixups that follow it in launch_options.
+# ---------------------------------------------------------------------------
+
+
+def test_avail_offsets_do_not_survive_the_swapped_screen():
+    """availTop/availLeft are not in the preset block, so a naive swap leaves them
+    pointing at the discarded device: availTop + availHeight > screen.height."""
+    from camoufox.fingerprints import (FP_GENERATOR, clamp_window_dimensions,
+                                       fix_screen_no_taskbar, from_browserforge)
+
+    for _ in range(40):
+        fp = FP_GENERATOR.generate(os="macos")
+        dpr = fp.screen.devicePixelRatio
+        if not dpr or abs(dpr - 1) < 0.02:
+            continue
+        cfg = from_browserforge(fp, "152")
+        resample_screen_for_dpr1(cfg, "mac", dpr, 152)
+        fix_screen_no_taskbar(cfg, "mac")
+        clamp_window_dimensions(cfg)
+
+        top = cfg.get("screen.availTop", 0) or 0
+        assert top + cfg["screen.availHeight"] <= cfg["screen.height"], (
+            f"availTop={top} left over from the discarded device: "
+            f"{top}+{cfg['screen.availHeight']} > {cfg['screen.height']}"
+        )
+        assert cfg.get("screen.availLeft", 0) + cfg["screen.availWidth"] <= cfg["screen.width"]
+        # Window keys are not emitted for every fingerprint, so only assert nesting
+        # when they are actually present.
+        inner, outer = cfg.get("window.innerWidth"), cfg.get("window.outerWidth")
+        if inner and outer:
+            assert inner <= outer <= cfg["screen.availWidth"]
+
+
+# ---------------------------------------------------------------------------
 # Wiring: the resample must reach the generated config
 # ---------------------------------------------------------------------------
 
@@ -156,6 +217,51 @@ def _binary():
         if c and os.path.exists(c):
             return c
     return None
+
+
+def _launch_config(**kwargs):
+    """Drive the real launch_options.
+
+    executable_path is MANDATORY here, never optional: without it launch_options
+    resolves the installed browser and will DOWNLOAD ~312MB if none is present. A
+    test suite must never do that, so these tests skip instead (see _binary()).
+    """
+    import json
+
+    from camoufox.utils import launch_options
+
+    lo = launch_options(headless=True, os="macos", ff_version=152,
+                        i_know_what_im_doing=True, executable_path=_binary(), **kwargs)
+    env = lo["env"]
+    return json.loads("".join(
+        env[k] for k in sorted((k for k in env if k.startswith("CAMOU_CONFIG_")),
+                               key=lambda k: int(k.rsplit("_", 1)[1]))
+    ))
+
+
+@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
+def test_explicit_screen_constraint_is_not_discarded():
+    """A caller's screen= is a MAX constraint. The other fixups only ever shrink, so
+    they cannot violate it; this one REPLACES the screen, so it must not run at all
+    when the caller pinned one."""
+    from browserforge.fingerprints import Screen
+
+    for _ in range(15):
+        cfg = _launch_config(screen=Screen(max_width=1280, max_height=800))
+        assert cfg["screen.width"] <= 1280, f"screen= was discarded: {cfg['screen.width']}"
+        assert cfg["screen.height"] <= 800
+
+
+@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
+def test_resample_still_runs_when_nothing_is_pinned():
+    """Guard against over-correcting B2 into a no-op for the default path."""
+    valid = real_dpr1_screens("macos")
+    drawn = set()
+    for _ in range(8):
+        cfg = _launch_config()
+        drawn.add((cfg["screen.width"], cfg["screen.height"]))
+    assert drawn, "no configs generated"
+    assert all(d in valid for d in drawn), f"resample stopped running: {drawn}"
 
 
 @pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
