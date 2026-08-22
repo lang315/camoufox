@@ -4,12 +4,13 @@ mismeasures dpr). Asserts geometry nesting, dpr coherence, and navigator
 consistency. Headless is the primary (real scraping) mode; headless floors dpr
 to 1, so the dpr assertion expects 1 here and a headful spot-check covers >1.
 See the module docstring in geom_multi.py for the one-time env setup."""
-import json, os, sys
+import json, sys
 from pathlib import Path
 from camoufox.sync_api import Camoufox
+import harness   # stdlib-only at import time; does not pull in Marionette
 
 HERE = Path(__file__).parent
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
+BIN = harness.default_binary()
 SAMPLES = 4
 OSES = ("windows", "macos", "linux")
 
