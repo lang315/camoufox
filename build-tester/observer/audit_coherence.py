@@ -14,16 +14,18 @@ HERE = Path(__file__).parent
 BIN = harness.default_binary()
 SAMPLES = 4
 OSES = ("windows", "macos", "linux")
-# What each requested OS must claim. Keyed by the same names as OSES; mirrors the table
-# in goapi/pkg/fingerprint/coherence_test.go.
+# What each requested OS must claim. PLATFORM_FOR mirrors the table in
+# goapi/pkg/fingerprint/coherence_test.go; UA_TOKEN_FOR has no counterpart there and is
+# local to this audit.
 PLATFORM_FOR = {"windows": "Win32", "macos": "MacIntel", "linux": "Linux x86_64"}
 UA_TOKEN_FOR = {"windows": "Windows", "macos": "Macintosh", "linux": "Linux"}
 # Decouple sampling from the machine running the audit. Without an explicit Screen,
 # launch_options falls back to get_screen_cons(), which caps BrowserForge at the HOST
 # monitor (1512x982 on the dev Mac). That made results machine-dependent and collapsed
 # the macOS arm to ~1 distinct screen across 4 samples -- including 960x540, a size no
-# real Mac reports. Bound is deliberately wider than any real display so the full
-# distribution is sampled.
+# real Mac reports. The bound is not "wider than any display" (a Pro Display XDR is
+# 6016x3384); it is wide enough to exclude ZERO of the 312 screen entries across both
+# bundled preset files, i.e. unconstrained over the data actually sampled.
 SCREEN = Screen(max_width=6000, max_height=4000)
 
 READ = """() => {
@@ -77,13 +79,25 @@ def main():
     bad_oses = sorted({r["os"] for r in results if r["fails"]})
     print("---")
     print(f"{sum(1 for r in results if not r['fails'])}/{len(results)} coherent")
-    # Surface sampling breadth: a arm that draws one screen across every sample is
-    # effectively n=1 and its PASS means much less than the sample count suggests.
+    # Sampling breadth GATES the run. An arm that draws one screen across every sample is
+    # effectively n=1, and every other check here (nesting, dpr, platform, UA) is satisfiable
+    # by a single fake screen -- so it would report a green 12/12 that means almost nothing.
+    # This is not hypothetical: commits a59a98f and ecf15b8 both shipped a passing 12/12
+    # whose macOS arm was entirely 960x540. Advisory output was not enough; it must fail.
+    collapsed = []
     for o in OSES:
         n = len({(r["sw"], r["sh"]) for r in results if r["os"] == o})
-        print(f"  {o}: {n}/{SAMPLES} distinct screens" + ("  <-- effectively n=1" if n == 1 else ""))
+        print(f"  {o}: {n}/{SAMPLES} distinct screens" + ("  <-- COLLAPSED" if n == 1 else ""))
+        if n == 1:
+            collapsed.append(o)
     if bad_oses:
         print("AUDIT FAIL:", ", ".join(bad_oses)); sys.exit(1)
+    if collapsed:
+        # n==1 can happen by chance (~1% per arm), so say so rather than asserting a bug.
+        print(f"AUDIT FAIL: sampling collapsed for {', '.join(collapsed)} -- every sample drew "
+              f"the same screen, so the PASS is not evidence. Re-run once; if it repeats, "
+              f"generation is constrained (see the SCREEN note above).")
+        sys.exit(1)
     print("AUDIT PASS")
 
 main()

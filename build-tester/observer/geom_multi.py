@@ -11,6 +11,12 @@ DELIBERATE KEEP: audit_coherence.py measures a strict superset of this, so this 
 is redundant to RUN -- but it is cited as evidence in the mo phong design doc and owns
 the setup notes below (audit_coherence.py's docstring points here). Not dead code.
 
+STALE RESULT WARNING: the "12/12 coherent" above predates the sampling fix. This script
+still lets launch_options fall back to get_screen_cons(), so it is capped by the HOST
+monitor -- on a small-screen host its macOS arm collapses to ~1 distinct screen and can
+draw 960x540, which no real Mac reports. audit_coherence.py passes an explicit Screen to
+avoid exactly that. Treat the count above as a historical reading, not a current claim.
+
 Setup (order matters -- mirror build-tester/run_tests.sh:60):
   uv pip uninstall cloverlabs-camoufox -p .venv     # FIRST, or you exercise stale code
   uv pip install -e ../pythonlib -p .venv
