@@ -280,6 +280,30 @@ def _real_display_present(
     return 'DISPLAY' in env and not virtual_display
 
 
+def _should_constrain_to_host_display(
+    headless: Optional[Union[bool, str]],
+    env: Dict[str, Union[str, float, bool]],
+    virtual_display: Optional[str],
+) -> bool:
+    """
+    True only when a real, pre-existing display will actually show the window.
+
+    The Screen constraint exists for one reason: to keep the browser WINDOW
+    fitting the display it is rendered on. So it applies headful-on-a-real-monitor
+    and nowhere else:
+
+      - headless (incl. 'virtual') renders offscreen -- there is no display to fit
+        into, and deriving one from the host caps browserforge at whatever monitor
+        the scraping machine happens to have. That both correlates the fingerprint
+        with the host (the host's own resolution starts showing up as the spoofed
+        screen) and can collapse an OS's distribution to a near-constant -- on a
+        1512x982 host, firefox+macOS generation fell to {960x540, 1512x982}, and no
+        real Mac reports 960x540.
+      - a self-spawned Xvfb is not a real monitor either (#242).
+    """
+    return not headless and _real_display_present(env, virtual_display)
+
+
 def update_fonts(config: Dict[str, Any], target_os: str) -> None:
     """
     Updates the fonts for the target OS.
@@ -752,7 +776,8 @@ def launch_options(
     if not _used_preset and fingerprint is None:
         # Default: BrowserForge synthetic generation (infinite unique fingerprints)
         fingerprint = generate_fingerprint(
-            screen=screen or get_screen_cons(headless or _real_display_present(env, virtual_display)),
+            screen=screen
+            or get_screen_cons(_should_constrain_to_host_display(headless, env, virtual_display)),
             window=window,
             os=os,
         )
