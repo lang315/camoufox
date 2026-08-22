@@ -373,6 +373,100 @@ def fix_screen_no_taskbar(config: Dict[str, Any], target_os: str) -> None:
             config['window.innerHeight'] = new_avail - chrome
 
 
+_DPR1_SCREENS: Dict[Tuple[Path, str], List[Dict[str, Any]]] = {}
+# Smallest menu bar observed in browserforge's macOS availTop values; used only for the
+# few pool devices whose screen leaves no vertical gap at all.
+_MACOS_MENUBAR_PX = 25
+
+
+def _real_dpr1_screens(target_os: str, ff_version: Optional[Any] = None) -> List[Dict[str, Any]]:
+    """Screen blocks from the bundled presets whose devicePixelRatio is ~1.
+
+    These are scraped from real browsers, so they are by construction resolutions
+    that real devices report AT dpr=1 -- exactly the claim we need to make.
+    Deliberately not a hand-written table: it would drift from reality, and the
+    data already ships.
+
+    Keyed by the resolved presets FILE, not just the OS: the pre-v150 bundle has no
+    dpr~1 entries for ANY of the three OSes (macos 0/30, windows 0/75, linux 0/18), so
+    this is inert below ff 150 and caching on the OS alone would let that empty result
+    poison a later ff_version's.
+    """
+    cache_key = (_select_presets_file(ff_version), _OS_TO_PRESET_KEY.get(target_os, target_os))
+    if cache_key not in _DPR1_SCREENS:
+        presets = load_presets(ff_version) or {}
+        _DPR1_SCREENS[cache_key] = [
+            s
+            for s in (p.get('screen', {}) for p in presets.get('presets', {}).get(cache_key[1], []))
+            if s.get('width')
+            and s.get('availWidth')
+            and s.get('devicePixelRatio')
+            and abs(s['devicePixelRatio'] - 1) < 0.02
+        ]
+    return _DPR1_SCREENS[cache_key]
+
+
+def resample_screen_for_dpr1(
+    config: Dict[str, Any], target_os: str, source_dpr: Optional[float],
+    ff_version: Optional[Any] = None,
+) -> None:
+    """Replace a scaled-display screen with one real devices report at dpr=1.
+
+    BrowserForge picks screen dimensions as CSS pixels *for a specific*
+    devicePixelRatio -- macOS `960x540 @ dpr 2` describes a real 1920x1080 Retina
+    panel. That dpr never reaches the config (there is no window.devicePixelRatio
+    key), and headless Firefox reports dpr=1 because there is no display, so the
+    page sees `960x540 @ dpr 1`: a size no device ships at 1x. Systematic rather
+    than one bad resolution -- 84% of macOS, 48% of linux and 37% of windows
+    fingerprints are sampled for dpr != 1.
+
+    Scaling back to the physical panel (960x540@2 -> 1920x1080) was measured and
+    rejected: it only moved 3/8 -> 4/8 macOS values onto real 1x resolutions,
+    because it introduces the opposite implausibility (3456x2234 and 5120x2880 are
+    Retina panels that only ever run at 2x). Drawing from screens observed at dpr~1
+    is correct by construction instead.
+
+    Only meaningful when the run will report dpr=1; the caller decides that.
+    Forcing window.devicePixelRatio to match instead is NOT viable -- it patches the
+    JS getter while matchMedia keeps reporting the host DPI, a page-verifiable
+    split-brain that is strictly worse (see build-tester/observer/probe_split.py).
+    """
+    if not source_dpr or abs(source_dpr - 1) < 0.01:
+        return
+    if config.get('screen.width') is None or config.get('screen.height') is None:
+        return
+    pool = _real_dpr1_screens(target_os, ff_version)
+    if not pool:
+        return  # no bundled presets: leave the config as-is rather than invent one
+    screen = choice(pool)  # nosec - cosmetic variety, not a security decision
+    # Take the whole block from ONE real device, so avail stays coherent with screen.
+    config['screen.width'] = screen['width']
+    config['screen.height'] = screen['height']
+    config['screen.availWidth'] = screen['availWidth']
+    config['screen.availHeight'] = screen['availHeight']
+    # availTop/availLeft are NOT in the preset block (no preset carries one), so left
+    # alone they keep pointing at the discarded device and give
+    # availTop + availHeight > screen.height.
+    #
+    # Keep BrowserForge's own availTop rather than deriving one: its values are real
+    # menu-bar heights (33/30/34/25 dominate) and a constant would be a fleet-level
+    # tell of its own. Only clamp it to what the new screen leaves free. macOS always
+    # reserves a menu bar, so availTop=0 there is impossible -- in that case take the
+    # menu bar out of availHeight instead of reporting no menu bar at all.
+    if 'screen.availTop' in config:
+        top = config.get('screen.availTop') or 0
+        if target_os in ('mac', 'macos') and top <= 0:
+            top = _MACOS_MENUBAR_PX
+        config['screen.availTop'] = top
+        # Shrink availHeight to fit rather than clamping availTop down to the gap:
+        # clamping distorts the menu-bar distribution (it piles draws onto whatever
+        # the gap happens to be), whereas the few pixels lost here are invisible.
+        if top + config['screen.availHeight'] > config['screen.height']:
+            config['screen.availHeight'] = config['screen.height'] - top
+    if 'screen.availLeft' in config:
+        config['screen.availLeft'] = 0
+
+
 def clamp_window_dimensions(config: Dict[str, Any]) -> None:
     """Enforce inner <= outer <= avail <= screen on BOTH axes.
 
