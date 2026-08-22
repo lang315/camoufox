@@ -374,6 +374,9 @@ def fix_screen_no_taskbar(config: Dict[str, Any], target_os: str) -> None:
 
 
 _DPR1_SCREENS: Dict[Tuple[Path, str], List[Dict[str, Any]]] = {}
+# Smallest menu bar observed in browserforge's macOS availTop values; used only for the
+# few pool devices whose screen leaves no vertical gap at all.
+_MACOS_MENUBAR_PX = 25
 
 
 def _real_dpr1_screens(target_os: str, ff_version: Optional[Any] = None) -> List[Dict[str, Any]]:
@@ -441,14 +444,25 @@ def resample_screen_for_dpr1(
     config['screen.height'] = screen['height']
     config['screen.availWidth'] = screen['availWidth']
     config['screen.availHeight'] = screen['availHeight']
-    # availTop/availLeft are NOT in the preset block (no preset carries them), so they
-    # would otherwise keep pointing at the discarded device and produce
-    # availTop + availHeight > screen.height. Re-derive from the new screen: macOS puts
-    # its menubar above the available rect, everything else keeps its bar at the bottom.
+    # availTop/availLeft are NOT in the preset block (no preset carries one), so left
+    # alone they keep pointing at the discarded device and give
+    # availTop + availHeight > screen.height.
+    #
+    # Keep BrowserForge's own availTop rather than deriving one: its values are real
+    # menu-bar heights (33/30/34/25 dominate) and a constant would be a fleet-level
+    # tell of its own. Only clamp it to what the new screen leaves free. macOS always
+    # reserves a menu bar, so availTop=0 there is impossible -- in that case take the
+    # menu bar out of availHeight instead of reporting no menu bar at all.
     if 'screen.availTop' in config:
-        config['screen.availTop'] = (
-            screen['height'] - screen['availHeight'] if target_os in ('mac', 'macos') else 0
-        )
+        top = config.get('screen.availTop') or 0
+        if target_os in ('mac', 'macos') and top <= 0:
+            top = _MACOS_MENUBAR_PX
+        config['screen.availTop'] = top
+        # Shrink availHeight to fit rather than clamping availTop down to the gap:
+        # clamping distorts the menu-bar distribution (it piles draws onto whatever
+        # the gap happens to be), whereas the few pixels lost here are invisible.
+        if top + config['screen.availHeight'] > config['screen.height']:
+            config['screen.availHeight'] = config['screen.height'] - top
     if 'screen.availLeft' in config:
         config['screen.availLeft'] = 0
 
