@@ -13,6 +13,10 @@ HERE = Path(__file__).parent
 BIN = harness.default_binary()
 SAMPLES = 4
 OSES = ("windows", "macos", "linux")
+# What each requested OS must claim. Keyed by the same names as OSES; mirrors the table
+# in goapi/pkg/fingerprint/coherence_test.go.
+PLATFORM_FOR = {"windows": "Win32", "macos": "MacIntel", "linux": "Linux x86_64"}
+UA_TOKEN_FOR = {"windows": "Windows", "macos": "Macintosh", "linux": "Linux"}
 
 READ = """() => {
   const dpr = window.devicePixelRatio, near = q => matchMedia(q).matches;
@@ -24,7 +28,7 @@ READ = """() => {
   };
 }"""
 
-def coherence_fails(d, expected_dpr):
+def coherence_fails(d, os_name, expected_dpr):
     f = []
     if not (d["iw"] <= d["ow"] <= d["aw"] <= d["sw"]):
         f.append(f"width nest: inner={d['iw']} outer={d['ow']} avail={d['aw']} screen={d['sw']}")
@@ -34,12 +38,16 @@ def coherence_fails(d, expected_dpr):
         f.append(f"dpr {d['dpr']} != expected {expected_dpr}")
     if not d["mmCoherent"]:
         f.append(f"dpr getter {d['dpr']} disagrees with matchMedia (split-brain)")
-    ua_os = "Windows" if "Windows" in d["ua"] else "Mac" if "Macintosh" in d["ua"] else "Linux" if "Linux" in d["ua"] else "?"
-    plat_os = "Windows" if d["plat"] == "Win32" else "Mac" if d["plat"] == "MacIntel" else "Linux" if "Linux" in d["plat"] else "?"
-    if ua_os != plat_os:
-        f.append(f"platform {d['plat']} != UA OS {ua_os}")
-    if d["plat"] in ("MacIntel", "Linux x86_64") and d["touch"] != 0:
-        f.append(f"maxTouchPoints={d['touch']} on desktop {d['plat']}")
+    # Assert against the OS we ASKED Camoufox for, not against a label re-derived from
+    # the readings. Comparing two derived labels passes whenever UA and platform are
+    # CONSISTENTLY wrong for the requested OS -- exactly the failure this audit exists
+    # to catch -- and both also compare equal when both fall back to "unknown".
+    if d["plat"] != PLATFORM_FOR[os_name]:
+        f.append(f"platform {d['plat']} != {PLATFORM_FOR[os_name]} requested for {os_name}")
+    if UA_TOKEN_FOR[os_name] not in d["ua"]:
+        f.append(f"UA lacks {UA_TOKEN_FOR[os_name]!r} requested for {os_name}: {d['ua']}")
+    if os_name in ("macos", "linux") and d["touch"] != 0:
+        f.append(f"maxTouchPoints={d['touch']} on desktop {os_name}")
     return f
 
 def launch(os_name):
@@ -51,7 +59,7 @@ def main():
     for os_name in OSES:
         for i in range(SAMPLES):
             d = launch(os_name)
-            fails = coherence_fails(d, expected_dpr=1.0)
+            fails = coherence_fails(d, os_name, expected_dpr=1.0)
             results.append({"os": os_name, "i": i, "fails": fails, **d})
             print(f"[{'PASS' if not fails else 'FAIL'}] {os_name}#{i}: "
                   f"screen={d['sw']}x{d['sh']} outer={d['ow']}x{d['oh']} inner={d['iw']}x{d['ih']} dpr={d['dpr']}")
