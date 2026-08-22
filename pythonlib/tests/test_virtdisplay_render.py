@@ -137,7 +137,7 @@ def test_virtual_headless_does_not_derive_screen_from_self_spawned_xvfb(monkeypa
     env = {"DISPLAY": ":99"}  # set by launch_options() for headless='virtual'
     virtual_display = ":99"
 
-    flag = headless or utils._real_display_present(env, virtual_display)
+    flag = utils._should_constrain_to_host_display(headless, env, virtual_display)
     result = utils.get_screen_cons(flag)
 
     assert result is None, (
@@ -154,7 +154,7 @@ def test_real_headful_still_derives_screen_from_real_monitor(monkeypatch):
     env = {"DISPLAY": ":0"}  # a real, pre-existing host display
     virtual_display = None  # no Xvfb spawned by us
 
-    flag = headless or utils._real_display_present(env, virtual_display)
+    flag = utils._should_constrain_to_host_display(headless, env, virtual_display)
     result = utils.get_screen_cons(flag)
 
     assert result is not None
@@ -181,7 +181,7 @@ def test_live_xvfb_reports_configured_screen_size():
         env = {"DISPLAY": display}
         # Simulate what launch_options() does for headless='virtual'.
         assert utils._real_display_present(env, display) is False
-        flag = False or utils._real_display_present(env, display)
+        flag = utils._should_constrain_to_host_display(False, env, display)
         assert utils.get_screen_cons(flag) is None
     finally:
         vd.kill()

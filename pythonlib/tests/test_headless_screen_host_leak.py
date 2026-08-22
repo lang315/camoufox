@@ -31,6 +31,8 @@ from types import SimpleNamespace
 # Make `import camoufox` resolve to the in-tree pythonlib without an install.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest  # noqa: E402
+
 from camoufox import utils  # noqa: E402
 
 FAKE_HOST_MONITOR = [SimpleNamespace(width=1512, height=982)]
@@ -91,3 +93,66 @@ def test_headful_real_display_still_reaches_browserforge(monkeypatch):
     assert screen is not None
     assert screen.max_width == 1512
     assert screen.max_height == 982
+
+
+# ---------------------------------------------------------------------------
+# Wiring: the tests above all pin the HELPER. Reverting the launch_options call
+# site alone would leave every one of them passing, so this asserts the absence
+# of the leak in the actual generated config rather than a helper's return value.
+# ---------------------------------------------------------------------------
+
+# A resolution no fingerprint dataset contains, so any appearance in the output
+# can only have come from the monitor probe.
+SENTINEL_MONITOR = [SimpleNamespace(width=1234, height=567)]
+
+
+def _camou_config(launch_opts):
+    """Reassemble the chunked CAMOU_CONFIG_<n> env vars launch_options emits."""
+    import json
+
+    env = launch_opts["env"]
+    parts = [env[k] for k in sorted(
+        (k for k in env if k.startswith("CAMOU_CONFIG_")),
+        key=lambda k: int(k.rsplit("_", 1)[1]),
+    )]
+    return json.loads("".join(parts))
+
+
+def _binary():
+    """launch_options needs a real binary: validate_config reads properties.json."""
+    candidates = [
+        os.environ.get("CFX_BIN"),
+        "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox",
+    ]
+    return next((c for c in candidates if c and os.path.exists(c)), None)
+
+
+@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
+def test_launch_options_headless_output_never_contains_host_resolution(monkeypatch):
+    """The leak must be absent from the config that actually reaches the browser."""
+    from camoufox.utils import launch_options
+
+    monkeypatch.setattr(utils, "get_monitors", lambda: SENTINEL_MONITOR)
+
+    drawn = []
+    for _ in range(8):  # generation is random; a single draw proves little
+        cfg = _camou_config(
+            launch_options(
+                headless=True, os="macos", ff_version=152,
+                i_know_what_im_doing=True, executable_path=_binary(),
+            )
+        )
+        drawn.append((cfg.get("screen.width"), cfg.get("screen.height")))
+
+    assert (1234, 567) not in drawn, (
+        f"the host monitor reached the generated fingerprint ({drawn}) -- the "
+        "launch_options call site is no longer routed through "
+        "_should_constrain_to_host_display"
+    )
+    # Not "every draw exceeds the bound": unconstrained macOS legitimately includes
+    # 960x540 (~5% of browserforge's firefox+macOS data). Constrained, NOTHING can
+    # exceed the monitor, so one draw over it is sufficient and non-flaky.
+    assert max(w for w, _ in drawn) > 1234, (
+        f"no draw exceeded the fake host monitor's 1234px bound ({drawn}), so "
+        "generation is still being constrained by it"
+    )
