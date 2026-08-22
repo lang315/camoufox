@@ -30,7 +30,8 @@ def serve(directory):
     try:
         yield httpd.server_address[1]
     finally:
-        httpd.shutdown()
+        httpd.shutdown()      # stop serve_forever
+        httpd.server_close()  # and release the listening socket, else it leaks per call
 
 class Session:
     def __init__(self, camou_config=None, arm=True, binary=None, prefs=None):
