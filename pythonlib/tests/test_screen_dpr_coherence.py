@@ -106,6 +106,43 @@ def test_avail_comes_from_the_same_real_screen():
         assert block in valid, f"screen/avail are not one real device's pair: {block}"
 
 
+def test_pool_keeps_duplicates_so_sampling_tracks_real_prevalence():
+    """The pool is a LIST with duplicates, so choice() weights by how often a
+    resolution actually occurs. A future set()/dict.fromkeys() 'cleanup' would
+    silently turn this into a uniform draw over distinct values and nothing else
+    would fail, so it is locked here."""
+    from camoufox.fingerprints import _real_dpr1_screens
+
+    pool = _real_dpr1_screens("mac", 152)
+    distinct = {(s["width"], s["height"]) for s in pool}
+    assert len(pool) > len(distinct), (
+        "pool was deduplicated: sampling is now uniform over distinct resolutions "
+        "instead of weighted by real prevalence"
+    )
+
+
+def test_macos_availtop_is_a_plausible_menu_bar():
+    """Removing the availTop impossibility must not replace it with an implausible
+    value: macOS always reserves a menu bar, and it is tens of pixels, not hundreds."""
+    from camoufox.fingerprints import FP_GENERATOR, from_browserforge
+
+    seen = 0
+    for _ in range(60):
+        fp = FP_GENERATOR.generate(os="macos")
+        dpr = fp.screen.devicePixelRatio
+        if not dpr or abs(dpr - 1) < 0.02:
+            continue
+        cfg = from_browserforge(fp, "152")
+        if "screen.availTop" not in cfg:
+            continue
+        resample_screen_for_dpr1(cfg, "mac", dpr, 152)
+        top = cfg["screen.availTop"]
+        seen += 1
+        assert 0 < top <= 60, f"availTop={top} is not a macOS menu bar"
+        assert top + cfg["screen.availHeight"] <= cfg["screen.height"]
+    assert seen, "no scaled-display macOS fingerprints were exercised"
+
+
 def test_960x540_at_dpr1_never_survives():
     """The reported case: it must not come out the far side unchanged."""
     for _ in range(30):
