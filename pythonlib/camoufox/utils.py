@@ -23,7 +23,7 @@ from .exceptions import (
     NonFirefoxFingerprint,
     NotWritableError,
 )
-from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_window_dimensions, set_media_devices_defaults
+from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_window_dimensions, resample_screen_for_dpr1, set_media_devices_defaults
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
@@ -763,6 +763,9 @@ def launch_options(
 
     # Generate a fingerprint
     _used_preset = False
+    # The dpr the chosen screen dimensions are CSS pixels FOR. from_browserforge /
+    # from_preset drop it, so capture it here for resample_screen_for_dpr1().
+    _source_dpr: Optional[float] = None
     if fingerprint is not None:
         # User passed a custom BrowserForge fingerprint
         if not i_know_what_im_doing:
@@ -776,6 +779,7 @@ def launch_options(
         if preset:
             merge_into(config, from_preset(preset, ff_version_str))
             _used_preset = True
+            _source_dpr = preset.get('screen', {}).get('devicePixelRatio')
 
     if not _used_preset and fingerprint is None:
         # Default: BrowserForge synthetic generation (infinite unique fingerprints)
@@ -792,6 +796,7 @@ def launch_options(
             config,
             from_browserforge(fingerprint, ff_version_str),
         )
+        _source_dpr = getattr(fingerprint.screen, 'devicePixelRatio', None)
 
     target_os = get_target_os(config)
 
@@ -800,6 +805,11 @@ def launch_options(
     if not _user_set_navigator:
         fix_navigator_arch(config, target_os)
     if not _user_set_screen_window:
+        # Headless has no display, so Firefox reports dpr=1 regardless of the dpr the
+        # screen was sampled for. Restore the physical panel first, then let the
+        # geometry fixups below re-normalize against the corrected screen.
+        if headless:
+            resample_screen_for_dpr1(config, target_os, _source_dpr, ff_version_str)
         fix_screen_no_taskbar(config, target_os)
         clamp_window_dimensions(config)
 
