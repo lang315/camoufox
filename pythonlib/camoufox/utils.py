@@ -23,7 +23,7 @@ from .exceptions import (
     NonFirefoxFingerprint,
     NotWritableError,
 )
-from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_window_dimensions, set_media_devices_defaults
+from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_window_dimensions, resample_screen_for_dpr1, set_media_devices_defaults
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
@@ -280,6 +280,32 @@ def _real_display_present(
     degenerate/fake Xvfb resolution poisons browserforge's output (#242).
     """
     return 'DISPLAY' in env and not virtual_display
+
+
+def _caller_pinned_screen(
+    screen: Optional[Screen],
+    window: Optional[Tuple[int, int]],
+    fingerprint: Optional[Fingerprint],
+    fingerprint_preset: Optional[Any],
+) -> bool:
+    """True when the caller chose the screen themselves, so we must not replace it.
+
+    `_user_set_screen_window` only inspects config dict KEYS, so it cannot see these
+    kwargs. That is fine for the other fixups, which only ever shrink and therefore
+    cannot violate a `max_*` constraint -- but resample_screen_for_dpr1 REPLACES the
+    screen, and did silently discard an explicit `screen=Screen(...)` until this guard
+    existed. A pinned fingerprint, preset dict, or window is the same request: that
+    exact device.
+
+    Kept as a named predicate rather than inline so it is testable without a browser
+    binary; the launch_options-level test that covers it can only run where one exists.
+    """
+    return (
+        screen is not None
+        or window is not None
+        or fingerprint is not None
+        or isinstance(fingerprint_preset, dict)
+    )
 
 
 def _should_constrain_to_host_display(
@@ -763,6 +789,11 @@ def launch_options(
 
     # Generate a fingerprint
     _used_preset = False
+    # The dpr the chosen screen dimensions are CSS pixels FOR. from_browserforge /
+    # from_preset drop it, so capture it here for resample_screen_for_dpr1().
+    _source_dpr: Optional[float] = None
+    # Captured BEFORE `fingerprint` is reassigned below.
+    _user_pinned_screen = _caller_pinned_screen(screen, window, fingerprint, fingerprint_preset)
     if fingerprint is not None:
         # User passed a custom BrowserForge fingerprint
         if not i_know_what_im_doing:
@@ -776,6 +807,7 @@ def launch_options(
         if preset:
             merge_into(config, from_preset(preset, ff_version_str))
             _used_preset = True
+            _source_dpr = preset.get('screen', {}).get('devicePixelRatio')
 
     if not _used_preset and fingerprint is None:
         # Default: BrowserForge synthetic generation (infinite unique fingerprints)
@@ -792,6 +824,7 @@ def launch_options(
             config,
             from_browserforge(fingerprint, ff_version_str),
         )
+        _source_dpr = getattr(fingerprint.screen, 'devicePixelRatio', None)
 
     target_os = get_target_os(config)
 
@@ -800,6 +833,14 @@ def launch_options(
     if not _user_set_navigator:
         fix_navigator_arch(config, target_os)
     if not _user_set_screen_window:
+        # Headless has no display, so Firefox reports dpr=1 regardless of the dpr the
+        # screen was sampled for. Swap in a screen real devices report AT dpr=1.
+        # Runs BEFORE the clamps below, which are downward-only and therefore cannot
+        # re-normalize a window against an enlarged screen -- a window left smaller
+        # than its screen is normal, so that is fine, but do not read the clamps as
+        # fixing up anything this changes.
+        if headless and not _user_pinned_screen:
+            resample_screen_for_dpr1(config, target_os, _source_dpr, ff_version_str)
         fix_screen_no_taskbar(config, target_os)
         clamp_window_dimensions(config)
 
