@@ -70,19 +70,19 @@ func uuidV4() string {
 
 // Beacon holds the browser-surface inputs the /tr beacon is assembled from.
 type Beacon struct {
-	PixelID    string            // -> id
-	Event      string            // -> ev  (e.g. "PageView")
-	DocLocation string           // -> dl  (window.location.href)
-	Referrer   string            // -> rl  (document.referrer)
-	InFrame    bool              // -> if  (window.top !== window)
-	ScreenW    int               // -> sw  (screen.width)
-	ScreenH    int               // -> sh  (screen.height)
-	Version    string            // -> v   (fbevents version, e.g. "2.9.100")
-	Release    string            // -> r   (internal release segment; optional)
-	EventCount int               // -> ec  (per-pixel in-memory counter, starts 0)
-	FBP        string            // -> fbp (the _fbp cookie value)
-	EventID    string            // -> eid (dedup id; if empty, generated)
-	CustomData map[string]string // -> cd[<key>] (site-supplied custom data)
+	PixelID     string            // -> id
+	Event       string            // -> ev  (e.g. "PageView")
+	DocLocation string            // -> dl  (window.location.href)
+	Referrer    string            // -> rl  (document.referrer)
+	InFrame     bool              // -> if  (window.top !== window)
+	ScreenW     int               // -> sw  (screen.width)
+	ScreenH     int               // -> sh  (screen.height)
+	Version     string            // -> v   (fbevents version, e.g. "2.9.100")
+	Release     string            // -> r   (internal release segment; optional)
+	EventCount  int               // -> ec  (per-pixel in-memory counter, starts 0)
+	FBP         string            // -> fbp (the _fbp cookie value)
+	EventID     string            // -> eid (dedup id; if empty, generated)
+	CustomData  map[string]string // -> cd[<key>] (site-supplied custom data)
 }
 
 // Values assembles the /tr query parameters in the documented layout. Timestamp

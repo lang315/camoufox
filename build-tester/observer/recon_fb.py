@@ -1,19 +1,15 @@
-import json, sys
+import json
 from pathlib import Path
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
 import harness
 
+HERE = Path(__file__).parent
+
 def main():
-    port, stop = harness.serve(HERE)
-    try:
-        with harness.Session(camou_config={"canvas:seed": 424242}) as s:
-            s.navigate(f"http://127.0.0.1:{port}/fb_surrogate.html")
-            s.wait_done(30)
-            snap = s.snapshot()
-            cookies = s.cookies()
-    finally:
-        stop()
+    with harness.serve(HERE) as port, harness.Session(camou_config={"canvas:seed": 424242}) as s:
+        s.navigate(f"http://127.0.0.1:{port}/fb_surrogate.html")
+        s.wait_done(30)
+        snap = s.snapshot()
+        cookies = s.cookies()
     assert snap, "surrogate produced no observer rows — check network egress to connect.facebook.net"
     all_reqs = [r for row in snap for r in row["requests"]]
     def is_fb(r): return "facebook" in r["host"] or "fbcdn" in r["host"] or "fbcdn.net" in r["url"]
