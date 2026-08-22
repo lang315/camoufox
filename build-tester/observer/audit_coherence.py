@@ -4,14 +4,29 @@ mismeasures dpr). Asserts geometry nesting, dpr coherence, and navigator
 consistency. Headless is the primary (real scraping) mode; headless floors dpr
 to 1, so the dpr assertion expects 1 here and a headful spot-check covers >1.
 See the module docstring in geom_multi.py for the one-time env setup."""
-import json, os, sys
+import json, sys
 from pathlib import Path
 from camoufox.sync_api import Camoufox
+from browserforge.fingerprints import Screen
+import harness   # stdlib-only at import time; does not pull in Marionette
 
 HERE = Path(__file__).parent
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
+BIN = harness.default_binary()
 SAMPLES = 4
 OSES = ("windows", "macos", "linux")
+# What each requested OS must claim. PLATFORM_FOR mirrors the table in
+# goapi/pkg/fingerprint/coherence_test.go; UA_TOKEN_FOR has no counterpart there and is
+# local to this audit.
+PLATFORM_FOR = {"windows": "Win32", "macos": "MacIntel", "linux": "Linux x86_64"}
+UA_TOKEN_FOR = {"windows": "Windows", "macos": "Macintosh", "linux": "Linux"}
+# Decouple sampling from the machine running the audit. Without an explicit Screen,
+# launch_options falls back to get_screen_cons(), which caps BrowserForge at the HOST
+# monitor (1512x982 on the dev Mac). That made results machine-dependent and collapsed
+# the macOS arm to ~1 distinct screen across 4 samples -- including 960x540, a size no
+# real Mac reports. The bound is not "wider than any display" (a Pro Display XDR is
+# 6016x3384); it is wide enough to exclude ZERO of the 312 screen entries across both
+# bundled preset files, i.e. unconstrained over the data actually sampled.
+SCREEN = Screen(max_width=6000, max_height=4000)
 
 READ = """() => {
   const dpr = window.devicePixelRatio, near = q => matchMedia(q).matches;
@@ -23,7 +38,7 @@ READ = """() => {
   };
 }"""
 
-def coherence_fails(d, expected_dpr):
+def coherence_fails(d, os_name, expected_dpr):
     f = []
     if not (d["iw"] <= d["ow"] <= d["aw"] <= d["sw"]):
         f.append(f"width nest: inner={d['iw']} outer={d['ow']} avail={d['aw']} screen={d['sw']}")
@@ -33,16 +48,21 @@ def coherence_fails(d, expected_dpr):
         f.append(f"dpr {d['dpr']} != expected {expected_dpr}")
     if not d["mmCoherent"]:
         f.append(f"dpr getter {d['dpr']} disagrees with matchMedia (split-brain)")
-    ua_os = "Windows" if "Windows" in d["ua"] else "Mac" if "Macintosh" in d["ua"] else "Linux" if "Linux" in d["ua"] else "?"
-    plat_os = "Windows" if d["plat"] == "Win32" else "Mac" if d["plat"] == "MacIntel" else "Linux" if "Linux" in d["plat"] else "?"
-    if ua_os != plat_os:
-        f.append(f"platform {d['plat']} != UA OS {ua_os}")
-    if d["plat"] in ("MacIntel", "Linux x86_64") and d["touch"] != 0:
-        f.append(f"maxTouchPoints={d['touch']} on desktop {d['plat']}")
+    # Assert against the OS we ASKED Camoufox for, not against a label re-derived from
+    # the readings. Comparing two derived labels passes whenever UA and platform are
+    # CONSISTENTLY wrong for the requested OS -- exactly the failure this audit exists
+    # to catch -- and both also compare equal when both fall back to "unknown".
+    if d["plat"] != PLATFORM_FOR[os_name]:
+        f.append(f"platform {d['plat']} != {PLATFORM_FOR[os_name]} requested for {os_name}")
+    if UA_TOKEN_FOR[os_name] not in d["ua"]:
+        f.append(f"UA lacks {UA_TOKEN_FOR[os_name]!r} requested for {os_name}: {d['ua']}")
+    if os_name in ("macos", "linux") and d["touch"] != 0:
+        f.append(f"maxTouchPoints={d['touch']} on desktop {os_name}")
     return f
 
 def launch(os_name):
-    with Camoufox(headless=True, executable_path=BIN, os=os_name, ff_version=152, i_know_what_im_doing=True) as b:
+    with Camoufox(headless=True, executable_path=BIN, os=os_name, ff_version=152,
+                  i_know_what_im_doing=True, screen=SCREEN) as b:
         p = b.new_context().new_page(); p.goto("about:blank"); return p.evaluate(READ)
 
 def main():
@@ -50,7 +70,7 @@ def main():
     for os_name in OSES:
         for i in range(SAMPLES):
             d = launch(os_name)
-            fails = coherence_fails(d, expected_dpr=1.0)
+            fails = coherence_fails(d, os_name, expected_dpr=1.0)
             results.append({"os": os_name, "i": i, "fails": fails, **d})
             print(f"[{'PASS' if not fails else 'FAIL'}] {os_name}#{i}: "
                   f"screen={d['sw']}x{d['sh']} outer={d['ow']}x{d['oh']} inner={d['iw']}x{d['ih']} dpr={d['dpr']}")
@@ -59,8 +79,25 @@ def main():
     bad_oses = sorted({r["os"] for r in results if r["fails"]})
     print("---")
     print(f"{sum(1 for r in results if not r['fails'])}/{len(results)} coherent")
+    # Sampling breadth GATES the run. An arm that draws one screen across every sample is
+    # effectively n=1, and every other check here (nesting, dpr, platform, UA) is satisfiable
+    # by a single fake screen -- so it would report a green 12/12 that means almost nothing.
+    # This is not hypothetical: commits a59a98f and ecf15b8 both shipped a passing 12/12
+    # whose macOS arm was entirely 960x540. Advisory output was not enough; it must fail.
+    collapsed = []
+    for o in OSES:
+        n = len({(r["sw"], r["sh"]) for r in results if r["os"] == o})
+        print(f"  {o}: {n}/{SAMPLES} distinct screens" + ("  <-- COLLAPSED" if n == 1 else ""))
+        if n == 1:
+            collapsed.append(o)
     if bad_oses:
         print("AUDIT FAIL:", ", ".join(bad_oses)); sys.exit(1)
+    if collapsed:
+        # n==1 can happen by chance (~1% per arm), so say so rather than asserting a bug.
+        print(f"AUDIT FAIL: sampling collapsed for {', '.join(collapsed)} -- every sample drew "
+              f"the same screen, so the PASS is not evidence. Re-run once; if it repeats, "
+              f"generation is constrained (see the SCREEN note above).")
+        sys.exit(1)
     print("AUDIT PASS")
 
 main()

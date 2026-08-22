@@ -8,8 +8,9 @@ Retina Mac the real host dpr is 2.0, so:
 Also reads screen + platform to confirm the other spoofs apply."""
 import json, os
 from marionette_driver.marionette import Marionette
+import harness
 
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
+BIN = harness.default_binary()
 WIN = {
     "screen.width": 1920, "screen.height": 1080,
     "screen.availWidth": 1920, "screen.availHeight": 1040,

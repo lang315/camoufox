@@ -3,11 +3,11 @@ one navigation, no automated loops) to see which of the 7 instrumented surfaces
 Meta's real homepage fingerprinting touches -- the operator spot-check REPORT.md
 deferred. Separate output (recon_fb_live.json); does not touch the surrogate's
 committed recon_fb.json."""
-import collections, json, sys, time
+import collections, json, time
 from pathlib import Path
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
 import harness
+
+HERE = Path(__file__).parent
 
 URL = "https://www.facebook.com/"
 SETTLE = 8  # real page has no __done__ expando; let fingerprinting JS run
