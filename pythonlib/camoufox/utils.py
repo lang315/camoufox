@@ -249,12 +249,14 @@ def determine_ua_os(user_agent: str) -> Literal['mac', 'win', 'lin']:
     return "lin"
 
 
-def get_screen_cons(headless: Optional[bool] = None) -> Optional[Screen]:
+def get_screen_cons(constrain_to_host: Optional[bool] = None) -> Optional[Screen]:
     """
-    Determines a sane viewport size for Camoufox if being ran in headful mode.
+    Screen constraint derived from the host monitor, or None to leave generation
+    unconstrained. Callers decide via _should_constrain_to_host_display() -- the
+    parameter is "should we constrain", NOT "are we headless".
     """
-    if headless is False:
-        return None  # Skip if headless
+    if constrain_to_host is False:
+        return None
     try:
         monitors = get_monitors()
     except Exception:
@@ -292,14 +294,16 @@ def _should_constrain_to_host_display(
     fitting the display it is rendered on. So it applies headful-on-a-real-monitor
     and nowhere else:
 
-      - headless (incl. 'virtual') renders offscreen -- there is no display to fit
-        into, and deriving one from the host caps browserforge at whatever monitor
-        the scraping machine happens to have. That both correlates the fingerprint
-        with the host (the host's own resolution starts showing up as the spoofed
-        screen) and can collapse an OS's distribution to a near-constant -- on a
-        1512x982 host, firefox+macOS generation fell to {960x540, 1512x982}, and no
-        real Mac reports 960x540.
-      - a self-spawned Xvfb is not a real monitor either (#242).
+      - headless renders offscreen -- there is no display to fit into, and deriving
+        one from the host caps browserforge at whatever monitor the scraping machine
+        happens to have. That both correlates the fingerprint with the host (the
+        host's own resolution starts showing up as the spoofed screen) and skews the
+        distribution hard: on a 1512x982 host, firefox+macOS generation returned
+        960x540 in 159/200 draws (79.5%) versus 7/200 unconstrained, and no real Mac
+        reports 960x540. THIS is what this predicate newly excludes.
+      - a self-spawned Xvfb is not a real monitor either. That case was already
+        handled by #242 upstream of here (sync_api/async_api set headless=False after
+        spawning Xvfb); it is preserved, not introduced, by the second term.
     """
     return not headless and _real_display_present(env, virtual_display)
 
