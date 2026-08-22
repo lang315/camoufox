@@ -7,7 +7,8 @@ the overrideDPPX/device_scale_factor layer, NOT this key. Run headful (headless
 forces dpr=1.0 and masks it)."""
 import json, os
 from marionette_driver.marionette import Marionette
-BIN = os.environ.get("CFX_BIN", "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox")
+import harness
+BIN = harness.default_binary()
 os.environ["CAMOU_CONFIG"] = json.dumps({"window.devicePixelRatio": 1.0})
 m = Marionette(bin=BIN, port=0, headless=False)  # HEADFUL: real host dpr=2
 m.start_session()

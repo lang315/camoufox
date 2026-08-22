@@ -1,8 +1,8 @@
-import json, sys
+import json
 from pathlib import Path
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
 import harness
+
+HERE = Path(__file__).parent
 
 # What makes a surface a Plan-B spoof candidate is NOT "does it vary between two configs"
 # (an un-spoofed surface returns the SAME real device value regardless of config, so a
@@ -18,16 +18,10 @@ def empty(v):
     return v is None or v == "<<absent>>" or v == "" or v == []
 
 def main():
-    port, stop = harness.serve(HERE)
-    try:
-        with harness.Session(camou_config={"canvas:seed": 1}) as s:
-            s.navigate(f"http://127.0.0.1:{port}/probe_leaks.html")
-            s.wait_done(30)
-            # __leaks__ is set by the page's own <script>; read across the Marionette
-            # Xray boundary via wrappedJSObject (see Global Constraints).
-            vals = s.eval_content("return window.wrappedJSObject.__leaks__;")
-    finally:
-        stop()
+    with harness.serve(HERE) as port, harness.Session(camou_config={"canvas:seed": 1}) as s:
+        s.navigate(f"http://127.0.0.1:{port}/probe_leaks.html")
+        s.wait_done(30)
+        vals = s.expando("__leaks__")   # set by the page's own <script>
     assert vals, "probe produced no values"
     table = {k: {"value": vals[k], "present": vals[k] != "<<absent>>",
                  "empty": empty(vals[k]), "has_maskconfig_key": k in HAS_KEY} for k in vals}

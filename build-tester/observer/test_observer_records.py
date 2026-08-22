@@ -1,24 +1,16 @@
-import sys
 from pathlib import Path
-HERE = Path(__file__).parent
-sys.path.insert(0, str(HERE))
 import harness
+
+HERE = Path(__file__).parent
 
 EXPECTED = set(harness.SURFACE_NAMES.values())
 
 def main():
-    port, stop = harness.serve(HERE)
-    try:
-        with harness.Session(camou_config={"canvas:seed": 424242}) as s:
-            s.navigate(f"http://127.0.0.1:{port}/probe_all_surfaces.html")
-            s.wait_done(30)
-            # window.wrappedJSObject: see harness.wait_done() -- plain window.__probeLog__
-            # reads the Xray view (always undefined for a page-set expando); wrappedJSObject
-            # waives the Xray to read the real value.
-            probe_log = s.eval_content("return window.wrappedJSObject.__probeLog__;")
-            snap = s.snapshot()
-    finally:
-        stop()
+    with harness.serve(HERE) as port, harness.Session(camou_config={"canvas:seed": 424242}) as s:
+        s.navigate(f"http://127.0.0.1:{port}/probe_all_surfaces.html")
+        s.wait_done(30)
+        probe_log = s.expando("__probeLog__")
+        snap = s.snapshot()
     recorded = {s for row in snap for s in row["surfaces"]}
     print("probe page results:", probe_log)
     print("observer recorded:", sorted(recorded))
