@@ -7,15 +7,17 @@ tiny macOS screens). That was a STALE-VENV artifact -- cloverlabs-camoufox==0.6.
 physically shadowed the editable .pth redirect and ran pre-#647/#666 code
 (importlib.metadata still reported the editable version, masking it). Not a bug.
 
-DELIBERATE KEEP: audit_coherence.py measures a strict superset of this, so this script
-is redundant to RUN -- but it is cited as evidence in the mo phong design doc and owns
-the setup notes below (audit_coherence.py's docstring points here). Not dead code.
+DELIBERATE KEEP: audit_coherence.py asserts a superset of what this checks, so this
+script is redundant to RUN -- but it is cited as evidence in the mo phong design doc and
+owns the setup notes below (audit_coherence.py's docstring points here). Not dead code.
+The one thing only this script reports is the screens<1280w line; the audit gates on
+distinctness, not on plausibility.
 
-STALE RESULT WARNING: the "12/12 coherent" above predates the sampling fix. This script
-still lets launch_options fall back to get_screen_cons(), so it is capped by the HOST
-monitor -- on a small-screen host its macOS arm collapses to ~1 distinct screen and can
-draw 960x540, which no real Mac reports. audit_coherence.py passes an explicit Screen to
-avoid exactly that. Treat the count above as a historical reading, not a current claim.
+STALE RESULT WARNING: the "12/12 coherent" above is a historical reading, not a current
+claim. pythonlib has changed twice under it since: headless generation no longer derives
+a Screen constraint from the host monitor, and a screen sampled for dpr!=1 is now
+resampled to one real devices report at dpr=1. Both change which screens appear here.
+Re-run before citing the count.
 
 Setup (order matters -- mirror build-tester/run_tests.sh:60):
   uv pip uninstall cloverlabs-camoufox -p .venv     # FIRST, or you exercise stale code
