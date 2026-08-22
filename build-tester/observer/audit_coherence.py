@@ -7,6 +7,7 @@ See the module docstring in geom_multi.py for the one-time env setup."""
 import json, sys
 from pathlib import Path
 from camoufox.sync_api import Camoufox
+from browserforge.fingerprints import Screen
 import harness   # stdlib-only at import time; does not pull in Marionette
 
 HERE = Path(__file__).parent
@@ -17,6 +18,13 @@ OSES = ("windows", "macos", "linux")
 # in goapi/pkg/fingerprint/coherence_test.go.
 PLATFORM_FOR = {"windows": "Win32", "macos": "MacIntel", "linux": "Linux x86_64"}
 UA_TOKEN_FOR = {"windows": "Windows", "macos": "Macintosh", "linux": "Linux"}
+# Decouple sampling from the machine running the audit. Without an explicit Screen,
+# launch_options falls back to get_screen_cons(), which caps BrowserForge at the HOST
+# monitor (1512x982 on the dev Mac). That made results machine-dependent and collapsed
+# the macOS arm to ~1 distinct screen across 4 samples -- including 960x540, a size no
+# real Mac reports. Bound is deliberately wider than any real display so the full
+# distribution is sampled.
+SCREEN = Screen(max_width=6000, max_height=4000)
 
 READ = """() => {
   const dpr = window.devicePixelRatio, near = q => matchMedia(q).matches;
@@ -51,7 +59,8 @@ def coherence_fails(d, os_name, expected_dpr):
     return f
 
 def launch(os_name):
-    with Camoufox(headless=True, executable_path=BIN, os=os_name, ff_version=152, i_know_what_im_doing=True) as b:
+    with Camoufox(headless=True, executable_path=BIN, os=os_name, ff_version=152,
+                  i_know_what_im_doing=True, screen=SCREEN) as b:
         p = b.new_context().new_page(); p.goto("about:blank"); return p.evaluate(READ)
 
 def main():
@@ -68,6 +77,11 @@ def main():
     bad_oses = sorted({r["os"] for r in results if r["fails"]})
     print("---")
     print(f"{sum(1 for r in results if not r['fails'])}/{len(results)} coherent")
+    # Surface sampling breadth: a arm that draws one screen across every sample is
+    # effectively n=1 and its PASS means much less than the sample count suggests.
+    for o in OSES:
+        n = len({(r["sw"], r["sh"]) for r in results if r["os"] == o})
+        print(f"  {o}: {n}/{SAMPLES} distinct screens" + ("  <-- effectively n=1" if n == 1 else ""))
     if bad_oses:
         print("AUDIT FAIL:", ", ".join(bad_oses)); sys.exit(1)
     print("AUDIT PASS")
