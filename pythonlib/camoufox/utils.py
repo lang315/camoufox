@@ -766,6 +766,17 @@ def launch_options(
     # The dpr the chosen screen dimensions are CSS pixels FOR. from_browserforge /
     # from_preset drop it, so capture it here for resample_screen_for_dpr1().
     _source_dpr: Optional[float] = None
+    # Whether the caller pinned the screen themselves. Captured BEFORE `fingerprint` is
+    # reassigned below. resample_screen_for_dpr1 REPLACES the screen rather than shrinking
+    # it, unlike the other fixups, so it must not run over a caller's explicit choice:
+    # a `screen=Screen(max_width=...)` constraint would be violated outright, and a
+    # pinned fingerprint/preset/window is a request for that exact device.
+    _user_pinned_screen = (
+        screen is not None
+        or window is not None
+        or fingerprint is not None
+        or isinstance(fingerprint_preset, dict)
+    )
     if fingerprint is not None:
         # User passed a custom BrowserForge fingerprint
         if not i_know_what_im_doing:
@@ -806,9 +817,12 @@ def launch_options(
         fix_navigator_arch(config, target_os)
     if not _user_set_screen_window:
         # Headless has no display, so Firefox reports dpr=1 regardless of the dpr the
-        # screen was sampled for. Restore the physical panel first, then let the
-        # geometry fixups below re-normalize against the corrected screen.
-        if headless:
+        # screen was sampled for. Swap in a screen real devices report AT dpr=1.
+        # Runs BEFORE the clamps below, which are downward-only and therefore cannot
+        # re-normalize a window against an enlarged screen -- a window left smaller
+        # than its screen is normal, so that is fine, but do not read the clamps as
+        # fixing up anything this changes.
+        if headless and not _user_pinned_screen:
             resample_screen_for_dpr1(config, target_os, _source_dpr, ff_version_str)
         fix_screen_no_taskbar(config, target_os)
         clamp_window_dimensions(config)

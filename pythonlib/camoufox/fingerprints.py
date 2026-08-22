@@ -385,8 +385,9 @@ def _real_dpr1_screens(target_os: str, ff_version: Optional[Any] = None) -> List
     data already ships.
 
     Keyed by the resolved presets FILE, not just the OS: the pre-v150 bundle has no
-    dpr~1 macOS entries at all, so caching on the OS alone would let one ff_version's
-    empty result poison another's.
+    dpr~1 entries for ANY of the three OSes (macos 0/30, windows 0/75, linux 0/18), so
+    this is inert below ff 150 and caching on the OS alone would let that empty result
+    poison a later ff_version's.
     """
     cache_key = (_select_presets_file(ff_version), _OS_TO_PRESET_KEY.get(target_os, target_os))
     if cache_key not in _DPR1_SCREENS:
@@ -434,12 +435,22 @@ def resample_screen_for_dpr1(
     pool = _real_dpr1_screens(target_os, ff_version)
     if not pool:
         return  # no bundled presets: leave the config as-is rather than invent one
-    screen = choice(pool)
+    screen = choice(pool)  # nosec - cosmetic variety, not a security decision
     # Take the whole block from ONE real device, so avail stays coherent with screen.
     config['screen.width'] = screen['width']
     config['screen.height'] = screen['height']
     config['screen.availWidth'] = screen['availWidth']
     config['screen.availHeight'] = screen['availHeight']
+    # availTop/availLeft are NOT in the preset block (no preset carries them), so they
+    # would otherwise keep pointing at the discarded device and produce
+    # availTop + availHeight > screen.height. Re-derive from the new screen: macOS puts
+    # its menubar above the available rect, everything else keeps its bar at the bottom.
+    if 'screen.availTop' in config:
+        config['screen.availTop'] = (
+            screen['height'] - screen['availHeight'] if target_os in ('mac', 'macos') else 0
+        )
+    if 'screen.availLeft' in config:
+        config['screen.availLeft'] = 0
 
 
 def clamp_window_dimensions(config: Dict[str, Any]) -> None:
