@@ -91,11 +91,17 @@ def real_dpr1_blocks(preset_key):
 
 
 def test_avail_comes_from_the_same_real_screen():
-    """avail must not be left over from the discarded screen, or the pair is a lie.
+    """avail must not be left over from the discarded screen.
 
     Checked by whole-block membership, not by a delta heuristic: a real macOS
     menubar is ~25px, so "availHeight differs from height by 25" is indistinguishable
     from leftover data and cannot be used as the test.
+
+    Scope note: verbatim block membership holds only when the config carries no
+    screen.availTop, as here. With one present, availHeight is deliberately shrunk to
+    fit the real menu bar (see test_macos_availtop_is_a_plausible_menu_bar), so the
+    block is no longer byte-identical to a scraped device. Do not "fix" the code to
+    satisfy a stricter reading of this test.
     """
     valid = real_dpr1_blocks("macos")
     for _ in range(20):
@@ -141,6 +147,19 @@ def test_macos_availtop_is_a_plausible_menu_bar():
         assert 0 < top <= 60, f"availTop={top} is not a macOS menu bar"
         assert top + cfg["screen.availHeight"] <= cfg["screen.height"]
     assert seen, "no scaled-display macOS fingerprints were exercised"
+
+
+def test_macos_never_reports_a_zero_menu_bar():
+    """macOS always reserves a menu bar, so availTop=0 with availHeight < height is
+    not a real Mac. BrowserForge never emits 0 today, so this branch is unreachable
+    from the default path -- but it is a stated guarantee, and the two other
+    unreachable-but-stated guarantees in this file both survived mutation testing
+    until they were pinned here."""
+    c = _cfg()
+    c["screen.availTop"] = 0
+    resample_screen_for_dpr1(c, "mac", source_dpr=2, ff_version=152)
+    assert c["screen.availTop"] > 0
+    assert c["screen.availTop"] + c["screen.availHeight"] <= c["screen.height"]
 
 
 def test_960x540_at_dpr1_never_survives():
@@ -248,6 +267,22 @@ def test_avail_offsets_do_not_survive_the_swapped_screen():
 # ---------------------------------------------------------------------------
 
 
+def test_pinned_screen_predicate_covers_every_way_of_choosing_one():
+    """B2's decision logic, tested without a binary. The launch_options test below
+    proves the same thing end to end but skips wherever no browser is installed,
+    including CI -- which is how the original override shipped unnoticed."""
+    from browserforge.fingerprints import Screen
+
+    from camoufox.utils import _caller_pinned_screen as pinned
+
+    assert pinned(None, None, None, None) is False           # default path resamples
+    assert pinned(None, None, None, True) is False           # opt-in presets, not pinned
+    assert pinned(Screen(max_width=1280), None, None, None) is True
+    assert pinned(None, (1600, 1000), None, None) is True
+    assert pinned(None, None, object(), None) is True        # caller-supplied fingerprint
+    assert pinned(None, None, None, {"screen": {}}) is True  # pinned preset dict
+
+
 def _binary():
     for c in (os.environ.get("CFX_BIN"),
               "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"):
@@ -290,15 +325,31 @@ def test_explicit_screen_constraint_is_not_discarded():
 
 
 @pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
-def test_resample_still_runs_when_nothing_is_pinned():
-    """Guard against over-correcting B2 into a no-op for the default path."""
-    valid = real_dpr1_screens("macos")
-    drawn = set()
+def test_resample_still_runs_when_nothing_is_pinned(monkeypatch):
+    """Guard against over-correcting B2 into a no-op for the default path.
+
+    Asserts the call happened rather than inspecting the drawn screen: ~16% of macOS
+    fingerprints already have dpr~1, and those are correctly NOT resampled, so their
+    screen comes from browserforge and need not be in the preset pool. An
+    "every draw is in the pool" assertion looks stricter but is simply flaky.
+    """
+    from camoufox import utils
+
+    seen_dprs = []
+    real = utils.resample_screen_for_dpr1
+
+    def spy(config, target_os, source_dpr, ff_version=None):
+        seen_dprs.append(source_dpr)
+        return real(config, target_os, source_dpr, ff_version)
+
+    monkeypatch.setattr(utils, "resample_screen_for_dpr1", spy)
     for _ in range(8):
-        cfg = _launch_config()
-        drawn.add((cfg["screen.width"], cfg["screen.height"]))
-    assert drawn, "no configs generated"
-    assert all(d in valid for d in drawn), f"resample stopped running: {drawn}"
+        _launch_config()
+
+    assert seen_dprs, "resample_screen_for_dpr1 was never reached on the default path"
+    assert any(d and abs(d - 1) > 0.02 for d in seen_dprs), (
+        f"never invoked with a scaled-display dpr in 8 draws: {seen_dprs}"
+    )
 
 
 @pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
