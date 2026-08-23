@@ -236,6 +236,32 @@ def get_target_os(config: Dict[str, Any]) -> Literal['mac', 'win', 'lin']:
     return OS_NAME
 
 
+def _reassemble_camou_config(from_options: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Reassembles the chunked CAMOU_CONFIG_<n> env vars from a launch_options()-shaped
+    dict back into the parsed config dict, or None if there's nothing usable.
+
+    Shared by launched_os and spoofs_window_dimensions, which both need the launch-time
+    config recovered from the same chunked env var contract -- keep them in sync here
+    rather than as two copies that can drift.
+    """
+    env = (from_options or {}).get('env') or {}
+    try:
+        keys = sorted(
+            (k for k in env if k.startswith('CAMOU_CONFIG_')),
+            key=lambda k: int(k.rsplit('_', 1)[1]),
+        )
+    except ValueError:
+        # A malformed CAMOU_CONFIG_<n> suffix -- treat as nothing usable, same as
+        # the JSON-decode failure below, rather than raising.
+        return None
+    if not keys:
+        return None
+    try:
+        return orjson.loads(''.join(env[k] for k in keys))
+    except orjson.JSONDecodeError:
+        return None
+
+
 def launched_os(from_options: Dict[str, Any]) -> Optional[str]:
     """The OS the browser was actually launched as, recovered from its own config.
 
@@ -243,41 +269,34 @@ def launched_os(from_options: Dict[str, Any]) -> Optional[str]:
     NewContext must know whether the OS it is being asked for matches the one the
     browser's fonts were generated for.
     """
-    env = (from_options or {}).get('env') or {}
-    parts = [
-        env[k]
-        for k in sorted(
-            (k for k in env if k.startswith('CAMOU_CONFIG_')),
-            key=lambda k: int(k.rsplit('_', 1)[1]),
-        )
-    ]
-    if not parts:
+    config = _reassemble_camou_config(from_options)
+    if not config or not config.get('navigator.userAgent'):
         return None
-    try:
-        config = orjson.loads(''.join(parts))
-    except orjson.JSONDecodeError:
-        return None
-    return get_target_os(config) if config.get('navigator.userAgent') else None
+    return get_target_os(config)
 
 
-_OS_TO_SHORT = {'windows': 'win', 'macos': 'mac', 'linux': 'lin'}
+def _warn_os_mismatch(browser: Any, resolved_os: Optional[str]) -> None:
+    """Per-context overrides do not cover fonts, so a context whose fingerprint
+    resolves to an OS other than the browser's inherits the launch OS's font set
+    and is cross-signal incoherent (issue #44).
 
-
-def _warn_os_mismatch(browser: Any, context_os: Optional[str]) -> None:
-    """Per-context overrides do not cover fonts, so a context whose OS differs from
-    the browser's inherits the launch OS's font set and is cross-signal incoherent
-    (issue #44). Loud beats silent: there is no way to fix it from here.
+    `resolved_os` is the OS the context's generated UA actually mapped to
+    ('mac' | 'win' | 'lin'), not necessarily the caller's `os=` kwarg --
+    NewContext(browser) with no `os=` is the default call pattern and still
+    resolves to a concrete OS, so the check must compare against what was
+    actually generated, not what was asked for. Loud beats silent: there is no
+    way to fix it from here.
     """
-    if not context_os:
+    if not resolved_os:
         return
     launch = getattr(browser, '_camoufox_os', None)
-    want = _OS_TO_SHORT.get(context_os, context_os)
-    if launch and launch != want:
+    if launch and launch != resolved_os:
         warnings.warn(
-            f"NewContext(os={context_os!r}) on a browser launched as {launch!r}: fonts "
-            "are set at launch and have no per-context override, so this context will "
-            "report the launch OS's fonts under a "
-            f"{context_os} platform. Launch a separate browser per OS instead.",
+            f"This context's fingerprint resolved to {resolved_os!r}, but the "
+            f"browser was launched as {launch!r}: fonts are set at launch and "
+            "have no per-context override, so this context will report the "
+            f"launch OS's fonts under a {resolved_os!r} platform. Launch a "
+            "separate browser per OS instead.",
             RuntimeWarning,
             stacklevel=3,
         )
@@ -536,12 +555,10 @@ def spoofs_window_dimensions(from_options: Dict[str, Any]) -> bool:
     dimension. The config is chunked across CAMOU_CONFIG_<n> env vars, so
     reassemble it in index order before looking.
     """
-    env = from_options.get('env') or {}
-    chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
-    if not chunks:
+    config = _reassemble_camou_config(from_options)
+    if not config:
         return False
-    blob = ''.join(v for _, v in sorted(chunks))
-    return any(key in blob for key in _WINDOW_DIM_KEYS)
+    return any(key in config for key in _WINDOW_DIM_KEYS)
 
 
 def attach_no_viewport_default(target: Any) -> Any:

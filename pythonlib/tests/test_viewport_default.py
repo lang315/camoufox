@@ -43,6 +43,12 @@ def test_no_env_is_not_spoofed():
     assert spoofs_window_dimensions({}) is False
 
 
+def test_none_from_options_is_not_spoofed():
+    """Must not raise on from_options=None -- shares its reassembly with
+    launched_os, which is already None-safe."""
+    assert spoofs_window_dimensions(None) is False
+
+
 class _FakeBrowser:
     def __init__(self):
         self.calls = []
