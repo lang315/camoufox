@@ -204,4 +204,8 @@ class NotWritableError(Exception):
     failing with a clear error.
     """
 
+
+class ProfileDirectoryError(RuntimeError):
+    """Raised when Camoufox's required runtime directory cannot be prepared."""
+
     ...

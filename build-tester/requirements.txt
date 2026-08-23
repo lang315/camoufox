@@ -1,3 +1,11 @@
 cloverlabs-camoufox
-playwright
+# Newer Playwright sends a drifted Browser.setDefaultViewport (viewport.isMobile)
+# that this juggler's protocol schema rejects -- every context creation fails, so
+# run_tests.py reports 0/0 Grade F, which reads like a spoofing regression but is
+# pure harness drift. Upstream caps at <1.61; measured against a camoufox-152
+# binary, 1.58 already breaks, and 1.55.0 is the version this suite's ~1050/1064
+# Grade A baseline was established on. Pin exactly rather than cap.
+playwright==1.55.0
+# observer/ scripts drive the browser over Marionette (chrome context), which
+# Playwright cannot reach.
 marionette_driver
