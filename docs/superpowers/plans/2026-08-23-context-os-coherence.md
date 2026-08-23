@@ -234,6 +234,17 @@ git commit -m "fix(pythonlib): warn when a context's OS differs from the browser
 - Consumes: nothing from Task 1.
 - Produces: the init script gains a `__camoufoxMissingSetters` array on `window`, listing setters the page did not provide.
 
+> **Amended after Task 1 review.** The brief's `_warn_os_mismatch` began with
+> `if not context_os: return`, so the warning only fired when the caller passed an
+> explicit `os=`. `NewContext(browser)` with no `os=` resolves to an arbitrary OS via
+> `generate_fingerprint(os=None)` and was silently exempt — the default call pattern,
+> and exactly the incoherence this task exists to surface. Amended: the check now runs
+> AFTER the context fingerprint is generated and compares the RESOLVED OS (derived from
+> the generated `navigator.userAgent` via `determine_ua_os`) against the launch OS.
+> Also amended: `launched_os` and `spoofs_window_dimensions` now share one
+> `_reassemble_camou_config` helper instead of two copies that had already drifted on
+> None-safety.
+
 **Why:** every setter is emitted as `if (typeof w.setX === "function") w.setX(v)`. When the binary lacks `setX` the call vanishes with no signal. That is exactly what made a missing `setWebGLRenderer` in the upstream binary look like a broken override for hours.
 
 - [ ] **Step 1: Write the failing test**
