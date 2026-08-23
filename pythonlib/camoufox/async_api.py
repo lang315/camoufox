@@ -17,9 +17,11 @@ from camoufox.virtdisplay import VirtualDisplay
 
 from .fingerprints import generate_context_fingerprint
 from .utils import (
+    _warn_os_mismatch,
     async_attach_vd,
     attach_no_viewport_default,
     launch_options,
+    launched_os,
     spoofs_window_dimensions,
 )
 
@@ -125,10 +127,12 @@ async def AsyncNewBrowser(
             if no_viewport_default and not ('viewport' in from_options or 'no_viewport' in from_options):
                 from_options = {**from_options, 'no_viewport': True}
             context = await playwright.firefox.launch_persistent_context(**from_options)
+            context._camoufox_os = launched_os(from_options)
             return await async_attach_vd(context, virtual_display)
 
         # Browser
         browser = await playwright.firefox.launch(**from_options)
+        browser._camoufox_os = launched_os(from_options)
         if no_viewport_default:
             attach_no_viewport_default(browser)
         return await async_attach_vd(browser, virtual_display)
@@ -197,6 +201,8 @@ async def AsyncNewContext(
         geolocation: Per-context geolocation ({"latitude": float, "longitude": float}).
         **context_kwargs: Additional Playwright new_context() options.
     """
+    _warn_os_mismatch(browser, os)
+
     # Auto-derive WebRTC IP and timezone from proxy's exit IP when not explicitly provided
     if proxy and (not webrtc_ip or "timezone_id" not in context_kwargs):
         geo = await _resolve_proxy_geo(proxy)

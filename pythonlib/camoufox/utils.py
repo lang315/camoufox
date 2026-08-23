@@ -1,5 +1,6 @@
 import os
 import sys
+import warnings
 from functools import wraps
 from os import environ
 from os.path import abspath
@@ -233,6 +234,53 @@ def get_target_os(config: Dict[str, Any]) -> Literal['mac', 'win', 'lin']:
     if config.get("navigator.userAgent"):
         return determine_ua_os(config["navigator.userAgent"])
     return OS_NAME
+
+
+def launched_os(from_options: Dict[str, Any]) -> Optional[str]:
+    """The OS the browser was actually launched as, recovered from its own config.
+
+    Needed because a Playwright Browser handle carries no camoufox identity, and
+    NewContext must know whether the OS it is being asked for matches the one the
+    browser's fonts were generated for.
+    """
+    env = (from_options or {}).get('env') or {}
+    parts = [
+        env[k]
+        for k in sorted(
+            (k for k in env if k.startswith('CAMOU_CONFIG_')),
+            key=lambda k: int(k.rsplit('_', 1)[1]),
+        )
+    ]
+    if not parts:
+        return None
+    try:
+        config = orjson.loads(''.join(parts))
+    except orjson.JSONDecodeError:
+        return None
+    return get_target_os(config) if config.get('navigator.userAgent') else None
+
+
+_OS_TO_SHORT = {'windows': 'win', 'macos': 'mac', 'linux': 'lin'}
+
+
+def _warn_os_mismatch(browser: Any, context_os: Optional[str]) -> None:
+    """Per-context overrides do not cover fonts, so a context whose OS differs from
+    the browser's inherits the launch OS's font set and is cross-signal incoherent
+    (issue #44). Loud beats silent: there is no way to fix it from here.
+    """
+    if not context_os:
+        return
+    launch = getattr(browser, '_camoufox_os', None)
+    want = _OS_TO_SHORT.get(context_os, context_os)
+    if launch and launch != want:
+        warnings.warn(
+            f"NewContext(os={context_os!r}) on a browser launched as {launch!r}: fonts "
+            "are set at launch and have no per-context override, so this context will "
+            "report the launch OS's fonts under a "
+            f"{context_os} platform. Launch a separate browser per OS instead.",
+            RuntimeWarning,
+            stacklevel=3,
+        )
 
 
 def determine_ua_os(user_agent: str) -> Literal['mac', 'win', 'lin']:
