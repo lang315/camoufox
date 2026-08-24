@@ -28,7 +28,33 @@
 
 <details open>
 <summary>View/Collapse All</summary>
-<br>
+
+## Premium
+
+<table>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://go.nodemaven.com/daijrogh" target="_blank">
+        <img width="380" alt="nodemaven" src="https://github.com/user-attachments/assets/25015cb5-f1b4-4b49-9e9b-b74dc25037dc"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://go.nodemaven.com/daijrogh">NodeMaven</a>: The most efficient proxy provider for Web Scrapping and Automation with the Highest Quality IP on the market.<br>
+      <strong>Why <a href="https://go.nodemaven.com/daijrogh">NodeMaven</a>?</strong><br>
+      • 99.9% uptime<br>
+      • ZIP Targeting<br>
+      • IP filtering: all proxies have fraud score <97%<br>
+      • No KYC required<br>
+      • Unique free tools: Proxy Bandwidth Checker, Meta Tag Checker, IP Lookup and others!<br>
+      <strong>Special codes for Camoufox users:</strong><br>
+      • <code>CAMOUFOX35</code> - 35% off to Mobile and Residential Proxies<br>
+      • <code>CAMOUFOX40</code> - 40% off to ISP (Static) Proxies<br>
+    </td>
+  </tr>
+</table>
+
+## Tools & Services
+  
 <table>
   <tr>
     <td width="25%" align="center" valign="middle">
@@ -62,17 +88,6 @@
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle" height="100">
-      <a href="https://talordata.com/?campaignid=X01VSF4OOvlHfN6U&utm_source=github&utm_term=camoufox" target="_blank">
-        <img width="350" alt="color horizontal" src="https://github.com/user-attachments/assets/1f470eca-2a37-47ac-bb84-3a63339c1578"/>
-      </a>
-    </td>
-    <td valign="middle">
-      <a href="https://talordata.com/?campaignid=X01VSF4OOvlHfN6U&utm_source=github&utm_term=camoufox">Talordata</a> is a simple web search API to scrape Google and other search engines at a fraction of the cost. Get 1,000 free requests upon registration, and pay just $0.25 per 1,000 successful responses—zero charges for failed scrapes.<br>
-Use coupon code <strong>CAMOUFOX</strong> for <strong>10% OFF</strong> Residential Proxies. [<a href="https://discord.gg/dMZFyY39Fx">Discord</a>]
-    </td>
-  </tr>
-  <tr>
-    <td width="25%" align="center" valign="middle" height="100">
       <a href="https://crawlbase.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox" target="_blank">
         <img width="350" alt="color horizontal" src="https://github.com/user-attachments/assets/5c515090-86c2-4c76-b7b2-6e0b393594d5"/>
       </a>
@@ -94,9 +109,19 @@ Use coupon code <strong>CAMOUFOX</strong> for <strong>10% OFF</strong> Residenti
       <a href="https://scrappey.com/?utm_source=camoufox&utm_medium=sponsorship&utm_campaign=camoufox_sponsorship">Scrappey</a> is a Web Scraping API that only charges successful scrapes with pay as you go - no subscriptions. Scrape complex sites. Residential proxies included, no hidden proxy fees, or expiring balances. One API for direct HTTP, full-browser rendering, JavaScript-heavy pages, screenshots, sessions, 30+ browser actions and 200+ concurrent sessions at a time - trusted by 1000+ developers and AI agents. Get 10% off with code CAMOUFOX.
     </td>
   </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://cloro.dev/?utm_source=referral&utm_medium=camoufox" target="_blank">
+        <img width="380" alt="Cloro" src="https://github.com/user-attachments/assets/6dce6615-9733-43e3-8c6d-8d3bfb1aa7c7" />
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://cloro.dev/?utm_source=referral&utm_medium=camoufox">Cloro</a> is a SERP and AI search API. Get structured results from Google, ChatGPT, Perplexity, Gemini, Copilot and Grok.
+    </td>
+  </tr>
 </table>
 
-## Proxy providers
+## Proxy Providers
 
 Camoufox is intended to be used with rotating proxies (preferably residential IPs). Check out these providers:
 
@@ -124,18 +149,6 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://birdproxies.com/t/camoufox" target="_blank">
-        <img width="380" alt="birdproxies" src="https://github.com/user-attachments/assets/e146836d-eb92-4b05-8bd9-120fd95dca10"/>
-      </a>
-    </td>
-    <td valign="middle">
-      Hey, we built BirdProxies because proxies shouldn't be complicated or overpriced. Fast residential and ISP proxies in 195+ locations, fair pricing, and real support.<br>
-      Try our FlappyBird game on the landing page for free data!<br>
-      <a href="https://birdproxies.com/t/camoufox">Try Now</a> | <a href="https://discord.com/invite/birdproxies">Discord</a>
-    </td>
-  </tr>
-  <tr>
-    <td width="25%" align="center" valign="middle">
       <a href="https://www.rapidproxy.io/?ref=daijro" target="_blank">
         <img width="380" alt="rapidproxy" src="https://github.com/user-attachments/assets/140337e0-50d5-452d-8a31-86c6b1761e47"/>
       </a>
@@ -148,7 +161,7 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
       • 🌍 90M+ IPs in 200+ countries & regions<br>
       • ♾️ No expiration on traffic — use anytime, no pressure<br>
       • 🔥 Unlimited concurrency for maximum performance<br>
-      • 💰 Starting from just $0.65/GB — built for scale<br>
+      • 💰 Starting from just &#36;0.65/GB — built for scale<br>
       • 📍 City-level targeting for precise geo access<br>
       • 🔄 Flexible session control tailored to your needs<br>
       Don’t miss out — start your free trial today and experience fast, stable, and scalable proxy performance with <a href="https://www.rapidproxy.io/?ref=daijro">RapidProxy</a>.
@@ -185,34 +198,6 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
   </tr>
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://9proxy.com/pricing?utm_source=github&utm_medium=daijro&utm_campaign=githubdev&utm_content=sponsored" target="_blank">
-        <img width="380" alt="9proxy" src="https://github.com/user-attachments/assets/2b59c5d9-317a-488d-a723-134b7237d339"/>
-      </a>
-    </td>
-    <td valign="middle">
-      <a href="https://9proxy.com/pricing?utm_source=github&utm_medium=daijro&utm_campaign=githubdev&utm_content=sponsored">9Proxy</a> provides residential proxies from just $0.018/IP or $0.68/GB. 20M+ IPs across 90+ countries. Sticky or rotating sessions, managed from desktop or mobile app.<br>
-    </td>
-  </tr>
-  <tr>
-    <td width="25%" align="center" valign="middle">
-      <a href="https://go.nodemaven.com/daijronew" target="_blank">
-        <img width="380" alt="nodemaven" src="https://github.com/user-attachments/assets/49608eb7-7c1b-4904-bdf8-53e69c7eda8c"/>
-      </a>
-    </td>
-    <td valign="middle">
-      <a href="https://go.nodemaven.com/daijronew">NodeMaven</a>: The most reliable proxy provider with the Highest Quality IP on the market.<br>
-      Best solution for automation, web scraping, SEO research, and social media management.<br>
-      <a href="https://go.nodemaven.com/daijronew">NodeMaven</a> offers:<br>
-      • Sticky sessions up to 7 days<br>
-      • 99.9% uptime<br>
-      • IP filtering: all proxies have fraud score <97%<br>
-      • No KYC required<br>
-      • Cashback on traffic - burn GB and earn up to 10% back<br>
-Special offer: Use code CAMOUFOX35 to get 35% discount on Proxies.
-    </td>
-  </tr>
-  <tr>
-    <td width="25%" align="center" valign="middle">
       <a href="https://proxidize.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox&utm_content=daijro" target="_blank">
         <img width="380" alt="proxidize" src="https://imagedelivery.net/r4caA8hJ3Ww3j8uyC_NNCA/95a9137a-43fd-48d4-7243-983f3f4a3d00/public"/>
       </a>
@@ -234,6 +219,28 @@ Special offer: Use code CAMOUFOX35 to get 35% discount on Proxies.
       Start now: <a href="https://proxidize.com/?utm_source=github&utm_medium=sponsorship&utm_campaign=camoufox&utm_content=daijro">https://proxidize.com</a>
     </td>
   </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://niuproxy.com/?utm_source=camoufox&utm_medium=camoufox&ref=camoufox" target="_blank">
+        <img width="380" alt="NiuProxy" src="https://github.com/user-attachments/assets/d1fc12cc-4113-4a8e-a7d3-e34df6c93731"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <strong><a href="https://niuproxy.com/?utm_source=camoufox&utm_medium=camoufox&ref=camoufox">NiuProxy</a> | Rotating Residential Proxies from &#36;0.35/GB<br></strong>
+      NiuProxy provides residential, ISP, mobile, and datacenter proxies for scraping, browser automation, SEO, AI agents, and data collection.<br>
+      <strong>Why NiuProxy?</strong><br>
+      • Residential proxies from &#36;0.35/GB<br>
+      • ISP proxies from &#36;3/IP<br>
+      • Mobile proxies from &#36;1.5/GB<br>
+      • Datacenter proxies from &#36;0.5/GB<br>
+      • HTTP(S) & SOCKS5 support<br>
+      • Flexible geo targeting and sessions<br>
+      • Alipay, USDT, cards, Google Pay & Apple Pay<br>
+      Special offer for Camoufox users: Use code PAY2 for 10% off your recharge.<br>
+      Start now: <a href="https://niuproxy.com/?utm_source=camoufox&utm_medium=camoufox&ref=camoufox">https://niuproxy.com</a>
+    </td>
+  </tr>
+  <tr>
 </table>
 </details>
 
@@ -317,47 +324,6 @@ async with AsyncCamoufox() as browser:
 ```
 
 [[Installation & usage](https://camoufox.com/python/)]
-
-### Making Full use of Hardware Spoofing
-
-For stable releases, you should always use the main [`camoufox`](https://pypi.org/project/camoufox/) pip package. However, if you want to make use of per-context fingerprints and hardware spoofing, use the [`cloverlabs-camoufox`](https://pypi.org/project/cloverlabs-camoufox/) package. This package is updated with each releases, whereas the official package is released on delay.
-
-Make sure you are using a virtual env to avoid conflicts between the two packages.
-
-**Installation**
-
-```bash
-pip install cloverlabs-camoufox
-```
-
-**Fetch the latest prerelease browser** (recommended for newest patches)
-
-```bash
-python -m camoufox sync
-python -m camoufox set official/prerelease
-python -m camoufox fetch
-```
-
-**Usage** — the API is identical to the upstream package:
-
-```python
-from camoufox.sync_api import Camoufox
-
-with Camoufox() as browser:
-    page = browser.new_page()
-    page.goto("https://example.com")
-```
-
-#### Real fingerprint presets (recommended for v149+ binaries)
-
-By default, fingerprint values are synthesized by BrowserForge. For better evasion against complex consistency checks, opt into the bundled presets — real fingerprints scraped from in-the-wild Firefox traffic:
-
-```python
-with Camoufox(fingerprint_preset=True, os="macos") as browser:
-    ...
-```
-
-The library auto-routes by binary version: Firefox ≥ 149 loads `fingerprint-presets-v150.json` (312 presets covering v149–v152, 67 macOS / 180 Windows / 65 Linux); older binaries fall back to the original bundle. UA strings are rewritten to match the active binary, so opting in is safe across versions. Pass a preset dict instead of `True` to pin a specific fingerprint.
 
 ---
 
