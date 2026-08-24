@@ -5,10 +5,14 @@ on:
     branches: [main]
     paths:
       - 'goapi/**'
+      - 'additions/**'
       - '.github/workflows/goapi.yml'
   pull_request:
     paths:
       - 'goapi/**'
+      # TestAdditionsImportTimerBeforeUsingIt guards additions/, so a PR that
+      # touches only additions/ must still trigger this job.
+      - 'additions/**'
       - '.github/workflows/goapi.yml'
   workflow_dispatch:
 
