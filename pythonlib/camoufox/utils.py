@@ -5,29 +5,36 @@ from os import environ
 from os.path import abspath
 from pathlib import Path
 from pprint import pprint
-from random import randint, randrange
-from typing import Any, Dict, List, Literal, Optional, Tuple, Union, cast
+from random import randint
+from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import orjson
 from browserforge.fingerprints import Fingerprint, Screen
 from platformdirs import user_cache_dir
-from screeninfo import get_monitors
 from typing_extensions import TypeAlias
 from ua_parser import user_agent_parser
 
 from .addons import DefaultAddons, add_default_addons, confirm_paths
+from .display import has_display, largest_display
 from .exceptions import (
     InvalidOS,
     InvalidPropertyType,
     NonFirefoxFingerprint,
     NotWritableError,
 )
-from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_window_dimensions, resample_screen_for_dpr1, set_media_devices_defaults
+from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, resample_screen_for_dpr1, set_media_devices_defaults
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
-from .pkgman import OS_NAME, get_path, installed_verstr, launch_path
+from .pkgman import (
+    INSTALL_DIR,
+    OS_NAME,
+    ensure_browser_profile_dir,
+    get_path,
+    installed_verstr,
+    launch_path,
+)
 from .virtdisplay import VirtualDisplay
 from ._warnings import LeakWarning
 from .webgl import sample_webgl
@@ -49,9 +56,10 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
     Generates a runtime fontconfig that resolves bundled font paths absolutely.
     The bundled fonts.conf uses prefix="cwd" relative paths which break when
     Playwright's working directory differs from the browser install directory.
-    Writes a patched copy under the platform cache dir
-    (user_cache_dir("camoufox")/fontconfig/), deterministic, only regenerated
-    when content changes.
+    Writes a patched copy to the platform cache dir (deterministic, only
+    regenerated when content changes). This must not live inside the versioned
+    browser bundle: the bundle is commonly baked into an image as root and run
+    as a non-root user, so it is read-only at launch time.
     """
     import hashlib
 
@@ -66,7 +74,8 @@ def _generate_fontconfig(fontconfig_path: str) -> str:
         f'<dir>{fonts_dir}</dir>',
     )
 
-    cache_dir = os.path.join(user_cache_dir("camoufox"), 'fontconfig')
+    # INSTALL_DIR is platformdirs' user_cache_dir("camoufox"); see pkgman.
+    cache_dir = str(INSTALL_DIR / 'fontconfig')
     os.makedirs(cache_dir, exist_ok=True)
 
     content_hash = hashlib.sha256(conf_content.encode()).hexdigest()[:12]
@@ -254,32 +263,34 @@ def get_screen_cons(constrain_to_host: Optional[bool] = None) -> Optional[Screen
     Screen constraint derived from the host monitor, or None to leave generation
     unconstrained. Callers decide via _should_constrain_to_host_display() -- the
     parameter is "should we constrain", NOT "are we headless".
+
+    Bounds are CSS pixels, the unit Firefox lays its windows out in -- see
+    camoufox.display for why that differs from the monitor's physical size.
     """
     if constrain_to_host is False:
         return None
-    try:
-        monitors = get_monitors()
-    except Exception:
-        return None  # Skip if there's an error getting the monitors
-    if not monitors:
-        return None  # Skip if there are no monitors
-
-    # Use the dimensions from the monitor with greatest screen real estate
-    monitor = max(monitors, key=lambda m: m.width * m.height)
-    return Screen(max_width=monitor.width, max_height=monitor.height)
+    display = largest_display()
+    if display is None:
+        return None  # Skip if the display can't be probed
+    return Screen(max_width=display.width, max_height=display.height)
 
 
 def _real_display_present(
     env: Dict[str, Union[str, float, bool]], virtual_display: Optional[str]
 ) -> bool:
     """
-    True if env['DISPLAY'] refers to a real, pre-existing X11 display.
+    True if a real, pre-existing desktop session will show the window.
 
     A self-spawned Xvfb (headless='virtual') is not a real monitor -- it must
     not be used to derive Screen constraints for fingerprint generation, or a
     degenerate/fake Xvfb resolution poisons browserforge's output (#242).
+
+    The session probe is camoufox.display.has_display, not a bare `'DISPLAY' in
+    env`: DISPLAY/WAYLAND_DISPLAY only exist on Linux, so keying off DISPLAY
+    alone silently skipped the constraint on Windows and macOS, where a session
+    is always present.
     """
-    return 'DISPLAY' in env and not virtual_display
+    return has_display(env) and not virtual_display
 
 
 def _caller_pinned_screen(
@@ -606,6 +617,7 @@ def launch_options(
     ff_version: Optional[int] = None,
     headless: Optional[bool] = None,
     main_world_eval: Optional[bool] = None,
+    allow_addon_new_tab: Optional[bool] = None,
     executable_path: Optional[Union[str, Path]] = None,
     browser: Optional[str] = None,
     firefox_user_prefs: Optional[Dict[str, Any]] = None,
@@ -689,6 +701,8 @@ def launch_options(
             top-level lexical declarations fail ("lexical declarations can't appear in
             a single-statement context") because let/const/class cannot be a labeled
             statement's body. Omit the prefix and evaluate the script directly.
+        allow_addon_new_tab (Optional[bool]):
+            Whether to allow addon open new tabs. Defaults to False.
         executable_path (Optional[Union[str, Path]]):
             Custom Camoufox browser executable path.
         browser (Optional[str]):
@@ -717,8 +731,12 @@ def launch_options(
         **launch_options (Dict[str, Any]):
             Additional Firefox launch options.
     """
-    # Fail fast with a clear error if HOME / the cache dir aren't writable,
-    # instead of hanging inside the browser subprocess (#572).
+    # Both are launch preflights and both fail fast with a clear message.
+    # ensure_browser_profile_dir covers the Linux runtime directory; the check
+    # below covers HOME / the platform cache on every platform, so that a
+    # read-only filesystem raises here instead of hanging for ~180s inside the
+    # browser subprocess (#572).
+    ensure_browser_profile_dir(env)
     _check_writable_dirs(env)
 
     # Build the config
@@ -738,8 +756,10 @@ def launch_options(
         custom_fonts_only = False
     if i_know_what_im_doing is None:
         i_know_what_im_doing = False
-    if env is None:
-        env = cast(Dict[str, Union[str, float, bool]], environ)
+    # Keep per-launch overrides isolated from the process environment and from
+    # mappings supplied by callers. In particular, DISPLAY must not outlive the
+    # virtual display that owns it.
+    env = dict(environ) if env is None else dict(env)
     if isinstance(executable_path, str):
         # Convert executable path to a Path object
         executable_path = Path(abspath(executable_path))
@@ -809,11 +829,21 @@ def launch_options(
             _used_preset = True
             _source_dpr = preset.get('screen', {}).get('devicePixelRatio')
 
+    # Bound the geometry to the real display. BrowserForge only honours this when
+    # its pool has a match, so it is re-applied after generation as well.
+    #
+    # Headful-on-a-real-monitor ONLY. Constraining headless to the host monitor
+    # leaks the host's screen into the fingerprint and collapses generation to
+    # whatever this machine happens to have (#37); an explicit `screen=` always
+    # wins over the probe.
+    screen_cons = screen or get_screen_cons(
+        _should_constrain_to_host_display(headless, env, virtual_display)
+    )
+
     if not _used_preset and fingerprint is None:
         # Default: BrowserForge synthetic generation (infinite unique fingerprints)
         fingerprint = generate_fingerprint(
-            screen=screen
-            or get_screen_cons(_should_constrain_to_host_display(headless, env, virtual_display)),
+            screen=screen_cons,
             window=window,
             os=os,
         )
@@ -824,7 +854,9 @@ def launch_options(
             config,
             from_browserforge(fingerprint, ff_version_str),
         )
-        _source_dpr = getattr(fingerprint.screen, 'devicePixelRatio', None)
+        # Both levels are optional: a caller (or a test fake) may pass anything
+        # duck-typed here, and a missing dpr just means "nothing to resample from".
+        _source_dpr = getattr(getattr(fingerprint, 'screen', None), 'devicePixelRatio', None)
 
     target_os = get_target_os(config)
 
@@ -833,6 +865,9 @@ def launch_options(
     if not _user_set_navigator:
         fix_navigator_arch(config, target_os)
     if not _user_set_screen_window:
+        # The two branches below are mutually exclusive -- headless vs headful --
+        # and each fixes a tell that only exists in its own mode.
+
         # Headless has no display, so Firefox reports dpr=1 regardless of the dpr the
         # screen was sampled for. Swap in a screen real devices report AT dpr=1.
         # Runs BEFORE the clamps below, which are downward-only and therefore cannot
@@ -841,11 +876,29 @@ def launch_options(
         # fixing up anything this changes.
         if headless and not _user_pinned_screen:
             resample_screen_for_dpr1(config, target_os, _source_dpr, ff_version_str)
+
+        # Headful on a real monitor only: this bound exists so the window fits
+        # the screen it is drawn on. headless has no window to overflow, and
+        # headless='virtual' reaches here as headless=False (see async_api) with
+        # a 1x1 Xvfb (virtdisplay.py) that is not a real screen.
+        if headless is False and not virtual_display and screen_cons:
+            clamp_screen_to_display(config, screen_cons.max_width, screen_cons.max_height)
         fix_screen_no_taskbar(config, target_os)
         clamp_window_dimensions(config)
+        clamp_window_position(config)
 
-    # Set a random window.history.length
-    set_into(config, 'window.history.length', randrange(1, 6))  # nosec
+    # Deliberately NOT setting window.history.length. It used to be pinned to a
+    # random 1-5 because browser.sessionhistory.max_entries=0 left the real
+    # session history empty, so the honest value was 0 -- an impossible number,
+    # since the HTML spec guarantees a browsing context always keeps its current
+    # entry. settings/camoufox.cfg now runs Firefox's stock max_entries, so the
+    # real value starts at 1 and grows with each navigation.
+    #
+    # Pinning it on top of that is strictly worse than leaving it alone: the
+    # value would no longer move across navigations, and a fresh tab would claim
+    # a depth of, say, 4 while history.back() -- which reads the real session
+    # history -- does nothing. Any page can check that pair. The property stays
+    # in properties.json for callers who want to override it by hand.
 
     # Update fonts list
     if fonts:
@@ -922,12 +975,18 @@ def launch_options(
     # Pass the humanize option
     if humanize:
         set_into(config, 'humanize', True)
-        if isinstance(humanize, (int, float)):
-            set_into(config, 'humanize:maxTime', humanize)
+        # bool is a subclass of int, but MaskConfig expects maxTime to be a
+        # JSON number with a floating-point representation.
+        if isinstance(humanize, (int, float)) and not isinstance(humanize, bool):
+            set_into(config, 'humanize:maxTime', float(humanize))
 
     # Enable the main world context creation
     if main_world_eval:
         set_into(config, 'allowMainWorld', True)
+
+    # Allow addon open new tabs
+    if allow_addon_new_tab:
+        set_into(config, 'allowAddonNewtab', True)
 
     # Set Firefox user preferences
     if block_images:
