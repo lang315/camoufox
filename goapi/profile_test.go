@@ -88,9 +88,10 @@ func TestCloseRemovesTheProfileDirectory(t *testing.T) {
 	}
 }
 
-// A caller-supplied dir is used as-is and must NOT be deleted -- it is the
-// caller's data, and deleting it would be destructive.
-func TestWithUserDataDirIsPreserved(t *testing.T) {
+// A caller-supplied dir is actually used as the Firefox profile, and is used
+// as-is -- it must NOT be deleted, since it is the caller's data and
+// deleting it would be destructive.
+func TestWithUserDataDirIsUsedAndPreserved(t *testing.T) {
 	if os.Getenv("CAMOUFOX_BIN") == "" {
 		t.Skip("set CAMOUFOX_BIN to run")
 	}
@@ -110,5 +111,17 @@ func TestWithUserDataDirIsPreserved(t *testing.T) {
 	}
 	if _, err := os.Stat(dir); err != nil {
 		t.Errorf("caller-supplied user data dir was removed: %v", err)
+	}
+
+	// If WithUserDataDir were dropped and a temp profile used instead, dir
+	// (a t.TempDir()) would still exist and the check above would still
+	// pass. Assert Firefox actually wrote its profile into the caller's
+	// dir, e.g. prefs.js / times.json / compatibility.ini.
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read user data dir: %v", err)
+	}
+	if len(entries) == 0 {
+		t.Error("WithUserDataDir was ignored: Firefox wrote nothing into the caller's dir")
 	}
 }
