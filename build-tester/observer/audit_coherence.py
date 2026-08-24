@@ -7,7 +7,6 @@ See the module docstring in geom_multi.py for the one-time env setup."""
 import json, sys
 from pathlib import Path
 from camoufox.sync_api import Camoufox
-from browserforge.fingerprints import Screen
 import harness   # stdlib-only at import time; does not pull in Marionette
 
 HERE = Path(__file__).parent
@@ -19,14 +18,10 @@ OSES = ("windows", "macos", "linux")
 # local to this audit.
 PLATFORM_FOR = {"windows": "Win32", "macos": "MacIntel", "linux": "Linux x86_64"}
 UA_TOKEN_FOR = {"windows": "Windows", "macos": "Macintosh", "linux": "Linux"}
-# Decouple sampling from the machine running the audit. Without an explicit Screen,
-# launch_options falls back to get_screen_cons(), which caps BrowserForge at the HOST
-# monitor (1512x982 on the dev Mac). That made results machine-dependent and collapsed
-# the macOS arm to ~1 distinct screen across 4 samples -- including 960x540, a size no
-# real Mac reports. The bound is not "wider than any display" (a Pro Display XDR is
-# 6016x3384); it is wide enough to exclude ZERO of the 312 screen entries across both
-# bundled preset files, i.e. unconstrained over the data actually sampled.
-SCREEN = Screen(max_width=6000, max_height=4000)
+# No screen=, window=, or fingerprint is passed to any launch below, on purpose. This
+# audit must exercise the default path a real scraper takes; pinning any of those makes
+# launch_options treat the screen as caller-chosen and skip its own corrections -- the
+# audit would then be measuring a path nobody uses.
 
 READ = """() => {
   const dpr = window.devicePixelRatio, near = q => matchMedia(q).matches;
@@ -62,7 +57,7 @@ def coherence_fails(d, os_name, expected_dpr):
 
 def launch(os_name):
     with Camoufox(headless=True, executable_path=BIN, os=os_name, ff_version=152,
-                  i_know_what_im_doing=True, screen=SCREEN) as b:
+                  i_know_what_im_doing=True) as b:
         p = b.new_context().new_page(); p.goto("about:blank"); return p.evaluate(READ)
 
 def main():
@@ -70,6 +65,14 @@ def main():
     for os_name in OSES:
         for i in range(SAMPLES):
             d = launch(os_name)
+            # expected_dpr=1.0 is a SMOKE TEST, not evidence. It hardcodes "headless
+            # Firefox floors dpr to 1" -- a second copy of the fact pythonlib encodes
+            # for itself, and the reason its dpr-1 screen resample exists. So it passes
+            # whether or not that resample ran: this audit cannot detect a regression
+            # there, and pythonlib's own tests are what cover it. It also means that if
+            # dpr ever stops being 1 in headless (the overrideDPPX work sketched in
+            # probe_split.py), this line fails for correct code -- fix the line, not the
+            # browser. The audit's real subject is the browser-side coherence below.
             fails = coherence_fails(d, os_name, expected_dpr=1.0)
             results.append({"os": os_name, "i": i, "fails": fails, **d})
             print(f"[{'PASS' if not fails else 'FAIL'}] {os_name}#{i}: "
@@ -95,8 +98,8 @@ def main():
     if collapsed:
         # n==1 can happen by chance (~1% per arm), so say so rather than asserting a bug.
         print(f"AUDIT FAIL: sampling collapsed for {', '.join(collapsed)} -- every sample drew "
-              f"the same screen, so the PASS is not evidence. Re-run once; if it repeats, "
-              f"generation is constrained (see the SCREEN note above).")
+              "the same screen, so the PASS is not evidence. Re-run once; if it repeats, "
+              "fingerprint generation is constrained somewhere upstream.")
         sys.exit(1)
     print("AUDIT PASS")
 
