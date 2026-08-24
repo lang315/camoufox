@@ -3,6 +3,7 @@
  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
 
 const uuidGen = Cc["@mozilla.org/uuid-generator;1"].getService(Ci.nsIUUIDGenerator);
+const {setTimeout, clearTimeout} = ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs");
 
 // Camoufox: cap juggler event waits so a missed ack (mouse/wheel/drag dispatch)
 // can't hang the process-wide activation chain forever (#225/#224/#262/#196/#331).
