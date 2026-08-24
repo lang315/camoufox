@@ -192,6 +192,12 @@ type Config struct {
 	Certificates     []string `json:"certificates,omitempty"`
 	Debug            *bool    `json:"debug,omitempty"`
 
+	// Registered in settings/properties.json but had no producer field, so
+	// TestProducerSchemaDrift failed on main and goapi.yml was red for every
+	// PR -- which would make the guard added alongside it unreadable.
+	// Kept in its own block so gofmt does not realign the one above.
+	DisableInstantAnimations *bool `json:"disableInstantAnimations,omitempty"`
+
 	// Extra allows callers to inject keys not yet captured by named fields
 	// (forward-compat with new CAMOU_CONFIG properties).
 	Extra map[string]any `json:"-"`
