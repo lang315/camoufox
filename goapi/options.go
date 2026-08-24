@@ -20,6 +20,7 @@ type launchConfig struct {
 	env             []string
 	firefoxUserPrefs map[string]any
 	virtualDisplay  string
+	userDataDir     string
 
 	os             string
 	firefoxVersion string
@@ -131,6 +132,17 @@ func WithDebug(b bool) Option { return func(c *launchConfig) { c.debug = b } }
 // (e.g. ":99"). Useful on Linux with Xvfb running headfully.
 func WithVirtualDisplay(display string) Option {
 	return func(c *launchConfig) { c.virtualDisplay = display }
+}
+
+// WithUserDataDir runs the browser against a caller-owned profile directory
+// instead of a throwaway one. State (cookies, localStorage, prefs) then
+// persists across launches, and goapi never deletes the directory.
+//
+// Without this, each Launch gets a fresh temp profile that Close removes.
+// That default exists because a shared profile links sessions that callers
+// expect to be independent -- see issue #50.
+func WithUserDataDir(dir string) Option {
+	return func(c *launchConfig) { c.userDataDir = dir }
 }
 
 // WithAddons supplies a list of paths to unpacked Firefox extensions.
