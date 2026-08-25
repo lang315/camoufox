@@ -57,6 +57,43 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
+      - name: "record_video under headless=virtual (#93/#458 regression guard)"
+        timeout-minutes: 15
+        run: |
+          # ffmpeg is a separate playwright download; without it video recording
+          # hangs rather than erroring. playwright==1.55.0 is the version this
+          # suite's browser interop is known good on.
+          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          python -m playwright install ffmpeg
+          cd pythonlib
+          python - <<'PY'
+          import os, glob
+          from camoufox.sync_api import Camoufox
+          out = "/tmp/vid"; os.makedirs(out, exist_ok=True)
+          with Camoufox(headless="virtual", executable_path=os.environ["CAMOUFOX_BIN"],
+                        ff_version=152, i_know_what_im_doing=True) as b:
+              p = b.new_page(record_video_dir=out, viewport={"width": 800, "height": 600})
+              p.goto("data:text/html,<h1 style='font-size:200px'>hello world</h1>")
+              p.wait_for_timeout(2000)
+              p.close()
+          vids = glob.glob(out + "/*.webm")
+          assert vids, "no .webm produced under headless='virtual'"
+          size = os.path.getsize(vids[0])
+          print(f"video: {vids[0]} {size} bytes")
+          # Composite off produced a 110-byte empty container; on, ~54KB. 10K
+          # separates them by a wide margin without pinning an exact size.
+          assert size > 10_000, (
+              f"video is {size} bytes -- an empty container. Composite is most likely "
+              "off; see the measurement table in pythonlib/camoufox/virtdisplay.py"
+          )
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          # pkgman.get_path() resolves fonts/ and properties.json through
+          # camoufox_path(), which fetches from the GitHub releases API when no
+          # local install exists; unauthenticated that is rate-limited to 403.
+          GITHUB_TOKEN: ${{ github.token }}
+
       - name: Integration suite (all goapi tests vs real binary)
         # Runs the FULL suite against the real binary, not just TestRuntimeSpoofs:
         # the other ~24 browser tests (navigation, DOM, forms, keyboard, storage,
