@@ -240,9 +240,8 @@ def _reassemble_camou_config(from_options: Optional[Dict[str, Any]]) -> Optional
     """Reassembles the chunked CAMOU_CONFIG_<n> env vars from a launch_options()-shaped
     dict back into the parsed config dict, or None if there's nothing usable.
 
-    Shared by launched_os and spoofs_window_dimensions, which both need the launch-time
-    config recovered from the same chunked env var contract -- keep them in sync here
-    rather than as two copies that can drift.
+    Used by spoofs_window_dimensions to recover the launch-time config from the
+    chunked env var contract.
     """
     env = (from_options or {}).get('env') or {}
     try:
@@ -260,46 +259,6 @@ def _reassemble_camou_config(from_options: Optional[Dict[str, Any]]) -> Optional
         return orjson.loads(''.join(env[k] for k in keys))
     except orjson.JSONDecodeError:
         return None
-
-
-def launched_os(from_options: Dict[str, Any]) -> Optional[str]:
-    """The OS the browser was actually launched as, recovered from its own config.
-
-    Needed because a Playwright Browser handle carries no camoufox identity, and
-    NewContext must know whether the OS it is being asked for matches the one the
-    browser's fonts were generated for.
-    """
-    config = _reassemble_camou_config(from_options)
-    if not config or not config.get('navigator.userAgent'):
-        return None
-    return get_target_os(config)
-
-
-def _warn_os_mismatch(browser: Any, resolved_os: Optional[str]) -> None:
-    """Per-context overrides do not cover fonts, so a context whose fingerprint
-    resolves to an OS other than the browser's inherits the launch OS's font set
-    and is cross-signal incoherent (issue #44).
-
-    `resolved_os` is the OS the context's generated UA actually mapped to
-    ('mac' | 'win' | 'lin'), not necessarily the caller's `os=` kwarg --
-    NewContext(browser) with no `os=` is the default call pattern and still
-    resolves to a concrete OS, so the check must compare against what was
-    actually generated, not what was asked for. Loud beats silent: there is no
-    way to fix it from here.
-    """
-    if not resolved_os:
-        return
-    launch = getattr(browser, '_camoufox_os', None)
-    if launch and launch != resolved_os:
-        warnings.warn(
-            f"This context's fingerprint resolved to {resolved_os!r}, but the "
-            f"browser was launched as {launch!r}: fonts are set at launch and "
-            "have no per-context override, so this context will report the "
-            f"launch OS's fonts under a {resolved_os!r} platform. Launch a "
-            "separate browser per OS instead.",
-            RuntimeWarning,
-            stacklevel=3,
-        )
 
 
 def determine_ua_os(user_agent: str) -> Literal['mac', 'win', 'lin']:
