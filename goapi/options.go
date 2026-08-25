@@ -20,6 +20,7 @@ type launchConfig struct {
 	env             []string
 	firefoxUserPrefs map[string]any
 	virtualDisplay  string
+	userDataDir     string
 
 	os             string
 	firefoxVersion string
@@ -100,9 +101,16 @@ func WithFingerprintOverride(o fingerprint.Options) Option {
 	}
 }
 
-// WithArgs appends raw firefox CLI args. The --juggler-pipe and
-// --headless flags are managed by Launch and should not be passed
-// here.
+// WithArgs appends raw firefox CLI args. The --juggler-pipe,
+// --headless and -profile flags are managed by Launch and should not
+// be passed here.
+//
+// Passing -profile or --profile is rejected by Launch rather than
+// ignored. Launch prepends its own and Firefox honors the FIRST
+// occurrence (measured -- with two -profile flags only the first
+// directory is populated), so a caller-supplied one would never take
+// effect, and the profile Firefox did use would be deleted on Close.
+// Use WithUserDataDir to run against a specific profile directory.
 func WithArgs(args ...string) Option {
 	return func(c *launchConfig) { c.args = append(c.args, args...) }
 }
@@ -131,6 +139,17 @@ func WithDebug(b bool) Option { return func(c *launchConfig) { c.debug = b } }
 // (e.g. ":99"). Useful on Linux with Xvfb running headfully.
 func WithVirtualDisplay(display string) Option {
 	return func(c *launchConfig) { c.virtualDisplay = display }
+}
+
+// WithUserDataDir runs the browser against a caller-owned profile directory
+// instead of a throwaway one. State (cookies, localStorage, prefs) then
+// persists across launches, and goapi never deletes the directory.
+//
+// Without this, each Launch gets a fresh temp profile that Close removes.
+// That default exists because a shared profile links sessions that callers
+// expect to be independent -- see issue #50.
+func WithUserDataDir(dir string) Option {
+	return func(c *launchConfig) { c.userDataDir = dir }
 }
 
 // WithAddons supplies a list of paths to unpacked Firefox extensions.
