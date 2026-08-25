@@ -17,12 +17,10 @@ from camoufox.virtdisplay import VirtualDisplay
 
 from .fingerprints import generate_context_fingerprint
 from .utils import (
-    _warn_os_mismatch,
     async_attach_vd,
     attach_no_viewport_default,
     determine_ua_os,
     launch_options,
-    launched_os,
     spoofs_window_dimensions,
 )
 
@@ -128,12 +126,10 @@ async def AsyncNewBrowser(
             if no_viewport_default and not ('viewport' in from_options or 'no_viewport' in from_options):
                 from_options = {**from_options, 'no_viewport': True}
             context = await playwright.firefox.launch_persistent_context(**from_options)
-            context._camoufox_os = launched_os(from_options)
             return await async_attach_vd(context, virtual_display)
 
         # Browser
         browser = await playwright.firefox.launch(**from_options)
-        browser._camoufox_os = launched_os(from_options)
         if no_viewport_default:
             attach_no_viewport_default(browser)
         return await async_attach_vd(browser, virtual_display)
@@ -219,7 +215,6 @@ async def AsyncNewContext(
     # (possibly absent) `os=` the caller passed -- NewContext(browser) with no
     # `os=` is the default call pattern and still resolves to a concrete OS.
     resolved_ua = fp['config'].get('navigator.userAgent')
-    _warn_os_mismatch(browser, determine_ua_os(resolved_ua) if resolved_ua else None)
 
     # Merge generated context options with user overrides (user wins)
     opts: Dict[str, Any] = {**fp['context_options'], **context_kwargs}
