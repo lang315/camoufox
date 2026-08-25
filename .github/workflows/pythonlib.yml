@@ -1,0 +1,43 @@
+name: pythonlib
+
+# The Python package had no per-PR gate: nothing in .github/workflows watched
+# pythonlib/**, and smoke.yml is workflow_dispatch-only. Three PRs in a row
+# reported "no checks" while changing it. This is the same blind spot that let
+# the juggler setTimeout bug (#48) ship for a month, when goapi.yml was
+# goapi/**-only.
+#
+# These tests need no browser binary -- they are unit tests over launch option
+# assembly, fingerprint generation and the virtual-display argv. The suite runs
+# in a couple of seconds.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pythonlib/**'
+      - '.github/workflows/pythonlib.yml'
+  pull_request:
+    paths:
+      - 'pythonlib/**'
+      - '.github/workflows/pythonlib.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pythonlib
+        run: |
+          python -m pip install --upgrade pip
+          # -e so the tests import the working tree, not a built copy.
+          pip install -e pythonlib pytest
+
+      - name: Run tests
+        working-directory: pythonlib
+        run: pytest tests/ -q
