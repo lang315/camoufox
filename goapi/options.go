@@ -105,11 +105,12 @@ func WithFingerprintOverride(o fingerprint.Options) Option {
 // --headless and -profile flags are managed by Launch and should not
 // be passed here.
 //
-// -profile in particular is silently ignored: Launch prepends its own
-// and Firefox honors the FIRST occurrence (measured -- with two
-// -profile flags only the first directory is populated), so a
-// caller-supplied one never takes effect. Use WithUserDataDir to run
-// against a specific profile directory.
+// Passing -profile or --profile is rejected by Launch rather than
+// ignored. Launch prepends its own and Firefox honors the FIRST
+// occurrence (measured -- with two -profile flags only the first
+// directory is populated), so a caller-supplied one would never take
+// effect, and the profile Firefox did use would be deleted on Close.
+// Use WithUserDataDir to run against a specific profile directory.
 func WithArgs(args ...string) Option {
 	return func(c *launchConfig) { c.args = append(c.args, args...) }
 }

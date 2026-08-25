@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -123,5 +124,26 @@ func TestWithUserDataDirIsUsedAndPreserved(t *testing.T) {
 	}
 	if len(entries) == 0 {
 		t.Error("WithUserDataDir was ignored: Firefox wrote nothing into the caller's dir")
+	}
+}
+
+// The guard runs before the executable is touched, so unlike the rest of this
+// file it needs no CAMOUFOX_BIN and actually executes in CI.
+//
+// Passing -profile via WithArgs used to work (it was the only such flag). Now
+// Launch prepends its own and Firefox honors the first, so the caller's would
+// be dropped silently AND the profile actually used would be a temp dir that
+// Close deletes -- no persistence at all, no error. Reject it instead.
+func TestLaunchRejectsProfileViaWithArgs(t *testing.T) {
+	for _, flag := range []string{"-profile", "--profile"} {
+		_, err := camoufox.Launch(context.Background(),
+			camoufox.WithExecutablePath("/nonexistent/camoufox-does-not-exist"),
+			camoufox.WithArgs(flag, "/tmp/some-profile-dir"))
+		if err == nil {
+			t.Fatalf("%s via WithArgs: expected an error, got nil", flag)
+		}
+		if !strings.Contains(err.Error(), "WithUserDataDir") {
+			t.Errorf("%s via WithArgs: error should name WithUserDataDir as the replacement, got: %v", flag, err)
+		}
 	}
 }
