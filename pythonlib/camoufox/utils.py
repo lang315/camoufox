@@ -1,5 +1,6 @@
 import os
 import sys
+import warnings
 from functools import wraps
 from os import environ
 from os.path import abspath
@@ -242,6 +243,31 @@ def get_target_os(config: Dict[str, Any]) -> Literal['mac', 'win', 'lin']:
     if config.get("navigator.userAgent"):
         return determine_ua_os(config["navigator.userAgent"])
     return OS_NAME
+
+
+def _reassemble_camou_config(from_options: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Reassembles the chunked CAMOU_CONFIG_<n> env vars from a launch_options()-shaped
+    dict back into the parsed config dict, or None if there's nothing usable.
+
+    Used by spoofs_window_dimensions to recover the launch-time config from the
+    chunked env var contract.
+    """
+    env = (from_options or {}).get('env') or {}
+    try:
+        keys = sorted(
+            (k for k in env if k.startswith('CAMOU_CONFIG_')),
+            key=lambda k: int(k.rsplit('_', 1)[1]),
+        )
+    except ValueError:
+        # A malformed CAMOU_CONFIG_<n> suffix -- treat as nothing usable, same as
+        # the JSON-decode failure below, rather than raising.
+        return None
+    if not keys:
+        return None
+    try:
+        return orjson.loads(''.join(env[k] for k in keys))
+    except orjson.JSONDecodeError:
+        return None
 
 
 def determine_ua_os(user_agent: str) -> Literal['mac', 'win', 'lin']:
@@ -499,12 +525,10 @@ def spoofs_window_dimensions(from_options: Dict[str, Any]) -> bool:
     dimension. The config is chunked across CAMOU_CONFIG_<n> env vars, so
     reassemble it in index order before looking.
     """
-    env = from_options.get('env') or {}
-    chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
-    if not chunks:
+    config = _reassemble_camou_config(from_options)
+    if not config:
         return False
-    blob = ''.join(v for _, v in sorted(chunks))
-    return any(key in blob for key in _WINDOW_DIM_KEYS)
+    return any(key in config for key in _WINDOW_DIM_KEYS)
 
 
 def attach_no_viewport_default(target: Any) -> Any:
