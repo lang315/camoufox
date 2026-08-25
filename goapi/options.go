@@ -101,9 +101,15 @@ func WithFingerprintOverride(o fingerprint.Options) Option {
 	}
 }
 
-// WithArgs appends raw firefox CLI args. The --juggler-pipe and
-// --headless flags are managed by Launch and should not be passed
-// here.
+// WithArgs appends raw firefox CLI args. The --juggler-pipe,
+// --headless and -profile flags are managed by Launch and should not
+// be passed here.
+//
+// -profile in particular is silently ignored: Launch prepends its own
+// and Firefox honors the FIRST occurrence (measured -- with two
+// -profile flags only the first directory is populated), so a
+// caller-supplied one never takes effect. Use WithUserDataDir to run
+// against a specific profile directory.
 func WithArgs(args ...string) Option {
 	return func(c *launchConfig) { c.args = append(c.args, args...) }
 }
