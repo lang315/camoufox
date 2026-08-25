@@ -16,6 +16,7 @@ from camoufox.virtdisplay import VirtualDisplay
 from .fingerprints import generate_context_fingerprint
 from .utils import (
     attach_no_viewport_default,
+    determine_ua_os,
     launch_options,
     spoofs_window_dimensions,
     sync_attach_vd,
@@ -198,6 +199,11 @@ def NewContext(
             context_kwargs["timezone_id"] = geo["timezone"]
 
     fp = generate_context_fingerprint(preset=preset, os=os, ff_version=ff_version, webrtc_ip=webrtc_ip)
+
+    # Warn on the OS this context's fingerprint actually resolved to, not the
+    # (possibly absent) `os=` the caller passed -- NewContext(browser) with no
+    # `os=` is the default call pattern and still resolves to a concrete OS.
+    resolved_ua = fp['config'].get('navigator.userAgent')
 
     # Merge generated context options with user overrides (user wins)
     opts: Dict[str, Any] = {**fp['context_options'], **context_kwargs}

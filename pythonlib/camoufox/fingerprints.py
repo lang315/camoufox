@@ -766,12 +766,15 @@ def _build_init_script(values: Dict[str, Any]) -> str:
         ('webglRenderer', 'setWebGLRenderer', '{val}'),
     ]
 
+    lines.append('  w.__camoufoxMissingSetters = w.__camoufoxMissingSetters || [];')
+
     for key, fn_name, _template in setters:
         val = values.get(key)
         if val is not None:
             js_val = _json.dumps(val)
             lines.append(
-                f'  if (typeof w.{fn_name} === "function") w.{fn_name}({js_val});'
+                f'  if (typeof w.{fn_name} === "function") {{ w.{fn_name}({js_val}); }}'
+                f' else {{ w.__camoufoxMissingSetters.push("{fn_name}"); }}'
             )
 
     # Screen dimensions (requires width + height together)
