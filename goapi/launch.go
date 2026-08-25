@@ -74,6 +74,18 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	if lc.executablePath == "" {
 		return nil, errors.New("camoufox: WithExecutablePath is required")
 	}
+	// Launch prepends its own -profile and Firefox honors the FIRST
+	// occurrence, so a caller-supplied one here would be dropped without a
+	// word -- and because lc.userDataDir stays empty, the profile Firefox
+	// actually uses is our temp dir, which Close deletes. A caller relying on
+	// WithArgs("-profile", dir) for persistence would silently get none at
+	// all. Fail loudly instead. (-P is Firefox's named-profile flag, different
+	// semantics, deliberately not covered.)
+	for _, a := range lc.args {
+		if a == "-profile" || a == "--profile" {
+			return nil, errors.New("camoufox: -profile is managed by Launch and cannot be passed via WithArgs; use WithUserDataDir to run against a specific profile directory")
+		}
+	}
 	_ = runtime.GOOS // pipe wiring is build-tag dispatched
 
 	cfg := lc.cfg
