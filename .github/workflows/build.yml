@@ -257,13 +257,17 @@ jobs:
       - name: Create swap space
         if: matrix.target != 'macos'
         run: |
-          sudo fallocate -l 16G /swapfile
+          sudo fallocate -l 24G /swapfile
           sudo chmod 600 /swapfile
           sudo mkswap /swapfile
           sudo swapon /swapfile
           free -h
 
       - name: Build
+        env:
+          # Cap Rust parallelism to lower peak memory (avoids OOM/SIGTERM).
+          # Tune to taste: higher = faster but more RAM.
+          CARGO_BUILD_JOBS: "1"
         run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
 
       - name: ccache stats
