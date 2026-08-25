@@ -29,6 +29,11 @@ type Browser struct {
 
 	debug bool
 
+	// profileDir is removed by Close only when ownsProfileDir is true --
+	// a caller-supplied WithUserDataDir is their data, never ours to delete.
+	profileDir     string
+	ownsProfileDir bool
+
 	mu       sync.Mutex
 	contexts map[string]*BrowserContext
 	pages    map[string]*Page // by targetId
@@ -68,6 +73,18 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	}
 	if lc.executablePath == "" {
 		return nil, errors.New("camoufox: WithExecutablePath is required")
+	}
+	// Launch prepends its own -profile and Firefox honors the FIRST
+	// occurrence, so a caller-supplied one here would be dropped without a
+	// word -- and because lc.userDataDir stays empty, the profile Firefox
+	// actually uses is our temp dir, which Close deletes. A caller relying on
+	// WithArgs("-profile", dir) for persistence would silently get none at
+	// all. Fail loudly instead. (-P is Firefox's named-profile flag, different
+	// semantics, deliberately not covered.)
+	for _, a := range lc.args {
+		if a == "-profile" || a == "--profile" {
+			return nil, errors.New("camoufox: -profile is managed by Launch and cannot be passed via WithArgs; use WithUserDataDir to run against a specific profile directory")
+		}
 	}
 	_ = runtime.GOOS // pipe wiring is build-tag dispatched
 
@@ -117,7 +134,26 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	// Build the firefox CLI. The Juggler bootstrap requires
 	// --juggler-pipe; --no-remote is recommended so a stale profile
 	// lock cannot redirect commands to an existing instance.
-	args := []string{"--juggler-pipe", "--no-remote"}
+	// Without an explicit -profile, Firefox falls back to a persistent default
+	// profile keyed per install path, so prefs and browsing state leak between
+	// launches that callers expect to be independent (#50).
+	profileDir := lc.userDataDir
+	ownsProfileDir := false
+	if profileDir == "" {
+		profileDir, err = os.MkdirTemp("", "camoufox-profile-")
+		if err != nil {
+			return nil, fmt.Errorf("camoufox: create profile dir: %w", err)
+		}
+		ownsProfileDir = true
+	}
+	launched := false
+	defer func() {
+		if ownsProfileDir && !launched {
+			_ = os.RemoveAll(profileDir)
+		}
+	}()
+
+	args := []string{"--juggler-pipe", "--no-remote", "-profile", profileDir}
 	if lc.headless {
 		args = append(args, "--headless")
 	}
@@ -173,6 +209,8 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		conn:           conn,
 		root:           conn.RootSession(),
 		debug:          lc.debug,
+		profileDir:     profileDir,
+		ownsProfileDir: ownsProfileDir,
 		contexts:       make(map[string]*BrowserContext),
 		pages:          make(map[string]*Page),
 		attachBuffered: make(map[string]*bufferedAttach),
@@ -233,6 +271,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 			return nil, err
 		}
 	}
+	launched = true
 	return b, nil
 }
 
@@ -420,6 +459,9 @@ func (b *Browser) Close() error {
 			_ = b.proc.Kill()
 			<-done
 		}
+	}
+	if b.ownsProfileDir && b.profileDir != "" {
+		_ = os.RemoveAll(b.profileDir)
 	}
 	return nil
 }
