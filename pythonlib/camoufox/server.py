@@ -1,4 +1,3 @@
-import atexit
 import signal
 import subprocess
 import sys
@@ -22,7 +21,7 @@ def camel_case(snake_str: str) -> str:
     if len(snake_str) < 2:
         return snake_str
     camel_case_str = ''.join(x.capitalize() for x in snake_str.lower().split('_'))
-    return camel_case_str[0].lower() + camel_case_str[1:]
+    return ("_" if snake_str[0] == "_" else "") + camel_case_str[0].lower() + camel_case_str[1:]
 
 
 def to_camel_case_dict(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -61,18 +60,26 @@ def launch_server(**kwargs) -> NoReturn:
     """
     Launch a Playwright server. Takes the same arguments as `Camoufox()`.
     Prints the websocket endpoint to the console.
+
+    Note: persistent contexts are not servable. Playwright's `launchServer`
+    routes through `BrowserType.launch()`, and its `PlaywrightServer` only
+    accepts a `preLaunchedBrowser` -- there is no way to expose a persistent
+    `BrowserContext` over a websocket endpoint. Reject those options up front
+    rather than accepting them and silently launching a throwaway profile.
     """
     # Playwright's launchServer has no persistent-context mode, so these two
     # options cannot be honored in server mode. Fail loudly with guidance
     # instead of crashing later with a cryptic "unexpected keyword argument"
-    # from launch_options() (#161).
-    if kwargs.get('persistent_context') or kwargs.get('user_data_dir'):
-        raise ValueError(
-            "launch_server() does not support persistent_context / user_data_dir: "
-            "Playwright's launchServer has no persistent-context mode. Use "
-            "Camoufox(persistent_context=True, user_data_dir=...) for a persistent "
-            "instance, or drop these arguments to launch an ephemeral server."
-        )
+    # from launch_options() (#161). Falsy values are dropped rather than
+    # rejected, so an explicit persistent_context=False still launches.
+    for unsupported in ('persistent_context', 'user_data_dir'):
+        if kwargs.get(unsupported):
+            raise ValueError(
+                f"launch_server() does not support {unsupported!r}: Playwright cannot "
+                "serve a persistent context over a websocket endpoint. Use "
+                f"Camoufox(persistent_context=True, ...) in-process instead."
+            )
+        kwargs.pop(unsupported, None)
 
     config = launch_options(**kwargs)
     nodejs = get_nodejs()
@@ -92,21 +99,55 @@ def launch_server(**kwargs) -> NoReturn:
         stdin=subprocess.PIPE,
         text=True,
     )
-
-    # Ensure the Node child is never orphaned: terminate it whenever this
-    # process exits, including via SIGINT (KeyboardInterrupt, handled by
-    # atexit during normal interpreter shutdown) and SIGTERM (which Python
-    # does not translate into an exception by default, so it's handled
-    # explicitly below).
-    atexit.register(_terminate, process)
+    # Python does not translate SIGTERM into an exception, so without this the
+    # `except BaseException` below never runs on `kill` and the Node child is
+    # orphaned. SIGINT already arrives as KeyboardInterrupt and needs no handler.
     signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(0))
 
-    # Write data to stdin, close the stream, and wait forever.
-    # communicate() tolerates the pipe closing early if the server exits before reading
-    # its config, keeping that error visible instead of masking it with an OSError.
-    process.communicate(input=base64.b64encode(data).decode())
+    # Send one newline-delimited configuration frame, then keep the pipe open.
+    # The Node process treats EOF as a shutdown request and can close Playwright
+    # cleanly before exiting, which removes its temporary browser profile.
+    assert process.stdin is not None
+    stdin = process.stdin
+    encoded_config = base64.b64encode(data).decode() + '\n'
 
-    # Add an explicit return statement to satisfy the NoReturn type hint
+    def close_stdin() -> None:
+        if stdin.closed:
+            return
+        try:
+            stdin.close()
+        except OSError:
+            pass
+
+    def shutdown_process() -> None:
+        """Ask Node to close BrowserServer, then reap it with bounded fallbacks."""
+        close_stdin()
+        if process.poll() is not None:
+            process.wait()
+            return
+        try:
+            process.wait(timeout=15)
+        except subprocess.TimeoutExpired:
+            _terminate(process)
+
+    try:
+        stdin.write(encoded_config)
+        stdin.flush()
+        process.wait()
+    except OSError as error:
+        # If Node failed before reading the frame, preserve its exit status
+        # instead of masking the original failure with a pipe exception.
+        shutdown_process()
+        raise RuntimeError(
+            f"Server process terminated unexpectedly with exit code {process.returncode}"
+        ) from error
+    except BaseException:
+        shutdown_process()
+        raise
+    finally:
+        close_stdin()
+
+    # Add an explicit exception to satisfy the NoReturn type hint.
     raise RuntimeError(
         f"Server process terminated unexpectedly with exit code {process.returncode}"
     )

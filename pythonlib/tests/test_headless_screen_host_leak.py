@@ -33,9 +33,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import pytest  # noqa: E402
 
-from camoufox import utils  # noqa: E402
+from camoufox import display, utils  # noqa: E402
 
-FAKE_HOST_MONITOR = [SimpleNamespace(width=1512, height=982)]
+# largest_display() returns one DisplaySize (CSS pixels), not a monitor list.
+FAKE_HOST_MONITOR = SimpleNamespace(width=1512, height=982)
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,10 @@ def test_headful_with_self_spawned_xvfb_does_not_constrain():
     assert utils._should_constrain_to_host_display(False, {"DISPLAY": ":99"}, ":99") is False
 
 
-def test_headful_without_any_display_does_not_constrain():
+def test_headful_without_any_display_does_not_constrain(monkeypatch):
+    # Linux-pinned: DISPLAY / WAYLAND_DISPLAY exist only there, so only there does
+    # an empty env mean "no session". Windows and macOS always have one.
+    monkeypatch.setattr(display, "OS_NAME", "lin")
     assert utils._should_constrain_to_host_display(False, {}, None) is False
 
 
@@ -76,7 +80,7 @@ def test_virtual_headless_does_not_constrain():
 def test_headless_never_queries_the_host_monitor(monkeypatch):
     queried = []
     monkeypatch.setattr(
-        utils, "get_monitors", lambda: queried.append(1) or FAKE_HOST_MONITOR
+        utils, "largest_display", lambda: queried.append(1) or FAKE_HOST_MONITOR
     )
 
     flag = utils._should_constrain_to_host_display(True, {"DISPLAY": ":0"}, None)
@@ -86,7 +90,7 @@ def test_headless_never_queries_the_host_monitor(monkeypatch):
 
 def test_headful_real_display_still_reaches_browserforge(monkeypatch):
     """Guard against over-correcting: the headful path must keep its constraint."""
-    monkeypatch.setattr(utils, "get_monitors", lambda: FAKE_HOST_MONITOR)
+    monkeypatch.setattr(utils, "largest_display", lambda: FAKE_HOST_MONITOR)
 
     flag = utils._should_constrain_to_host_display(False, {"DISPLAY": ":0"}, None)
     screen = utils.get_screen_cons(flag)
@@ -103,7 +107,7 @@ def test_headful_real_display_still_reaches_browserforge(monkeypatch):
 
 # A resolution no fingerprint dataset contains, so any appearance in the output
 # can only have come from the monitor probe.
-SENTINEL_MONITOR = [SimpleNamespace(width=1234, height=567)]
+SENTINEL_MONITOR = SimpleNamespace(width=1234, height=567)
 
 
 def _camou_config(launch_opts):
@@ -132,7 +136,7 @@ def test_launch_options_headless_output_never_contains_host_resolution(monkeypat
     """The leak must be absent from the config that actually reaches the browser."""
     from camoufox.utils import launch_options
 
-    monkeypatch.setattr(utils, "get_monitors", lambda: SENTINEL_MONITOR)
+    monkeypatch.setattr(utils, "largest_display", lambda: SENTINEL_MONITOR)
 
     drawn = []
     for _ in range(8):  # generation is random; a single draw proves little

@@ -21,5 +21,6 @@ def test_launch_server_rejects_user_data_dir():
 
 
 def test_launch_server_rejects_both_together():
-    with pytest.raises(ValueError, match="launchServer has no persistent-context"):
+    # Rejection is per-option, so passing both reports the first one hit.
+    with pytest.raises(ValueError, match="cannot serve a persistent context"):
         launch_server(persistent_context=True, user_data_dir="/tmp/session")

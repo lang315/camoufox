@@ -1,3 +1,5 @@
+import { setTimeout } from "resource://gre/modules/Timer.sys.mjs";
+
 import { Collector } from "./Collector.sys.mjs";
 import { NetHook } from "./NetHook.sys.mjs";
 
