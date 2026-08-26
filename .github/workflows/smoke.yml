@@ -57,6 +57,24 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
+      - name: "#60 diag: is MaskConfig's timezone visible to GetTimezone?"
+        timeout-minutes: 5
+        run: |
+          BIN="${{ steps.bin.outputs.bin }}"
+          # Single-var CAMOU_CONFIG is a supported fallback in MaskConfig::GetJson,
+          # so no chunking needed. Loading any document triggers SetNewDocument ->
+          # GetTimezone, which is where the instrumentation prints.
+          export CAMOU_CONFIG='{"timezone":"Europe/London","navigator.platform":"FakePlatform99"}'
+          echo "=== run 1 ==="
+          xvfb-run -a "$BIN" --headless --screenshot /tmp/s1.png \
+            "data:text/html,<h1>one</h1>" 2>&1 | grep -F "[CAMOU-TZDIAG]" | head -20 || true
+          echo "=== run 2 (fresh process, same config) ==="
+          xvfb-run -a "$BIN" --headless --screenshot /tmp/s2.png \
+            "data:text/html,<h1>two</h1>" 2>&1 | grep -F "[CAMOU-TZDIAG]" | head -20 || true
+          echo "=== run 3, no CAMOU_CONFIG at all (control) ==="
+          env -u CAMOU_CONFIG xvfb-run -a "$BIN" --headless --screenshot /tmp/s3.png \
+            "data:text/html,<h1>three</h1>" 2>&1 | grep -F "[CAMOU-TZDIAG]" | head -10 || true
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |
