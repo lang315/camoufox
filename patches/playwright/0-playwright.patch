@@ -303,7 +303,7 @@ diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
 index 69d45a59b4..fe0e77f151 100644
 --- a/docshell/base/nsDocShell.cpp
 +++ b/docshell/base/nsDocShell.cpp
-@@ -15,6 +15,12 @@
+@@ -15,6 +15,13 @@
  #  include <unistd.h>  // for getpid()
  #endif
  
@@ -312,6 +312,7 @@ index 69d45a59b4..fe0e77f151 100644
 +#endif /* JS_HAS_INTL_API && !MOZ_SYSTEM_ICU */
 +
 +#include "js/LocaleSensitive.h"
++#include "mozilla/dom/TimezoneManager.h"
 +
  #include "nsDeviceContext.h"
  #include "mozilla/Attributes.h"
@@ -363,7 +364,7 @@ index 69d45a59b4..fe0e77f151 100644
        mAllowAuth(mItemType == typeContent),
        mAllowKeywordFixup(false),
        mDisableMetaRefreshWhenInactive(false),
-@@ -2957,6 +2975,232 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
+@@ -2957,6 +2975,245 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
    return NS_OK;
  }
  
@@ -491,6 +492,19 @@ index 69d45a59b4..fe0e77f151 100644
 +    if (!*aSuccess) {
 +      fprintf(stderr, "Failed to set 'TZ' to '%s'\n", timeZoneId.get());
 +    }
++  }
++
++  // Camoufox: record the per-context override in the store that
++  // nsGlobalWindowOuter::SetNewDocument reads. The override above is
++  // process-global -- per-realm timezone overrides are disabled in this build
++  // -- so without this the next navigation in any context would re-apply that
++  // context's configured value and clobber this one. Storing it means each
++  // context re-establishes its own timezone as it navigates, and an explicit
++  // per-context timezone outranks the launch-level CAMOU_CONFIG value.
++  if (*aSuccess && mBrowsingContext) {
++    mozilla::dom::TimezoneManager::SetTimezone(
++        mBrowsingContext->OriginAttributesRef().mUserContextId,
++        aTimezoneOverride);
 +  }
 +  return NS_OK;
 +}
