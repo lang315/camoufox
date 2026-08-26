@@ -215,7 +215,7 @@ index 7aab4d6f92..81caaa8f31 100644
  #include "mozilla/Likely.h"
  #include "mozilla/Preferences.h"
  #include "mozilla/SchedulerGroup.h"
-@@ -2507,6 +2509,22 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
+@@ -2507,6 +2509,25 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
      MOZ_ALWAYS_SUCCEEDS(bc->SetCurrentInnerWindowId(mInnerWindow->WindowID()));
    }
  
@@ -228,10 +228,13 @@ index 7aab4d6f92..81caaa8f31 100644
 +    }
 +    nsAutoString storedTimezone;
 +    if (mozilla::dom::TimezoneManager::GetTimezone(userContextId, storedTimezone)) {
-+      if (JSContext* cx = nsContentUtils::GetCurrentJSContext()) {
-+        NS_LossyConvertUTF16toASCII timezoneASCII(storedTimezone);
-+        JS::SetRealmTimeZoneOverride(cx, timezoneASCII.get());
-+      }
++      // Per-realm overrides are inert in this build: the Playwright patch
++      // disables them (Realm::dateTimeInfo() returns nullptr) in favour of the
++      // process-global override. Both paths that demonstrably work --
++      // window.setTimezone() and docShell.overrideTimezone() -- call the
++      // global one, so a launch-level CAMOU_CONFIG timezone must too.
++      NS_LossyConvertUTF16toASCII timezoneASCII(storedTimezone);
++      JS::SetTimeZoneOverride(timezoneASCII.get());
 +    }
 +  }
 +
