@@ -57,61 +57,70 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
-      - name: "#60 diag: is the missing JSContext why launch-config timezone is skipped?"
+      - name: "diag: does a reused profile inherit a stale fingerprint + dead setters?"
         timeout-minutes: 12
         run: |
-          # Established so far, both measured on this same artifact:
-          #  - MaskConfig reads "timezone" fine (maskTz=Europe/London printed).
-          #  - GetTimezone's fallback stores it: prefs.js gains
-          #    user_pref("roverfox.s.timezone_0", "Europe/London").
-          #  - Yet Intl.DateTimeFormat().resolvedOptions().timeZone reported the
-          #    HOST zone (UTC) in all 7 launches -- fresh profile, shared
-          #    profile, single-var and chunked config alike.
-          #
-          # So the value is computed and persisted but never applied. The only
-          # consumer for the launch-config path is nsGlobalWindowOuter::
-          # SetNewDocument, which applies the override through
-          #     if (JSContext* cx = nsContentUtils::GetCurrentJSContext())
-          # -- null when no JS is on the stack, i.e. every browser-initiated
-          # navigation. window.setTimezone() works because it runs inside a JS
-          # call (cx non-null) AND additionally sets a process-wide override.
-          #
-          # Prediction: a SCRIPT-initiated navigation puts JS on the stack, so
-          # the same launch config should suddenly apply. If D2 reports
-          # Europe/London while D1 reports UTC, the null cx is the whole bug.
+          # Every spoofing setter stores through RoverfoxStorageManager, which
+          # writes USER prefs (Preferences::SetCString, prefix "roverfox.s.").
+          # User prefs are serialised to prefs.js, so they survive into the next
+          # launch that reuses the profile. Two consequences to measure:
+          #   1. stale VALUES  -- webgl_renderer_, nav_plat_, timezone_, ...
+          #   2. dead SETTERS  -- the self-destruct flags (tz_disabled_,
+          #      audio_disabled_, canvas_seed_disabled_) persist too, so the
+          #      WebIDL Func guard should hide the setters from launch 2 on.
+          # If 2 holds, a reused profile can never be re-fingerprinted.
           pip install --quiet 'playwright==1.55.0'
           python - <<'PY'
           import json, os
           from playwright.sync_api import sync_playwright
 
           BIN = os.environ["CAMOUFOX_BIN"]
-          READ = "() => Intl.DateTimeFormat().resolvedOptions().timeZone"
-          CFG = {"timezone": "Europe/London", "navigator.platform": "FakePlatform99"}
-          ENV = {**os.environ, "CAMOU_CONFIG": json.dumps(CFG)}
+          PROFILE = "/tmp/reused-profile"
+          os.makedirs(PROFILE, exist_ok=True)
+
+          PROBE = """() => ({
+            setTimezone: typeof window.setTimezone,
+            setWebGLRenderer: typeof window.setWebGLRenderer,
+            setNavigatorPlatform: typeof window.setNavigatorPlatform,
+            tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            platform: navigator.platform,
+          })"""
+
+          def launch(tz, plat):
+              env = {**os.environ, "CAMOU_CONFIG": json.dumps({"timezone": tz, "navigator.platform": plat})}
+              ctx = pw.firefox.launch_persistent_context(
+                  PROFILE, executable_path=BIN, headless=True, env=env)
+              # The init script is what pythonlib does: call the setters if present.
+              ctx.add_init_script(
+                  'if (typeof window.setTimezone === "function") window.setTimezone(%s);'
+                  % json.dumps(tz))
+              page = ctx.new_page()
+              page.goto("data:text/html,<h1>p</h1>")
+              got = page.evaluate(PROBE)
+              ctx.close()
+              return got
+
+          def prefs():
+              f = os.path.join(PROFILE, "prefs.js")
+              if not os.path.exists(f):
+                  return []
+              return sorted(l.strip() for l in open(f) if "roverfox.s." in l)
 
           with sync_playwright() as pw:
-              b = pw.firefox.launch(executable_path=BIN, headless=True, env=ENV)
-
-              print("=== ARM D: same launch, browser-initiated vs script-initiated nav ===")
-              p = b.new_page()
-              p.goto("data:text/html,<h1>A</h1>")
-              print(f"  D1 browser-initiated goto      -> {p.evaluate(READ)}   (measured: UTC)")
-
-              # A timer callback runs with JS on the stack, so SetNewDocument for
-              # the resulting load sees a non-null GetCurrentJSContext().
-              p.evaluate("setTimeout(function(){ location.reload(); }, 0)")
-              p.wait_for_load_state("load")
-              p.wait_for_timeout(1500)
-              print(f"  D2 script-initiated reload     -> {p.evaluate(READ)}   (predicted: Europe/London)")
-              p.close()
-
-              print("\n=== ARM E: control, the path that is known to work ===")
-              ctx = b.new_context(timezone_id="Europe/Paris")
-              pg = ctx.new_page()
-              pg.goto("data:text/html,<h1>E</h1>")
-              print(f"  E  Playwright timezone_id=Europe/Paris -> {pg.evaluate(READ)}")
-              ctx.close()
-              b.close()
+              for label, tz, plat in (("launch 1", "Europe/London", "FakePlatformAAA"),
+                                      ("launch 2", "Asia/Tokyo",    "FakePlatformBBB")):
+                  got = launch(tz, plat)
+                  print(f"\n=== {label}: config tz={tz} platform={plat} ===")
+                  print(f"  setters visible: setTimezone={got['setTimezone']} "
+                        f"setWebGLRenderer={got['setWebGLRenderer']} "
+                        f"setNavigatorPlatform={got['setNavigatorPlatform']}")
+                  print(f"  observed: tz={got['tz']}  navigator.platform={got['platform']}")
+                  p = prefs()
+                  print(f"  prefs.js roverfox.s.* ({len(p)}):")
+                  for line in p[:14]:
+                      print(f"    {line}")
+          print("\nIf launch 2 shows setters 'undefined' or carries launch 1's "
+                "values, a reused profile cannot be re-fingerprinted.")
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
