@@ -78,6 +78,47 @@ jobs:
           # which is rate-limited to 403 unauthenticated.
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: "launch-config timezone applies (#60 regression guard)"
+        timeout-minutes: 8
+        run: |
+          # #60: SetNewDocument applied a CAMOU_CONFIG timezone with
+          # JS::SetRealmTimeZoneOverride, which the Playwright patch makes inert
+          # (per-realm overrides are disabled in favour of the process-global
+          # one). The value was read and persisted to prefs.js but never
+          # applied, so Intl kept reporting the host zone.
+          #
+          # The second assertion is not decoration: the fix moves this path onto
+          # a PROCESS-GLOBAL override, so a per-context timezone_id must still
+          # win over it. Losing that would be #44 all over again in this layer.
+          pip install --quiet 'playwright==1.55.0'
+          python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          READ = "() => Intl.DateTimeFormat().resolvedOptions().timeZone"
+          ENV = {**os.environ, "CAMOU_CONFIG": json.dumps({"timezone": "Europe/London"})}
+
+          def tz_of(page):
+              page.goto("data:text/html,<h1>tz</h1>")
+              return page.evaluate(READ)
+
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
+                                    headless=True, env=ENV)
+              got = tz_of(b.new_page())
+              print(f"launch config Europe/London -> {got}")
+
+              ctx = b.new_context(timezone_id="Europe/Paris")
+              per_ctx = tz_of(ctx.new_page())
+              print(f"context timezone_id Europe/Paris -> {per_ctx}")
+              ctx.close(); b.close()
+
+          assert got == "Europe/London", f"launch-config timezone not applied: {got}"
+          assert per_ctx == "Europe/Paris", f"per-context timezone_id lost to the global override: {per_ctx}"
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |
