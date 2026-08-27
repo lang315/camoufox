@@ -366,14 +366,29 @@ index aee042ab75..54b5638d19 100644
    }
  
    return ret;
-@@ -2027,6 +2099,57 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2027,6 +2099,72 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
    const auto& state = State();
  
    // -
 +  std::optional<
 +      std::variant<int64_t, bool, double, std::string, std::nullptr_t>>
 +      data;
-+  data = MaskConfig::GLParam(pname, mIsWebGL2);
++  // UNMASKED_RENDERER_WEBGL and UNMASKED_VENDOR_WEBGL have a dedicated branch
++  // further down that reads this context's WebGLParamsManager value BEFORE
++  // falling back to MaskConfig. The generic parameter table below is keyed by
++  // raw pname, and a launch-level fingerprint carries entries for both of them
++  // (webGl:parameters["37446"] / ["37445"]), so answering them here returns the
++  // launch-level value and returns early -- the per-context branch never runs
++  // and setWebGLRenderer() silently has no effect (#44).
++  //
++  // These two pnames are already singled out in the switch just below, so
++  // treating them as special here follows what this function already does.
++  const bool hasPerContextBranch =
++      pname == dom::WEBGL_debug_renderer_info_Binding::UNMASKED_RENDERER_WEBGL ||
++      pname == dom::WEBGL_debug_renderer_info_Binding::UNMASKED_VENDOR_WEBGL;
++  if (!hasPerContextBranch) {
++    data = MaskConfig::GLParam(pname, mIsWebGL2);
++  }
 +
 +  if (data.has_value()) {
 +    const auto& value = data.value();

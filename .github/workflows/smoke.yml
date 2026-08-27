@@ -220,6 +220,64 @@ jobs:
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
 
+      - name: "per-context WebGL renderer beats the launch config (#44 regression guard)"
+        timeout-minutes: 10
+        run: |
+          # A launch-level fingerprint carries webGl:parameters["37446"], the raw
+          # pname for UNMASKED_RENDERER_WEBGL. GetParameter used to answer from
+          # that generic table and return before reaching the branch that reads
+          # this context's own value, so setWebGLRenderer() silently did nothing
+          # and every context reported the launch OS's renderer.
+          #
+          # Needs a real GL context: headless CI returns '(no webgl)' for every
+          # read, which looks like a clean negative while never testing anything.
+          pip install --quiet 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          WANT = ["Intel(R) HD Graphics 111", "Intel(R) HD Graphics 222"]
+          READ = """() => {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl');
+            const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+            return dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) : '(no webgl)';
+          }"""
+          # A launch config shaped like a real fingerprint: the generic parameter
+          # table, not just the webGl:renderer shorthand. Only the table triggers
+          # the early return this guards against.
+          CFG = json.dumps({"webGl:renderer": "LAUNCH-RENDERER",
+                            "webGl:vendor": "LAUNCH-VENDOR",
+                            "webGl:parameters": {"37446": "LAUNCH-RENDERER",
+                                                 "37445": "LAUNCH-VENDOR"}})
+
+          got = []
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
+                                    headless=False,
+                                    firefox_user_prefs={"webgl.force-enabled": True},
+                                    env={**os.environ, "CAMOU_CONFIG": CFG})
+              for want in WANT:
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setWebGLRenderer === "function") '
+                      'window.setWebGLRenderer(%s);' % json.dumps(want))
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>w</h1>")
+                  r = page.evaluate(READ)
+                  print(f"  asked {want!r:32s} -> {r}")
+                  got.append(r)
+                  ctx.close()
+              b.close()
+
+          assert "(no webgl)" not in got, "no GL context -- the guard tested nothing"
+          assert got == WANT, (
+              f"per-context renderer lost to the launch config: {got} != {WANT}")
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |
