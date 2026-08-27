@@ -366,14 +366,33 @@ index aee042ab75..54b5638d19 100644
    }
  
    return ret;
-@@ -2027,6 +2099,57 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2027,6 +2099,76 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
    const auto& state = State();
  
    // -
 +  std::optional<
 +      std::variant<int64_t, bool, double, std::string, std::nullptr_t>>
 +      data;
-+  data = MaskConfig::GLParam(pname, mIsWebGL2);
++  // UNMASKED_RENDERER_WEBGL and UNMASKED_VENDOR_WEBGL have a dedicated branch
++  // further down that reads this context's WebGLParamsManager value BEFORE
++  // falling back to MaskConfig. The generic parameter table below is keyed by
++  // raw pname, and a launch-level fingerprint carries entries for both of them
++  // (webGl:parameters["37446"] / ["37445"]), so answering them here returns the
++  // launch-level value and returns early -- the per-context branch never runs
++  // and setWebGLRenderer() silently has no effect (#44).
++  //
++  // These two pnames are already singled out in the switch just below, so
++  // treating them as special here follows what this function already does.
++  //
++  // If a future pname gains per-context storage, it must be added here too --
++  // nothing enforces that, and forgetting reproduces #44 silently. The two
++  // case blocks that consume this carry a back-reference to this variable.
++  const bool hasPerContextBranch =
++      pname == dom::WEBGL_debug_renderer_info_Binding::UNMASKED_RENDERER_WEBGL ||
++      pname == dom::WEBGL_debug_renderer_info_Binding::UNMASKED_VENDOR_WEBGL;
++  if (!hasPerContextBranch) {
++    data = MaskConfig::GLParam(pname, mIsWebGL2);
++  }
 +
 +  if (data.has_value()) {
 +    const auto& value = data.value();
@@ -522,7 +541,7 @@ index aee042ab75..54b5638d19 100644
        return;
    }
  
-@@ -2355,6 +2513,17 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2355,6 +2513,28 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
  
          switch (pname) {
            case dom::WEBGL_debug_renderer_info_Binding::UNMASKED_RENDERER_WEBGL:
@@ -533,6 +552,17 @@ index aee042ab75..54b5638d19 100644
 +                break;
 +              }
 +            }
++            // The generic table is skipped at the top of this function so it
++            // cannot shadow the per-context value above (#44), but it is still
++            // a valid config source -- webGl:parameters and the webGl:renderer
++            // shorthand are independently optional keys, so a config that sets
++            // only the table must not silently lose its spoof.
++            if (auto value = MaskConfig::GLParam(pname, mIsWebGL2);
++                value.has_value() &&
++                std::holds_alternative<std::string>(value.value())) {
++              ret = Some(nsCString(std::get<std::string>(value.value()).c_str()));
++              break;
++            }
 +            if (auto value = MaskConfig::GetString("webGl:renderer")) {
 +              ret = Some(value.value());
 +              break;
@@ -540,7 +570,7 @@ index aee042ab75..54b5638d19 100644
              if (ShouldResistFingerprinting(RFPTarget::WebGLRenderInfo) ||
                  ShouldResistFingerprinting(RFPTarget::WebGLRendererConstant)) {
                ret = Some("Mozilla"_ns);
-@@ -2367,6 +2536,17 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2367,6 +2536,25 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
              break;
  
            case dom::WEBGL_debug_renderer_info_Binding::UNMASKED_VENDOR_WEBGL:
@@ -550,6 +580,14 @@ index aee042ab75..54b5638d19 100644
 +                ret = Some(NS_ConvertUTF16toUTF8(stored));
 +                break;
 +              }
++            }
++            // Same tier as the renderer case above: skipped at the top of the
++            // function, honoured here, after the per-context value (#44).
++            if (auto value = MaskConfig::GLParam(pname, mIsWebGL2);
++                value.has_value() &&
++                std::holds_alternative<std::string>(value.value())) {
++              ret = Some(nsCString(std::get<std::string>(value.value()).c_str()));
++              break;
 +            }
 +            if (auto value = MaskConfig::GetString("webGl:vendor")) {
 +              ret = Some(value.value());
