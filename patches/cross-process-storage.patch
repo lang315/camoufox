@@ -2,7 +2,7 @@ diff --git a/dom/ipc/ContentParent.cpp b/dom/ipc/ContentParent.cpp
 index 1ff3195235..795cb05bc3 100644
 --- a/dom/ipc/ContentParent.cpp
 +++ b/dom/ipc/ContentParent.cpp
-@@ -1231,6 +1231,26 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateGMPService() {
+@@ -1231,6 +1231,28 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateGMPService() {
    return IPC_OK();
  }
  
@@ -12,7 +12,9 @@ index 1ff3195235..795cb05bc3 100644
 +  if (!StringBeginsWith(aPrefName, "roverfox.s."_ns)) {
 +    return IPC_OK();
 +  }
-+  Preferences::SetCString(aPrefName.get(), aValue);
++  // Default branch, so this never lands in prefs.js -- see
++  // RoverfoxStorageManager::SetPrefValue and #63.
++  Preferences::SetCString(aPrefName.get(), aValue, PrefValueKind::Default);
 +  return IPC_OK();
 +}
 +
@@ -22,7 +24,7 @@ index 1ff3195235..795cb05bc3 100644
 +    *aOutValue = ""_ns;
 +    return IPC_OK();
 +  }
-+  Preferences::GetCString(aPrefName.get(), *aOutValue);
++  Preferences::GetCString(aPrefName.get(), *aOutValue, PrefValueKind::Default);
 +  return IPC_OK();
 +}
 +
