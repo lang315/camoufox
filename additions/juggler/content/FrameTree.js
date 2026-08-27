@@ -660,6 +660,21 @@ class Frame {
         executionContext.evaluateScriptSafely(script);
     }
 
+    // Camoufox (#57): the spoofing setters self-destruct only when CALLED, so
+    // every field an init script leaves unset keeps its setter on window -- and
+    // a context with no init script at all keeps all 14, which is one line for
+    // a page to fingerprint the browser with. Init scripts have just run and
+    // the page's own script has not, so this is the last moment any setter is
+    // legitimately needed. Skip about:blank: a caller may add init scripts
+    // between opening the page and its first real navigation.
+    if (this.domWindow()?.location?.href !== 'about:blank') {
+      try {
+        this.docShell().disableSpoofSetters();
+      } catch (e) {
+        // An older binary without the method must not break navigation.
+      }
+    }
+
     const url = this.domWindow().location?.href;
     if (url === 'about:blank' && !this._url) {
       // Sometimes FrameTree is created too early, before the location has been set.
