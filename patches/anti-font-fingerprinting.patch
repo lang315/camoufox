@@ -179,7 +179,7 @@ new file mode 100644
 index 0000000000..1f8b3a08f6
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.cpp
-@@ -0,0 +1,184 @@
+@@ -0,0 +1,194 @@
 +#include "RoverfoxStorageManager.h"
 +#include "mozilla/Preferences.h"
 +#include "nsXULAppAPI.h"
@@ -218,7 +218,17 @@ index 0000000000..1f8b3a08f6
 +  }
 +  // Sync to parent for cross-process availability
 +  if (XRE_IsParentProcess()) {
-+    Preferences::SetCString(prefName.get(), value);
++    // Default branch, not user: user prefs are serialised to prefs.js, so a
++    // reused profile inherits the previous session's spoof values AND its
++    // *_disabled_* self-destruct flags. Those flags permanently hide the
++    // setters, leaving the profile unable to be re-fingerprinted (#63).
++    // Default prefs are process-lifetime and are never written to disk.
++    //
++    // Reads pass PrefValueKind::Default too, so a profile already poisoned by
++    // an older build -- whose prefs.js still holds roverfox.s.* USER values --
++    // is healed rather than merely stopped: a user value would otherwise
++    // outrank the default one on every subsequent launch.
++    Preferences::SetCString(prefName.get(), value, PrefValueKind::Default);
 +  } else {
 +    ContentChild* cc = ContentChild::GetSingleton();
 +    if (cc) {
@@ -248,7 +258,7 @@ index 0000000000..1f8b3a08f6
 +  }
 +  // Fall back to Preferences (values synced from other processes)
 +  if (strValue.IsEmpty()) {
-+    Preferences::GetCString(prefName.get(), strValue);
++    Preferences::GetCString(prefName.get(), strValue, PrefValueKind::Default);
 +  }
 +  // Sync IPC read from parent (cross-process fallback for workers)
 +  if (strValue.IsEmpty() && !XRE_IsParentProcess() && NS_IsMainThread()) {
@@ -290,7 +300,7 @@ index 0000000000..1f8b3a08f6
 +    }
 +  }
 +  if (strValue.IsEmpty()) {
-+    Preferences::GetCString(prefName.get(), strValue);
++    Preferences::GetCString(prefName.get(), strValue, PrefValueKind::Default);
 +  }
 +  // Sync IPC read from parent (cross-process fallback for workers)
 +  if (strValue.IsEmpty() && !XRE_IsParentProcess() && NS_IsMainThread()) {
@@ -330,7 +340,7 @@ index 0000000000..1f8b3a08f6
 +    }
 +  }
 +  if (utf8Value.IsEmpty()) {
-+    Preferences::GetCString(prefName.get(), utf8Value);
++    Preferences::GetCString(prefName.get(), utf8Value, PrefValueKind::Default);
 +  }
 +  // Sync IPC read from parent (cross-process fallback for workers)
 +  if (utf8Value.IsEmpty() && !XRE_IsParentProcess() && NS_IsMainThread()) {

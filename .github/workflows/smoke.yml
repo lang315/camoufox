@@ -90,6 +90,17 @@ jobs:
           # The second assertion is not decoration: the fix moves this path onto
           # a PROCESS-GLOBAL override, so a per-context timezone_id must still
           # win over it. Losing that would be #44 all over again in this layer.
+
+      - name: "reused profile can be re-fingerprinted (#63 regression guard)"
+        timeout-minutes: 8
+        run: |
+          # roverfox.s.* used to be written as USER prefs, so they were
+          # serialised to prefs.js. A reused profile then inherited the
+          # previous session's values and, worse, its *_disabled_* self-destruct
+          # flags -- which hide the setters via the WebIDL Func guard, so the
+          # init script's `typeof window.setX === "function"` check silently
+          # skipped them forever. Measured before the fix: launch 2 asked for
+          # Asia/Tokyo and got UTC.
           pip install --quiet 'playwright==1.55.0'
           python - <<'PY'
           import json, os
@@ -115,6 +126,39 @@ jobs:
 
           assert got == "Europe/London", f"launch-config timezone not applied: {got}"
           assert per_ctx == "Europe/Paris", f"per-context timezone_id lost to the global override: {per_ctx}"
+
+          PROFILE = "/tmp/reuse-guard"
+          os.makedirs(PROFILE, exist_ok=True)
+
+          def launch(pw, tz):
+              env = {**os.environ, "CAMOU_CONFIG": json.dumps({"timezone": tz})}
+              ctx = pw.firefox.launch_persistent_context(
+                  PROFILE, executable_path=os.environ["CAMOUFOX_BIN"],
+                  headless=True, env=env)
+              ctx.add_init_script(
+                  'if (typeof window.setTimezone === "function") window.setTimezone(%s);'
+                  % json.dumps(tz))
+              page = ctx.new_page()
+              page.goto("data:text/html,<h1>p</h1>")
+              got = page.evaluate("() => Intl.DateTimeFormat().resolvedOptions().timeZone")
+              ctx.close()
+              return got
+
+          with sync_playwright() as pw:
+              first = launch(pw, "Europe/London")
+              second = launch(pw, "Asia/Tokyo")
+          print(f"launch 1 Europe/London -> {first}")
+          print(f"launch 2 Asia/Tokyo    -> {second}")
+
+          leaked = [l.strip() for l in open(os.path.join(PROFILE, "prefs.js"))
+                    if "roverfox.s." in l] if os.path.exists(os.path.join(PROFILE, "prefs.js")) else []
+          print(f"roverfox.s.* persisted to prefs.js: {leaked or 'none'}")
+
+          assert first == "Europe/London", f"launch 1 timezone not applied: {first}"
+          assert second == "Asia/Tokyo", (
+              f"launch 2 got {second} -- the profile kept launch 1's state and could "
+              "not be re-fingerprinted")
+          assert not leaked, f"roverfox.s.* still written to prefs.js: {leaked}"
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
