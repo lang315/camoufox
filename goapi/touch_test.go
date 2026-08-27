@@ -84,14 +84,19 @@ func TestTouchscreenTouchEvents(t *testing.T) {
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
+		// The listeners record into the DOM, not into a page global. Evaluate
+		// runs in an isolated world -- that is the point of the juggler patch --
+		// so it can read the DOM but never the page's own JS globals. Reading a
+		// page global here would only pass on a build whose isolation is broken.
 		_, _ = w.Write([]byte(`<html><body>
 <div id="log"></div>
 <script>
-var log = [];
 ['touchstart','touchmove','touchend','touchcancel'].forEach(function(e) {
-  document.addEventListener(e, function() { log.push(e); });
+  document.addEventListener(e, function() {
+    var d = document.getElementById('log');
+    d.textContent = d.textContent ? d.textContent + ',' + e : e;
+  });
 });
-window.getLog = function() { return log.join(','); };
 </script>
 </body></html>`))
 	}))
@@ -140,7 +145,7 @@ window.getLog = function() { return log.join(','); };
 		}
 	}
 
-	got, err := p.Evaluate(ctx, `window.getLog()`)
+	got, err := p.Evaluate(ctx, `document.getElementById('log').textContent`)
 	if err != nil {
 		t.Fatalf("Evaluate: %v", err)
 	}

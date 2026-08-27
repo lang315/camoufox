@@ -38,6 +38,7 @@ from typing import Any, Dict
 from camoufox.async_api import AsyncCamoufox
 
 EXECUTABLE_PATH = os.environ.get("CAMOUFOX_EXECUTABLE_PATH")
+FF_VERSION = os.environ.get("CAMOUFOX_FF_VERSION", "152")
 
 PAGE = """
 <main id="target">content</main>
@@ -86,6 +87,11 @@ def _launch_kwargs() -> Dict[str, Any]:
     kwargs: Dict[str, Any] = dict(headless=True, os="linux")
     if EXECUTABLE_PATH:
         kwargs["executable_path"] = EXECUTABLE_PATH
+        # launch_options() still calls installed_verstr() even when the binary
+        # is given explicitly, so without a version it raises
+        # CamoufoxNotInstalled against an unpacked build or a CI artifact.
+        kwargs["ff_version"] = FF_VERSION
+        kwargs["i_know_what_im_doing"] = True
     return kwargs
 
 
