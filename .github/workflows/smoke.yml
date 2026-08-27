@@ -90,17 +90,6 @@ jobs:
           # The second assertion is not decoration: the fix moves this path onto
           # a PROCESS-GLOBAL override, so a per-context timezone_id must still
           # win over it. Losing that would be #44 all over again in this layer.
-
-      - name: "reused profile can be re-fingerprinted (#63 regression guard)"
-        timeout-minutes: 8
-        run: |
-          # roverfox.s.* used to be written as USER prefs, so they were
-          # serialised to prefs.js. A reused profile then inherited the
-          # previous session's values and, worse, its *_disabled_* self-destruct
-          # flags -- which hide the setters via the WebIDL Func guard, so the
-          # init script's `typeof window.setX === "function"` check silently
-          # skipped them forever. Measured before the fix: launch 2 asked for
-          # Asia/Tokyo and got UTC.
           pip install --quiet 'playwright==1.55.0'
           python - <<'PY'
           import json, os
@@ -126,6 +115,24 @@ jobs:
 
           assert got == "Europe/London", f"launch-config timezone not applied: {got}"
           assert per_ctx == "Europe/Paris", f"per-context timezone_id lost to the global override: {per_ctx}"
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+
+      - name: "reused profile can be re-fingerprinted (#63 regression guard)"
+        timeout-minutes: 8
+        run: |
+          # roverfox.s.* used to be written as USER prefs, so they were
+          # serialised to prefs.js. A reused profile then inherited the
+          # previous session's values and, worse, its *_disabled_* self-destruct
+          # flags -- which hide the setters via the WebIDL Func guard, so the
+          # init script's `typeof window.setX === "function"` check silently
+          # skipped them forever. Measured before the fix: launch 2 asked for
+          # Asia/Tokyo and got UTC.
+          pip install --quiet 'playwright==1.55.0'
+          python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
 
           PROFILE = "/tmp/reuse-guard"
           os.makedirs(PROFILE, exist_ok=True)
@@ -219,6 +226,100 @@ jobs:
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+
+      - name: "per-context WebGL renderer beats the launch config (#44 regression guard)"
+        timeout-minutes: 10
+        run: |
+          # A launch-level fingerprint carries webGl:parameters["37446"], the raw
+          # pname for UNMASKED_RENDERER_WEBGL. GetParameter used to answer from
+          # that generic table and return before reaching the branch that reads
+          # this context's own value, so setWebGLRenderer() silently did nothing
+          # and every context reported the launch OS's renderer.
+          #
+          # Three assertions, because the fix can regress in three directions:
+          #   A  the per-context value wins over the launch config -- the bug;
+          #   B  vendor behaves like renderer -- the two paths are line-for-line
+          #      identical, so a typo dropping one disjunct would regress vendor
+          #      while a renderer-only guard stayed green;
+          #   C  with NO per-context value the launch config still applies. The
+          #      table is skipped at the top of GetParameter, so it has to be
+          #      honoured in the dedicated branch instead, or a config setting
+          #      only webGl:parameters loses its spoof silently.
+          #
+          # For C the table and the shorthand carry DIFFERENT values, otherwise
+          # the assertion cannot tell which source answered.
+          #
+          # Needs a real GL context: headless CI returns '(no webgl)' for every
+          # read, which looks like a clean negative while never testing anything.
+          pip install --quiet 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          READ = '''() => {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl');
+            const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+            if (!dbg) return {renderer: '(no webgl)', vendor: '(no webgl)'};
+            return {renderer: gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL),
+                    vendor:   gl.getParameter(dbg.UNMASKED_VENDOR_WEBGL)};
+          }'''
+          CFG = json.dumps({"webGl:renderer": "SHORTHAND-RENDERER",
+                            "webGl:vendor": "SHORTHAND-VENDOR",
+                            "webGl:parameters": {"37446": "TABLE-RENDERER",
+                                                 "37445": "TABLE-VENDOR"}})
+
+          def init_for(renderer, vendor):
+              return (
+                  'if (typeof window.setWebGLRenderer === "function") '
+                  'window.setWebGLRenderer(%s);'
+                  'if (typeof window.setWebGLVendor === "function") '
+                  'window.setWebGLVendor(%s);'
+                  % (json.dumps(renderer), json.dumps(vendor))
+              )
+
+          def read(browser, init=None):
+              ctx = browser.new_context()
+              if init:
+                  ctx.add_init_script(init)
+              page = ctx.new_page()
+              page.goto("data:text/html,<h1>w</h1>")
+              out = page.evaluate(READ)
+              ctx.close()
+              return out
+
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
+                                    headless=False,
+                                    firefox_user_prefs={"webgl.force-enabled": True},
+                                    env={**os.environ, "CAMOU_CONFIG": CFG})
+
+              per_ctx = []
+              for r, v in (("CTX-RENDERER-1", "CTX-VENDOR-1"),
+                           ("CTX-RENDERER-2", "CTX-VENDOR-2")):
+                  got = read(b, init_for(r, v))
+                  print(f"  per-context asked {r}/{v} -> {got['renderer']}/{got['vendor']}")
+                  per_ctx.append((got["renderer"], got["vendor"]))
+
+              plain = read(b)   # no init script: the launch config must still apply
+              print(f"  no per-context value -> {plain['renderer']}/{plain['vendor']}")
+              b.close()
+
+          flat = [x for pair in per_ctx for x in pair] + [plain["renderer"], plain["vendor"]]
+          assert "(no webgl)" not in flat, "no GL context -- the guard tested nothing"
+
+          # A + B
+          assert per_ctx == [("CTX-RENDERER-1", "CTX-VENDOR-1"),
+                             ("CTX-RENDERER-2", "CTX-VENDOR-2")], (
+              f"per-context renderer/vendor lost to the launch config: {per_ctx}")
+          # C -- the table is the more specific source, so it wins the fallback
+          assert (plain["renderer"], plain["vendor"]) == ("TABLE-RENDERER", "TABLE-VENDOR"), (
+              "launch-level webGl:parameters no longer reaches the renderer/vendor "
+              f"branch: got {plain['renderer']}/{plain['vendor']}")
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
 
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
