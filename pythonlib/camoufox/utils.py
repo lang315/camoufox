@@ -716,15 +716,29 @@ def launch_options(
             Note: If you are running linux, passing headless='virtual' to Camoufox & AsyncCamoufox
             will use Xvfb.
         main_world_eval (Optional[bool]):
-            Deprecated / no-op on FF152 builds. Historically this ran scripts in the
-            page's main world via a "mw:" script prefix. On FF152 the default
-            page.evaluate already reaches the page's main-world globals (e.g.
-            page.evaluate("() => window.someGlobal") returns page-declared globals),
-            so the flag is unnecessary and reads no config. The "mw:" prefix is now
-            just a JavaScript label: it is a harmless no-op for expressions but makes
-            top-level lexical declarations fail ("lexical declarations can't appear in
-            a single-statement context") because let/const/class cannot be a labeled
-            statement's body. Omit the prefix and evaluate the script directly.
+            Opt in to the "mw:" script prefix, which runs a script in the page's
+            own main world instead of the isolated one page.evaluate normally
+            uses. Off by default, and deliberately so: the isolation is what
+            keeps automation invisible to the page, so reaching into the main
+            world gives that up for the scripts that ask for it.
+
+            Without this flag, "mw:" is refused outright:
+            'Main world evaluation is disabled. Launch with main_world_eval=True
+            to use the "mw:" prefix.'
+
+            Note for anyone who read the previous version of this docstring: it
+            claimed the flag was a dead no-op and that page.evaluate already
+            reached page globals. That was true of beta.28, whose world
+            isolation was broken. beta.29 restored it, so measured on a current
+            build:
+
+                main_world_eval=False   page.evaluate("() => window.pageSecret") -> None
+                                        page.evaluate("mw: window.pageSecret")   -> refused
+                main_world_eval=True    page.evaluate("() => window.pageSecret") -> None
+                                        page.evaluate("mw: window.pageSecret")   -> 41
+
+            Plain evaluate stays isolated in both, so the flag adds the escape
+            hatch without weakening the default.
         allow_addon_new_tab (Optional[bool]):
             Whether to allow addon open new tabs. Defaults to False.
         executable_path (Optional[Union[str, Path]]):
