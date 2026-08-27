@@ -163,6 +163,63 @@ jobs:
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
 
+      - name: "spoofing setters are gone from window (#57 regression guard)"
+        timeout-minutes: 8
+        run: |
+          # The setters self-destruct only when CALLED, so every field a config
+          # leaves unset kept its setter on window -- all 14 in a context that
+          # runs no init script, which is the first thing anyone writes:
+          #   Camoufox(...) then browser.new_page().
+          # A page needed one line to identify the browser. Juggler now tears
+          # them down right after the init-script loop.
+          #
+          # Both arms matter: the default context is the serious half, and the
+          # explicit-context arm proves teardown does not run so early that a
+          # per-context value stops applying.
+          pip install --quiet 'playwright==1.55.0'
+          python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          NAMES = ["setFontSpacingSeed","setAudioFingerprintSeed","setCanvasSeed","setTimezone",
+                   "setScreenDimensions","setScreenColorDepth","setNavigatorPlatform",
+                   "setNavigatorOscpu","setNavigatorHardwareConcurrency","setWebGLVendor",
+                   "setWebGLRenderer","setFontList","setSpeechVoices","setWebRTCIPv4"]
+          LEFT = "() => (%s).filter(n => typeof window[n] !== 'undefined')" % json.dumps(NAMES)
+          PLATFORM = "() => navigator.platform"
+
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
+                                    headless=True, env={**os.environ})
+
+              page = b.new_page()
+              page.goto("data:text/html,<h1>d</h1>")
+              default_left = page.evaluate(LEFT)
+              print(f"default context : {len(default_left)}/14 left -> {default_left}")
+              page.close()
+
+              ctx = b.new_context()
+              ctx.add_init_script(
+                  'if (typeof window.setNavigatorPlatform === "function") '
+                  'window.setNavigatorPlatform("FakePlatform99");')
+              p2 = ctx.new_page()
+              p2.goto("data:text/html,<h1>c</h1>")
+              ctx_left = p2.evaluate(LEFT)
+              platform = p2.evaluate(PLATFORM)
+              print(f"explicit context: {len(ctx_left)}/14 left -> {ctx_left}")
+              print(f"                  navigator.platform = {platform}")
+              ctx.close(); b.close()
+
+          assert not default_left, (
+              f"{len(default_left)} setters still on window in the default context: {default_left}")
+          assert not ctx_left, (
+              f"{len(ctx_left)} setters still on window after init scripts: {ctx_left}")
+          assert platform == "FakePlatform99", (
+              f"teardown ran too early -- the per-context value did not apply: {platform}")
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |

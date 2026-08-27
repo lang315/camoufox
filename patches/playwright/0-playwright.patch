@@ -303,7 +303,7 @@ diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
 index 69d45a59b4..fe0e77f151 100644
 --- a/docshell/base/nsDocShell.cpp
 +++ b/docshell/base/nsDocShell.cpp
-@@ -15,6 +15,13 @@
+@@ -15,6 +15,22 @@
  #  include <unistd.h>  // for getpid()
  #endif
  
@@ -313,6 +313,15 @@ index 69d45a59b4..fe0e77f151 100644
 +
 +#include "js/LocaleSensitive.h"
 +#include "mozilla/dom/TimezoneManager.h"
++#include "mozilla/dom/AudioFingerprintManager.h"
++#include "mozilla/dom/CanvasSeedManager.h"
++#include "mozilla/dom/FontListManager.h"
++#include "mozilla/dom/FontSpacingSeedManager.h"
++#include "mozilla/dom/NavigatorManager.h"
++#include "mozilla/dom/ScreenDimensionManager.h"
++#include "mozilla/dom/SpeechVoicesManager.h"
++#include "mozilla/dom/WebGLParamsManager.h"
++#include "mozilla/dom/WebRTCIPManager.h"
 +
  #include "nsDeviceContext.h"
  #include "mozilla/Attributes.h"
@@ -364,7 +373,7 @@ index 69d45a59b4..fe0e77f151 100644
        mAllowAuth(mItemType == typeContent),
        mAllowKeywordFixup(false),
        mDisableMetaRefreshWhenInactive(false),
-@@ -2957,6 +2975,245 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
+@@ -2957,6 +2975,279 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
    return NS_OK;
  }
  
@@ -506,6 +515,40 @@ index 69d45a59b4..fe0e77f151 100644
 +        mBrowsingContext->OriginAttributesRef().mUserContextId,
 +        aTimezoneOverride);
 +  }
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsDocShell::DisableSpoofSetters() {
++  // Camoufox (#57): the spoofing setters self-destruct when CALLED, so every
++  // field a config leaves unset keeps its setter on window -- all 14 of them in
++  // a context that runs no init script at all, which a page identifies the
++  // browser with in one line. Juggler calls this straight after the init-script
++  // loop, the last moment any of them is legitimately needed.
++  //
++  // These write the same per-userContextId disabled flags the WebIDL Func
++  // guards already read, so no guard has to change.
++  if (!mBrowsingContext) {
++    return NS_OK;
++  }
++  const uint32_t id = mBrowsingContext->OriginAttributesRef().mUserContextId;
++
++  mozilla::dom::AudioFingerprintManager::DisableFunction(id);
++  mozilla::dom::CanvasSeedManager::DisableFunction(id);
++  mozilla::dom::FontListManager::DisableFunction(id);
++  mozilla::dom::FontSpacingSeedManager::DisableFunction(id);
++  mozilla::dom::SpeechVoicesManager::DisableFunction(id);
++  mozilla::dom::TimezoneManager::DisableFunction(id);
++  mozilla::dom::WebGLParamsManager::DisableRendererFunction(id);
++  mozilla::dom::WebGLParamsManager::DisableVendorFunction(id);
++  mozilla::dom::WebRTCIPManager::DisableIPv4Function(id);
++  mozilla::dom::WebRTCIPManager::DisableIPv6Function(id);
++  mozilla::dom::NavigatorManager::DisablePlatformFunction(id);
++  mozilla::dom::NavigatorManager::DisableOscpuFunction(id);
++  mozilla::dom::NavigatorManager::DisableHwcFunction(id);
++  mozilla::dom::NavigatorManager::DisableUaFunction(id);
++  mozilla::dom::ScreenDimensionManager::DisableDimensionsFunction(id);
++  mozilla::dom::ScreenDimensionManager::DisableColorDepthFunction(id);
 +  return NS_OK;
 +}
 +
@@ -753,7 +796,7 @@ index 4aa56b4ce1..c66eed9b3d 100644
  interface nsIEditor;
  interface nsIEditingSession;
  interface nsIInputStream;
-@@ -692,6 +693,45 @@ interface nsIDocShell : nsIDocShellTreeItem
+@@ -692,6 +693,53 @@ interface nsIDocShell : nsIDocShellTreeItem
     */
    void synchronizeLayoutHistoryState();
  
@@ -770,6 +813,14 @@ index 4aa56b4ce1..c66eed9b3d 100644
 +  attribute AString languageOverride;
 +
 +  boolean overrideTimezone(in AString timezoneId);
++
++  /**
++   * Camoufox: hide every spoofing setter from this docShell's user
++   * context. Chrome-only, so it adds nothing to window -- juggler calls
++   * it after running init scripts, which is the only moment the setters
++   * are still needed (#57).
++   */
++  void disableSpoofSetters();
 +
 +  cenum ReducedMotionOverride : 8 {
 +    REDUCED_MOTION_OVERRIDE_REDUCE,
