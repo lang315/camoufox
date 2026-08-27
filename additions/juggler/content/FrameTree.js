@@ -665,9 +665,17 @@ class Frame {
     // a context with no init script at all keeps all 14, which is one line for
     // a page to fingerprint the browser with. Init scripts have just run and
     // the page's own script has not, so this is the last moment any setter is
-    // legitimately needed. Skip about:blank: a caller may add init scripts
-    // between opening the page and its first real navigation.
-    if (this.domWindow()?.location?.href !== 'about:blank') {
+    // legitimately needed.
+    //
+    // Only tear down on a real document. Two reasons, and the second cost a
+    // build to find: a caller may add init scripts between opening a page and
+    // its first navigation, and -- as the about:blank branch below says -- this
+    // runs before location has been set, so href is sometimes '' or undefined.
+    // Testing `!== 'about:blank'` let those through and disabled the setters
+    // before any init script had run, which left the fingerprint unapplied
+    // (navigator.platform read the host's real value).
+    const href = this.domWindow()?.location?.href;
+    if (href && !href.startsWith('about:')) {
       try {
         this.docShell().disableSpoofSetters();
       } catch (e) {
