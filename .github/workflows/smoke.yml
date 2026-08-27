@@ -57,6 +57,27 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
+      - name: "page.evaluate() is isolated from the page (#51/#62)"
+        timeout-minutes: 10
+        run: |
+          # Upstream's own check for what its docstring calls Camoufox's core
+          # automation-stealth property: page.evaluate() must run in a
+          # Cu.Sandbox with its own compartment, so page globals are invisible
+          # to automation and vice versa. It regressed once before (03c1230)
+          # and no test noticed, because evaluate() keeps working either way --
+          # it just stops being hidden.
+          #
+          # beta.28 shipped it broken, which is the whole of #51 and #62:
+          # TestTouchscreenTouchEvents passed there only by reading a page
+          # global that a correctly isolated evaluate() cannot see.
+          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          python tests/patches/isolated-evaluate.py
+        env:
+          CAMOUFOX_EXECUTABLE_PATH: ${{ steps.bin.outputs.bin }}
+          # pkgman resolves fonts/ and properties.json through the releases API,
+          # which is rate-limited to 403 unauthenticated.
+          GITHUB_TOKEN: ${{ github.token }}
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |
