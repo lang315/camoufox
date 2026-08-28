@@ -7,7 +7,11 @@ cd "$SCRIPT_DIR"
 BUILD_TESTER_DIR="$SCRIPT_DIR/../build-tester"
 
 VERSION="official/stable"
-HEADFUL=""
+# Headful by default: the WebGL checks in the shared build-tester bundle
+# answer "WebGL not available" with passed:true, so a headless run scores
+# them for free and drops 12 more from the denominator entirely (issue #75).
+# --headless opts out and forfeits those checks.
+HEADFUL="--headful"
 PROFILE_COUNT=6
 PROXIES="$SCRIPT_DIR/proxies.txt"
 EXTRA_ARGS=""
@@ -30,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --headful)
             HEADFUL="--headful"
+            shift
+            ;;
+        --headless)
+            HEADFUL=""
             shift
             ;;
         --no-cert)
@@ -123,6 +131,22 @@ fi
 LOCAL_RC=0
 FETCHED_RC=0
 
+# Headful needs a display. With none, borrow one from xvfb rather than
+# silently falling back to a run whose WebGL checks verify nothing.
+RUN=($PYTHON)
+if [[ -n "$HEADFUL" && -z "$DISPLAY" ]]; then
+    if command -v xvfb-run >/dev/null 2>&1; then
+        echo "==> no DISPLAY -- running headful under xvfb"
+        export LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}"
+        RUN=(xvfb-run -a --server-args="-screen 0 1920x1080x24" $PYTHON)
+    else
+        echo "WARNING: no DISPLAY and no xvfb-run; falling back to headless." >&2
+        echo "         The WebGL checks will pass without a GL context (issue #75)." >&2
+        echo "         Install xvfb (apt install xvfb) to actually verify them." >&2
+        HEADFUL=""
+    fi
+fi
+
 # ── Phase 1: locally compiled binary ─────────────────────────────────────────
 if [[ -n "$LOCAL_BIN" ]]; then
     echo
@@ -130,7 +154,7 @@ if [[ -n "$LOCAL_BIN" ]]; then
     echo "  PHASE 1/2 — Local binary: $LOCAL_BIN"
     echo "════════════════════════════════════════════════════════════"
     set +e
-    $PYTHON run_tests.py \
+    "${RUN[@]}" run_tests.py \
         --executable-path "$LOCAL_BIN" \
         --profile-count "$PROFILE_COUNT" \
         --proxies "$PROXIES" \
@@ -151,7 +175,7 @@ if [[ "$BINARY_MODE" != "local" ]]; then
     echo "==> Fetching browser..."
     $PYTHON -m camoufox fetch
     set +e
-    $PYTHON run_tests.py \
+    "${RUN[@]}" run_tests.py \
         --browser-version "$VERSION" \
         --profile-count "$PROFILE_COUNT" \
         --proxies "$PROXIES" \

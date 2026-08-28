@@ -58,7 +58,27 @@ PIP=".venv/bin/pip"
 
 echo "==> Installing camoufox from local source + playwright..."
 $PIP uninstall -y cloverlabs-camoufox >/dev/null 2>&1 || true
-$PIP install -q -e ../pythonlib playwright
+# Pin exactly: requirements.txt explains that 1.58+ breaks this juggler's
+# protocol schema, so every context creation fails and the suite reports
+# 0/0 Grade F -- which reads as a spoofing regression but is harness drift.
+# This line used to install whatever `playwright` resolved to, which is
+# exactly how that false regression gets in.
+$PIP install -q -e ../pythonlib 'playwright==1.55.0'
 
 echo "==> Running build tester..."
-$PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
+# The suite launches headful so the WebGL checks have a real GL context --
+# headless they answer "WebGL not available" and score passed:true without
+# testing anything (issue #75). With no display, borrow one from xvfb.
+if [ -n "$DISPLAY" ] || [ "$BUILDTESTER_HEADLESS" = "1" ]; then
+    $PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
+elif command -v xvfb-run >/dev/null 2>&1; then
+    echo "    (no DISPLAY -- running under xvfb)"
+    LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}" \
+        xvfb-run -a --server-args="-screen 0 1920x1080x24" \
+        $PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
+else
+    echo "    WARNING: no DISPLAY and no xvfb-run; falling back to headless." >&2
+    echo "    The WebGL checks will pass without a GL context (issue #75)." >&2
+    echo "    Install xvfb (apt install xvfb) to actually verify them." >&2
+    BUILDTESTER_HEADLESS=1 $PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
+fi
