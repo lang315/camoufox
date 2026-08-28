@@ -44,10 +44,10 @@ Tests the **raw binary** in isolation, bypassing the Python package entirely. Fi
 
 ```bash
 cd build-tester
-npm install          # first time only
-pip install -r requirements.txt
-python scripts/run_tests.py /path/to/camoufox-binary
+./run_tests.sh /path/to/camoufox-binary
 ```
+
+`run_tests.sh` installs the deps and launches the browser **headful**, borrowing a display from `xvfb` when there is none. That matters: headless Firefox has no GL context, and the suite's WebGL checks report `passed: true` on "WebGL not available" — a headless run scores 5 of them for free and drops 12 more from the denominator entirely (issue #75). Running `python scripts/run_tests.py` directly still works, but needs a `DISPLAY` (or `xvfb-run`, or `BUILDTESTER_HEADLESS=1` to opt out and forfeit those checks).
 
 See [`build-tester/README.md`](build-tester/README.md) for full details.
 
