@@ -40,78 +40,15 @@ from _grading import adjust_cross_os_font_checks, compute_grade, count_all_check
 from _proxies import load_proxies, resolve_proxy_geo
 
 
-async def run_tests(
-    browser_version: str,
-    profile_count: int,
-    headful: bool,
-    proxies_path: Path,
-    secret: str,
-    save_cert: Optional[str],
-    no_cert: bool,
-    executable_path: Optional[str] = None,
-) -> int:
-    # 1. Ensure checks bundle is built
-    ensure_bundle()
+async def _run_os_group(AsyncCamoufox, AsyncNewContext, launch_kwargs, entries,
+                        test_page_url, profile_results):
+    """Run every profile of one OS inside a single browser launched as that OS.
 
-    # 2. Load proxies
-    proxies = load_proxies(proxies_path)
-    print(f"Loaded {len(proxies)} proxy/proxies from {proxies_path.name}")
-
-    # 3. Build profile specs — fingerprints and timezone resolved by camoufox per-context
-    all_specs = [
-        {"os": "macos", "name": f"macOS Per-Context {chr(65 + i)}"} for i in range(3)
-    ] + [
-        {"os": "linux", "name": f"Linux Per-Context {chr(65 + i)}"} for i in range(3)
-    ]
-    entries = all_specs[:max(1, min(profile_count, len(all_specs)))]
-
-    # Assign proxies round-robin across entries
-    for i, entry in enumerate(entries):
-        entry["proxy"] = proxies[i % len(proxies)]
-
-    # Resolve proxy geo info concurrently (for certificate debug section)
-    print("Resolving proxy locations...")
-    geos = await asyncio.gather(*[resolve_proxy_geo(e["proxy"]) for e in entries])
-    for entry, geo in zip(entries, geos):
-        entry["proxy_geo"] = geo
-
-    # 4. Start HTTP server for the test page
-    port = start_http_server()
-    test_page_url = f"http://127.0.0.1:{port}/test"
-    print(f"HTTP server started on port {port}")
-
-    # 5. Parse ff_version from browser_version specifier
-    ff_version = None
-    for part in browser_version.split("/"):
-        try:
-            ff_version = int(part.split(".")[0])
-            break
-        except ValueError:
-            continue
-
-    profile_results: list = []
-    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-    try:
-        from camoufox.async_api import AsyncCamoufox, AsyncNewContext
-    except ImportError:
-        print("ERROR: camoufox package not installed.", file=sys.stderr)
-        return 1
-
-    print(f"\n{'─' * 60}")
-    print(f"Per-context phase: {len(entries)} profiles (all open simultaneously)")
-    print(f"{'─' * 60}")
-    print("Launching browser...")
-
-    launch_kwargs = {"headless": not headful}
-    if executable_path:
-        launch_kwargs["executable_path"] = executable_path
-        print(f"Using local binary: {executable_path}")
-    elif ff_version:
-        launch_kwargs["ff_version"] = ff_version
-
-    try:
-        async with AsyncCamoufox(**launch_kwargs) as browser:
+    Split out of run_tests so each OS gets its own process: the launch-level
+    font list becomes a process-wide whitelist and families outside it are
+    deleted from the font list entirely, so one process can host exactly one
+    font environment (#44/#45)."""
+    async with AsyncCamoufox(**launch_kwargs) as browser:
             # Create all contexts simultaneously — camoufox handles all fingerprint injection
             open_contexts = []
             for entry in entries:
@@ -179,6 +116,98 @@ async def run_tests(
                     except Exception:
                         pass
 
+async def run_tests(
+    browser_version: str,
+    profile_count: int,
+    headful: bool,
+    proxies_path: Path,
+    secret: str,
+    save_cert: Optional[str],
+    no_cert: bool,
+    executable_path: Optional[str] = None,
+) -> int:
+    # 1. Ensure checks bundle is built
+    ensure_bundle()
+
+    # 2. Load proxies
+    proxies = load_proxies(proxies_path)
+    print(f"Loaded {len(proxies)} proxy/proxies from {proxies_path.name}")
+
+    # 3. Build profile specs — fingerprints and timezone resolved by camoufox per-context
+    all_specs = [
+        {"os": "macos", "name": f"macOS Per-Context {chr(65 + i)}"} for i in range(3)
+    ] + [
+        {"os": "linux", "name": f"Linux Per-Context {chr(65 + i)}"} for i in range(3)
+    ]
+    entries = all_specs[:max(1, min(profile_count, len(all_specs)))]
+
+    # Assign proxies round-robin across entries
+    for i, entry in enumerate(entries):
+        entry["proxy"] = proxies[i % len(proxies)]
+
+    # Resolve proxy geo info concurrently (for certificate debug section)
+    print("Resolving proxy locations...")
+    geos = await asyncio.gather(*[resolve_proxy_geo(e["proxy"]) for e in entries])
+    for entry, geo in zip(entries, geos):
+        entry["proxy_geo"] = geo
+
+    # 4. Start HTTP server for the test page
+    port = start_http_server()
+    test_page_url = f"http://127.0.0.1:{port}/test"
+    print(f"HTTP server started on port {port}")
+
+    # 5. Parse ff_version from browser_version specifier
+    ff_version = None
+    for part in browser_version.split("/"):
+        try:
+            ff_version = int(part.split(".")[0])
+            break
+        except ValueError:
+            continue
+
+    profile_results: list = []
+    timestamp = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    try:
+        from camoufox.async_api import AsyncCamoufox, AsyncNewContext
+    except ImportError:
+        print("ERROR: camoufox package not installed.", file=sys.stderr)
+        return 1
+
+    # One browser per OS, not one browser for everything.
+    #
+    # The launch-level font list becomes a process-wide whitelist:
+    # gfxPlatformFontList's constructor writes it to font.system.whitelist and
+    # ApplyWhitelist() then DELETES every other family from mFontFamilies. A
+    # per-context setFontList() runs later and can only narrow what survived, so
+    # a macOS profile inside a browser launched as Windows can never get its
+    # Apple families back -- measured 0/3 vs 3/3 marker fonts (#44/#45).
+    #
+    # A browser process therefore hosts exactly one font environment. Grouping
+    # by OS respects that instead of asking one process to be two.
+    by_os = {}
+    for entry in entries:
+        by_os.setdefault(entry["os"], []).append(entry)
+
+    print(f"\n{'─' * 60}")
+    print(f"Per-context phase: {len(entries)} profiles across {len(by_os)} browser(s), grouped by OS")
+    print(f"{'─' * 60}")
+
+    base_kwargs = {"headless": not headful}
+    if executable_path:
+        base_kwargs["executable_path"] = executable_path
+        print(f"Using local binary: {executable_path}")
+    elif ff_version:
+        base_kwargs["ff_version"] = ff_version
+
+    try:
+        for os_name, os_entries in by_os.items():
+            print(f"\nLaunching browser for os={os_name} ({len(os_entries)} profile(s))...")
+            await _run_os_group(
+                AsyncCamoufox, AsyncNewContext,
+                {**base_kwargs, "os": os_name}, os_entries,
+                test_page_url, profile_results,
+            )
     except Exception as e:
         print(f"{RED}ERROR: Failed to launch Camoufox: {e}{RESET}", file=sys.stderr)
         return 1
