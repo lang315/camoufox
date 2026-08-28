@@ -378,10 +378,15 @@ jobs:
           # reported PASS. They now run headful under the xvfb above; fail the
           # step if they go back to skipping, otherwise the regression is
           # invisible again.
-          if grep -q "no WebGL in this headless env" "$GITHUB_WORKSPACE/spoof-test.log"; then
-            echo "::error::WebGL subtests skipped -- no GL context, so the WebGL spoofs were not verified"
-            exit 1
-          fi
+          # A subtest that downgrades itself to a skip still lets the suite
+          # report PASS, so the missing coverage is invisible. Both of these
+          # skipped for months while their PASS line was quoted as evidence.
+          for marker in "no WebGL in this headless env" "no voices returned"; do
+            if grep -q "$marker" "$GITHUB_WORKSPACE/spoof-test.log"; then
+              echo "::error::subtest skipped ($marker) -- that spoof was not verified"
+              exit 1
+            fi
+          done
 
       - name: Detector-site smoke (CreepJS / sannysoft / browserleaks)
         run: |
