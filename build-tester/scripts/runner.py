@@ -30,6 +30,32 @@ from constants import (
     WEBRTC_TEST_LOCAL_IP,
     grade_color,
 )
+# Headless Firefox has no GL context, and the WebGL checks in extended.ts
+# answer "WebGL not available" with passed:true. Measured on one profile
+# against the same binary: headless scored 124/125 with 5 checks passing
+# that way -- noSwiftShader, whose whole job is catching a software-renderer
+# tell, among them -- while headful under xvfb scored 136/137 with none.
+# The denominator moves too: 12 checks are not even counted headless.
+# webgl.force-enabled below is not sufficient on its own; this was measured,
+# not inferred (see issue #75).
+#
+# Default headful. run_tests.sh supplies xvfb when there is no display.
+# BUILDTESTER_HEADLESS=1 opts out, and forfeits those checks.
+_HEADLESS = os.environ.get("BUILDTESTER_HEADLESS") == "1"
+
+if not _HEADLESS and not os.environ.get("DISPLAY"):
+    raise SystemExit(
+        "build-tester now launches headful so the WebGL checks have a real GL\n"
+        "context, and there is no DISPLAY here. Either:\n"
+        "  ./run_tests.sh <binary>            # borrows a display from xvfb\n"
+        "  xvfb-run -a python scripts/run_tests.py <binary>\n"
+        "  BUILDTESTER_HEADLESS=1 python scripts/run_tests.py <binary>\n"
+        "\n"
+        "The last one forfeits 5 WebGL checks -- they report passed:true\n"
+        "without a GL context -- and drops 12 more from the denominator\n"
+        "entirely. See issue #75."
+    )
+
 from grading import (
     adjust_cross_os_font_checks,
     compute_cross_profile,
@@ -320,7 +346,7 @@ async def run_tests(
             try:
                 browser = await firefox.launch(
                     executable_path=binary_path,
-                    headless=True,
+                    headless=_HEADLESS,
                     firefox_user_prefs=FIREFOX_WEBGL_PREFS,
                 )
             except Exception as e:
@@ -351,7 +377,7 @@ async def run_tests(
                 env = {**dict(os.environ), "CAMOU_CONFIG": json.dumps(preset["camouConfig"])}
                 browser = await firefox.launch(
                     executable_path=binary_path,
-                    headless=True,
+                    headless=_HEADLESS,
                     env=env,
                     firefox_user_prefs=FIREFOX_WEBGL_PREFS,
                 )

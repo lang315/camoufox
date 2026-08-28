@@ -64,9 +64,14 @@ Two suites, **both required for PRs** (they cover different layers):
 
 - **`build-tester/`** — tests the raw binary directly (bypasses the Python package); fingerprints injected via `generate_context_fingerprint` + `addInitScript` and `CAMOU_CONFIG`. Run when changing patches / C++ / JS browser layer:
   ```bash
-  cd build-tester && npm install && pip install -r requirements.txt
-  python scripts/run_tests.py /path/to/camoufox-binary
+  cd build-tester && ./run_tests.sh /path/to/camoufox-binary
   ```
+  `run_tests.sh` installs deps and runs **headful** (under `xvfb` when there is no
+  display). Headless Firefox has no GL context and the WebGL checks fail *open* —
+  `passed: true` on "WebGL not available" — so a headless run scores 5 checks for
+  free and drops 12 more from the denominator (issue #75). Calling
+  `python scripts/run_tests.py` directly needs a `DISPLAY`; it now refuses rather
+  than silently launching a run that verifies nothing.
 - **`service-tester/`** — tests the Python package / service layer.
 - **`tests/`** — Playwright tests, run via `make tests` (add `headful=true` for headful): points at `camoufox-*/obj-*/dist/bin/camoufox-bin`.
 
