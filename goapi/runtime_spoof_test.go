@@ -299,10 +299,27 @@ func TestRuntimeSpoofs(t *testing.T) {
 		for _, v := range cfg.Voices {
 			want[v.Name] = v.Lang
 		}
+		matched := 0
 		for _, v := range voices {
-			if w, ok := want[v.Name]; ok && w != v.Lang {
+			w, ok := want[v.Name]
+			if !ok {
+				continue // a host voice we did not configure; not ours to check
+			}
+			matched++
+			if w != v.Lang {
 				t.Errorf("voice %q lang = %q, want %q", v.Name, v.Lang, w)
 			}
+		}
+		// The lang loop above only compares voices it recognises, so a page
+		// returning nothing but the host's own espeak voices satisfies it
+		// vacuously. voice-spoofing.patch AddVoiceImpl()s every configured
+		// voice into the registry, so at least one must come back -- absent
+		// that, the config never reached the page and this subtest measured
+		// nothing, which is the same blind spot as the old empty-list skip
+		// wearing a green tick.
+		if matched == 0 {
+			t.Fatalf("none of the %d configured voices reached the page; got %v",
+				len(cfg.Voices), voices)
 		}
 	})
 
