@@ -288,7 +288,7 @@
     "@VOICE_TYPE": {
         "*isLocalService": "bool",
         "*isDefault": "bool",
-        "*voiceURI": "str",
+        "*voiceUri": "str",
         "*name": "str",
         "*lang": "str"
     },
