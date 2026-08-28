@@ -17,6 +17,8 @@ from camoufox.virtdisplay import VirtualDisplay
 
 from .fingerprints import generate_context_fingerprint
 from .utils import (
+    attach_launch_fonts,
+    warn_fonts_excluded_by_launch,
     async_attach_vd,
     attach_no_viewport_default,
     determine_ua_os,
@@ -132,6 +134,7 @@ async def AsyncNewBrowser(
         browser = await playwright.firefox.launch(**from_options)
         if no_viewport_default:
             attach_no_viewport_default(browser)
+        attach_launch_fonts(browser, from_options)
         return await async_attach_vd(browser, virtual_display)
     except BaseException:
         # A launch failure here (bad options, InvalidProxy, missing browser, ...)
@@ -223,6 +226,8 @@ async def AsyncNewContext(
     if geolocation:
         opts['geolocation'] = geolocation
         opts.setdefault('permissions', ['geolocation'])
+
+    warn_fonts_excluded_by_launch(browser, fp['config'].get('fonts'))
 
     context = await browser.new_context(**opts)
     await context.add_init_script(fp['init_script'])

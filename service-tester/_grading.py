@@ -1,4 +1,3 @@
-import sys
 
 from _constants import CATEGORY_LABELS
 
@@ -59,14 +58,20 @@ def count_all_checks(results: dict) -> tuple:
 
 
 def adjust_cross_os_font_checks(os_type: str, results: dict) -> None:
-    host_os = "macos" if sys.platform == "darwin" else ("windows" if sys.platform == "win32" else "linux")
-    if os_type == host_os:
-        return
-    font_env = results.get("extended", {}).get("fontEnvironment")
-    if not font_env:
-        return
-    for key in ("osDetection", "noWrongOSFonts"):
-        check = font_env.get(key)
-        if check and not check.get("passed"):
-            check["passed"] = True
-            check["detail"] = "[Cross-OS: expected] " + check.get("detail", "")
+    """Deliberately does nothing. Kept so the call site reads as an explicit decision.
+
+    This used to force-pass osDetection and noWrongOSFonts whenever a profile's
+    OS differed from the host's, on the assumption that a Linux host simply
+    cannot show Apple fonts. That assumption is wrong: Camoufox ships bundled
+    font sets for every OS, and a bare launch on a Linux runner detects all
+    three Apple marker fonts (Helvetica Neue, PingFang HK, Geneva).
+
+    So the failures it was hiding were real -- the launch-level font whitelist
+    deleting families a per-context setFontList() could never restore (#44/#45)
+    -- and every cross-OS profile was marked "[Cross-OS: expected]" while being
+    broken in exactly the way the same-OS profiles were failing loudly.
+
+    run_tests.py now launches one browser per OS, so the fonts are right and
+    these checks must stand on their own. macOSVersionDepth was never in the
+    masked list anyway, and failed either way.
+    """

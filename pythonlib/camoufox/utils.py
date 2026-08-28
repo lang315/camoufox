@@ -531,6 +531,49 @@ def spoofs_window_dimensions(from_options: Dict[str, Any]) -> bool:
     return any(key in config for key in _WINDOW_DIM_KEYS)
 
 
+def attach_launch_fonts(target: Any, from_options: Optional[Dict[str, Any]]) -> Any:
+    """
+    Record the launch-level font list on the browser so NewContext can warn when
+    a context asks for fonts the launch config already excluded.
+
+    The launch font list becomes a process-wide whitelist: gfxPlatformFontList's
+    constructor writes it to font.system.whitelist, and ApplyWhitelist() then
+    DELETES every other family from mFontFamilies. A per-context setFontList()
+    can only narrow what is left, so a family the launch config dropped can
+    never be added back by a context (#44).
+    """
+    cfg = _reassemble_camou_config(from_options) or {}
+    fonts = cfg.get('fonts')
+    if fonts:
+        try:
+            target._camoufox_launch_fonts = frozenset(fonts)
+        except AttributeError:
+            pass  # a Playwright object that does not accept attributes
+    return target
+
+
+def warn_fonts_excluded_by_launch(browser: Any, context_fonts: Optional[List[str]]) -> None:
+    """Warn when a context's fonts cannot appear because the launch whitelist dropped them."""
+    launch_fonts = getattr(browser, '_camoufox_launch_fonts', None)
+    if not launch_fonts or not context_fonts:
+        return
+    missing = sorted(set(context_fonts) - launch_fonts)
+    if not missing:
+        return
+    shown = ', '.join(missing[:5]) + (f", and {len(missing) - 5} more" if len(missing) > 5 else '')
+    warnings.warn(
+        f"{len(missing)} of this context's fonts cannot be rendered because the "
+        f"browser was launched with a different font set: {shown}. "
+        "The launch-level font list becomes a process-wide whitelist and every "
+        "other family is dropped from the font list entirely, so a per-context "
+        "setFontList() can only narrow it, never restore a family (#44). "
+        "Launch one browser per OS, or pass the same os= at launch, if the "
+        "context's fonts matter.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 def attach_no_viewport_default(target: Any) -> Any:
     """
     Default new_page()/new_context() to no_viewport=True.
