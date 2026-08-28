@@ -266,7 +266,11 @@ inline std::optional<std::array<int32_t, 4>> GetInt32Rect(
 
 inline std::optional<nlohmann::json> GetNested(const std::string& domain,
                                                std::string keyStr) {
-  auto data = GetJson();
+  // GetJson() returns a reference to the process-wide parsed config; binding it
+  // with `auto` copies the whole tree on every call, and this runs on every
+  // GLParam/MParamGL/GetAttribute -- i.e. every WebGL getParameter() a page
+  // makes. Every other GetJson() caller in this file already uses const auto&.
+  const auto& data = GetJson();
   if (!data.contains(domain)) return std::nullopt;
 
   if (!data[domain].contains(keyStr)) return std::nullopt;
@@ -351,7 +355,7 @@ inline std::optional<std::array<int32_t, 3UL>> MShaderData(
 inline std::optional<
     std::vector<std::tuple<std::string, std::string, std::string, bool, bool>>>
 MVoices() {
-  auto data = GetJson();
+  const auto& data = GetJson();
   if (!data.contains("voices") || !data["voices"].is_array()) {
     return std::nullopt;
   }

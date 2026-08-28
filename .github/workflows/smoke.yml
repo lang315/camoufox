@@ -359,6 +359,8 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
 
       - name: Integration suite (all goapi tests vs real binary)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
         # Runs the FULL suite against the real binary, not just TestRuntimeSpoofs:
         # the other ~24 browser tests (navigation, DOM, forms, keyboard, storage,
         # accessibility, ...) otherwise never execute against a real build —
@@ -367,7 +369,18 @@ jobs:
           set -o pipefail  # tee must not mask a go-test failure exit code
           cd goapi
           CAMOUFOX_BIN="${{ steps.bin.outputs.bin }}" \
-            xvfb-run -a go test -timeout 15m -v ./... 2>&1 | tee "$GITHUB_WORKSPACE/spoof-test.log"
+            xvfb-run -a --server-args="-screen 0 1920x1080x24" \
+            go test -timeout 15m -v ./... 2>&1 | tee "$GITHUB_WORKSPACE/spoof-test.log"
+
+          # TestRuntimeSpoofs used to launch headless, so its two WebGL subtests
+          # hit their "__NOGL__" guard and skipped while the suite still
+          # reported PASS. They now run headful under the xvfb above; fail the
+          # step if they go back to skipping, otherwise the regression is
+          # invisible again.
+          if grep -q "no WebGL in this headless env" "$GITHUB_WORKSPACE/spoof-test.log"; then
+            echo "::error::WebGL subtests skipped -- no GL context, so the WebGL spoofs were not verified"
+            exit 1
+          fi
 
       - name: Detector-site smoke (CreepJS / sannysoft / browserleaks)
         run: |

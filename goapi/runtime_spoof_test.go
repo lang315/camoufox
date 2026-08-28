@@ -45,7 +45,15 @@ func launchForSpoofTest(t *testing.T) (context.Context, *camoufox.Page, *config.
 		camoufox.WithExecutablePath(exe),
 		camoufox.WithConfig(cfg),
 		camoufox.WithNoFingerprint(), // cfg is authoritative; do not regenerate
-		camoufox.WithHeadless(true),
+		// Headful under the suite's existing xvfb, plus force-enabled WebGL.
+		// With WithHeadless(true) there is no GL context, so the two WebGL
+		// subtests below hit their `__NOGL__` guard and t.Skip() -- the suite
+		// reported PASS while never exercising the WebGL spoofs at all.
+		// CAMOUFOX_HEADLESS=1 restores the old behaviour for anyone running
+		// this without a display.
+		camoufox.WithHeadless(os.Getenv("CAMOUFOX_HEADLESS") == "1"),
+		camoufox.WithFirefoxUserPref("webgl.force-enabled", true),
+		camoufox.WithFirefoxUserPref("webgl.disabled", false),
 	)
 	if err != nil {
 		cancel()
