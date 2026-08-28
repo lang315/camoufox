@@ -11,9 +11,12 @@
 // to platform-specific size limits — see EnvVars.
 package config
 
-// Voice mirrors @VOICE_TYPE in settings/camoucfg.jvv.
+// Voice mirrors what MaskConfig::MVoices actually reads. Note the key is
+// "voiceUri", not the DOM's "voiceURI": MVoices requires all five fields and
+// skips any entry missing one, so a "voiceURI" key silently registers no
+// voices at all and leaves the host's own list exposed.
 type Voice struct {
-	VoiceURI       string `json:"voiceURI"`
+	VoiceURI       string `json:"voiceUri"`
 	Name           string `json:"name"`
 	Lang           string `json:"lang"`
 	IsLocalService bool   `json:"isLocalService"`

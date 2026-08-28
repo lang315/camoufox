@@ -31,7 +31,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             unzip xvfb libgtk-3-0 libdbus-glib-1-2 libx11-xcb1 \
             libxt6 libxcomposite1 libxdamage1 libxrandr2 libpci3 \
-            libasound2t64 || sudo apt-get install -y --no-install-recommends libasound2
+            libasound2t64 speech-dispatcher \
+            || sudo apt-get install -y --no-install-recommends libasound2 speech-dispatcher
 
       - name: Download linux artifact
         env:
@@ -377,16 +378,42 @@ jobs:
           # reported PASS. They now run headful under the xvfb above; fail the
           # step if they go back to skipping, otherwise the regression is
           # invisible again.
-          if grep -q "no WebGL in this headless env" "$GITHUB_WORKSPACE/spoof-test.log"; then
-            echo "::error::WebGL subtests skipped -- no GL context, so the WebGL spoofs were not verified"
-            exit 1
-          fi
+          # A subtest that downgrades itself to a skip still lets the suite
+          # report PASS, so the missing coverage is invisible. Both of these
+          # skipped for months while their PASS line was quoted as evidence.
+          for marker in "no WebGL in this headless env" "no voices returned" \
+                        "decodingInfo did not resolve in time"; do
+            if grep -q "$marker" "$GITHUB_WORKSPACE/spoof-test.log"; then
+              echo "::error::subtest skipped ($marker) -- that spoof was not verified"
+              exit 1
+            fi
+          done
 
       - name: Detector-site smoke (CreepJS / sannysoft / browserleaks)
         run: |
+          set -o pipefail  # tee must not mask the run's exit code
           cd goapi
+          # This step used to end in `|| true` with no pipefail, so it was green
+          # even if the binary crashed or ./example/integration failed to
+          # compile -- the workflow's only live check against real anti-bot
+          # vendors could not fail for any reason.
           CAMOUFOX_BIN="${{ steps.bin.outputs.bin }}" \
-            xvfb-run -a go run ./example/integration 2>&1 | tee "$GITHUB_WORKSPACE/smoke.log" || true
+            xvfb-run -a go run ./example/integration 2>&1 | tee "$GITHUB_WORKSPACE/smoke.log"
+
+          # example/integration asserts nothing about the verdicts by design --
+          # it logs each oracle and writes its JSON "for human review", skipping
+          # any oracle whose goto/eval failed. So the file count is the one
+          # machine-checkable signal here: zero files means the browser reached
+          # no oracle at all, which is a broken run, not a bad score.
+          written=$(ls integration-results/*.json 2>/dev/null | wc -l)
+          echo "oracles captured: $written / 4"
+          if [ "$written" -eq 0 ]; then
+            echo "::error::detector smoke reached no oracle -- run is broken, not merely flagged"
+            exit 1
+          fi
+          if [ "$written" -lt 4 ]; then
+            echo "::warning::only $written/4 oracles captured; the rest failed goto/eval (see smoke.log)"
+          fi
 
       - name: Upload results
         if: always()

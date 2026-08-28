@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,11 +58,12 @@ func TestNavigateGuarded_botwall(t *testing.T) {
 		t.Skip("set CAMOUFOX_BIN to run")
 	}
 
-	calls := 0
+	// atomic: the handler goroutine writes this while the test goroutine reads
+	// it in the assertions below.
+	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
-		calls++
-		if calls == 1 {
+		if calls.Add(1) == 1 {
 			// First visit: bot wall page.
 			_, _ = w.Write([]byte(`<html><head><title>Just a moment...</title></head><body>checking</body></html>`))
 		} else {
@@ -99,5 +101,22 @@ func TestNavigateGuarded_botwall(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("NavigateGuarded botwall: %v", err)
+	}
+
+	// Without these, the test passes whether or not a retry ever happened.
+	// ExpectedURLs is unset here, so isBotWall() is the ONLY thing that can
+	// reject attempt 1 (navguard.go:65 skips the URL check when the list is
+	// empty). Were that detection to regress to always-false, NavigateGuarded
+	// would accept the bot wall itself and return nil after a single request --
+	// and this test, which exists to guard the retry, would still report PASS.
+	if n := calls.Load(); n < 2 {
+		t.Fatalf("server saw %d request(s); the bot wall was accepted instead of retried", n)
+	}
+	title, err := p.Evaluate(ctx, `document.title`)
+	if err != nil {
+		t.Fatalf("read title: %v", err)
+	}
+	if title != "Landing" {
+		t.Errorf("final page title = %v, want %q (still on the bot wall)", title, "Landing")
 	}
 }
