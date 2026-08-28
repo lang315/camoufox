@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -74,6 +75,53 @@ func TestProducerSchemaDrift(t *testing.T) {
 	for k := range cfg {
 		if !schema[k] && !knownConfigOnlyKeys[k] {
 			t.Errorf("config.go emits %q that is absent from properties.json and not in knownConfigOnlyKeys — register it in the schema or add it to the allowlist", k)
+		}
+	}
+}
+
+// TestVoiceKeysMatchReader pins config.Voice's JSON keys to the set
+// MaskConfig::MVoices actually requires.
+//
+// TestProducerSchemaDrift above only compares TOP-LEVEL Config keys against
+// properties.json, so nested object fields were checked against nothing. That
+// gap shipped a real bug: config.go emitted "voiceURI" (mirroring
+// settings/camoucfg.jvv, which was itself wrong) while MVoices reads
+// "voiceUri". JSON keys are case-sensitive, MVoices skips any entry missing a
+// required field, so every goapi-configured voice was dropped and the host's
+// own voices stayed exposed. CI passed throughout: the runtime subtest only
+// compared voices it recognised, and recognised none.
+//
+// The oracle here is the reader itself, not a second schema -- agreeing with
+// the wrong spec is how the bug got in.
+func TestVoiceKeysMatchReader(t *testing.T) {
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "additions", "camoucfg", "MaskConfig.hpp"))
+	if err != nil {
+		t.Fatalf("read MaskConfig.hpp: %v", err)
+	}
+	want := map[string]bool{}
+	for _, m := range regexp.MustCompile(`voice\.contains\("([^"]+)"\)`).FindAllStringSubmatch(string(src), -1) {
+		want[m[1]] = true
+	}
+	if len(want) == 0 {
+		t.Fatal(`no voice.contains("...") found in MaskConfig.hpp -- MVoices was refactored; retarget this test at its new required-field check`)
+	}
+
+	got := map[string]bool{}
+	vt := reflect.TypeFor[Voice]()
+	for i := 0; i < vt.NumField(); i++ {
+		if name := strings.Split(vt.Field(i).Tag.Get("json"), ",")[0]; name != "" && name != "-" {
+			got[name] = true
+		}
+	}
+
+	for k := range want {
+		if !got[k] {
+			t.Errorf("MVoices requires voice key %q but config.Voice emits no such json tag; every voice would be skipped", k)
+		}
+	}
+	for k := range got {
+		if !want[k] {
+			t.Errorf("config.Voice emits %q which MVoices never reads", k)
 		}
 	}
 }
