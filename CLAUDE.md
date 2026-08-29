@@ -43,6 +43,24 @@ make edits          # launches scripts/developer.py — apply/undo/create/manage
 - **New patch:** in the UI "Reset workspace" → edit files in `camoufox-*/` → `make build` / `make run` to test → "Write workspace to patch".
 - **Edit existing patch:** "Edit a patch" (resets workspace to that patch's state) → edit → "Write workspace to patch" to overwrite.
 
+**Balance the context lines in every hunk you hand-write.** GNU `patch` (what
+`scripts/patch.py` shells out to) charges the *difference* between leading and trailing
+context against a max-2 fuzz budget, so a hunk with 7 leading and 1 trailing context line
+is REJECTED even at the exactly correct line of a pristine file. Verified with a minimal
+repro: same file, same position, 7/1 fails with `Hunk #1 FAILED`, 7/7 applies cleanly.
+This cost one ~1h20m build (run 33245117873, `.rej` on `gfxPlatformFontList.cpp`).
+
+`git apply --check` is **not** a valid pre-flight here — it accepts hunks GNU patch
+rejects (also verified). Dry-run with the invocation the build actually uses:
+
+```bash
+patch -p1 --forward -l --binary --dry-run < patches/your.patch
+```
+
+Note also that several patches on `main` carry pre-existing off-by-one hunk headers in
+their LAST hunk (`webgl-spoofing`, `font-hijacker`, `font-list-spoofing`). They apply
+fine and are not yours to fix; just don't add a new one.
+
 Low-level equivalents: `make patch ./patches/x.patch`, `make unpatch ./patches/x.patch`, `make workspace ./patches/x.patch`, `make revert` (reset to `unpatched` tag), `make diff` (diff against `first-checkpoint`). The source dir is a git repo with `unpatched` / `first-checkpoint` / `checkpoint` tags used by these targets.
 
 ## Repository layout (the parts that require cross-file understanding)
