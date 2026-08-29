@@ -4,7 +4,21 @@
 
 **Goal:** A context created with `os="macos"` under a browser launched for Windows reports macOS fonts, without any code path ever exposing the host's real font families.
 
-**Architecture:** Keep the deletion. `font-hijacker.patch` writes the launch `fonts` list into `font.system.whitelist`, and upstream `ApplyWhitelist()` clears `mFontFamilies` down to that list — host families are destroyed at startup and can never leak. We widen the launch list to the *union* of the bundled per-OS sets (732 families) so every OS a context might ask for survives startup, then rely on the fork's existing per-context filter to narrow each context back to its own OS. Any read path we miss therefore shows bundled Camoufox fonts, never host fonts: the failure mode is a fingerprint tell with a known ceiling, not a deanonymising leak.
+**Architecture (amended after Task 1, read this before Task 2):** Keep the deletion.
+
+The union goes in a **new, separate** config key `fonts:whitelist`, read ONLY by
+`font-hijacker.patch` when it hijacks `font.system.whitelist`. The existing
+`fonts` key keeps its current meaning — this profile's random per-OS subset —
+so every fallback path still narrows to a plausible list.
+
+This separation is not cosmetic. `config['fonts']` is a RANDOM SUBSET produced by
+`_generate_random_font_subset(target_os)`, not the full OS set. Had we simply
+widened `fonts` to the union, every read path that falls back to the launch level
+would report all 732 bundled families — a list no real machine has, and a worse
+tell than the bug being fixed. With the split, a missed path reports this
+profile's own subset, exactly as it does today.
+
+Original architecture note follows. `font-hijacker.patch` writes the launch `fonts` list into `font.system.whitelist`, and upstream `ApplyWhitelist()` clears `mFontFamilies` down to that list — host families are destroyed at startup and can never leak. We widen the launch list to the *union* of the bundled per-OS sets (732 families) so every OS a context might ask for survives startup, then rely on the fork's existing per-context filter to narrow each context back to its own OS. Any read path we miss therefore shows bundled Camoufox fonts, never host fonts: the failure mode is a fingerprint tell with a known ceiling, not a deanonymising leak.
 
 **Tech Stack:** C++ (Firefox 152.0.4 tree), the fork's `patches/*.patch`, `additions/camoucfg/`, pythonlib, goapi.
 
@@ -160,7 +174,13 @@ x86_64) — so the gate costs a smoke run (~8 min), not a build (~1h20m).
 
 Expected on success: `VERDICT: filter narrows correctly under a union whitelist -- proceed`
 
-- [ ] **Step 4: Record the verdict**
+- [ ] **Step 4: Also assert the default context is not widened**
+
+The default context (`userContextId` 0) must still report a plausible subset,
+not all 732. If it reports the union, the `fonts:whitelist` split is not being
+honoured and that is a STOP.
+
+- [ ] **Step 4b: Record the verdict**
 
 Append the three printed lines to the report file. If the verdict is STOP, the task ends here with status DONE_WITH_CONCERNS and the plan halts — do not start Task 2.
 
@@ -169,8 +189,11 @@ Append the three printed lines to the report file. If the verdict is STOP, the t
 ### Task 2: Widen the launch whitelist to the union, in both producers
 
 **Files:**
-- Modify: `pythonlib/camoufox/utils.py` (where the launch `fonts` list is assembled into the config)
-- Modify: `goapi/pkg/fingerprint/fonts.go`
+- Modify: `pythonlib/camoufox/fingerprints.py` (emit `fonts:whitelist` beside `fonts`; the `fonts` assignments are at :725, :735 and :898, and `_load_os_fonts()` at :55 already loads and caches fonts.json)
+- Modify: `goapi/pkg/fingerprint/fonts.go` (alongside `RandomFontSubset`, :36)
+- Modify: `goapi/pkg/config/config.go` (add the `fonts:whitelist` json tag; do NOT run `gofmt -w` on this file)
+- Modify: `settings/camoucfg.jvv` (register `"fonts:whitelist": "array[str]"` beside the existing `"fonts"`)
+- Modify: `settings/properties.json` (register it, or `TestProducerSchemaDrift` fails)
 - Test: `pythonlib/tests/test_font_union_whitelist.py` (create)
 - Test: `goapi/pkg/fingerprint/fonts_test.go` (extend)
 
@@ -189,6 +212,10 @@ def test_launch_whitelist_is_the_union_not_one_os():
     fonts = json.loads((pathlib.Path(__file__).parents[1] /
                         "camoufox" / "fonts.json").read_text())
     got = set(_launch_font_whitelist())
+    # and `fonts` must NOT have been widened along with it
+    from camoufox.fingerprints import _generate_random_font_subset
+    subset = _generate_random_font_subset("windows")
+    assert len(subset) < 732, "the per-profile `fonts` subset must stay a subset"
     assert len(got) == 732, f"expected the 732-family union, got {len(got)}"
     for os_key in ("win", "mac", "lin"):
         missing = set(fonts[os_key]) - got
@@ -204,9 +231,15 @@ Expected: FAIL — `ImportError: cannot import name '_launch_font_whitelist'`
 
 Add to `pythonlib/camoufox/utils.py`, and use it wherever the launch config's `fonts` key is set:
 
+Emit it as `fonts:whitelist`, leaving `fonts` untouched:
+
 ```python
 def _launch_font_whitelist() -> List[str]:
-    """Every bundled family, across all OSes.
+    """Every bundled family, across all OSes -- the value of `fonts:whitelist`.
+
+    NOT the value of `fonts`, which stays this profile's random per-OS subset.
+    Widening `fonts` itself would make every launch-level fallback report all
+    732 bundled families, which no real machine has.
 
     font-hijacker.patch writes this into font.system.whitelist, and upstream
     ApplyWhitelist() then deletes every family outside it from mFontFamilies.
@@ -260,6 +293,23 @@ All three are C++. **Do them in one commit so they share one build.**
 
 **Upstream anchors in FIREFOX_152_0_4_RELEASE `gfx/thebes/gfxPlatformFontList.cpp`:**
 `GetFontList` at **:1175**, `GetFontFamilyList` at **:1213**. `GetFontList` has TWO paths — a `SharedFontList()` branch that returns early at the top, and the `mFontFamilies` loop below it. **Both need the filter**; filtering only the second one leaves the shared-list path unfiltered.
+
+- [ ] **Step 0: Teach the hijacker to prefer `fonts:whitelist`**
+
+In `patches/font-hijacker.patch`, the constructor currently reads
+`MaskConfig::GetStringList("fonts")`. Read `fonts:whitelist` first and fall back
+to `fonts` when it is absent, so an old config still behaves exactly as before:
+
+```cpp
+  std::vector<std::string> fontValues =
+      MaskConfig::GetStringList("fonts:whitelist");
+  if (fontValues.empty()) {
+    fontValues = MaskConfig::GetStringList("fonts");
+  }
+  if (!fontValues.empty()) {
+    // ... existing join + Preferences::SetCString, unchanged
+  }
+```
 
 - [ ] **Step 1: Chokepoint 3 — `IsFontAllowed` in `FontFaceImpl.h`**
 
@@ -344,7 +394,10 @@ Insert before the `record_video` step. The guard must assert BOTH directions and
           # different code paths and only both being right means it works.
 ```
 
-Assert, for a mac context under a union launch: the three Apple markers resolve, `Segoe UI` and `Tahoma` do not, and `document.fonts.check('12px "Helvetica Neue"')` is true while `document.fonts.check('12px "Segoe UI"')` is false. Fail if every probe returns the same value (no signal).
+Assert, for a mac context under a union launch: the three Apple markers resolve, `Segoe UI` and `Calibri` do not
+(**not `Tahoma`** — it is in BOTH the win and mac sets; 83 families are shared
+across two or more lists, so per-OS test constants must be derived as
+`set(os) - set(other) - set(other)`, never eyeballed, see Task 1's report), and `document.fonts.check('12px "Helvetica Neue"')` is true while `document.fonts.check('12px "Segoe UI"')` is false. Fail if every probe returns the same value (no signal).
 
 - [ ] **Step 3: Run the smoke workflow and read the log**
 
