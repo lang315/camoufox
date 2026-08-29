@@ -279,6 +279,71 @@ git commit -m "fix(#44): launch font whitelist becomes the union of bundled sets
 
 ---
 
+## Amendments after Tasks 1-2 (binding on Task 3)
+
+
+## Scope correction: only chokepoint 3 is content-reachable
+
+Firefox 152 exposes NO font-enumeration API to content:
+- `queryLocalFonts()` / Local Font Access API is Chrome-only; absent from Firefox WebIDL.
+- `dom/webidl/Window.webidl` and `FontFaceSet.webidl` contain no enumeration entry point.
+
+Therefore:
+- **Chokepoint 3 (`IsFontAllowed` -> `document.fonts`)** is the only one a page can reach.
+  This is the one that fixes an observable #44 symptom. Highest priority.
+- **Chokepoints 1 and 2 (`GetFontList` :1175, `GetFontFamilyList` :1213)** are reachable
+  only from chrome/XPCOM (`nsIFontEnumerator`, devtools, the font picker in preferences).
+  They are defense-in-depth. Still worth doing -- they ride the same build, and a future
+  chrome-exposed surface or a WebExtension could reach them -- but they are NOT what
+  makes #44 observable, and Task 4 CANNOT verify them from a content page.
+
+## Consequence for Task 4
+
+Do not write a smoke guard that tries to prove `GetFontList` is filtered by calling
+something from a page: no such call exists. Task 4 verifies:
+  (a) text measurement narrows per context   (the Task 1 probe, re-run)
+  (b) `document.fonts.check()` agrees with measurement  (chokepoint 3)
+  (c) the default context is not widened to 732
+Chokepoints 1/2 are verified by code review only, and that is the honest claim to make
+in the PR -- do not imply they were measured.
+
+## Key derivation, verified
+
+- `gfxPlatformFontList::GenerateFontListKey(const nsACString&, nsACString&)` at :883,
+  in-place overload at :889. This is what `FindAndAddFamiliesLocked` uses at :1750 to
+  build the key it passes to the fork's per-context filter. Use the same for the
+  `mFontFamilies` loops so keys match what `setFontList` stored.
+- The `SharedFontList()` branch of `GetFontList` (:1180-:1197) iterates
+  `fontlist::Family` and returns EARLY. Filtering only the `mFontFamilies` loop below
+  leaves that path unfiltered. For shared families the display name comes from
+  `list->LocalizedFamilyName(&f)`; the canonical lowercased key is `f.Key().AsString(list)`
+  -- confirm the exact accessor against the pinned tree before writing the hunk.
+
+## Not covered, deliberately
+
+`SystemFindFontForChar` fallback loops (:1371, :1463) select a fallback FACE rather than
+reporting a list. The union bounds what they can reveal to bundled families. If Task 4
+shows a leak through them, file a follow-up issue -- do not silently widen this task.
+
+## Verified accessors (FIREFOX_152_0_4_RELEASE)
+
+- `fontlist::Family::Key()` -> `const String&`, `gfx/thebes/SharedFontList.h:287`.
+- `fontlist::String::AsString(FontList*)` -> `nsCString`, same header :120.
+  So the shared-list key is `f.Key().AsString(list)`.
+
+## Pre-existing hunk mismatches -- do NOT fix
+
+At HEAD both font patches already fail `hunkcheck.py` on their LAST hunk:
+`patches/font-hijacker.patch @@ -370,3 +370,6 @@` and
+`patches/font-list-spoofing.patch @@ -169,3 +178,15 @@`, each delta=1. They are on
+`main`, they apply cleanly, and they are not yours. After your edit the count must
+still be exactly these 2 -- a third means you broke a hunk header.
+
+## Task 3 must also handle version skew
+
+Read `fonts:whitelist` and fall back to `fonts` when absent. A binary built from this
+patch may run against an older config (and vice versa); the fallback keeps both working.
+
 ### Task 3: Make the three launch-level read paths context-aware
 
 All three are C++. **Do them in one commit so they share one build.**
