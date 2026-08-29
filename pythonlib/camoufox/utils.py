@@ -371,6 +371,26 @@ def _should_constrain_to_host_display(
     return not headless and _real_display_present(env, virtual_display)
 
 
+def _resolve_font_whitelist(
+    requested_fonts: List[str], custom_fonts_only: bool
+) -> List[str]:
+    """The value of `fonts:whitelist` -- what survives ApplyWhitelist().
+
+    Normally the bundled union widened by whatever the caller asked for.
+    `fonts=` is documented as families installed on the SYSTEM, so they are not
+    in the bundled union; a bundled-only whitelist would delete exactly the
+    families the caller requested.
+
+    Under `custom_fonts_only` the caller's list is used verbatim. That flag means
+    OS-specific system fonts are not passed, so widening to the bundled union
+    would let any host family sharing a bundled name survive -- the opposite of
+    what the flag asks for.
+    """
+    if custom_fonts_only:
+        return sorted(set(requested_fonts))
+    return sorted(set(_launch_font_whitelist()) | set(requested_fonts))
+
+
 def _launch_font_whitelist() -> List[str]:
     """Every bundled family, across all OSes -- the value of `fonts:whitelist`.
 
@@ -1025,7 +1045,17 @@ def launch_options(
     # (see _launch_font_whitelist docstring): every branch of the fonts logic
     # just ran (user-passed `fonts`, custom_fonts_only, the random subset, or
     # the update_fonts fallback), so setting it once here covers all of them.
-    set_into(config, 'fonts:whitelist', _launch_font_whitelist())
+    #
+    # It must still respect the two documented `fonts=` contracts. `fonts=`
+    # takes "font family names that are installed on the system" -- host
+    # families, which are NOT in the bundled union, so a bundled-only
+    # whitelist would have ApplyWhitelist() delete exactly the families the
+    # caller asked for. And custom_fonts_only means "OS-specific system fonts
+    # will not be passed", so widening past the caller's list there would let
+    # any host family sharing a bundled name survive -- the opposite of the
+    # flag. Hence: union normally, exact list under custom_fonts_only.
+    set_into(config, 'fonts:whitelist',
+             _resolve_font_whitelist(config.get('fonts') or [], custom_fonts_only))
 
     # Generate a unique random voice subset
     if 'voices' not in config:

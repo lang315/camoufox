@@ -65,3 +65,25 @@ func TestGenerateSetsFontsWhitelist(t *testing.T) {
 		t.Fatalf("cfg.Fonts must stay the per-OS subset, got %d families", len(cfg.Fonts))
 	}
 }
+
+// A caller may pre-set cfg.Fonts to families installed on the host. Those are
+// not in the bundled union, and font-hijacker.patch feeds fonts:whitelist to
+// font.system.whitelist, where upstream ApplyWhitelist() deletes every family
+// outside it -- so a bundled-only whitelist would delete exactly what the
+// caller asked for.
+func TestCallerFontsSurviveTheWhitelist(t *testing.T) {
+	cfg := &config.Config{Fonts: []string{"My Private Font", "Wingdings 3"}}
+	if err := Generate(cfg, Options{OS: "windows", Rand: rand.New(rand.NewPCG(1, 2))}); err != nil {
+		t.Fatal(err)
+	}
+	got := setOf(cfg.FontsWhitelist)
+	for _, f := range []string{"My Private Font", "Wingdings 3"} {
+		if !got[f] {
+			t.Errorf("caller font %q missing from fonts:whitelist; it would be deleted at startup", f)
+		}
+	}
+	if len(cfg.FontsWhitelist) <= 732 {
+		t.Errorf("whitelist = %d entries, want the 732-family union plus the caller's",
+			len(cfg.FontsWhitelist))
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/lang315/camoufox/goapi/pkg/config"
@@ -54,12 +55,17 @@ func Generate(cfg *config.Config, opts Options) error {
 	// LaunchFontWhitelist doc comment): it is the launch-time whitelist that
 	// keeps every bundled OS's families alive at startup, while Fonts stays
 	// this profile's random per-OS subset.
+	//
+	// Caller-supplied Fonts are unioned in: a caller may pre-set cfg.Fonts to
+	// families installed on the host, which are not in the bundled union, and a
+	// bundled-only whitelist would have ApplyWhitelist() delete exactly those.
 	if len(cfg.FontsWhitelist) == 0 {
 		whitelist, err := LaunchFontWhitelist()
 		if err != nil {
 			return err
 		}
-		cfg.FontsWhitelist = whitelist
+		cfg.FontsWhitelist = appendMissing(whitelist, cfg.Fonts)
+		sort.Strings(cfg.FontsWhitelist)
 	}
 	if len(cfg.Voices) == 0 {
 		names, err := RandomVoiceSubset(targetOS, rng)
