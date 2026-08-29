@@ -113,6 +113,7 @@ type Config struct {
 
 	// fonts / voices
 	Fonts            []string `json:"fonts,omitempty"`
+	FontsWhitelist   []string `json:"fonts:whitelist,omitempty"`
 	FontsSpacingSeed *uint32  `json:"fonts:spacing_seed,omitempty"`
 	AudioSeed        *uint32  `json:"audio:seed,omitempty"`
 	CanvasSeed       *uint32  `json:"canvas:seed,omitempty"`

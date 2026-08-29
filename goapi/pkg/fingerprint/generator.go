@@ -50,6 +50,17 @@ func Generate(cfg *config.Config, opts Options) error {
 		}
 		cfg.Fonts = fonts
 	}
+	// fonts:whitelist is a separate, wider key from Fonts above (see
+	// LaunchFontWhitelist doc comment): it is the launch-time whitelist that
+	// keeps every bundled OS's families alive at startup, while Fonts stays
+	// this profile's random per-OS subset.
+	if len(cfg.FontsWhitelist) == 0 {
+		whitelist, err := LaunchFontWhitelist()
+		if err != nil {
+			return err
+		}
+		cfg.FontsWhitelist = whitelist
+	}
 	if len(cfg.Voices) == 0 {
 		names, err := RandomVoiceSubset(targetOS, rng)
 		if err != nil {

@@ -24,7 +24,7 @@ from .exceptions import (
     NonFirefoxFingerprint,
     NotWritableError,
 )
-from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_screen_no_taskbar, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, resample_screen_for_dpr1, set_media_devices_defaults
+from .fingerprints import from_browserforge, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, _load_os_fonts, fix_navigator_arch, fix_screen_no_taskbar, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, resample_screen_for_dpr1, set_media_devices_defaults
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
@@ -369,6 +369,28 @@ def _should_constrain_to_host_display(
         spawning Xvfb); it is preserved, not introduced, by the second term.
     """
     return not headless and _real_display_present(env, virtual_display)
+
+
+def _launch_font_whitelist() -> List[str]:
+    """Every bundled family, across all OSes -- the value of `fonts:whitelist`.
+
+    NOT the value of `fonts`, which stays this profile's random per-OS subset.
+    Widening `fonts` itself would make every launch-level fallback report all
+    732 bundled families, which no real machine has.
+
+    font-hijacker.patch writes this into font.system.whitelist, and upstream
+    ApplyWhitelist() then deletes every family outside it from mFontFamilies.
+    Narrowing it to one OS is what made a per-context setFontList() unable to
+    widen back (#44): the families were already gone. The union keeps all
+    bundled families alive at startup; the per-context filter in
+    FindAndAddFamiliesLocked narrows each context to its own OS.
+
+    Host families are still deleted, so a read path that misses the
+    per-context filter shows bundled fonts -- a fingerprint tell with a known
+    ceiling -- never the host's real font list.
+    """
+    fonts = _load_os_fonts()
+    return sorted(set().union(*(set(v) for v in fonts.values())))
 
 
 def update_fonts(config: Dict[str, Any], target_os: str) -> None:
@@ -998,6 +1020,12 @@ def launch_options(
             config['fonts'] = _generate_random_font_subset(os_name)
         except Exception:
             update_fonts(config, target_os)
+
+    # The launch-level whitelist is a separate, wider key from `fonts` above
+    # (see _launch_font_whitelist docstring): every branch of the fonts logic
+    # just ran (user-passed `fonts`, custom_fonts_only, the random subset, or
+    # the update_fonts fallback), so setting it once here covers all of them.
+    set_into(config, 'fonts:whitelist', _launch_font_whitelist())
 
     # Generate a unique random voice subset
     if 'voices' not in config:

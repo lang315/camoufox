@@ -2,6 +2,7 @@ package fingerprint
 
 import (
 	"math/rand/v2"
+	"sort"
 )
 
 // Marker fonts CreepJS uses to detect OS (must always be present).
@@ -73,6 +74,36 @@ func RandomFontSubset(targetOS string, rng *rand.Rand) ([]string, error) {
 	count := min(int(float64(pct)/100.0*float64(len(nonEssential))+0.5), len(nonEssential))
 	result = append(result, sampleN(nonEssential, count, rng)...)
 	return appendMissing(result, markers), nil
+}
+
+// LaunchFontWhitelist mirrors pythonlib/camoufox/utils.py:_launch_font_whitelist.
+// It returns every bundled family across all OSes -- the value of
+// `fonts:whitelist` -- and is NOT the value of Fonts, which stays this
+// profile's random per-OS subset (see RandomFontSubset).
+//
+// font-hijacker.patch writes fonts:whitelist into font.system.whitelist, and
+// upstream ApplyWhitelist() then deletes every family outside it from
+// mFontFamilies. Narrowing that to one OS is what made a per-context
+// setFontList() unable to widen back (#44): the families were already gone.
+// The union keeps all bundled families alive at startup so the per-context
+// filter can still narrow each context to its own OS.
+func LaunchFontWhitelist() ([]string, error) {
+	fonts, err := loadFonts()
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	for _, list := range fonts {
+		for _, f := range list {
+			seen[f] = true
+		}
+	}
+	union := make([]string, 0, len(seen))
+	for f := range seen {
+		union = append(union, f)
+	}
+	sort.Strings(union)
+	return union, nil
 }
 
 // RandomVoiceSubset mirrors _generate_random_voice_subset.

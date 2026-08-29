@@ -76,6 +76,7 @@
     "battery:level$__BATTERY": "double[>0]",
 
     "fonts": "array[str]",
+    "fonts:whitelist": "array[str]",
     "fonts:spacing_seed": "int[>=0]",
     "audio:seed": "int[>=0]",
     "canvas:seed": "int[>=0]",
