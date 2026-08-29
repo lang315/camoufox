@@ -235,18 +235,121 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/ipc/FileDescriptorUtils.h"
  #include "mozilla/TextUtils.h"
-@@ -1632,6 +1633,16 @@
+@@ -1170,38 +1171,73 @@
+ bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
+                                          FontVisibility aVisibility) const {
+   return aFamily.Visibility() <= aVisibility || IsFontFamilyWhitelistActive();
+ }
+ 
++// Camoufox: per-context font visibility (#44).
++//
++// A read path with no per-context font list must not answer "allow
++// everything". Since #44 the launch whitelist pref carries the *union* of the
++// bundled per-OS sets, so allowing everything reports a font set no real
++// machine has -- measured in the default context (userContextId 0), which
++// never receives a setFontList() call. Fall back to the launch-level "fonts"
++// key instead: this profile's own per-OS subset. The wide "fonts:whitelist"
++// union is deliberately never read here; it is consulted only where the
++// whitelist pref is written, in font-hijacker.patch.
++static bool CamouIsFontAllowed(const nsACString& aLowerKey) {
++  uint32_t ctx = mozilla::dom::FontListManager::GetCurrentContext();
++  if (ctx != 0 && mozilla::dom::FontListManager::HasFontList(ctx)) {
++    return mozilla::dom::FontListManager::IsFontAllowed(ctx, aLowerKey);
++  }
++  static const std::vector<std::string> sLaunchFonts =
++      MaskConfig::GetStringListLower("fonts");
++  if (sLaunchFonts.empty()) {
++    return true;
++  }
++  std::string key(aLowerKey.BeginReading(), aLowerKey.EndReading());
++  return std::find(sLaunchFonts.begin(), sLaunchFonts.end(), key) !=
++         sLaunchFonts.end();
++}
++
+ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
+                                       const nsACString& aGenericFamily,
+                                       nsTArray<nsString>& aListOfFonts) {
+   AutoLock lock(mLock);
+ 
+   if (SharedFontList()) {
+     fontlist::FontList* list = SharedFontList();
+     const fontlist::Family* families = list->Families();
+     if (families) {
+       for (uint32_t i = 0; i < list->NumFamilies(); i++) {
+         auto& f = families[i];
+         if (!IsVisibleToCSS(f, FontVisibility::User) || f.IsAltLocaleFamily()) {
+           continue;
+         }
++        nsAutoCString ctxKey(f.Key().AsString(list));
++        GenerateFontListKey(ctxKey);
++        if (!CamouIsFontAllowed(ctxKey)) {
++          continue;
++        }
+         // XXX TODO: filter families for aGenericFamily, if supported by
+         // platform
+         aListOfFonts.AppendElement(
+             NS_ConvertUTF8toUTF16(list->LocalizedFamilyName(&f)));
+       }
+     }
+     return;
+   }
+ 
+   for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
+     if (!IsVisibleToCSS(*family, FontVisibility::User)) {
+       continue;
+     }
++    nsAutoCString ctxKey;
++    GenerateFontListKey(family->Name(), ctxKey);
++    if (!CamouIsFontAllowed(ctxKey)) {
++      continue;
++    }
+     if (family->FilterForFontList(aLangGroup, aGenericFamily)) {
+       nsAutoCString localizedFamilyName;
+       family->LocalizedName(localizedFamilyName);
+       aListOfFonts.AppendElement(NS_ConvertUTF8toUTF16(localizedFamilyName));
+     }
+   }
+@@ -1213,16 +1249,30 @@
+ void gfxPlatformFontList::GetFontFamilyList(
+     nsTArray<RefPtr<gfxFontFamily>>& aFamilyArray) {
+   AutoLock lock(mLock);
+   MOZ_ASSERT(aFamilyArray.IsEmpty());
+   // This doesn't use ToArray, because the caller passes an AutoTArray.
+   aFamilyArray.SetCapacity(mFontFamilies.Count());
+   for (const auto& family : mFontFamilies.Values()) {
++    nsAutoCString ctxKey;
++    GenerateFontListKey(family->Name(), ctxKey);
++    if (!CamouIsFontAllowed(ctxKey)) {
++      continue;
++    }
+     aFamilyArray.AppendElement(family);
+   }
++  // The sole caller is gfxFontGroup::GetDefaultFont()'s font-of-last-resort
++  // loop, which MOZ_CRASHes when it finds nothing usable. Filtering is a
++  // fingerprinting defence, not a reason to crash: if it emptied the list,
++  // hand back the unfiltered one.
++  if (aFamilyArray.IsEmpty()) {
++    for (const auto& family : mFontFamilies.Values()) {
++      aFamilyArray.AppendElement(family);
++    }
++  }
+ }
+ 
+ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
+     FontVisibilityProvider* aFontVisibilityProvider, uint32_t aCh,
+     uint32_t aNextCh, Script aRunScript, FontPresentation aPresentation,
+     const gfxFontStyle* aStyle, FontVisibility* aVisibility) {
+   AutoLock lock(mLock);
+@@ -1632,6 +1682,14 @@
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
 
-+  // Per-context font list filtering
-+  {
-+    uint32_t ctx = mozilla::dom::FontListManager::GetCurrentContext();
-+    if (ctx != 0 && mozilla::dom::FontListManager::HasFontList(ctx)) {
-+      if (!mozilla::dom::FontListManager::IsFontAllowed(ctx, key)) {
-+        return false;
-+      }
-+    }
++  // Per-context font list filtering. Falls back to the launch-level
++  // "fonts" subset when this context installed no list of its own -- the
++  // default context never does, and the union whitelist would otherwise
++  // let it resolve every bundled family (#44).
++  if (!CamouIsFontAllowed(key)) {
++    return false;
 +  }
 +
    bool allowHidden = bool(aFlags & FindFamiliesFlags::eSearchHiddenFamilies);

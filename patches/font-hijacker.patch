@@ -10,13 +10,21 @@ index 6bdcd2a57c..41d46bf26c 100644
  
  #include "FontVisibilityProvider.h"
  
-@@ -313,6 +314,16 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
+@@ -313,6 +314,24 @@ gfxPlatformFontList::gfxPlatformFontList(bool aNeedFullnamePostscriptNames)
  
    mFontPrefs = MakeUnique<FontPrefs>();
  
-+  // Hijack the kFontSystemWhitelistPref pref
-+  if (std::vector<std::string> fontValues = MaskConfig::GetStringList("fonts");
-+      !fontValues.empty()) {
++  // Hijack the kFontSystemWhitelistPref pref.
++  // Prefer "fonts:whitelist" -- the union of every bundled per-OS set -- so
++  // that a family some context may later ask for survives ApplyWhitelist(),
++  // which deletes every family outside this pref. Fall back to "fonts" so a
++  // config written before that key existed behaves exactly as it did (#44).
++  std::vector<std::string> fontValues =
++      MaskConfig::GetStringList("fonts:whitelist");
++  if (fontValues.empty()) {
++    fontValues = MaskConfig::GetStringList("fonts");
++  }
++  if (!fontValues.empty()) {
 +    std::string fontValuesJoined =
 +        std::accumulate(fontValues.begin(), fontValues.end(), std::string(),
 +                        [](const std::string& acc, const std::string& s) {
@@ -115,20 +123,35 @@ diff --git a/layout/style/FontFaceImpl.h b/layout/style/FontFaceImpl.h
 index c94388212e..2826682e7b 100644
 --- a/layout/style/FontFaceImpl.h
 +++ b/layout/style/FontFaceImpl.h
-@@ -8,6 +8,7 @@
+@@ -8,6 +8,8 @@
  #include "gfxUserFontSet.h"
  #include "mozilla/RWLock.h"
  #include "mozilla/dom/FontFaceBinding.h"
 +#include "MaskConfig.hpp"
++#include "mozilla/dom/FontListManager.h"
  #include "nsTHashSet.h"
  
  class gfxFontFaceBufferSource;
-@@ -27,6 +28,20 @@ class UTF8StringOrArrayBufferOrArrayBufferView;
+@@ -27,6 +29,34 @@ class UTF8StringOrArrayBufferOrArrayBufferView;
  
  namespace mozilla::dom {
  
 +// Helper function to check if a font is in the allowed list
 +inline bool IsFontAllowed(const nsACString& aFontName) {
++  // Prefer this context's list. FontFaceSet.cpp scopes an AutoFontListContext
++  // around the FontFaceSet entry points, so document.fonts questions arrive
++  // with a context. Reading only the launch-level "fonts" key here made
++  // document.fonts answer for the launch OS in every context (#44).
++  if (uint32_t ctx = FontListManager::GetCurrentContext();
++      ctx != 0 && FontListManager::HasFontList(ctx)) {
++    nsAutoCString key(aFontName);
++    ToLowerCase(key);
++    return FontListManager::IsFontAllowed(ctx, key);
++  }
++  // No context list: answer from the launch-level "fonts" key, this profile's
++  // own per-OS subset. Never "fonts:whitelist" -- the wide union the whitelist
++  // pref carries -- and never "allow everything", which under a union
++  // whitelist would hand the default context every bundled family (#44).
 +  if (std::vector<std::string> maskValues =
 +          MaskConfig::GetStringListLower("fonts");
 +      !maskValues.empty()) {
