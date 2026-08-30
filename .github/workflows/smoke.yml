@@ -381,6 +381,209 @@ jobs:
               f"premultipliedAlpha override never reached the page: {a} "
               "(antialias did, so the key string is wrong, not the mechanism)")
           PY2
+
+      - name: "per-context font list beats the launch whitelist (#44 regression guard)"
+        timeout-minutes: 10
+        run: |
+          # #44 / H2: the per-context filter is the ONLY thing that narrows a
+          # context's font set -- nothing is trimmed at launch time (that flip
+          # is Task 8, not yet landed). Two launches probe both halves of that
+          # claim:
+          #
+          #   config launch (`fonts` = this profile's own Windows subset, same
+          #   as today) -- no context installs a list of its own, so every
+          #   read path must fall back to `fonts`, never answer "allow
+          #   everything":
+          #     (a) the default page (never gets setFontList) resolves only
+          #         the launch `fonts` subset, not macOS families too;
+          #     (c) document.fonts agrees with canvas text measurement --
+          #         different code paths (FontFaceImpl.h's IsFontAllowed via
+          #         FontFaceSet::Check, versus
+          #         gfxPlatformFontList::FindAndAddFamiliesLocked) -- so only
+          #         both being right means the context is coherent;
+          #     (d) a BARE FontFace agrees too: `new FontFace(f,
+          #         'local(f)').status` read straight off the object, never
+          #         added to document.fonts. (c) only covers read paths that
+          #         go THROUGH a FontFaceSet entry point, which is where the
+          #         AutoFontListContext lives; a bare FontFace has none above
+          #         it, so FontFace::Status() ran with no context in scope.
+          #
+          #   bare launch (no `fonts` key at all) -- mFontFamilies then holds
+          #   every bundled family (the Linux package bundles win+mac+linux
+          #   together), nothing is deleted from font.system.whitelist, and
+          #   setFontList() per context is the only thing narrowing the set.
+          #   This is the exact steady state Task 8 makes the product path
+          #   reach, which is what lets every gate in later tasks be measured
+          #   before the flip:
+          #     (b) a mac context resolves mac families and not windows ones,
+          #         and a win context the other way round -- including an OS
+          #         the launch config never had.
+          #
+          # Marker families are DERIVED as set(os) - set(other) - set(other).
+          # 83 of the 815 bundled entries appear in two or more per-OS lists
+          # (Tahoma is in BOTH win and mac), and an eyeballed marker silently
+          # inverts the probe.
+          #
+          # (c) has to add the family to document.fonts first: on a *system*
+          # family document.fonts.check() is vacuously true in FF152, because
+          # FontFaceSetImpl::FindMatchingFontFaces only searches the user font
+          # set and an unmatched family contributes no face to test -- measured,
+          # check('12px "__NoSuchFamily__12345"') === true. Adding the family
+          # routes the question through FontFaceSet::Check -> FontFace::Status()
+          # -> IsFontAllowed, inside the AutoFontListContext scope.
+          #
+          # (d): FontFace::Status() and FontFace::Load() consult IsFontAllowed()
+          # with no AutoFontListContext in scope unless the caller sets one, so
+          # a bare FontFace the page never hands to a FontFaceSet has none above
+          # it. Measured on run 33260827044, before the fix: a mac context
+          # reported 'loaded' for Segoe UI and 'error' for Helvetica Neue while
+          # canvas measurement in that same context said the opposite. Wrong-
+          # but-consistent is one tell; two surfaces contradicting each other
+          # hands a detector a boolean in two lines of JS.
+          #
+          # Fails loudly on no signal: a second impossible family must not
+          # resolve, the canvas must measure a non-zero width, every context
+          # must resolve something, and the mac/win contexts (bare launch)
+          # must not agree.
+          pip install --quiet 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
+          WIN_STRICT = set(FONTS["win"]) - set(FONTS["mac"]) - set(FONTS["lin"])
+          MAC_ONLY = ["Helvetica Neue", "PingFang HK", "Geneva"]
+          WIN_ONLY = ["Segoe UI", "Calibri"]
+          PROBES = MAC_ONLY + WIN_ONLY
+          assert MAC_STRICT.issuperset(MAC_ONLY), (
+              "these are no longer mac-only in fonts.json, the probe would invert: "
+              f"{sorted(set(MAC_ONLY) - MAC_STRICT)}")
+          assert WIN_STRICT.issuperset(WIN_ONLY), (
+              "these are no longer win-only in fonts.json, the probe would invert: "
+              f"{sorted(set(WIN_ONLY) - WIN_STRICT)}")
+
+          # Two DIFFERENT impossible families: both must fall back to the same
+          # default face, so equal widths. If they ever differ, width comparison
+          # has stopped meaning "did this family resolve".
+          JS = """(families) => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const w = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
+            const absentW = w('__CamouAbsentRef__0001');
+            const measure = {}, fontfaces = {}, status = {};
+            for (const f of families) measure[f] = (w(f) !== absentW);
+            measure['__impossible__'] = (w('__NoSuchFamily__12345') !== absentW);
+            // Bare FontFace objects, read BEFORE anything is handed to
+            // document.fonts: no FontFaceSet entry point sits above this read,
+            // so nothing but FontFace::Status() itself can scope the context.
+            const bare = (f) => new FontFace(f, 'local("' + f + '")').status;
+            for (const f of families) status[f] = bare(f);
+            status['__impossible__'] = bare('__NoSuchFamily__12345');
+            for (const f of families) {
+              document.fonts.add(new FontFace(f, 'local("' + f + '")'));
+              fontfaces[f] = document.fonts.check('12px "' + f + '"');
+            }
+            return {measure: measure, fontfaces: fontfaces, status: status,
+                    absentWidth: absentW};
+          }"""
+
+          def probe(page):
+              page.goto("data:text/html,<h1>f</h1>")
+              return page.evaluate(JS, PROBES)
+
+          def check_signal(label, r):
+              assert r["absentWidth"] > 0, f"{label}: canvas measured 0 -- nothing ran"
+              assert not r["measure"]["__impossible__"], (
+                  f"{label}: an impossible family 'resolved' -- width comparison can no "
+                  "longer tell a hit from a miss")
+              assert any(r["measure"][f] for f in PROBES), (
+                  f"{label}: not one bundled family resolved -- the guard measured nothing")
+
+          # config launch -- `fonts` is this profile's own Windows subset, and
+          # no context installs a per-context list. Covers arms (a), (c), (d).
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})})
+              default = probe(b.new_page())
+              b.close()
+
+          print(f"  [config launch / default] measure        {default['measure']}")
+          print(f"  [config launch / default] document.fonts  {default['fontfaces']}")
+          print(f"  [config launch / default] FontFace.status {default['status']}")
+          check_signal("config launch / default", default)
+
+          # (a) the default context answers from the launch `fonts` subset,
+          # not from every bundled family (the Linux package bundles
+          # win+mac+linux together).
+          assert all(default["measure"][f] for f in WIN_ONLY), (
+              "the default context lost the launch config's own Windows families: "
+              f"{default['measure']}")
+          assert not any(default["measure"][f] for f in MAC_ONLY), (
+              "the default context resolved macOS families under a Windows launch -- a "
+              f"read path answered 'allow everything' instead of `fonts`: {default['measure']}")
+
+          # (c) document.fonts and text measurement are the same context
+          for f in PROBES:
+              assert bool(default["fontfaces"][f]) == default["measure"][f], (
+                  f"document.fonts says {default['fontfaces'][f]} for {f!r} but text "
+                  f"measurement says {default['measure'][f]} -- the two font read paths "
+                  "disagree, so the context is not coherent")
+
+          # (d) a bare FontFace answers for the same context as measurement.
+          assert default["status"]["__impossible__"] == "error", (
+              "config launch / default: a bare FontFace for an impossible family reports "
+              f"{default['status']['__impossible__']!r} -- .status can no longer tell a hit "
+              "from a miss, so this arm is measuring nothing")
+          assert any(default["status"][f] == "loaded" for f in PROBES), (
+              "config launch / default: not one bundled family is 'loaded' on a bare "
+              "FontFace -- the .status arm measured nothing")
+          for f in PROBES:
+              assert (default["status"][f] == "loaded") == default["measure"][f], (
+                  f"new FontFace({f!r}, 'local(...)').status is {default['status'][f]!r} but "
+                  f"text measurement says {default['measure'][f]} -- FontFace::Status() is "
+                  "answering for a different context than measurement")
+
+          # bare launch -- no `fonts` key at all, so mFontFamilies holds every
+          # bundled family and nothing is deleted from font.system.whitelist.
+          # setFontList() per context is the only narrowing in play. Covers
+          # arm (b).
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              ctxs = {}
+              for name in ("mac", "win"):
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS[name])))
+                  ctxs[name] = probe(ctx.new_page())
+                  ctx.close()
+              b.close()
+          mac, win = ctxs["mac"], ctxs["win"]
+
+          for label, r in (("bare launch / mac context", mac), ("bare launch / win context", win)):
+              print(f"  [{label}] measure        {r['measure']}")
+              print(f"  [{label}] document.fonts  {r['fontfaces']}")
+              print(f"  [{label}] FontFace.status {r['status']}")
+              check_signal(label, r)
+
+          assert mac["measure"] != win["measure"], (
+              "the mac and win contexts measured identically -- no per-context signal")
+
+          # (b) each context narrows to its own OS, including one the launch
+          # never had
+          assert all(mac["measure"][f] for f in MAC_ONLY), (
+              "a mac context cannot resolve macOS families under a bare launch -- the "
+              f"per-context filter regressed: {mac['measure']}")
+          assert not any(mac["measure"][f] for f in WIN_ONLY), (
+              f"the mac context still resolves Windows-only families: {mac['measure']}")
+          assert all(win["measure"][f] for f in WIN_ONLY), f"win context: {win['measure']}"
+          assert not any(win["measure"][f] for f in MAC_ONLY), (
+              f"the win context resolves macOS-only families: {win['measure']}")
+          PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
