@@ -43,6 +43,24 @@ make edits          # launches scripts/developer.py — apply/undo/create/manage
 - **New patch:** in the UI "Reset workspace" → edit files in `camoufox-*/` → `make build` / `make run` to test → "Write workspace to patch".
 - **Edit existing patch:** "Edit a patch" (resets workspace to that patch's state) → edit → "Write workspace to patch" to overwrite.
 
+**Balance the context lines in every hunk you hand-write.** GNU `patch` (what
+`scripts/patch.py` shells out to) charges the *difference* between leading and trailing
+context against a max-2 fuzz budget, so a hunk with 7 leading and 1 trailing context line
+is REJECTED even at the exactly correct line of a pristine file. Verified with a minimal
+repro: same file, same position, 7/1 fails with `Hunk #1 FAILED`, 7/7 applies cleanly.
+This cost one ~1h20m build (run 33245117873, `.rej` on `gfxPlatformFontList.cpp`).
+
+`git apply --check` is **not** a valid pre-flight here — it accepts hunks GNU patch
+rejects (also verified). Dry-run with the invocation the build actually uses:
+
+```bash
+patch -p1 --forward -l --binary --dry-run < patches/your.patch
+```
+
+Note also that several patches on `main` carry pre-existing off-by-one hunk headers in
+their LAST hunk (`webgl-spoofing`, `font-hijacker`, `font-list-spoofing`). They apply
+fine and are not yours to fix; just don't add a new one.
+
 Low-level equivalents: `make patch ./patches/x.patch`, `make unpatch ./patches/x.patch`, `make workspace ./patches/x.patch`, `make revert` (reset to `unpatched` tag), `make diff` (diff against `first-checkpoint`). The source dir is a git repo with `unpatched` / `first-checkpoint` / `checkpoint` tags used by these targets.
 
 ## Repository layout (the parts that require cross-file understanding)
@@ -64,13 +82,61 @@ Two suites, **both required for PRs** (they cover different layers):
 
 - **`build-tester/`** — tests the raw binary directly (bypasses the Python package); fingerprints injected via `generate_context_fingerprint` + `addInitScript` and `CAMOU_CONFIG`. Run when changing patches / C++ / JS browser layer:
   ```bash
-  cd build-tester && npm install && pip install -r requirements.txt
-  python scripts/run_tests.py /path/to/camoufox-binary
+  cd build-tester && ./run_tests.sh /path/to/camoufox-binary
   ```
+  `run_tests.sh` installs deps and runs **headful** (under `xvfb` when there is no
+  display). Headless Firefox has no GL context and the WebGL checks fail *open* —
+  `passed: true` on "WebGL not available" — so a headless run scores 5 checks for
+  free and drops 12 more from the denominator (issue #75). Calling
+  `python scripts/run_tests.py` directly needs a `DISPLAY`; it now refuses rather
+  than silently launching a run that verifies nothing.
 - **`service-tester/`** — tests the Python package / service layer.
 - **`tests/`** — Playwright tests, run via `make tests` (add `headful=true` for headful): points at `camoufox-*/obj-*/dist/bin/camoufox-bin`.
 
 `ccache` is enabled in the build config — install it for fast incremental rebuilds (cold ~40 min, incremental ~5 min).
+
+## Verifying spoofing claims (learned the hard way)
+
+Three failures from the #44 fonts work, each of which produced green CI and a
+wrong conclusion. They generalise; read them before asserting that a spoof is
+safe, complete, or unreachable.
+
+**1. Never assert a safety bound you have not read the code for.**
+The #44 union-whitelist approach was chosen on the claim "host fonts are deleted
+at startup, so a missed read path can only leak *bundled* fonts — a tell with a
+known ceiling." That ceiling does not exist. `Makefile`'s package targets
+deliberately bundle every OS *except* the target's own (`package-macos:
+--fonts windows linux`), because the host supplies its own. And upstream
+`ApplyWhitelist()` filters by font *name*, not by origin. So a whitelist
+containing all three OSes' names keeps the **host's real fonts** alive on native
+Windows and macOS. The claim was plausible, repeated in a PR body, a plan
+document and a shipped docstring, and never checked against `Makefile`.
+
+**2. "Unreachable" is a claim about ALL paths, not the one you looked at.**
+`FontFaceImpl::SetStatus` consults `IsFontAllowed` with no `AutoFontListContext`,
+so it answers for the launch OS in every context. This was dismissed as
+unreachable after checking only `FontFace::Load()` — which the fork rewrites to
+resolve immediately, so it genuinely is safe. But CSS `@font-face` rules reach
+`SetStatus` through `FontFaceSet::InsertRuleFontFace` during style flush, which
+is *not* wrapped (only `Check` and `Add` are). Enumerate the callers before
+declaring a path dead; "I checked the obvious one" is not a reachability proof.
+
+**3. A guard only answers the question it was asked.**
+The #44 guard was genuinely well built — real tripwires, verified it could go
+red, 16/16 green. It still could not see either bug above, for two structural
+reasons: it runs on **Linux CI**, where `bundle/fontconfig/linux/fonts.conf`
+excludes host fonts so the host-leak is vacuous there; and it probes by **family
+name**, so it never exercises codepoint fallback (`SystemFindFontForChar` /
+`GlobalFontFallback`), which no patch gates. When a spoof is host- or
+platform-sensitive, a Linux-only measurement is not evidence about Windows or
+macOS. State what a guard cannot see, next to what it proves.
+
+**Font read paths known to be ungated** (as of the #44 review; check before
+assuming a font change is complete): `SystemFindFontForChar` /
+`GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
+worker + `OffscreenCanvas` (`GetDocument()` is null off-main-thread, so the
+context id falls to 0); `LookupLocalFont` / `LookupInFaceNameLists` (matched by
+full/PostScript name, not family key).
 
 ## Constraints when editing this repo
 
