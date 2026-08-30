@@ -50,12 +50,47 @@ diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
 index 56e579eb33..5a679f75ba 100644
 --- a/layout/style/FontFace.cpp
 +++ b/layout/style/FontFace.cpp
-@@ -239,7 +239,16 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
+@@ -17,6 +17,10 @@
+ #include "mozilla/dom/FontFaceBinding.h"
+ #include "mozilla/dom/FontFaceImpl.h"
+ #include "mozilla/dom/FontFaceSet.h"
++#include "mozilla/dom/BrowsingContext.h"
++#include "mozilla/dom/FontListManager.h"
++#include "nsIGlobalObject.h"
++#include "nsPIDOMWindow.h"
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/TypedArray.h"
+ #include "mozilla/dom/UnionTypes.h"
+@@ -239,7 +243,40 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
    mImpl->SetSizeAdjust(aValue, aRv);
  }
  
 -FontFaceLoadStatus FontFace::Status() { return mImpl->Status(); }
++// Camoufox: the user context this FontFace belongs to, or 0 when it has no
++// inner window (a worker global, or a detached document). Derived exactly the
++// way FontFaceSet.cpp derives it for its own entry points, and the way
++// nsGlobalWindowInner::SetFontList() keyed the list when it stored it.
++static uint32_t CamouFontListContextId(nsIGlobalObject* aGlobal) {
++  if (!aGlobal) {
++    return 0;
++  }
++  nsPIDOMWindowInner* inner = aGlobal->GetAsInnerWindow();
++  if (!inner) {
++    return 0;
++  }
++  BrowsingContext* bc = inner->GetBrowsingContext();
++  return bc ? bc->OriginAttributesRef().mUserContextId : 0;
++}
++
 +FontFaceLoadStatus FontFace::Status() {
++  // Nothing scopes a context for a bare FontFace -- one the page never handed
++  // to a FontFaceSet -- so IsFontAllowed() fell back to the launch-level
++  // "fonts" key here in every context. Under a Windows launch a macOS context
++  // reported 'loaded' for Segoe UI and 'error' for Helvetica Neue while canvas
++  // text measurement in that same context said the exact opposite (#44).
++  AutoFontListContext autoFontListCtx(
++      CamouFontListContextId(GetParentObject()));
++
 +  nsAutoCString fontFamily;
 +  GetFamily(fontFamily);
 +
@@ -68,11 +103,16 @@ index 56e579eb33..5a679f75ba 100644
  
  Promise* FontFace::Load(ErrorResult& aRv) {
    EnsurePromise();
-@@ -249,7 +258,17 @@ Promise* FontFace::Load(ErrorResult& aRv) {
+@@ -249,7 +286,22 @@ Promise* FontFace::Load(ErrorResult& aRv) {
      return nullptr;
    }
  
 -  mImpl->Load();
++  // Load() consults IsFontAllowed() too, so it needs the same context in
++  // scope as the Status() getter above (#44).
++  AutoFontListContext autoFontListCtx(
++      CamouFontListContextId(GetParentObject()));
++
 +  nsAutoCString fontFamily;
 +  GetFamily(fontFamily);
 +

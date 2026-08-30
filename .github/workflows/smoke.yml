@@ -351,6 +351,12 @@ jobs:
           #       FontFaceSet::Check, versus
           #       gfxPlatformFontList::FindAndAddFamiliesLocked -- so only both
           #       being right means the context is coherent.
+          #   (d) a BARE FontFace agrees too: `new FontFace(f, 'local(f)').status`
+          #       read straight off the object, never added to document.fonts.
+          #       (c) only covers the read paths that go THROUGH a FontFaceSet
+          #       entry point, which is where the AutoFontListContext lives; a
+          #       bare FontFace has no such entry point above it, so
+          #       FontFace::Status() ran with no context in scope at all.
           #
           # Marker families are DERIVED as set(os) - set(other) - set(other).
           # 83 of the 815 bundled entries appear in two or more per-OS lists
@@ -395,14 +401,21 @@ jobs:
             const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
             const w = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
             const absentW = w('__CamouAbsentRef__0001');
-            const measure = {}, fontfaces = {};
+            const measure = {}, fontfaces = {}, status = {};
             for (const f of families) measure[f] = (w(f) !== absentW);
             measure['__impossible__'] = (w('__NoSuchFamily__12345') !== absentW);
+            // Bare FontFace objects, read BEFORE anything is handed to
+            // document.fonts: no FontFaceSet entry point sits above this read,
+            // so nothing but FontFace::Status() itself can scope the context.
+            const bare = (f) => new FontFace(f, 'local("' + f + '")').status;
+            for (const f of families) status[f] = bare(f);
+            status['__impossible__'] = bare('__NoSuchFamily__12345');
             for (const f of families) {
               document.fonts.add(new FontFace(f, 'local("' + f + '")'));
               fontfaces[f] = document.fonts.check('12px "' + f + '"');
             }
-            return {measure: measure, fontfaces: fontfaces, absentWidth: absentW};
+            return {measure: measure, fontfaces: fontfaces, status: status,
+                    absentWidth: absentW};
           }"""
 
           def probe(page):
@@ -432,6 +445,7 @@ jobs:
           for label, r in seen:
               print(f"  [{label}] measure       {r['measure']}")
               print(f"  [{label}] document.fonts {r['fontfaces']}")
+              print(f"  [{label}] FontFace.status {r['status']}")
 
           # No signal at all is a failure, not a pass.
           for label, r in seen:
@@ -469,6 +483,33 @@ jobs:
                       f"{label}: document.fonts says {r['fontfaces'][f]} for {f!r} but text "
                       f"measurement says {r['measure'][f]} -- the two font read paths "
                       "disagree, so the context is not coherent")
+
+          # (d) a bare FontFace answers for the same context as measurement.
+          # FontFace::Status() and FontFace::Load() consult IsFontAllowed() with
+          # no AutoFontListContext in scope, so they read the launch-level
+          # `fonts` key in EVERY context. Measured on run 33260827044, before
+          # the fix: a mac context under this exact Windows launch reported
+          # 'loaded' for Segoe UI and 'error' for Helvetica Neue while canvas
+          # measurement in that same context said the opposite. Wrong-but-
+          # consistent is one tell; two surfaces contradicting each other hands
+          # a detector a boolean in two lines of JS.
+          for label, r in seen:
+              assert r["status"]["__impossible__"] == "error", (
+                  f"{label}: a bare FontFace for an impossible family reports "
+                  f"{r['status']['__impossible__']!r} -- .status can no longer tell a hit "
+                  "from a miss, so this arm is measuring nothing")
+              assert any(r["status"][f] == "loaded" for f in PROBES), (
+                  f"{label}: not one bundled family is 'loaded' on a bare FontFace -- the "
+                  ".status arm measured nothing")
+              for f in PROBES:
+                  assert (r["status"][f] == "loaded") == r["measure"][f], (
+                      f"{label}: new FontFace({f!r}, 'local(...)').status is "
+                      f"{r['status'][f]!r} but text measurement says {r['measure'][f]} -- "
+                      "FontFace::Status() is answering for a different context than "
+                      "measurement")
+          assert mac["status"] != win["status"], (
+              "the mac and win contexts report identical FontFace.status -- .status is not "
+              "per-context at all")
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
