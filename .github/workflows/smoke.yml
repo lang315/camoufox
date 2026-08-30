@@ -342,11 +342,19 @@ jobs:
 
           # Both default to true, so false is a value the page cannot produce
           # on its own for this request.
+          # antialias is spoofed the OTHER way on purpose. A driver may DECLINE
+          # MSAA (reporting false when the page asked true), but it cannot
+          # spuriously ENABLE it, so "page asked false, got true" can only come
+          # from the spoof -- on any runner, whatever the GL stack does. Asking
+          # true and spoofing false would have gone vacuous the day a runner
+          # downgraded naturally. Measured on this CI (run 33289500088): with no
+          # config at all, antialias comes back true, so the old direction was
+          # load-bearing today but only by luck of the driver.
           CFG = json.dumps({"webGl:contextAttributes": {
-              "premultipliedAlpha": False, "antialias": False}})
+              "premultipliedAlpha": False, "antialias": True}})
           READ = """() => {
             const c = document.createElement('canvas');
-            const gl = c.getContext('webgl', {premultipliedAlpha: true, antialias: true});
+            const gl = c.getContext('webgl', {premultipliedAlpha: true, antialias: false});
             if (!gl) return '(no webgl)';
             const a = gl.getContextAttributes();
             return JSON.stringify({pma: a.premultipliedAlpha, aa: a.antialias});
@@ -365,7 +373,9 @@ jobs:
           print(f"getContextAttributes -> {got}")
           assert got != "(no webgl)", "no GL context -- the guard tested nothing"
           a = json.loads(got)
-          assert a["aa"] is False, f"antialias override lost: {a}"
+          assert a["aa"] is True, (
+              f"antialias override lost: {a} -- the page asked for antialias:false and a\n"
+              "driver cannot turn MSAA on by itself, so true here can only come from the spoof")
           assert a["pma"] is False, (
               f"premultipliedAlpha override never reached the page: {a} "
               "(antialias did, so the key string is wrong, not the mechanism)")
