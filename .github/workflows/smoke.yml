@@ -322,6 +322,69 @@ jobs:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
 
+      - name: "webGl:contextAttributes reach the page (premultipliedAlpha guard)"
+        timeout-minutes: 10
+        run: |
+          # MBoolVal() passes a BARE field name to MaskConfig::GetAttribute,
+          # which prepends the domain itself. premultipliedAlpha passed the
+          # domain-qualified string instead, so the lookup became
+          # data["webGl:contextAttributes"]["webGl:contextAttributes.premultipliedAlpha"]
+          # -- a key that cannot exist. GetNested returns nullopt on a miss
+          # with no warning, so MBoolVal fell back to the page's own real
+          # value and the override was silently inert. Nothing tested this.
+          #
+          # antialias is asserted alongside it on purpose: it pins that the
+          # mechanism works, so a failure here separates "this one key is
+          # wrong" from "contextAttributes stopped applying entirely".
+          pip install --quiet 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY2'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          # Both default to true, so false is a value the page cannot produce
+          # on its own for this request.
+          # antialias is spoofed the OTHER way on purpose. A driver may DECLINE
+          # MSAA (reporting false when the page asked true), but it cannot
+          # spuriously ENABLE it, so "page asked false, got true" can only come
+          # from the spoof -- on any runner, whatever the GL stack does. Asking
+          # true and spoofing false would have gone vacuous the day a runner
+          # downgraded naturally. Measured on this CI (run 33289500088): with no
+          # config at all, antialias comes back true, so the old direction was
+          # load-bearing today but only by luck of the driver.
+          CFG = json.dumps({"webGl:contextAttributes": {
+              "premultipliedAlpha": False, "antialias": True}})
+          READ = """() => {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl', {premultipliedAlpha: true, antialias: false});
+            if (!gl) return '(no webgl)';
+            const a = gl.getContextAttributes();
+            return JSON.stringify({pma: a.premultipliedAlpha, aa: a.antialias});
+          }"""
+
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
+                                    headless=False,
+                                    firefox_user_prefs={"webgl.force-enabled": True},
+                                    env={**os.environ, "CAMOU_CONFIG": CFG})
+              page = b.new_page()
+              page.goto("data:text/html,<h1>ca</h1>")
+              got = page.evaluate(READ)
+              b.close()
+
+          print(f"getContextAttributes -> {got}")
+          assert got != "(no webgl)", "no GL context -- the guard tested nothing"
+          a = json.loads(got)
+          assert a["aa"] is True, (
+              f"antialias override lost: {a} -- the page asked for antialias:false and a\n"
+              "driver cannot turn MSAA on by itself, so true here can only come from the spoof")
+          assert a["pma"] is False, (
+              f"premultipliedAlpha override never reached the page: {a} "
+              "(antialias did, so the key string is wrong, not the mechanism)")
+          PY2
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |
