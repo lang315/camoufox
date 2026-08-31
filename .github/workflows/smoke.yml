@@ -586,6 +586,242 @@ jobs:
           assert all(win["measure"][f] for f in WIN_ONLY), f"win context: {win['measure']}"
           assert not any(win["measure"][f] for f in MAC_ONLY), (
               f"the win context resolves macOS-only families: {win['measure']}")
+          # -----------------------------------------------------------
+          # Step 0: the two gates Task 1 added inside gfxPlatformFontList
+          # (GetFontList, GetFontFamilyList) have no arm reaching either.
+          # Reachability, checked against the FIREFOX_152_0_4_RELEASE tag
+          # (raw.githubusercontent.com/mozilla-firefox/firefox and
+          # searchfox.org/mozilla-central, symbol layout unchanged for
+          # this window):
+          #
+          #   GetFontList -- gfxPlatform::GetFontList() has exactly one
+          #   caller, nsThebesFontEnumerator (gfx/src/
+          #   nsThebesFontEnumerator.cpp:53,119), which implements
+          #   nsIFontEnumerator. Every consumer of that interface --
+          #   browser/components/preferences/config/accessibility.mjs,
+          #   toolkit/content/preferences/Preference.mjs,
+          #   toolkit/mozapps/preferences/fontbuilder.js -- is the
+          #   chrome-privileged about:preferences font-picker UI.
+          #   Instantiating nsIFontEnumerator needs Components.classes,
+          #   which unprivileged page content never has. Chrome-only: no
+          #   page-side probe can reach it. Unmeasured defence-in-depth;
+          #   the gate stays, it is not verified by this guard.
+          #
+          #   GetFontFamilyList -- exactly one caller,
+          #   gfx/thebes/gfxTextRun.cpp:2229, inside
+          #   gfxFontGroup::GetDefaultFont()'s font-of-last-resort loop.
+          #   GetDefaultFont() IS reached from ordinary content text
+          #   shaping -- gfxFontGroup::GetFirstValidFont()'s own last
+          #   resort (gfxTextRun.cpp:2326) and
+          #   gfxFontGroup::FindFontForChar()'s fallback chain
+          #   (gfxTextRun.cpp:3430) both call it -- so this one is not
+          #   chrome-only the way GetFontList is. But its interesting
+          #   branch -- "if CamouIsFontAllowed() filtered the list down
+          #   to nothing, hand back the unfiltered one" -- only opens
+          #   when a context's ENTIRE per-context family set is empty,
+          #   one step before gfxTextRun.cpp's own next fallback
+          #   (pfl->GetDefaultFontEntry(), a separate, non-per-context
+          #   call) and two steps before a MOZ_CRASH
+          #   ("unable to find a usable font"). Every context this guard
+          #   builds installs a real, non-empty OS font list, so normal
+          #   probes never approach that edge, and deliberately emptying
+          #   a context's list to force it risks landing on the
+          #   MOZ_CRASH side of that line inside a CI browser process
+          #   rather than the unfiltered-fallback side. No arm is added
+          #   for it here: both gates are unmeasured defence-in-depth,
+          #   like GetFontList. Stated plainly: the last-resort branch
+          #   deliberately returns every bundled OS's families, unfiltered,
+          #   whenever filtering has emptied a context's set -- a hole by
+          #   construction, not a bug Task 2 introduces or closes.
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arms (e)-(h): the four read paths #44's H2 review found
+          # ungated. A second bare launch (no `fonts` key, same as (b))
+          # -- the mac/win contexts above already closed, so this
+          # launch and its own mac/win contexts are this block's only
+          # state, kept apart from (a)-(d) so this addition never has
+          # to touch a line above it.
+          # -----------------------------------------------------------
+          JS_EFGH = """async () => {
+            const c = document.createElement('canvas').getContext('2d');
+
+            // (e) CSS @font-face via a stylesheet rule, not a JS
+            // FontFace object -- FontFaceSet::Check/::Add scope an
+            // AutoFontListContext; InsertRuleFontFace (what a
+            // stylesheet rule goes through during style flush) does
+            // not. Both families are real marker families -- an
+            // invented name reports 'error' in every context and would
+            // never disagree with anything.
+            const eSheet = document.createElement('style');
+            eSheet.textContent =
+              '@font-face { font-family: "Segoe UI"; src: local("Segoe UI"); }' +
+              '@font-face { font-family: "Helvetica Neue"; src: local("Helvetica Neue"); }';
+            document.head.appendChild(eSheet);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+            const eStatus = {};
+            for (const f of document.fonts) { eStatus[f.family] = f.status; }
+
+            const s72 = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const absent72 = (() => {
+              c.font = '72px "__CamouAbsentRef2__9999", monospace';
+              return c.measureText(s72).width;
+            })();
+            const eMeasure = {};
+            for (const f of ['Segoe UI', 'Helvetica Neue']) {
+              c.font = '72px "' + f + '", monospace';
+              eMeasure[f] = c.measureText(s72).width !== absent72;
+            }
+
+            // (f) codepoint fallback: neither context's non-CJK
+            // families cover U+6F22, so this forces
+            // SystemFindFontForChar / GlobalFontFallback, which
+            // nothing gates.
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const fWidth = c.measureText('\u6f22').width;
+
+            // (g) worker / OffscreenCanvas: GetDocument() is null off
+            // the main thread, so the context id falls to 0 there and
+            // the per-context list is never consulted.
+            const s48 = 'mmmmmmmmmmlli';
+            const baseline48 = (() => {
+              c.font = '48px monospace';
+              return c.measureText(s48).width;
+            })();
+            const gMain = {};
+            for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
+              c.font = '48px "' + f + '", monospace';
+              gMain[f] = c.measureText(s48).width;
+            }
+            const workerSrc = `onmessage = () => {
+              const c = new OffscreenCanvas(8, 8).getContext('2d');
+              const out = {};
+              for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
+                c.font = '48px "' + f + '", monospace';
+                out[f] = c.measureText('mmmmmmmmmmlli').width;
+              }
+              postMessage(out);
+            }`;
+            const gWorker = await new Promise((resolve) => {
+              const w = new Worker(URL.createObjectURL(
+                new Blob([workerSrc], {type: 'text/javascript'})));
+              w.onmessage = (ev) => resolve(ev.data);
+              w.postMessage(null);
+            });
+
+            // (h) face-name lookup: only reached when a local()
+            // @font-face src is actually USED to render text
+            // (gfxUserFontSet::FindPlatformFont at font-matching time)
+            // -- never via FontFace.load(), which font-hijacker.patch
+            // answers purely from IsFontAllowed() without ever calling
+            // mImpl->Load(). Full-name and PostScript-name forms,
+            // printed regardless of verdict -- Task 6 designs the gate
+            // from what these print.
+            const hSheet = document.createElement('style');
+            hSheet.textContent =
+              '@font-face { font-family: "ProbeH_full"; src: local("Segoe UI"); }' +
+              '@font-face { font-family: "ProbeH_ps"; src: local("SegoeUI"); }';
+            document.head.appendChild(hSheet);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+            c.font = '48px "ProbeH_full", monospace';
+            const hFull = c.measureText(s48).width;
+            c.font = '48px "ProbeH_ps", monospace';
+            const hPs = c.measureText(s48).width;
+
+            return {eStatus: eStatus, eMeasure: eMeasure, fWidth: fWidth,
+                    gMain: gMain, gWorker: gWorker, baseline48: baseline48,
+                    hFull: hFull, hPs: hPs};
+          }"""
+
+          def probe_efgh(page):
+              page.goto("data:text/html,<h1>f</h1>")
+              return page.evaluate(JS_EFGH)
+
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              efgh = {}
+              for name in ("mac", "win"):
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS[name])))
+                  efgh[name] = probe_efgh(ctx.new_page())
+                  ctx.close()
+              b.close()
+
+          for label, r in (("mac", efgh["mac"]), ("win", efgh["win"])):
+              print(f"  [{label} / arm e] document.fonts status {r['eStatus']}")
+              print(f"  [{label} / arm e] measureText resolves   {r['eMeasure']}")
+              print(f"  [{label} / arm f] CJK fallback width      {r['fWidth']}")
+              print(f"  [{label} / arm g] main thread widths      {r['gMain']}")
+              print(f"  [{label} / arm g] worker widths            {r['gWorker']} (baseline {r['baseline48']})")
+              print(f"  [{label} / arm h] local('Segoe UI')={r['hFull']} local('SegoeUI')={r['hPs']} baseline={r['baseline48']}")
+              assert r["baseline48"] > 0, f"{label}: monospace baseline measured 0 -- nothing ran"
+              assert set(r["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
+                  f"{label}: worker returned {r['gWorker']} -- did the Worker even run?")
+
+          # (e) CSS @font-face: expect NO disagreement between
+          # document.fonts and measurement in a correctly-gated world.
+          # Pre-gate, InsertRuleFontFace runs with no context in scope,
+          # so IsFontAllowed() falls through to allow-all and a family
+          # measurement says this context doesn't have still reports
+          # 'loaded'. That disagreement is the red.
+          e_failures = []
+          for label, r in (("mac", efgh["mac"]), ("win", efgh["win"])):
+              for f in ("Segoe UI", "Helvetica Neue"):
+                  expect = "loaded" if r["eMeasure"][f] else "error"
+                  got = r["eStatus"].get(f)
+                  if got != expect:
+                      e_failures.append(
+                          f"{label}/{f}: document.fonts status is {got!r} but "
+                          f"measureText says {'loaded' if r['eMeasure'][f] else 'error'}")
+
+          # (f) codepoint fallback: expect the mac and win contexts to
+          # measure DIFFERENT widths in a correctly-gated world --
+          # PingFang HK and MS Gothic cover U+6F22 with different
+          # metrics. Ungated, fallback ignores context entirely and
+          # both resolve the same font -- that sameness is the red.
+          f_mac, f_win = efgh["mac"]["fWidth"], efgh["win"]["fWidth"]
+          assert f_mac > 0 and f_win > 0, (
+              f"arm (f): CJK fallback measured 0 in at least one context -- "
+              f"nothing rendered, no signal. mac={f_mac} win={f_win}")
+
+          # (g) worker/OffscreenCanvas: expect the worker's answer to
+          # match the main thread's for every family in a correctly-
+          # gated world. GetDocument() is null off the main thread, so
+          # the context id falls to 0 there and the per-context list is
+          # never consulted -- that disagreement is the red.
+          g_failures = []
+          for label, r in (("mac", efgh["mac"]), ("win", efgh["win"])):
+              for f in ("Segoe UI", "Helvetica Neue", "Tahoma"):
+                  if r["gMain"][f] != r["gWorker"][f]:
+                      g_failures.append(
+                          f"{label}/{f}: main={r['gMain'][f]} worker={r['gWorker'][f]}")
+
+          tripwires = []
+          if e_failures:
+              tripwires.append(f"(e) CSS @font-face -- doc.fonts vs measureText disagree: {e_failures}")
+          if f_mac == f_win:
+              tripwires.append(f"(f) codepoint fallback ignores context: mac={f_mac} win={f_win}")
+          if g_failures:
+              tripwires.append(f"(g) worker/OffscreenCanvas vs main thread disagree: {g_failures}")
+
+          print("=== arms (e)-(h) summary ===")
+          print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
+          print(f"  (f) codepoint fallback:     {'RED (expected)' if f_mac == f_win else 'GREEN'} -- mac={f_mac} win={f_win}")
+          print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
+          print("  (h) face-name lookup: measurement only, no verdict enforced here "
+                "(Task 6 reads the gate from this data):")
+          print(f"      mac: local('Segoe UI')={efgh['mac']['hFull']} local('SegoeUI')={efgh['mac']['hPs']} baseline={efgh['mac']['baseline48']}")
+          print(f"      win: local('Segoe UI')={efgh['win']['hFull']} local('SegoeUI')={efgh['win']['hPs']} baseline={efgh['win']['baseline48']}")
+
+          assert not tripwires, (
+              "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
+              "each close one of these):\n" + "\n".join(tripwires))
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
