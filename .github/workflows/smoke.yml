@@ -381,6 +381,9 @@ jobs:
               f"premultipliedAlpha override never reached the page: {a} "
               "(antialias did, so the key string is wrong, not the mechanism)")
           PY2
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
 
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
         timeout-minutes: 10
