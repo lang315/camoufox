@@ -673,24 +673,34 @@ jobs:
             // FontFace object -- FontFaceSet::Check/::Add scope an
             // AutoFontListContext; InsertRuleFontFace (what a
             // stylesheet rule goes through during style flush) does
-            // not. Both families are real marker families -- an
+            // not. Both discriminating families are real markers -- an
             // invented name reports 'error' in every context and would
-            // never disagree with anything.
+            // never disagree with anything. A third rule, "Tahoma", is
+            // a positive control: it is in BOTH FONTS["mac"] and
+            // FONTS["win"], so a genuinely working readback must never
+            // report 'error' for it in either context -- unlike the
+            // other two, its redness would mean the readback itself is
+            // broken, not that the gate is missing, which is the wrong
+            // kind of red for a tripwire whose job is to tell Task 3
+            // what to fix.
             const sheet = document.createElement('style');
             sheet.textContent =
               '@font-face { font-family: "Segoe UI"; src: local("Segoe UI"); }' +
-              '@font-face { font-family: "Helvetica Neue"; src: local("Helvetica Neue"); }';
+              '@font-face { font-family: "Helvetica Neue"; src: local("Helvetica Neue"); }' +
+              '@font-face { font-family: "Tahoma"; src: local("Tahoma"); }';
             document.head.appendChild(sheet);
             document.body.offsetHeight;
             await document.fonts.ready;
             const out = {};
+            const rawFamilies = [];
             for (const f of document.fonts) {
+              rawFamilies.push(f.family);
               // FontFace.family serializes as a CSS string, quotes
               // included -- strip them or every lookup below misses.
               const fam = f.family.replace(/^["\']|["\']$/g, '');
               out[fam] = f.status;
             }
-            return out;
+            return {status: out, rawFamilies: rawFamilies};
           }"""
 
           JS_F = """() => {
@@ -713,22 +723,25 @@ jobs:
             // thread reading -- printed here for the record, but see
             // the design note above on why it cannot be trusted as a
             // baseline on its own.
-            const c = document.createElement('canvas').getContext('2d');
-            const s48 = 'mmmmmmmmmmlli';
-            const baseline48 = (() => {
-              c.font = '48px monospace';
-              return c.measureText(s48).width;
-            })();
-            const gMain = {};
-            for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
-              c.font = '48px "' + f + '", monospace';
-              gMain[f] = c.measureText(s48).width;
-            }
-            // The worker reports its own identity alongside the widths --
-            // self.constructor.name and typeof document -- so a silent
-            // fallback to a main-thread measurement (this OffscreenCanvas
-            // is created INSIDE the worker, never transferred in from the
-            // page) fails loudly instead of scoring a vacuous green.
+            //
+            // The worker is spawned and awaited FIRST, before this
+            // page's main thread has touched any of these families at
+            // all -- if Gecko memoizes a (family, context) resolution
+            // anywhere below the per-call IsFontAllowed check, a
+            // worker whose own context propagation were genuinely
+            // broken could otherwise read a cache entry the main
+            // thread's correctly-gated lookup had just warmed, and
+            // produce this exact symmetric per-context-correct data
+            // for the wrong reason. Doing gMain second removes that
+            // path entirely: nothing on this page has resolved any of
+            // these families before the worker answers.
+            //
+            // The worker reports its own identity alongside the widths
+            // -- self.constructor.name and typeof document -- so a
+            // silent fallback to a main-thread measurement (this
+            // OffscreenCanvas is created INSIDE the worker, never
+            // transferred in from the page) fails loudly instead of
+            // scoring a vacuous green.
             const workerSrc = `onmessage = () => {
               const c = new OffscreenCanvas(8, 8).getContext('2d');
               const widths = {};
@@ -748,6 +761,20 @@ jobs:
               w.onerror = (ev) => { clearTimeout(timer); reject(new Error('worker error: ' + ev.message)); };
               w.postMessage(null);
             });
+
+            // Only now -- after the worker has already answered -- does
+            // this page's main thread touch any of these families.
+            const c = document.createElement('canvas').getContext('2d');
+            const s48 = 'mmmmmmmmmmlli';
+            const baseline48 = (() => {
+              c.font = '48px monospace';
+              return c.measureText(s48).width;
+            })();
+            const gMain = {};
+            for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
+              c.font = '48px "' + f + '", monospace';
+              gMain[f] = c.measureText(s48).width;
+            }
             return {gMain: gMain, gWorker: gWorker.widths, gWorkerCtor: gWorker.ctor,
                     gWorkerDocType: gWorker.docType, baseline48: baseline48};
           }"""
@@ -805,8 +832,8 @@ jobs:
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
-          print(f"  [mac / arm e] document.fonts status {e['mac']}")
-          print(f"  [win / arm e] document.fonts status {e['win']}")
+          print(f"  [mac / arm e] document.fonts status {e['mac']['status']} raw families {e['mac']['rawFamilies']}")
+          print(f"  [win / arm e] document.fonts status {e['win']['status']} raw families {e['win']['rawFamilies']}")
           print(f"  [mac / arm f] CJK fallback width      {f['mac']}")
           print(f"  [mac2 / arm f] CJK fallback width (dup mac list, own launch) {f['mac2']}")
           print(f"  [win / arm f] CJK fallback width      {f['win']}")
@@ -842,6 +869,28 @@ jobs:
               f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
               f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
 
+          # Non-vacuity floor for arm (e), matching (a)-(d)'s
+          # __impossible__/absentWidth discipline and (f)/(g)'s own
+          # controls: (1) document.fonts is well-formed -- exactly the
+          # 3 rules this page declared, non-empty, real family strings
+          # -- and (2) "Tahoma" (in both FONTS["mac"] and FONTS["win"])
+          # never reports 'error' in either context. Without this, a
+          # malformed readback (e.g. document.fonts empty, or every
+          # entry reporting the same thing regardless of family) would
+          # still trip e_failures below and look identical to a genuine
+          # gating leak -- the wrong kind of red for a tripwire whose
+          # job is to tell Task 3 what to fix.
+          for label in ("mac", "win"):
+              raw = sorted(f.strip('"').strip("'") for f in e[label]["rawFamilies"])
+              assert raw == ["Helvetica Neue", "Segoe UI", "Tahoma"], (
+                  f"arm (e): {label} document.fonts has {raw!r}, not exactly the 3 rules "
+                  "this page declared -- the readback is malformed, not a gating question")
+              assert e[label]["status"].get("Tahoma") != "error", (
+                  f"arm (e): {label} reports 'error' for Tahoma, which is in BOTH "
+                  "FONTS[\"mac\"] and FONTS[\"win\"] and so must never be 'error' in "
+                  "either context -- this is a broken readback, not a per-context gating "
+                  f"leak: {e[label]['status']}")
+
           # (e) CSS @font-face: expect NO disagreement between
           # document.fonts and the arm (b) measurement (mac/win dicts,
           # already validated above) for the same family in the same
@@ -853,7 +902,7 @@ jobs:
           for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
               for fam in ("Segoe UI", "Helvetica Neue"):
                   expect = "loaded" if ground[fam] else "error"
-                  got = e[label].get(fam)
+                  got = e[label]["status"].get(fam)
                   if got != expect:
                       e_failures.append(
                           f"{label}/{fam}: document.fonts status is {got!r} but arm (b) "
