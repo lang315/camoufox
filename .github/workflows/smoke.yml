@@ -638,14 +638,19 @@ jobs:
           # -----------------------------------------------------------
           # Arms (e)-(h): the four read paths #44's H2 review found
           # ungated. A second bare launch (no `fonts` key, same as (b))
-          # -- the mac/win contexts above already closed, so this
-          # launch and its own mac/win contexts are this block's only
-          # state, kept apart from (a)-(d) so this addition never has
-          # to touch a line above it.
+          # -- the mac/win contexts above already closed. Each arm gets
+          # its OWN fresh page (and (f) an extra duplicate-list context)
+          # rather than sharing one page/JS call: a first attempt shared
+          # one page across (e)-(h) and (e)'s @font-face rules for
+          # "Segoe UI"/"Helvetica Neue" silently shadowed (g)'s later
+          # plain c.font lookups for those SAME family names on the SAME
+          # document, making (g) measure the shadowed face instead of
+          # the system family -- verified by re-running (g) alone on an
+          # untouched page and seeing it recover per-context
+          # differentiation. Isolating every arm onto its own page
+          # removes that whole class of cross-arm contamination.
           # -----------------------------------------------------------
-          JS_EFGH = """async () => {
-            const c = document.createElement('canvas').getContext('2d');
-
+          JS_E = """async () => {
             // (e) CSS @font-face via a stylesheet rule, not a JS
             // FontFace object -- FontFaceSet::Check/::Add scope an
             // AutoFontListContext; InsertRuleFontFace (what a
@@ -653,37 +658,39 @@ jobs:
             // not. Both families are real marker families -- an
             // invented name reports 'error' in every context and would
             // never disagree with anything.
-            const eSheet = document.createElement('style');
-            eSheet.textContent =
+            const sheet = document.createElement('style');
+            sheet.textContent =
               '@font-face { font-family: "Segoe UI"; src: local("Segoe UI"); }' +
               '@font-face { font-family: "Helvetica Neue"; src: local("Helvetica Neue"); }';
-            document.head.appendChild(eSheet);
+            document.head.appendChild(sheet);
             document.body.offsetHeight;
             await document.fonts.ready;
-            const eStatus = {};
-            for (const f of document.fonts) { eStatus[f.family] = f.status; }
-
-            const s72 = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
-            const absent72 = (() => {
-              c.font = '72px "__CamouAbsentRef2__9999", monospace';
-              return c.measureText(s72).width;
-            })();
-            const eMeasure = {};
-            for (const f of ['Segoe UI', 'Helvetica Neue']) {
-              c.font = '72px "' + f + '", monospace';
-              eMeasure[f] = c.measureText(s72).width !== absent72;
+            const out = {};
+            for (const f of document.fonts) {
+              // FontFace.family serializes as a CSS string, quotes
+              // included -- strip them or every lookup below misses.
+              const fam = f.family.replace(/^["\']|["\']$/g, '');
+              out[fam] = f.status;
             }
+            return out;
+          }"""
 
+          JS_F = """() => {
             // (f) codepoint fallback: neither context's non-CJK
             // families cover U+6F22, so this forces
             // SystemFindFontForChar / GlobalFontFallback, which
-            // nothing gates.
+            // nothing gates. A bare page, nothing else run on it first
+            // -- see the arm (g) contamination note above.
+            const c = document.createElement('canvas').getContext('2d');
             c.font = '48px "NoSuchFamilyAtAll"';
-            const fWidth = c.measureText('\u6f22').width;
+            return c.measureText('\u6f22').width;
+          }"""
 
+          JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
             // the per-context list is never consulted.
+            const c = document.createElement('canvas').getContext('2d');
             const s48 = 'mmmmmmmmmmlli';
             const baseline48 = (() => {
               c.font = '48px monospace';
@@ -709,7 +716,10 @@ jobs:
               w.onmessage = (ev) => resolve(ev.data);
               w.postMessage(null);
             });
+            return {gMain: gMain, gWorker: gWorker, baseline48: baseline48};
+          }"""
 
+          JS_H = """async () => {
             // (h) face-name lookup: only reached when a local()
             // @font-face src is actually USED to render text
             // (gfxUserFontSet::FindPlatformFont at font-matching time)
@@ -718,77 +728,110 @@ jobs:
             // mImpl->Load(). Full-name and PostScript-name forms,
             // printed regardless of verdict -- Task 6 designs the gate
             // from what these print.
-            const hSheet = document.createElement('style');
-            hSheet.textContent =
+            const sheet = document.createElement('style');
+            sheet.textContent =
               '@font-face { font-family: "ProbeH_full"; src: local("Segoe UI"); }' +
               '@font-face { font-family: "ProbeH_ps"; src: local("SegoeUI"); }';
-            document.head.appendChild(hSheet);
+            document.head.appendChild(sheet);
             document.body.offsetHeight;
             await document.fonts.ready;
+            const c = document.createElement('canvas').getContext('2d');
+            const s48 = 'mmmmmmmmmmlli';
+            c.font = '48px monospace';
+            const baseline = c.measureText(s48).width;
             c.font = '48px "ProbeH_full", monospace';
             const hFull = c.measureText(s48).width;
             c.font = '48px "ProbeH_ps", monospace';
             const hPs = c.measureText(s48).width;
-
-            return {eStatus: eStatus, eMeasure: eMeasure, fWidth: fWidth,
-                    gMain: gMain, gWorker: gWorker, baseline48: baseline48,
-                    hFull: hFull, hPs: hPs};
+            return {hFull: hFull, hPs: hPs, baseline: baseline};
           }"""
 
-          def probe_efgh(page):
+          def run(js, page):
               page.goto("data:text/html,<h1>f</h1>")
-              return page.evaluate(JS_EFGH)
+              return page.evaluate(js)
+
+          def make_ctx(b, fonts_key):
+              ctx = b.new_context()
+              ctx.add_init_script(
+                  'if (typeof window.setFontList === "function") '
+                  'window.setFontList(%s);' % json.dumps(",".join(FONTS[fonts_key])))
+              return ctx
 
           with sync_playwright() as pw:
               b = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
-              efgh = {}
-              for name in ("mac", "win"):
-                  ctx = b.new_context()
-                  ctx.add_init_script(
-                      'if (typeof window.setFontList === "function") '
-                      'window.setFontList(%s);' % json.dumps(",".join(FONTS[name])))
-                  efgh[name] = probe_efgh(ctx.new_page())
-                  ctx.close()
+              ctx_mac = make_ctx(b, "mac")
+              ctx_win = make_ctx(b, "win")
+              # Duplicate mac context, same list as ctx_mac -- arm (f)'s
+              # repeatability check: if the SAME list gives a DIFFERENT
+              # fallback width across two independent contexts, the
+              # width is not a deterministic function of the per-context
+              # list and mac-vs-win comparisons prove nothing.
+              ctx_mac2 = make_ctx(b, "mac")
+
+              e = {"mac": run(JS_E, ctx_mac.new_page()), "win": run(JS_E, ctx_win.new_page())}
+              f = {"mac": run(JS_F, ctx_mac.new_page()), "win": run(JS_F, ctx_win.new_page()),
+                   "mac2": run(JS_F, ctx_mac2.new_page())}
+              g = {"mac": run(JS_G, ctx_mac.new_page()), "win": run(JS_G, ctx_win.new_page())}
+              h = {"mac": run(JS_H, ctx_mac.new_page()), "win": run(JS_H, ctx_win.new_page())}
+
+              ctx_mac.close()
+              ctx_win.close()
+              ctx_mac2.close()
               b.close()
 
-          for label, r in (("mac", efgh["mac"]), ("win", efgh["win"])):
-              print(f"  [{label} / arm e] document.fonts status {r['eStatus']}")
-              print(f"  [{label} / arm e] measureText resolves   {r['eMeasure']}")
-              print(f"  [{label} / arm f] CJK fallback width      {r['fWidth']}")
-              print(f"  [{label} / arm g] main thread widths      {r['gMain']}")
-              print(f"  [{label} / arm g] worker widths            {r['gWorker']} (baseline {r['baseline48']})")
-              print(f"  [{label} / arm h] local('Segoe UI')={r['hFull']} local('SegoeUI')={r['hPs']} baseline={r['baseline48']}")
-              assert r["baseline48"] > 0, f"{label}: monospace baseline measured 0 -- nothing ran"
-              assert set(r["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
-                  f"{label}: worker returned {r['gWorker']} -- did the Worker even run?")
+          print(f"  [mac / arm e] document.fonts status {e['mac']}")
+          print(f"  [win / arm e] document.fonts status {e['win']}")
+          print(f"  [mac / arm f] CJK fallback width      {f['mac']}")
+          print(f"  [mac2 / arm f] CJK fallback width (dup mac list) {f['mac2']}")
+          print(f"  [win / arm f] CJK fallback width      {f['win']}")
+          print(f"  [mac / arm g] main thread widths {g['mac']['gMain']}")
+          print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
+          print(f"  [win / arm g] main thread widths {g['win']['gMain']}")
+          print(f"  [win / arm g] worker widths      {g['win']['gWorker']} (baseline {g['win']['baseline48']})")
+          print(f"  [mac / arm h] local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
+          print(f"  [win / arm h] local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
+
+          assert g["mac"]["baseline48"] > 0 and g["win"]["baseline48"] > 0, (
+              "arm (g): monospace baseline measured 0 -- nothing ran")
+          assert set(g["mac"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
+              f"arm (g): mac worker returned {g['mac']['gWorker']} -- did the Worker even run?")
+          assert set(g["win"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
+              f"arm (g): win worker returned {g['win']['gWorker']} -- did the Worker even run?")
+          assert f["mac"] > 0 and f["win"] > 0 and f["mac2"] > 0, (
+              f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
+              f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
 
           # (e) CSS @font-face: expect NO disagreement between
-          # document.fonts and measurement in a correctly-gated world.
-          # Pre-gate, InsertRuleFontFace runs with no context in scope,
-          # so IsFontAllowed() falls through to allow-all and a family
-          # measurement says this context doesn't have still reports
-          # 'loaded'. That disagreement is the red.
+          # document.fonts and the arm (b) measurement (mac/win dicts,
+          # already validated above) for the same family in the same
+          # context. Pre-gate, InsertRuleFontFace runs with no context
+          # in scope, so IsFontAllowed() falls through to allow-all and
+          # a family arm (b) says this context doesn't have still
+          # reports 'loaded'. That disagreement is the red.
           e_failures = []
-          for label, r in (("mac", efgh["mac"]), ("win", efgh["win"])):
-              for f in ("Segoe UI", "Helvetica Neue"):
-                  expect = "loaded" if r["eMeasure"][f] else "error"
-                  got = r["eStatus"].get(f)
+          for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
+              for fam in ("Segoe UI", "Helvetica Neue"):
+                  expect = "loaded" if ground[fam] else "error"
+                  got = e[label].get(fam)
                   if got != expect:
                       e_failures.append(
-                          f"{label}/{f}: document.fonts status is {got!r} but "
-                          f"measureText says {'loaded' if r['eMeasure'][f] else 'error'}")
+                          f"{label}/{fam}: document.fonts status is {got!r} but arm (b) "
+                          f"measurement says {'loaded' if ground[fam] else 'error'}")
 
           # (f) codepoint fallback: expect the mac and win contexts to
           # measure DIFFERENT widths in a correctly-gated world --
           # PingFang HK and MS Gothic cover U+6F22 with different
           # metrics. Ungated, fallback ignores context entirely and
           # both resolve the same font -- that sameness is the red.
-          f_mac, f_win = efgh["mac"]["fWidth"], efgh["win"]["fWidth"]
-          assert f_mac > 0 and f_win > 0, (
-              f"arm (f): CJK fallback measured 0 in at least one context -- "
-              f"nothing rendered, no signal. mac={f_mac} win={f_win}")
+          # Only trust mac-vs-win at all if mac-vs-mac2 (same list,
+          # independent context) agrees -- otherwise the width isn't a
+          # deterministic function of the list and this arm proves
+          # nothing either way.
+          f_repeatable = (f["mac"] == f["mac2"])
+          f_tripwire = f_repeatable and f["mac"] == f["win"]
+          print(f"  [arm f] repeatable (mac == mac2)? {f_repeatable}")
 
           # (g) worker/OffscreenCanvas: expect the worker's answer to
           # match the main thread's for every family in a correctly-
@@ -796,28 +839,36 @@ jobs:
           # the context id falls to 0 there and the per-context list is
           # never consulted -- that disagreement is the red.
           g_failures = []
-          for label, r in (("mac", efgh["mac"]), ("win", efgh["win"])):
-              for f in ("Segoe UI", "Helvetica Neue", "Tahoma"):
-                  if r["gMain"][f] != r["gWorker"][f]:
-                      g_failures.append(
-                          f"{label}/{f}: main={r['gMain'][f]} worker={r['gWorker'][f]}")
+          for label in ("mac", "win"):
+              for fam in ("Segoe UI", "Helvetica Neue", "Tahoma"):
+                  gm, gw = g[label]["gMain"][fam], g[label]["gWorker"][fam]
+                  if gm != gw:
+                      g_failures.append(f"{label}/{fam}: main={gm} worker={gw}")
 
           tripwires = []
           if e_failures:
-              tripwires.append(f"(e) CSS @font-face -- doc.fonts vs measureText disagree: {e_failures}")
-          if f_mac == f_win:
-              tripwires.append(f"(f) codepoint fallback ignores context: mac={f_mac} win={f_win}")
+              tripwires.append(f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: {e_failures}")
+          if f_tripwire:
+              tripwires.append(
+                  f"(f) codepoint fallback ignores context (repeatable): mac={f['mac']} "
+                  f"mac2={f['mac2']} win={f['win']}")
           if g_failures:
               tripwires.append(f"(g) worker/OffscreenCanvas vs main thread disagree: {g_failures}")
 
           print("=== arms (e)-(h) summary ===")
           print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
-          print(f"  (f) codepoint fallback:     {'RED (expected)' if f_mac == f_win else 'GREEN'} -- mac={f_mac} win={f_win}")
+          if not f_repeatable:
+              print(f"  (f) codepoint fallback:     INCONCLUSIVE -- mac != mac2 on the same font "
+                    f"list ({f['mac']} vs {f['mac2']}); width is not a deterministic function of "
+                    f"the list, mac-vs-win proves nothing. Needs a different measurement, not "
+                    f"scored here.")
+          else:
+              print(f"  (f) codepoint fallback:     {'RED (expected)' if f_tripwire else 'GREEN (repeatable)'} -- mac={f['mac']} mac2={f['mac2']} win={f['win']}")
           print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
           print("  (h) face-name lookup: measurement only, no verdict enforced here "
                 "(Task 6 reads the gate from this data):")
-          print(f"      mac: local('Segoe UI')={efgh['mac']['hFull']} local('SegoeUI')={efgh['mac']['hPs']} baseline={efgh['mac']['baseline48']}")
-          print(f"      win: local('Segoe UI')={efgh['win']['hFull']} local('SegoeUI')={efgh['win']['hPs']} baseline={efgh['win']['baseline48']}")
+          print(f"      mac: local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
+          print(f"      win: local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
 
           assert not tripwires, (
               "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
