@@ -637,18 +637,36 @@ jobs:
 
           # -----------------------------------------------------------
           # Arms (e)-(h): the four read paths #44's H2 review found
-          # ungated. A second bare launch (no `fonts` key, same as (b))
-          # -- the mac/win contexts above already closed. Each arm gets
-          # its OWN fresh page (and (f) an extra duplicate-list context)
-          # rather than sharing one page/JS call: a first attempt shared
-          # one page across (e)-(h) and (e)'s @font-face rules for
-          # "Segoe UI"/"Helvetica Neue" silently shadowed (g)'s later
-          # plain c.font lookups for those SAME family names on the SAME
-          # document, making (g) measure the shadowed face instead of
-          # the system family -- verified by re-running (g) alone on an
-          # untouched page and seeing it recover per-context
-          # differentiation. Isolating every arm onto its own page
-          # removes that whole class of cross-arm contamination.
+          # ungated. Two design lessons from two earlier attempts, both
+          # against this same run_id, before this shape:
+          #
+          #   1. One page per context, not one context serving four
+          #      pages. Sharing ctx_mac across arms (e)-(h) let (e)'s
+          #      @font-face rules for "Segoe UI"/"Helvetica Neue"
+          #      shadow (g)'s later plain c.font lookups for those same
+          #      names on the SAME document -- (g) measured the
+          #      shadowed face, not the system family.
+          #   2. Even with each arm on its OWN page, the per-context
+          #      list still degraded by the 3rd page opened in a
+          #      context that had ALREADY served earlier arms' pages:
+          #      arm (g)'s own MAIN-THREAD measurement, on ITS page
+          #      alone, came back identical for mac and win (every
+          #      family "present" in both) -- the same allow-everything
+          #      shape arm (b) shows only when a context's per-context
+          #      list is entirely absent. Whatever `setFontList()`
+          #      installs is not proven to survive a context serving
+          #      more than one page. So every arm below gets a FRESH
+          #      context of its own (one `setFontList()` call, one
+          #      page, nothing else ever asked of that context) rather
+          #      than sharing ctx_mac/ctx_win across arms. Arm (f) goes
+          #      one step further and gives every measurement (mac,
+          #      win, and the mac2 repeatability control) its own
+          #      FRESH BROWSER LAUNCH, since a shared-context fix does
+          #      not rule out a process-wide confound (e.g. progressive
+          #      cmap-loading state shared by every context in one
+          #      content process) -- and the first attempt at this
+          #      repeatability control (contexts sharing one launch)
+          #      still measured mac2 != mac on an identical list.
           # -----------------------------------------------------------
           JS_E = """async () => {
             // (e) CSS @font-face via a stylesheet rule, not a JS
@@ -679,8 +697,8 @@ jobs:
             // (f) codepoint fallback: neither context's non-CJK
             // families cover U+6F22, so this forces
             // SystemFindFontForChar / GlobalFontFallback, which
-            // nothing gates. A bare page, nothing else run on it first
-            // -- see the arm (g) contamination note above.
+            // nothing gates. Own browser launch, own context, one
+            // page -- see the design note above.
             const c = document.createElement('canvas').getContext('2d');
             c.font = '48px "NoSuchFamilyAtAll"';
             return c.measureText('\u6f22').width;
@@ -689,7 +707,12 @@ jobs:
           JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
-            // the per-context list is never consulted.
+            // the per-context list is never consulted. Verdict
+            // compares the worker against arm (b)'s trusted per-
+            // context ground truth, not against this page's own main-
+            // thread reading -- printed here for the record, but see
+            // the design note above on why it cannot be trusted as a
+            // baseline on its own.
             const c = document.createElement('canvas').getContext('2d');
             const s48 = 'mmmmmmmmmmlli';
             const baseline48 = (() => {
@@ -746,49 +769,40 @@ jobs:
             return {hFull: hFull, hPs: hPs, baseline: baseline};
           }"""
 
-          def run(js, page):
-              page.goto("data:text/html,<h1>f</h1>")
-              return page.evaluate(js)
+          def one_page(fonts_key, js):
+              # A brand-new launch, a brand-new context, exactly one
+              # page: the strongest isolation available, since sharing
+              # even just a context (never mind a whole launch) across
+              # more than one page was already shown to degrade the
+              # per-context list.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS[fonts_key])))
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>f</h1>")
+                  result = page.evaluate(js)
+                  b.close()
+                  return result
 
-          def make_ctx(b, fonts_key):
-              ctx = b.new_context()
-              ctx.add_init_script(
-                  'if (typeof window.setFontList === "function") '
-                  'window.setFontList(%s);' % json.dumps(",".join(FONTS[fonts_key])))
-              return ctx
-
-          with sync_playwright() as pw:
-              b = pw.firefox.launch(
-                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
-                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
-              ctx_mac = make_ctx(b, "mac")
-              ctx_win = make_ctx(b, "win")
-              # Duplicate mac context, same list as ctx_mac -- arm (f)'s
-              # repeatability check: if the SAME list gives a DIFFERENT
-              # fallback width across two independent contexts, the
-              # width is not a deterministic function of the per-context
-              # list and mac-vs-win comparisons prove nothing.
-              ctx_mac2 = make_ctx(b, "mac")
-
-              e = {"mac": run(JS_E, ctx_mac.new_page()), "win": run(JS_E, ctx_win.new_page())}
-              f = {"mac": run(JS_F, ctx_mac.new_page()), "win": run(JS_F, ctx_win.new_page()),
-                   "mac2": run(JS_F, ctx_mac2.new_page())}
-              g = {"mac": run(JS_G, ctx_mac.new_page()), "win": run(JS_G, ctx_win.new_page())}
-              h = {"mac": run(JS_H, ctx_mac.new_page()), "win": run(JS_H, ctx_win.new_page())}
-
-              ctx_mac.close()
-              ctx_win.close()
-              ctx_mac2.close()
-              b.close()
+          e = {"mac": one_page("mac", JS_E), "win": one_page("win", JS_E)}
+          f = {"mac": one_page("mac", JS_F), "win": one_page("win", JS_F),
+               "mac2": one_page("mac", JS_F)}
+          g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
+          h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
           print(f"  [mac / arm e] document.fonts status {e['mac']}")
           print(f"  [win / arm e] document.fonts status {e['win']}")
           print(f"  [mac / arm f] CJK fallback width      {f['mac']}")
-          print(f"  [mac2 / arm f] CJK fallback width (dup mac list) {f['mac2']}")
+          print(f"  [mac2 / arm f] CJK fallback width (dup mac list, own launch) {f['mac2']}")
           print(f"  [win / arm f] CJK fallback width      {f['win']}")
-          print(f"  [mac / arm g] main thread widths {g['mac']['gMain']}")
+          print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
-          print(f"  [win / arm g] main thread widths {g['win']['gMain']}")
+          print(f"  [win / arm g] main thread widths (this page only, not a trusted baseline) {g['win']['gMain']}")
           print(f"  [win / arm g] worker widths      {g['win']['gWorker']} (baseline {g['win']['baseline48']})")
           print(f"  [mac / arm h] local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
           print(f"  [win / arm h] local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
@@ -825,25 +839,35 @@ jobs:
           # PingFang HK and MS Gothic cover U+6F22 with different
           # metrics. Ungated, fallback ignores context entirely and
           # both resolve the same font -- that sameness is the red.
-          # Only trust mac-vs-win at all if mac-vs-mac2 (same list,
-          # independent context) agrees -- otherwise the width isn't a
-          # deterministic function of the list and this arm proves
-          # nothing either way.
+          # Only trust mac-vs-win at all if mac-vs-mac2 (same list, own
+          # launch) agrees -- otherwise the width isn't a deterministic
+          # function of the list and this arm proves nothing either way.
           f_repeatable = (f["mac"] == f["mac2"])
           f_tripwire = f_repeatable and f["mac"] == f["win"]
-          print(f"  [arm f] repeatable (mac == mac2)? {f_repeatable}")
+          print(f"  [arm f] repeatable (mac == mac2, separate launches)? {f_repeatable}")
 
           # (g) worker/OffscreenCanvas: expect the worker's answer to
-          # match the main thread's for every family in a correctly-
-          # gated world. GetDocument() is null off the main thread, so
-          # the context id falls to 0 there and the per-context list is
-          # never consulted -- that disagreement is the red.
+          # match arm (b)'s trusted per-context ground truth for every
+          # family in a correctly-gated world -- NOT this page's own
+          # main-thread reading, which cannot be trusted as a baseline
+          # (see the design note above). GetDocument() is null off the
+          # main thread, so the context id falls to 0 there and
+          # sLaunchFonts is empty under this bare launch, so
+          # CamouIsFontAllowed falls through to allow-all -- the worker
+          # should see every family regardless of context. That
+          # disagreement with arm (b) is the red. Tahoma is printed for
+          # the record (both contexts should resolve it either way) but
+          # skipped here -- arm (b)'s ground truth only covers
+          # MAC_ONLY/WIN_ONLY, and Tahoma is neither, so it has no
+          # ground-truth entry to compare against.
           g_failures = []
-          for label in ("mac", "win"):
-              for fam in ("Segoe UI", "Helvetica Neue", "Tahoma"):
-                  gm, gw = g[label]["gMain"][fam], g[label]["gWorker"][fam]
-                  if gm != gw:
-                      g_failures.append(f"{label}/{fam}: main={gm} worker={gw}")
+          for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
+              for fam in ("Segoe UI", "Helvetica Neue"):
+                  worker_present = g[label]["gWorker"][fam] != g[label]["baseline48"]
+                  if worker_present != ground[fam]:
+                      g_failures.append(
+                          f"{label}/{fam}: worker {'resolved' if worker_present else 'did not resolve'} "
+                          f"it, arm (b) says this context {'has' if ground[fam] else 'does not have'} it")
 
           tripwires = []
           if e_failures:
@@ -853,15 +877,15 @@ jobs:
                   f"(f) codepoint fallback ignores context (repeatable): mac={f['mac']} "
                   f"mac2={f['mac2']} win={f['win']}")
           if g_failures:
-              tripwires.append(f"(g) worker/OffscreenCanvas vs main thread disagree: {g_failures}")
+              tripwires.append(f"(g) worker vs arm (b) per-context ground truth disagree: {g_failures}")
 
           print("=== arms (e)-(h) summary ===")
           print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
           if not f_repeatable:
               print(f"  (f) codepoint fallback:     INCONCLUSIVE -- mac != mac2 on the same font "
-                    f"list ({f['mac']} vs {f['mac2']}); width is not a deterministic function of "
-                    f"the list, mac-vs-win proves nothing. Needs a different measurement, not "
-                    f"scored here.")
+                    f"list, separate launches ({f['mac']} vs {f['mac2']}); width is not a "
+                    f"deterministic function of the list, mac-vs-win proves nothing. Needs a "
+                    f"different measurement, not scored here.")
           else:
               print(f"  (f) codepoint fallback:     {'RED (expected)' if f_tripwire else 'GREEN (repeatable)'} -- mac={f['mac']} mac2={f['mac2']} win={f['win']}")
           print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
