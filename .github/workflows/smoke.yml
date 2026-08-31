@@ -683,11 +683,29 @@ jobs:
             // broken, not that the gate is missing, which is the wrong
             // kind of red for a tripwire whose job is to tell Task 3
             // what to fix.
+            //
+            // Discriminator for WHICH kind of broken, per code review:
+            // Tahoma's rule is declared as a bare, unquoted CSS
+            // identifier (valid -- it has no space) instead of a
+            // quoted string, unlike Segoe UI/Helvetica Neue which MUST
+            // be quoted (they contain a space). If FontFace.family
+            // serializes it without quotes and its status comes back
+            // correctly gated where the space-containing families do
+            // not, that points hard at InsertRuleFontFace handing a
+            // QUOTED family key to IsFontAllowed(). Separately, Calibri
+            // (win-only, no spaces) is added via
+            // document.fonts.add(new FontFace(...)) rather than a
+            // stylesheet rule -- FontFaceSet::Add DOES get an
+            // AutoFontListContext scope (Task 1's own patch), unlike
+            // InsertRuleFontFace. If THAT path resolves Calibri
+            // correctly per context, the per-context mechanism itself
+            // works and whatever is wrong is specific to the CSS-rule
+            // path's family key, not a missing scope in general.
             const sheet = document.createElement('style');
             sheet.textContent =
               '@font-face { font-family: "Segoe UI"; src: local("Segoe UI"); }' +
               '@font-face { font-family: "Helvetica Neue"; src: local("Helvetica Neue"); }' +
-              '@font-face { font-family: "Tahoma"; src: local("Tahoma"); }';
+              '@font-face { font-family: Tahoma; src: local(Tahoma); }';
             document.head.appendChild(sheet);
             document.body.offsetHeight;
             await document.fonts.ready;
@@ -700,7 +718,13 @@ jobs:
               const fam = f.family.replace(/^["\']|["\']$/g, '');
               out[fam] = f.status;
             }
-            return {status: out, rawFamilies: rawFamilies};
+
+            const jsFace = new FontFace('Calibri', 'local(Calibri)');
+            document.fonts.add(jsFace);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+
+            return {status: out, rawFamilies: rawFamilies, jsFaceStatus: jsFace.status};
           }"""
 
           JS_F = """() => {
@@ -834,6 +858,8 @@ jobs:
 
           print(f"  [mac / arm e] document.fonts status {e['mac']['status']} raw families {e['mac']['rawFamilies']}")
           print(f"  [win / arm e] document.fonts status {e['win']['status']} raw families {e['win']['rawFamilies']}")
+          print(f"  [mac / arm e] document.fonts.add(new FontFace('Calibri', ...)).status = {e['mac']['jsFaceStatus']!r}")
+          print(f"  [win / arm e] document.fonts.add(new FontFace('Calibri', ...)).status = {e['win']['jsFaceStatus']!r}")
           print(f"  [mac / arm f] CJK fallback width      {f['mac']}")
           print(f"  [mac2 / arm f] CJK fallback width (dup mac list, own launch) {f['mac2']}")
           print(f"  [win / arm f] CJK fallback width      {f['win']}")
@@ -869,27 +895,17 @@ jobs:
               f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
               f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
 
-          # Non-vacuity floor for arm (e), matching (a)-(d)'s
-          # __impossible__/absentWidth discipline and (f)/(g)'s own
-          # controls: (1) document.fonts is well-formed -- exactly the
-          # 3 rules this page declared, non-empty, real family strings
-          # -- and (2) "Tahoma" (in both FONTS["mac"] and FONTS["win"])
-          # never reports 'error' in either context. Without this, a
-          # malformed readback (e.g. document.fonts empty, or every
-          # entry reporting the same thing regardless of family) would
-          # still trip e_failures below and look identical to a genuine
-          # gating leak -- the wrong kind of red for a tripwire whose
-          # job is to tell Task 3 what to fix.
+          # Well-formedness floor for arm (e): document.fonts has
+          # exactly the 3 rules this page declared, non-empty, real
+          # family strings. This is a pure "did anything even run" gate
+          # -- kept as an early hard assert, unlike Tahoma's positive
+          # control below, which is itself part of the evidence the
+          # discriminator needs and must not be allowed to mask it.
           for label in ("mac", "win"):
               raw = sorted(f.strip('"').strip("'") for f in e[label]["rawFamilies"])
               assert raw == ["Helvetica Neue", "Segoe UI", "Tahoma"], (
                   f"arm (e): {label} document.fonts has {raw!r}, not exactly the 3 rules "
                   "this page declared -- the readback is malformed, not a gating question")
-              assert e[label]["status"].get("Tahoma") != "error", (
-                  f"arm (e): {label} reports 'error' for Tahoma, which is in BOTH "
-                  "FONTS[\"mac\"] and FONTS[\"win\"] and so must never be 'error' in "
-                  "either context -- this is a broken readback, not a per-context gating "
-                  f"leak: {e[label]['status']}")
 
           # (e) CSS @font-face: expect NO disagreement between
           # document.fonts and the arm (b) measurement (mac/win dicts,
@@ -897,16 +913,70 @@ jobs:
           # context. Pre-gate, InsertRuleFontFace runs with no context
           # in scope, so IsFontAllowed() falls through to allow-all and
           # a family arm (b) says this context doesn't have still
-          # reports 'loaded'. That disagreement is the red.
+          # reports 'loaded'. That disagreement is the red. Tahoma is
+          # included here too, not as a separate early hard-assert like
+          # (a)-(d)'s __impossible__ check -- it is in BOTH
+          # FONTS["mac"] and FONTS["win"] (not from arm (b)'s
+          # PROBES-based measurement, which never covers it), so its
+          # ground truth is hardcoded True/"loaded" for both contexts.
+          # Folding it into e_failures rather than a standalone assert
+          # means a broken Tahoma reading still surfaces as evidence
+          # instead of crashing before the discriminator below runs.
+          e_ground = {
+              "mac": {"Segoe UI": mac["measure"]["Segoe UI"],
+                      "Helvetica Neue": mac["measure"]["Helvetica Neue"], "Tahoma": True},
+              "win": {"Segoe UI": win["measure"]["Segoe UI"],
+                      "Helvetica Neue": win["measure"]["Helvetica Neue"], "Tahoma": True},
+          }
           e_failures = []
-          for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
-              for fam in ("Segoe UI", "Helvetica Neue"):
-                  expect = "loaded" if ground[fam] else "error"
+          for label, ground in e_ground.items():
+              for fam, present in ground.items():
+                  expect = "loaded" if present else "error"
                   got = e[label]["status"].get(fam)
                   if got != expect:
                       e_failures.append(
-                          f"{label}/{fam}: document.fonts status is {got!r} but arm (b) "
-                          f"measurement says {'loaded' if ground[fam] else 'error'}")
+                          f"{label}/{fam}: document.fonts status is {got!r} but expected "
+                          f"{expect!r} ({'arm (b) measurement' if fam != 'Tahoma' else 'Tahoma is in both FONTS[mac] and FONTS[win]'})")
+
+          # Discriminator: does document.fonts.add(new FontFace(...)) --
+          # the ALREADY-SCOPED path -- resolve "Calibri" (win-only)
+          # correctly per context, and does the bare-identifier Tahoma
+          # rule (no quotes needed in its source) resolve correctly,
+          # where the space-containing (always-quoted) Segoe UI /
+          # Helvetica Neue rules do not? The combination tells Task 3
+          # which defect this tripwire is actually reporting.
+          js_face_expect = {"mac": "error", "win": "loaded"}  # Calibri is win-only
+          js_face_correct = all(
+              e[label]["jsFaceStatus"] == js_face_expect[label] for label in ("mac", "win"))
+          tahoma_bare_correct = all(
+              e[label]["status"].get("Tahoma") == "loaded" for label in ("mac", "win"))
+          print(f"  [arm e] document.fonts.add() path correct per context? {js_face_correct}")
+          print(f"  [arm e] bare-identifier Tahoma rule correct per context? {tahoma_bare_correct}")
+          if js_face_correct and tahoma_bare_correct:
+              hypothesis = (
+                  "SUPPORTS the quoting hypothesis: document.fonts.add() resolves Calibri "
+                  "correctly per context AND the bare-identifier Tahoma rule also resolves "
+                  "correctly, while the space-containing (always-quoted) Segoe UI/Helvetica "
+                  "Neue rules do not -- InsertRuleFontFace is handing IsFontAllowed() a "
+                  "QUOTED family key for names that need quoting in CSS, and that mismatch "
+                  "-- not a missing context scope -- is the defect Task 3 should fix.")
+          elif js_face_correct and not tahoma_bare_correct:
+              hypothesis = (
+                  "PARTIALLY supports the CSS-rule-key hypothesis: document.fonts.add() "
+                  "resolves Calibri correctly (the per-context mechanism itself works), but "
+                  "Tahoma still fails even as a bare, unquoted identifier -- so quoting "
+                  "alone does not explain it; something else about InsertRuleFontFace's "
+                  "family key is broken, still specific to the CSS-rule path, not a missing "
+                  "context scope in general (which would predict allow-all/'loaded', not "
+                  "uniform 'error').")
+          else:
+              hypothesis = (
+                  "REFUTES the CSS-rule-specific hypothesis: document.fonts.add(), the "
+                  "ALREADY-SCOPED path per Task 1's own patch, ALSO fails to resolve Calibri "
+                  "correctly per context -- whatever is broken is not specific to "
+                  "InsertRuleFontFace or CSS-rule parsing; the per-context mechanism itself "
+                  "is unreliable somewhere broader, and Task 3 needs to look there first.")
+          print(f"  [arm e] hypothesis: {hypothesis}")
 
           # (f) codepoint fallback: expect the mac and win contexts to
           # measure DIFFERENT widths in a correctly-gated world --
@@ -945,7 +1015,9 @@ jobs:
 
           tripwires = []
           if e_failures:
-              tripwires.append(f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: {e_failures}")
+              tripwires.append(
+                  f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: "
+                  f"{e_failures}. Discriminator result -- {hypothesis}")
           if f_tripwire:
               tripwires.append(
                   f"(f) codepoint fallback ignores context (repeatable): mac={f['mac']} "
