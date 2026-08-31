@@ -724,22 +724,32 @@ jobs:
               c.font = '48px "' + f + '", monospace';
               gMain[f] = c.measureText(s48).width;
             }
+            // The worker reports its own identity alongside the widths --
+            // self.constructor.name and typeof document -- so a silent
+            // fallback to a main-thread measurement (this OffscreenCanvas
+            // is created INSIDE the worker, never transferred in from the
+            // page) fails loudly instead of scoring a vacuous green.
             const workerSrc = `onmessage = () => {
               const c = new OffscreenCanvas(8, 8).getContext('2d');
-              const out = {};
+              const widths = {};
               for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
                 c.font = '48px "' + f + '", monospace';
-                out[f] = c.measureText('mmmmmmmmmmlli').width;
+                widths[f] = c.measureText('mmmmmmmmmmlli').width;
               }
-              postMessage(out);
+              postMessage({widths: widths, ctor: self.constructor.name,
+                          docType: typeof document});
             }`;
-            const gWorker = await new Promise((resolve) => {
+            const gWorker = await new Promise((resolve, reject) => {
               const w = new Worker(URL.createObjectURL(
                 new Blob([workerSrc], {type: 'text/javascript'})));
-              w.onmessage = (ev) => resolve(ev.data);
+              const timer = setTimeout(
+                () => reject(new Error('worker never responded (10s)')), 10000);
+              w.onmessage = (ev) => { clearTimeout(timer); resolve(ev.data); };
+              w.onerror = (ev) => { clearTimeout(timer); reject(new Error('worker error: ' + ev.message)); };
               w.postMessage(null);
             });
-            return {gMain: gMain, gWorker: gWorker, baseline48: baseline48};
+            return {gMain: gMain, gWorker: gWorker.widths, gWorkerCtor: gWorker.ctor,
+                    gWorkerDocType: gWorker.docType, baseline48: baseline48};
           }"""
 
           JS_H = """async () => {
@@ -802,8 +812,10 @@ jobs:
           print(f"  [win / arm f] CJK fallback width      {f['win']}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
+          print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
           print(f"  [win / arm g] main thread widths (this page only, not a trusted baseline) {g['win']['gMain']}")
           print(f"  [win / arm g] worker widths      {g['win']['gWorker']} (baseline {g['win']['baseline48']})")
+          print(f"  [win / arm g] worker identity    ctor={g['win']['gWorkerCtor']!r} typeof document={g['win']['gWorkerDocType']!r}")
           print(f"  [mac / arm h] local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
           print(f"  [win / arm h] local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
 
@@ -813,6 +825,19 @@ jobs:
               f"arm (g): mac worker returned {g['mac']['gWorker']} -- did the Worker even run?")
           assert set(g["win"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
               f"arm (g): win worker returned {g['win']['gWorker']} -- did the Worker even run?")
+          # Prove the measurement genuinely ran off the main thread before
+          # trusting anything about the widths: a fallback that silently
+          # measured on the main thread and reported it as "the worker's"
+          # answer would look exactly like a real, gated result.
+          for label in ("mac", "win"):
+              assert g[label]["gWorkerCtor"] == "DedicatedWorkerGlobalScope", (
+                  f"arm (g): {label} worker reported self.constructor.name = "
+                  f"{g[label]['gWorkerCtor']!r}, not 'DedicatedWorkerGlobalScope' -- "
+                  "this did not run in a worker, the whole arm is unverified")
+              assert g[label]["gWorkerDocType"] == "undefined", (
+                  f"arm (g): {label} worker reported typeof document = "
+                  f"{g[label]['gWorkerDocType']!r}, not 'undefined' -- "
+                  "this ran somewhere with a document, the whole arm is unverified")
           assert f["mac"] > 0 and f["win"] > 0 and f["mac2"] > 0, (
               f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
               f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
