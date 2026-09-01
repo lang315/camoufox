@@ -782,6 +782,48 @@ jobs:
             return {immediate: immediate, delayed: delayed};
           }"""
 
+          # Follow-up diagnostic: JS_F_RACE (this same run's earlier result,
+          # mac only) confirmed the value changes over time on one page --
+          # 30.533 immediate, 41.517 after 3s. But a fixed sleep is a
+          # diagnostic, not something a guard can rely on for determinism,
+          # and one context alone can't say whether the ASYMPTOTIC value
+          # discriminates mac from win. This polls until the measurement
+          # stops changing (3 consecutive identical reads, 250ms apart,
+          # bounded at 10s -- loud failure via a null `stable` if it never
+          # settles) and records that STABLE value for mac, win, and mac2,
+          # plus reference widths for the same glyph in the three CSS
+          # generics at the same size, to identify what's actually
+          # rendering once fallback stops moving.
+          JS_F_STABLE = """async () => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const samples = [];
+            let prevWidth = null;
+            let stableRun = 0;
+            let polls = 0;
+            const maxPolls = 40;
+            while (polls < maxPolls) {
+              const w = c.measureText('\u6f22').width;
+              samples.push(w);
+              if (prevWidth !== null && w === prevWidth) {
+                stableRun++;
+                if (stableRun >= 3) break;
+              } else {
+                stableRun = 0;
+              }
+              prevWidth = w;
+              await new Promise(r => setTimeout(r, 250));
+              polls++;
+            }
+            const stable = (stableRun >= 3) ? samples[samples.length - 1] : null;
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('\u6f22').width;
+            }
+            return {stable: stable, polls: polls, samples: samples, refs: refs};
+          }"""
+
           JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
@@ -941,6 +983,9 @@ jobs:
           f_control = {"mac": one_page("mac", JS_F_CONTROL_MAC),
                        "win": one_page("win", JS_F_CONTROL_WIN)}
           f_race = one_page("mac", JS_F_RACE)
+          f_stable = {"mac": one_page("mac", JS_F_STABLE),
+                      "win": one_page("win", JS_F_STABLE),
+                      "mac2": one_page("mac", JS_F_STABLE)}
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
@@ -954,6 +999,10 @@ jobs:
           print(f"  [mac / arm f] positive control -- named 'PingFang HK' width {f_control['mac']}")
           print(f"  [win / arm f] positive control -- named 'MS Gothic' width   {f_control['win']}")
           print(f"  [mac / arm f] async cmap-loading race diagnostic -- immediate={f_race['immediate']} delayed(3s)={f_race['delayed']}")
+          for label in ("mac", "win", "mac2"):
+              fs = f_stable[label]
+              print(f"  [{label} / arm f] poll-to-stable -- stable={fs['stable']} polls={fs['polls']} "
+                    f"samples={fs['samples']} refs={fs['refs']}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
