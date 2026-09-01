@@ -760,6 +760,28 @@ jobs:
             return c.measureText('\u6f22').width;
           }"""
 
+          # Diagnostic (not scored, no assert): does JS_F's own measurement
+          # change if repeated after a delay on the SAME page? Source trace
+          # (gfx/thebes/SharedFontList.h: IsFullyInitialized() requires a
+          # computed character map; gfx/thebes/gfxPlatformFontList.cpp's
+          # GlobalFontFallback shared-list loop skips any family that isn't
+          # fully initialized and only fires an ASYNC StartCmapLoadingFromFamily
+          # for it -- gfx.font_rendering.fallback.async defaults to true) says
+          # a brand-new page's first-ever fallback call may race ahead of
+          # cmap loading for every family except whatever few were already
+          # touched during startup, and never reach a genuinely-present,
+          # genuinely-allowed CJK family at all. If `delayed` differs from
+          # `immediate` here, that race is the reason arm (f) cannot
+          # discriminate on this harness, independent of gate correctness.
+          JS_F_RACE = """async () => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const immediate = c.measureText('\u6f22').width;
+            await new Promise(r => setTimeout(r, 3000));
+            const delayed = c.measureText('\u6f22').width;
+            return {immediate: immediate, delayed: delayed};
+          }"""
+
           JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
@@ -918,6 +940,7 @@ jobs:
                "mac2": one_page("mac", JS_F)}
           f_control = {"mac": one_page("mac", JS_F_CONTROL_MAC),
                        "win": one_page("win", JS_F_CONTROL_WIN)}
+          f_race = one_page("mac", JS_F_RACE)
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
@@ -930,6 +953,7 @@ jobs:
           print(f"  [win / arm f] CJK fallback width      {f['win']}")
           print(f"  [mac / arm f] positive control -- named 'PingFang HK' width {f_control['mac']}")
           print(f"  [win / arm f] positive control -- named 'MS Gothic' width   {f_control['win']}")
+          print(f"  [mac / arm f] async cmap-loading race diagnostic -- immediate={f_race['immediate']} delayed(3s)={f_race['delayed']}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
