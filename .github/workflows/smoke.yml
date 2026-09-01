@@ -1146,6 +1146,54 @@ jobs:
                   print("  [web-font] status and render evidence agree -- no "
                         "production-wide surface shown by this measurement.")
 
+              if webfont['status'] == 'error' and not webfont['rendered']:
+                  # Review pushback: status and render evidence agreeing
+                  # does NOT mean "no problem" here -- it means the web font
+                  # is consistently blocked rather than inconsistently
+                  # reported, and "camoufox blocks web fonts" would itself
+                  # be a far bigger tell than #44. But one sample through a
+                  # data: URI on a data: page can fail for reasons that have
+                  # nothing to do with font gating (CSP, origin rules, a
+                  # malformed payload). Discriminator: does this same page
+                  # render under a BARE launch/context instead -- no
+                  # CAMOU_CONFIG "fonts" key, no setFontList() call at all,
+                  # so IsFontAllowed()'s own second branch
+                  # (FontFaceImpl.h) falls through to allow-everything?
+                  def one_page_webfont_bare(js, arg):
+                      # Deliberately NOT one_page_webfont() above: this one
+                      # must skip the setFontList() call entirely, not just
+                      # pass a different fonts_key -- there must be no
+                      # per-context list AND no launch-level list installed.
+                      with sync_playwright() as pw:
+                          b = pw.firefox.launch(
+                              executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                              env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                          ctx = b.new_context()
+                          page = ctx.new_page()
+                          page.goto("data:text/html,<h1>f</h1>")
+                          result = page.evaluate(js, arg)
+                          b.close()
+                          return result
+
+                  webfont_bare = one_page_webfont_bare(JS_WEBFONT, webfont_uri)
+                  print(f"  [web-font/bare] document.fonts status = {webfont_bare['status']!r}")
+                  print(f"  [web-font/bare] rendered (probe width {webfont_bare['probeWidth']} vs "
+                        f"monospace baseline {webfont_bare['baseline']})? {webfont_bare['rendered']}")
+                  if webfont_bare['rendered']:
+                      print("  [web-font] DISCRIMINATOR: renders under the bare launch/context "
+                            "(IsFontAllowed falls through to allow-everything) but NOT under the "
+                            "per-context-list measurement above -- pins the non-render to font "
+                            "gating specifically. This is a real defect, out of scope for #44 "
+                            "and NOT fixed by this task -- it needs its own issue and its own plan.")
+                  else:
+                      print("  [web-font] DISCRIMINATOR: fails to render under the bare "
+                            "launch/context too, where IsFontAllowed() allows everything -- the "
+                            "non-render cannot be font gating. The probe's own setup is at fault "
+                            "(most likely the data: URI font payload -- decode failure, MIME "
+                            "type, or the raw .ttf needing a woff2 wrapper instead), not a gating "
+                            "defect. The question stays open, not closed: next step would be "
+                            "checking for a console font-decode error, or trying a woff2 payload.")
+
           assert not tripwires, (
               "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
               "each close one of these):\n" + "\n".join(tripwires))
