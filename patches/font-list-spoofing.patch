@@ -336,6 +336,42 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
      uint32_t aNextCh, Script aRunScript, FontPresentation aPresentation,
      const gfxFontStyle* aStyle, FontVisibility* aVisibility) {
    AutoLock lock(mLock);
+@@ -1404,6 +1450,11 @@
+       if (!fallback || !IsVisibleToCSS(*fallback, level)) {
+         continue;
+       }
++      nsAutoCString ctxKey;
++      GenerateFontListKey(fallback->Name(), ctxKey);
++      if (!CamouIsFontAllowed(ctxKey)) {
++        continue;
++      }
+       fallback->FindFontForChar(&data);
+       if (data.mBestMatch) {
+         RefPtr<gfxFont> font = check(data.mBestMatch, FontFamily(fallback));
+@@ -1480,6 +1526,11 @@
+         if (!IsVisibleToCSS(family, level)) {
+           continue;
+         }
++        nsAutoCString ctxKey(family.Key().AsString(SharedFontList()));
++        GenerateFontListKey(ctxKey);
++        if (!CamouIsFontAllowed(ctxKey)) {
++          continue;
++        }
+         if (!family.IsFullyInitialized() &&
+             StaticPrefs::gfx_font_rendering_fallback_async() &&
+             !XRE_IsParentProcess()) {
+@@ -1506,6 +1552,11 @@
+       if (!IsVisibleToCSS(*family, level)) {
+         continue;
+       }
++      nsAutoCString ctxKey;
++      GenerateFontListKey(family->Name(), ctxKey);
++      if (!CamouIsFontAllowed(ctxKey)) {
++        continue;
++      }
+       // evaluate all fonts in this family for a match
+       family->FindFontForChar(&data);
+       if (data.mMatchDistance == 0.0) {
 @@ -1632,6 +1678,13 @@
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
@@ -366,6 +402,17 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    // Ensure resolved font instances are valid; discard them if necessary.
    auto* pfl = gfxPlatformFontList::PlatformFontList();
    if (mFontListGeneration != pfl->GetGeneration()) {
+@@ -3931,6 +3934,10 @@
+ already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
+     uint32_t aCh, uint32_t aNextCh, Script aRunScript,
+     FontPresentation aPresentation) {
++  // EnsureFontList()'s AutoFontListContext scope ends long before fallback
++  // runs; re-establish it here so CommonFontFallback/GlobalFontFallback see
++  // this font group's context, not context 0 (#44).
++  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
+   FontVisibility visibility;
+   return gfxPlatformFontList::PlatformFontList()->SystemFindFontForChar(
+       mFontVisibilityProvider, aCh, aNextCh, aRunScript, aPresentation, &mStyle,
 diff --git a/layout/style/FontFaceSet.cpp b/layout/style/FontFaceSet.cpp
 index xxxxxxxxxx..yyyyyyyyyy 100644
 --- a/layout/style/FontFaceSet.cpp
