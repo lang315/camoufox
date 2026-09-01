@@ -457,7 +457,7 @@ jobs:
           MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
           WIN_STRICT = set(FONTS["win"]) - set(FONTS["mac"]) - set(FONTS["lin"])
           MAC_ONLY = ["Helvetica Neue", "PingFang HK", "Geneva"]
-          WIN_ONLY = ["Segoe UI", "Calibri"]
+          WIN_ONLY = ["Segoe UI", "Calibri", "MS Gothic"]
           PROBES = MAC_ONLY + WIN_ONLY
           assert MAC_STRICT.issuperset(MAC_ONLY), (
               "these are no longer mac-only in fonts.json, the probe would invert: "
@@ -738,6 +738,28 @@ jobs:
             return c.measureText('\u6f22').width;
           }"""
 
+          # Positive control for arm (f), added after a review finding: JS_F's
+          # width alone never proved U+6F22 can render as a real glyph at all
+          # -- if it's tofu everywhere, no gate could ever make mac/win
+          # diverge. Explicitly names each context's own CJK family (real,
+          # allowed, per WIN_ONLY/MAC_ONLY -- WIN_ONLY needed "MS Gothic"
+          # added for this control to even be attemptable, since it had no
+          # CJK-covering entry before). If this width equals JS_F's
+          # impossible-family fallback width, the probe measures tofu in
+          # both cases and arm (f) cannot discriminate regardless of the
+          # gate's correctness.
+          JS_F_CONTROL_MAC = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "PingFang HK"';
+            return c.measureText('\u6f22').width;
+          }"""
+
+          JS_F_CONTROL_WIN = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "MS Gothic"';
+            return c.measureText('\u6f22').width;
+          }"""
+
           JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
@@ -894,6 +916,8 @@ jobs:
           e = {"mac": one_page("mac", JS_E), "win": one_page("win", JS_E)}
           f = {"mac": one_page("mac", JS_F), "win": one_page("win", JS_F),
                "mac2": one_page("mac", JS_F)}
+          f_control = {"mac": one_page("mac", JS_F_CONTROL_MAC),
+                       "win": one_page("win", JS_F_CONTROL_WIN)}
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
@@ -904,6 +928,8 @@ jobs:
           print(f"  [mac / arm f] CJK fallback width      {f['mac']}")
           print(f"  [mac2 / arm f] CJK fallback width (dup mac list, own launch) {f['mac2']}")
           print(f"  [win / arm f] CJK fallback width      {f['win']}")
+          print(f"  [mac / arm f] positive control -- named 'PingFang HK' width {f_control['mac']}")
+          print(f"  [win / arm f] positive control -- named 'MS Gothic' width   {f_control['win']}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
@@ -935,6 +961,23 @@ jobs:
           assert f["mac"] > 0 and f["win"] > 0 and f["mac2"] > 0, (
               f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
               f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
+          # Positive control: prove U+6F22 can render as a real, non-tofu
+          # glyph at all before trusting anything about arm (f)'s fallback
+          # measurement. If naming the context's own CJK family produces the
+          # SAME width as JS_F's impossible-family fallback, the probe has
+          # been measuring tofu in both cases and no gate could ever make
+          # this arm discriminate -- that would be a probe-design defect,
+          # not evidence about the gate.
+          assert f_control["mac"] != f["mac"], (
+              f"arm (f) positive control: naming 'PingFang HK' explicitly measured the "
+              f"SAME width ({f_control['mac']}) as the impossible-family fallback "
+              f"({f['mac']}) on mac -- U+6F22 never rendered as a real glyph here, so "
+              f"this arm cannot prove anything about the gate")
+          assert f_control["win"] != f["win"], (
+              f"arm (f) positive control: naming 'MS Gothic' explicitly measured the "
+              f"SAME width ({f_control['win']}) as the impossible-family fallback "
+              f"({f['win']}) on win -- U+6F22 never rendered as a real glyph here, so "
+              f"this arm cannot prove anything about the gate")
 
           # Well-formedness floor for arm (e): document.fonts has
           # exactly the 3 rules this page declared, non-empty, real
