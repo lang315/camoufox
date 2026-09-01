@@ -1206,16 +1206,73 @@ jobs:
           print(f"  [arm e] hypothesis: {hypothesis}")
 
           # (f) codepoint fallback: expect the mac and win contexts to
-          # measure DIFFERENT widths in a correctly-gated world --
-          # PingFang HK and MS Gothic cover U+6F22 with different
-          # metrics. Ungated, fallback ignores context entirely and
-          # both resolve the same font -- that sameness is the red.
-          # Only trust mac-vs-win at all if mac-vs-mac2 (same list, own
-          # launch) agrees -- otherwise the width isn't a deterministic
-          # function of the list and this arm proves nothing either way.
-          f_repeatable = (f["mac"] == f["mac2"])
-          f_tripwire = f_repeatable and f["mac"] == f["win"]
-          print(f"  [arm f] repeatable (mac == mac2, separate launches)? {f_repeatable}")
+          # each resolve their OWN real CJK family in a correctly-gated
+          # world -- not merely "different from each other", but each
+          # settled value corresponding to a family that context is
+          # actually allowed. Ungated, fallback ignores context entirely
+          # and both resolve the same font (or the same tofu box) --
+          # that sameness is the red.
+          #
+          # Scored on the SETTLED value (f_final), not the immediate one
+          # (f): the immediate measurement is taken inside
+          # GlobalFontFallback's async cmap-loading window
+          # (gfx.font_rendering.fallback.async defaults true -- see the
+          # Task 4 report's source trace) and is architecturally
+          # guaranteed to be the .notdef/tofu box regardless of gate
+          # correctness -- every context's OWN `f[label]` immediate
+          # measurement already IS that tofu floor (confirmed repeatable
+          # and reference-matched across every prior run of this arm), so
+          # it doubles as the per-context "known tofu" baseline below
+          # without needing a hardcoded constant. f_final samples on a
+          # fixed 10s window, well past that race.
+          mac_final = f_final["mac"]["final"]
+          win_final = f_final["win"]["final"]
+          mac2_final = f_final["mac2"]["final"]
+          f_repeatable = (mac_final == mac2_final)
+          f_not_tofu_mac = mac_final != f["mac"]
+          f_not_tofu_win = win_final != f["win"]
+          # Bisection identifies WHICH family the mac context's settled
+          # value corresponds to (JS_F_BISECT, measured explicitly per
+          # candidate) -- it must be a real match AND a family
+          # FONTS["mac"] (what setFontList() actually installed) really
+          # contains, not merely a number that happens to differ from
+          # win's.
+          mac_bisect_matches = [fam for fam, w in f_bisect.items() if w == mac_final]
+          mac_matches_allowed = [fam for fam in mac_bisect_matches if fam in FONTS["mac"]]
+          # win's settled value must match its own known-real CJK family:
+          # the positive control named "MS Gothic" (confirmed win-only,
+          # in WIN_ONLY) explicitly.
+          win_matches_control = (win_final == f_control["win"])
+
+          f_failures = []
+          if not f_repeatable:
+              f_failures.append(
+                  f"mac settled value not repeatable across separate launches on the same "
+                  f"list: mac={mac_final} mac2={mac2_final} -- width is not a deterministic "
+                  f"function of the list, this arm proves nothing")
+          else:
+              if not f_not_tofu_mac:
+                  f_failures.append(
+                      f"mac settled value ({mac_final}) never left the tofu/no-render floor "
+                      f"({f['mac']}) inside the 10s window -- fallback found nothing")
+              if not f_not_tofu_win:
+                  f_failures.append(
+                      f"win settled value ({win_final}) never left the tofu/no-render floor "
+                      f"({f['win']}) inside the 10s window -- fallback found nothing")
+              if f_not_tofu_mac and f_not_tofu_win and mac_final == win_final:
+                  f_failures.append(
+                      f"mac and win settled to the SAME value ({mac_final}) -- fallback "
+                      f"ignores context")
+              if f_not_tofu_mac and not mac_matches_allowed:
+                  f_failures.append(
+                      f"mac settled value ({mac_final}) does not correspond to any family in "
+                      f"FONTS['mac'] -- bisection matches: {mac_bisect_matches or 'none'}")
+              if f_not_tofu_win and not win_matches_control:
+                  f_failures.append(
+                      f"win settled value ({win_final}) does not match win's own CJK control "
+                      f"('MS Gothic' named explicitly measured {f_control['win']})")
+          print(f"  [arm f] repeatable (mac == mac2 settled, separate launches)? {f_repeatable}")
+          print(f"  [arm f] mac settled family match (in FONTS['mac']): {mac_matches_allowed or mac_bisect_matches or 'none'}")
 
           # (g) worker/OffscreenCanvas: expect the worker's answer to
           # match arm (b)'s trusted per-context ground truth for every
@@ -1245,22 +1302,16 @@ jobs:
               tripwires.append(
                   f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: "
                   f"{e_failures}. Discriminator result -- {hypothesis}")
-          if f_tripwire:
-              tripwires.append(
-                  f"(f) codepoint fallback ignores context (repeatable): mac={f['mac']} "
-                  f"mac2={f['mac2']} win={f['win']}")
+          if f_failures:
+              tripwires.append(f"(f) codepoint fallback -- settled values: {f_failures}")
           if g_failures:
               tripwires.append(f"(g) worker vs arm (b) per-context ground truth disagree: {g_failures}")
 
           print("=== arms (e)-(h) summary ===")
           print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
-          if not f_repeatable:
-              print(f"  (f) codepoint fallback:     INCONCLUSIVE -- mac != mac2 on the same font "
-                    f"list, separate launches ({f['mac']} vs {f['mac2']}); width is not a "
-                    f"deterministic function of the list, mac-vs-win proves nothing. Needs a "
-                    f"different measurement, not scored here.")
-          else:
-              print(f"  (f) codepoint fallback:     {'RED (expected)' if f_tripwire else 'GREEN (repeatable)'} -- mac={f['mac']} mac2={f['mac2']} win={f['win']}")
+          print(f"  (f) codepoint fallback:     {'RED' if f_failures else 'GREEN'} -- "
+                f"mac_settled={mac_final} (family={mac_matches_allowed}) mac2_settled={mac2_final} "
+                f"win_settled={win_final} (control={f_control['win']}) failures={f_failures}")
           print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
           print("  (h) face-name lookup: measurement only, no verdict enforced here "
                 "(Task 6 reads the gate from this data):")
