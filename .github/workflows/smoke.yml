@@ -830,6 +830,47 @@ jobs:
             return {hFull: hFull, hPs: hPs, baseline: baseline};
           }"""
 
+          JS_WEBFONT = """async (fontDataUri) => {
+            // Out-of-scope observation for #44 (measured, not fixed here --
+            // see the Task 3 brief). font-hijacker.patch's SetStatus()
+            // answers status purely from IsFontAllowed() for EVERY
+            // @font-face, not just the OS-name surface Tasks 1-3 spoof. An
+            // ordinary web font loaded by URL, whose family is in no OS
+            // list at all, asks IsFontAllowed() a question it can only
+            // answer 'no' to. A bare, unquoted, single-word invented
+            // family name isolates this from the quoting bug Task 3 fixes:
+            // IsFontAllowed() never has a chance to match it against any
+            // list entry regardless of quoting.
+            //
+            // status alone cannot tell "reported failed" apart from
+            // "genuinely failed" -- both look like 'error'. The
+            // discriminating control is render evidence: does the glyph
+            // width actually change from a plain-monospace fallback, which
+            // only happens if the browser truly loaded and is using this
+            // font's outlines.
+            const FAMILY = 'CamouProbeWebFont';
+            const sheet = document.createElement('style');
+            sheet.textContent =
+                '@font-face { font-family: ' + FAMILY + '; src: url("' + fontDataUri + '"); }';
+            document.head.appendChild(sheet);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+            const face = [...document.fonts].find(
+                f => f.family.replace(/^["\']|["\']$/g, '') === FAMILY);
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlli';
+            c.font = '72px monospace';
+            const baseline = c.measureText(s).width;
+            c.font = '72px "' + FAMILY + '", monospace';
+            const probeWidth = c.measureText(s).width;
+            return {
+              status: face ? face.status : 'NO_FACE_FOUND',
+              rendered: Math.abs(probeWidth - baseline) > 1,
+              probeWidth: probeWidth,
+              baseline: baseline,
+            };
+          }"""
+
           def one_page(fonts_key, js):
               # A brand-new launch, a brand-new context, exactly one
               # page: the strongest isolation available, since sharing
@@ -1039,6 +1080,71 @@ jobs:
                 "(Task 6 reads the gate from this data):")
           print(f"      mac: local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
           print(f"      win: local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
+
+          # Web-font measurement (out of scope for this task -- see the
+          # comment on JS_WEBFONT above). A local .ttf on the runner
+          # supplies real font bytes for a data: URI src -- the browser
+          # only ever sees these as ordinary web-font bytes, not a host
+          # font, so the host-font-deletion machinery is irrelevant here.
+          import base64, glob
+
+          def find_test_font():
+              for c in (
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+              ):
+                  if os.path.exists(c):
+                      return c
+              hits = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
+              return hits[0] if hits else None
+
+          webfont_path = find_test_font()
+          if webfont_path is None:
+              print("  [web-font] SKIP: no local .ttf found on the runner to embed")
+          else:
+              with open(webfont_path, "rb") as fh:
+                  webfont_b64 = base64.b64encode(fh.read()).decode("ascii")
+              webfont_uri = "data:font/ttf;base64," + webfont_b64
+
+              def one_page_webfont(fonts_key, js, arg):
+                  # Same shape as one_page() above, but page.evaluate() here
+                  # needs an argument (the data: URI) -- kept as its own
+                  # function rather than changing one_page()'s signature.
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      ctx = b.new_context()
+                      ctx.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(FONTS[fonts_key])))
+                      page = ctx.new_page()
+                      page.goto("data:text/html,<h1>f</h1>")
+                      result = page.evaluate(js, arg)
+                      b.close()
+                      return result
+
+              webfont = one_page_webfont("mac", JS_WEBFONT, webfont_uri)
+              print(f"  [web-font] font file used: {webfont_path} ({len(webfont_b64)} b64 chars)")
+              print(f"  [web-font] document.fonts status = {webfont['status']!r}")
+              print(f"  [web-font] rendered (probe width {webfont['probeWidth']} vs "
+                    f"monospace baseline {webfont['baseline']})? {webfont['rendered']}")
+              if webfont['status'] == 'error' and webfont['rendered']:
+                  print("  [web-font] FINDING (out of scope, not fixed here): "
+                        "document.fonts reports 'error' for an ordinary web font "
+                        "that the canvas evidence shows the browser actually "
+                        "rendered -- SetStatus() answers every @font-face from "
+                        "IsFontAllowed(), not just the OS-name spoofing surface "
+                        "#44 targets. A page can watch its own web font render "
+                        "while document.fonts calls it failed. Recorded for "
+                        "issue #44; intentionally not fixed by this task.")
+              elif webfont['status'] == 'loaded' and not webfont['rendered']:
+                  print("  [web-font] unexpected: status says 'loaded' but no "
+                        "render evidence -- treat this measurement as unreliable, "
+                        "not a clean answer either way.")
+              else:
+                  print("  [web-font] status and render evidence agree -- no "
+                        "production-wide surface shown by this measurement.")
 
           assert not tripwires, (
               "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
