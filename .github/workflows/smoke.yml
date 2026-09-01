@@ -852,6 +852,36 @@ jobs:
             return {final: samples[samples.length - 1], samples: samples, refs: refs};
           }"""
 
+          # Bisection (team-lead directive): the mac context's fallback
+          # value (41.517) is not PingFang HK's own width (48, per the
+          # positive control) -- something ELSE is serving U+6F22 in the
+          # mac context. Identify it by naming, not inferring: measure
+          # U+6F22 explicitly against every CJK-capable family actually
+          # present in bundle/fonts/ across all three bundled OSes (exact
+          # family names extracted locally via fontTools from the real
+          # .ttf/.ttc/.otf files -- not guessed), in the MAC context. If a
+          # name outside MAC_ONLY/FONTS["mac"] measures 41.517, the gate
+          # leaks; if nothing does, fallback is reaching something not in
+          # the bundle at all (a runner font).
+          JS_F_BISECT = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const candidates = [
+              'PingFang HK', 'PingFang SC', 'PingFang TC',
+              'Hiragino Sans GB', 'Heiti SC', 'Heiti TC',
+              'Apple SD Gothic Neo',
+              'MS Gothic', 'MS PGothic', 'SimSun', 'NSimSun',
+              'Malgun Gothic', 'Microsoft YaHei', 'Microsoft JhengHei',
+              'Yu Gothic',
+              'Noto Sans SC', 'Noto Sans TC', 'Noto Sans JP', 'Noto Sans KR',
+            ];
+            const widths = {};
+            for (const fam of candidates) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText('漢').width;
+            }
+            return widths;
+          }"""
+
           JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
@@ -1017,6 +1047,7 @@ jobs:
           f_final = {"mac": one_page("mac", JS_F_FINAL),
                      "win": one_page("win", JS_F_FINAL),
                      "mac2": one_page("mac", JS_F_FINAL)}
+          f_bisect = one_page("mac", JS_F_BISECT)
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
@@ -1038,6 +1069,10 @@ jobs:
               ff = f_final[label]
               print(f"  [{label} / arm f] fixed-window (20x500ms=10s) -- final={ff['final']} "
                     f"samples={ff['samples']} refs={ff['refs']}")
+          print(f"  [mac / arm f] bisection -- named-CJK widths {f_bisect}")
+          mac_final = f_final["mac"]["final"]
+          matches = [fam for fam, w in f_bisect.items() if w == mac_final]
+          print(f"  [mac / arm f] bisection MATCH for mac's fallback final ({mac_final}): {matches or 'NONE -- not any named bundled CJK family'}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
