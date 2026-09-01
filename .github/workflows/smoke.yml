@@ -824,6 +824,34 @@ jobs:
             return {stable: stable, polls: polls, samples: samples, refs: refs};
           }"""
 
+          # Final diagnostic on this arm (team-lead directive): JS_F_STABLE's
+          # "3 consecutive identical reads" heuristic stopped at a TEMPORARY
+          # plateau (polls=3, samples all 30.533, exited in under a second)
+          # while JS_F_RACE's fixed 3s delay in the SAME run still showed
+          # 41.517 -- the underlying process changes state on a multi-second
+          # timescale, so short-run stability is not convergence. This
+          # samples on a FIXED window (no early-stop logic at all) long
+          # enough to clear that plateau -- 20 samples, 500ms apart, 10s
+          # total -- and reports the raw series plus the final value, for
+          # mac, win, and mac2, to answer directly: does the eventual value
+          # discriminate context, or does everything converge to the same
+          # number regardless of which context is asking?
+          JS_F_FINAL = """async () => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const samples = [];
+            for (let i = 0; i < 20; i++) {
+              samples.push(c.measureText('漢').width);
+              await new Promise(r => setTimeout(r, 500));
+            }
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('漢').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+          }"""
+
           JS_G = """async () => {
             // (g) worker / OffscreenCanvas: GetDocument() is null off
             // the main thread, so the context id falls to 0 there and
@@ -986,6 +1014,9 @@ jobs:
           f_stable = {"mac": one_page("mac", JS_F_STABLE),
                       "win": one_page("win", JS_F_STABLE),
                       "mac2": one_page("mac", JS_F_STABLE)}
+          f_final = {"mac": one_page("mac", JS_F_FINAL),
+                     "win": one_page("win", JS_F_FINAL),
+                     "mac2": one_page("mac", JS_F_FINAL)}
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
@@ -1003,6 +1034,10 @@ jobs:
               fs = f_stable[label]
               print(f"  [{label} / arm f] poll-to-stable -- stable={fs['stable']} polls={fs['polls']} "
                     f"samples={fs['samples']} refs={fs['refs']}")
+          for label in ("mac", "win", "mac2"):
+              ff = f_final[label]
+              print(f"  [{label} / arm f] fixed-window (20x500ms=10s) -- final={ff['final']} "
+                    f"samples={ff['samples']} refs={ff['refs']}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
