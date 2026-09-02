@@ -1516,6 +1516,49 @@ jobs:
               f"this codepoint.")
           print("  (i) negative fallback cache (#81):  GREEN -- context B resolved its own "
                 f"real font ({i_b['final']}), unaffected by context A's earlier miss")
+
+          # Cost measurement (team-lead directive): the fix clears
+          # mCodepointsWithNoFonts on every setFontList() call, so the
+          # question is "how much does one clear-then-rescan cost", not
+          # whether it's zero. window.setFontList() is itself page-JS
+          # callable (same function every context's init script uses),
+          # so this compares N repeated (setFontList -> probe) cycles
+          # ["cold": every probe is a fresh post-clear scan] against one
+          # setFontList() followed by N probes ["warm": only the first
+          # is a scan, the rest are cache hits] on the SAME page --
+          # isolating the added per-call cost without a second binary.
+          # Probes a Unicode noncharacter (permanently reserved, never
+          # assigned to any real glyph) so every probe, cold or warm, is
+          # a genuine, deterministic fallback miss.
+          JS_4B_COST = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const N = 20;
+            const probe = () => {
+              c.font = '48px "NoSuchFamilyAtAll2"';
+              return c.measureText('﷐').width;
+            };
+            const t0 = performance.now();
+            for (let i = 0; i < N; i++) {
+              window.setFontList('Arial,Calibri');
+              probe();
+            }
+            const coldMs = performance.now() - t0;
+
+            window.setFontList('Arial,Calibri');
+            const t1 = performance.now();
+            for (let i = 0; i < N; i++) {
+              probe();
+            }
+            const warmMs = performance.now() - t1;
+
+            return {N: N, coldMs: coldMs, warmMs: warmMs,
+                    perClearOverheadMs: (coldMs - warmMs) / N};
+          }"""
+          i_cost = one_page("win", JS_4B_COST)
+          print(f"  [arm i / 4b] cost -- {i_cost['N']} cold (clear+rescan) cycles: "
+                f"{i_cost['coldMs']:.2f}ms total; {i_cost['N']} warm (1 scan + cache hits) "
+                f"cycles: {i_cost['warmMs']:.2f}ms total; measured added cost per "
+                f"setFontList() call: {i_cost['perClearOverheadMs']:.3f}ms")
           # -----------------------------------------------------------
 
           assert not tripwires, (
