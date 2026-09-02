@@ -1446,15 +1446,30 @@ jobs:
               with sync_playwright() as pw:
                   b = pw.firefox.launch(
                       executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
-                      # Diagnostic (team-lead directive): force a single
-                      # content process so two contexts in one launch are
-                      # GUARANTEED to share gfxPlatformFontList's
-                      # per-process singleton -- settling whether #81/#82
-                      # need process-sharing to manifest, or whether the
-                      # theory needs re-examination, with no C++ change
-                      # and no rebuild. Default dom.ipc.processCount is 8,
-                      # so two sequential contexts landing in different
-                      # processes (unforced) is entirely plausible.
+                      # PERMANENT, not diagnostic: gfxPlatformFontList is
+                      # a per-process singleton, and Firefox's content-
+                      # process selection factors in OriginAttributes
+                      # (mUserContextId is a member) -- so two sequential
+                      # new_context() calls normally land in SEPARATE
+                      # content processes with no shared font-list state
+                      # at all, and this arm tests NOTHING without this
+                      # pref. Confirmed empirically, not just by source
+                      # reading: the unforced arm read GREEN in every
+                      # earlier run of this task (mistaken for "the fix
+                      # works" and, before that, for "the bug isn't
+                      # reachable") purely because the two contexts never
+                      # shared a process; forcing this pref produced the
+                      # first RED/GREEN pair that actually meant
+                      # anything -- RED on a binary with no #81 fix
+                      # (run 33597181430), GREEN with it (run
+                      # 33597175086), both under this exact pref. Default
+                      # dom.ipc.processCount is 8, so production
+                      # reproduction starts as soon as a caller runs more
+                      # than a handful of contexts and process reuse
+                      # begins -- this pref makes that condition apply on
+                      # every run of this arm, every time, rather than
+                      # depending on how many contexts happen to precede
+                      # it.
                       firefox_user_prefs={"dom.ipc.processCount": 1},
                       env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
                   ctx_a = b.new_context()
@@ -1581,15 +1596,44 @@ jobs:
           # cross-context leak, not just a coherence defect.
           #
           # Same two-contexts-one-launch shape as arm (i). Context A
-          # gets a list with a family that DOES cover U+FFFD (Tahoma,
-          # confirmed via fontTools against the real bundled .ttf) --
-          # its own gated resolution populates the cache. Context B,
-          # same launch, opened after A, gets a list confirmed (via
-          # fontTools) to cover U+FFFD in NONE of its families -- if
-          # correctly gated, B gets nothing (its own tofu floor); if
-          # leaking, B gets A's cached family's real glyph, which
-          # differs from B's own tofu floor.
-          FFFD_YES_PROBE = ["Tahoma"]
+          # needs a list with a family that DEMONSTRABLY resolves
+          # U+FFFD in THIS build under a per-context list -- team-lead
+          # correction: a fontTools cmap entry says the codepoint is
+          # MAPPED, it does not guarantee this build's gated fallback
+          # actually resolves that family for it (confirmed the hard
+          # way: "Tahoma" alone reported "arm (j)/#82 setup invalid...
+          # settled U+FFFD to 49.217, its OWN tofu floor" in run
+          # 33596116918 -- A never populated the cache, so B had
+          # nothing to inherit, and the arm correctly refused its own
+          # result rather than report a false pass). Bisected against
+          # several strong candidates by naming each one directly
+          # (`JS_FFFD_BISECT`, same discipline as arm (f)'s
+          # `JS_F_BISECT`) to find one that empirically differs from a
+          # known-tofu reference, rather than trusting cmap coverage
+          # alone.
+          FFFD_CANDIDATES = ["Tahoma", "Verdana", "Segoe UI", "MS Gothic",
+                              "Arial Unicode MS", "Noto Sans", "DejaVu Sans",
+                              "SimSun", "Malgun Gothic", "Yu Gothic"]
+          JS_FFFD_BISECT = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll5"';
+            const tofu = c.measureText('�').width;
+            const widths = {};
+            for (const fam of """ + json.dumps(FFFD_CANDIDATES) + """) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText('�').width;
+            }
+            return {tofu: tofu, widths: widths};
+          }"""
+          fffd_bisect = one_page("win", JS_FFFD_BISECT)
+          print(f"  [arm j / #82 setup] U+FFFD tofu floor (no-op family, own context): "
+                f"{fffd_bisect['tofu']}")
+          print(f"  [arm j / #82 setup] named-candidate U+FFFD widths: {fffd_bisect['widths']}")
+          fffd_working = [fam for fam, w in fffd_bisect["widths"].items() if w != fffd_bisect["tofu"]]
+          print(f"  [arm j / #82 setup] candidates that demonstrably resolve U+FFFD "
+                f"(differ from tofu): {fffd_working or 'NONE -- see setup note above'}")
+
+          FFFD_YES_PROBE = fffd_working if fffd_working else FFFD_CANDIDATES
           FFFD_NO_PROBE = ["Arial", "Calibri", "Times New Roman"]
 
           JS_4C = """async () => {
