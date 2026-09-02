@@ -1405,6 +1405,119 @@ jobs:
                             "defect. The question stays open, not closed: next step would be "
                             "checking for a console font-decode error, or trying a woff2 payload.")
 
+          # -----------------------------------------------------------
+          # Arm (i): the negative fallback cache Task 4's gate made
+          # reachable (#81 / Task 4b). gfxPlatformFontList's
+          # mCodepointsWithNoFonts is a process-wide "no font covers
+          # this codepoint" cache, keyed only by FontVisibility --
+          # unrelated to mUserContextId. gfxFontGroup::FindFontForChar
+          # consults it via SkipFontFallbackForChar() at
+          # gfxTextRun.cpp:3450, BEFORE reaching
+          # WhichSystemFontSupportsChar at :3506 -- Task 4's gate. A
+          # cache hit short-circuits FindFontForChar and returns
+          # early; the gate never runs.
+          #
+          # Before Task 4 a fallback miss was almost impossible (the
+          # scan was unfiltered, nearly always found something).
+          # After Task 4 a miss is the correct, expected outcome
+          # whenever a context's own list covers nothing for a
+          # codepoint -- which is exactly what makes this cache
+          # reachable in normal operation for the first time.
+          #
+          # This arm must do the OPPOSITE of every other arm in this
+          # guard: ONE launch, TWO contexts, IN ORDER. Every other arm
+          # gives each measurement its own fresh launch specifically
+          # for isolation -- which is exactly why none of them can see
+          # this bug (the cache always starts empty). Context A gets a
+          # list covering NOTHING for U+6F22 (a genuine, correct miss
+          # that poisons the process-wide cache); context B, same
+          # launch, opened AFTER A, gets a list that DOES cover it. B
+          # rendering tofu is the bug -- B's own gate never ran because
+          # the cache answered before FindFontForChar ever reached it.
+          # B rendering its own real glyph is the fix.
+          NO_CJK_PROBE = ["Calibri", "Segoe UI", "Arial"]
+
+          def two_contexts_one_launch(list_a, list_b, js):
+              # Deliberately NOT one_page(): every other helper in this
+              # file gives each measurement its own fresh launch. This
+              # arm needs the opposite -- one launch serving two
+              # contexts in sequence, so a launch-lifetime cache set by
+              # the first can be observed (or not) by the second.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_a = b.new_context()
+                  ctx_a.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(list_a)))
+                  page_a = ctx_a.new_page()
+                  page_a.goto("data:text/html,<h1>4b-a</h1>")
+                  result_a = page_a.evaluate(js)
+
+                  ctx_b = b.new_context()
+                  ctx_b.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(list_b)))
+                  page_b = ctx_b.new_page()
+                  page_b.goto("data:text/html,<h1>4b-b</h1>")
+                  result_b = page_b.evaluate(js)
+
+                  b.close()
+                  return result_a, result_b
+
+          JS_4B = """async () => {
+            // Same fixed-window sampling discipline as arm (f)'s
+            // JS_F_FINAL -- no early-stop heuristic, long enough to
+            // clear the async cmap-loading window this fork's
+            // fallback path goes through (see the Task 4 report's
+            // source trace) -- so a genuinely-covered context isn't
+            // mistaken for a poisoned one just because it hasn't
+            // settled yet.
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const samples = [];
+            for (let i = 0; i < 20; i++) {
+              samples.push(c.measureText('漢').width);
+              await new Promise(r => setTimeout(r, 500));
+            }
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('漢').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+          }"""
+
+          i_a, i_b = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
+          i_a_tofu = i_a["final"] in i_a["refs"].values()
+          i_b_tofu = i_b["final"] in i_b["refs"].values()
+          print(f"  [arm i / 4b] context A (no-CJK list, first in launch) settled={i_a['final']} "
+                f"refs={i_a['refs']} samples={i_a['samples']}")
+          print(f"  [arm i / 4b] context B (FONTS['win'], same launch, AFTER A) settled={i_b['final']} "
+                f"refs={i_b['refs']} samples={i_b['samples']}")
+
+          assert i_a_tofu, (
+              f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
+              f"U+6F22 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
+              f"either the probe list accidentally covers this codepoint, or something else "
+              f"is wrong with the setup. This arm cannot test the cache-poisoning bug until "
+              f"A's own miss is genuine.")
+          assert not i_b_tofu, (
+              f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
+              f"same launch, measured AFTER context A's genuine miss) settled U+6F22 to "
+              f"{i_b['final']}, its own context's tofu floor ({i_b['refs']}) -- context A's "
+              f"correct, context-specific miss poisoned gfxPlatformFontList's process-wide "
+              f"mCodepointsWithNoFonts cache (keyed only by FontVisibility, not context id), "
+              f"so B's FindFontForChar short-circuited via SkipFontFallbackForChar() at "
+              f"gfxTextRun.cpp:3450 before ever reaching WhichSystemFontSupportsChar's gate "
+              f"at :3506 -- B never got a chance to resolve its own real CJK font, even "
+              f"though its own list ({FONTS['win'][:3]}... plus MS Gothic et al.) covers "
+              f"this codepoint.")
+          print("  (i) negative fallback cache (#81):  GREEN -- context B resolved its own "
+                f"real font ({i_b['final']}), unaffected by context A's earlier miss")
+          # -----------------------------------------------------------
+
           assert not tripwires, (
               "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
               "each close one of these):\n" + "\n".join(tripwires))
