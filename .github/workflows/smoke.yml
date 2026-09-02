@@ -1533,26 +1533,42 @@ jobs:
           print(f"  [arm i / 4b] context B (FONTS['win'], same launch, AFTER A) settled={i_b['final']} "
                 f"refs={i_b['refs']} samples={i_b['samples']}")
 
-          assert i_a_tofu, (
-              f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
-              f"U+6F22 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
-              f"either the probe list accidentally covers this codepoint, or something else "
-              f"is wrong with the setup. This arm cannot test the cache-poisoning bug until "
-              f"A's own miss is genuine.")
-          assert not i_b_tofu, (
-              f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
-              f"same launch, measured AFTER context A's genuine miss) settled U+6F22 to "
-              f"{i_b['final']}, matching context A's confirmed tofu floor "
-              f"({i_a['final']}, no-CJK list) -- context A's "
-              f"correct, context-specific miss poisoned gfxPlatformFontList's process-wide "
-              f"mCodepointsWithNoFonts cache (keyed only by FontVisibility, not context id), "
-              f"so B's FindFontForChar short-circuited via SkipFontFallbackForChar() at "
-              f"gfxTextRun.cpp:3450 before ever reaching WhichSystemFontSupportsChar's gate "
-              f"at :3506 -- B never got a chance to resolve its own real CJK font, even "
-              f"though its own list ({FONTS['win'][:3]}... plus MS Gothic et al.) covers "
-              f"this codepoint.")
-          print("  (i) negative fallback cache (#81):  GREEN -- context B resolved its own "
-                f"real font ({i_b['final']}), unaffected by context A's earlier miss")
+          # Collect-then-assert (team-lead directive), matching arms
+          # (e)/(f)/(g): a hard `assert` here KILLS THE SCRIPT before any
+          # arm below it runs -- and arm (i) is EXPECTED red on any
+          # binary without the #81 fix, which is exactly the control
+          # build arm (j) also needs. An inline assert made arm (j)
+          # structurally unmeasurable on the one build where its own red
+          # matters most (confirmed: run 33599430397, arm (i) correctly
+          # red on the control build, arm (j) never printed anything at
+          # all because the script died first). Every arm in this guard
+          # must run and print, every time, before anything asserts.
+          i_failures = []
+          if not i_a_tofu:
+              i_failures.append(
+                  f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
+                  f"U+6F22 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
+                  f"either the probe list accidentally covers this codepoint, or something else "
+                  f"is wrong with the setup. This arm cannot test the cache-poisoning bug until "
+                  f"A's own miss is genuine.")
+          elif i_b_tofu:
+              i_failures.append(
+                  f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
+                  f"same launch, measured AFTER context A's genuine miss) settled U+6F22 to "
+                  f"{i_b['final']}, matching context A's confirmed tofu floor "
+                  f"({i_a['final']}, no-CJK list) -- context A's "
+                  f"correct, context-specific miss poisoned gfxPlatformFontList's process-wide "
+                  f"mCodepointsWithNoFonts cache (keyed only by FontVisibility, not context id), "
+                  f"so B's FindFontForChar short-circuited via SkipFontFallbackForChar() at "
+                  f"gfxTextRun.cpp:3450 before ever reaching WhichSystemFontSupportsChar's gate "
+                  f"at :3506 -- B never got a chance to resolve its own real CJK font, even "
+                  f"though its own list ({FONTS['win'][:3]}... plus MS Gothic et al.) covers "
+                  f"this codepoint.")
+          i_ok_msg = f"context B resolved its own real font ({i_b['final']}), unaffected by context A's earlier miss"
+          print(f"  (i) negative fallback cache (#81):  {'RED' if i_failures else 'GREEN'} -- "
+                f"{i_failures or i_ok_msg}")
+          if i_failures:
+              tripwires.append(f"(i) negative fallback cache (#81): {i_failures}")
 
           # Cost measurement REMOVED (was JS_4B_COST): window.setFontList()
           # is one-shot per user context by design --
@@ -1666,22 +1682,36 @@ jobs:
           print(f"  [arm j / #82] context B ({FFFD_NO_PROBE}, no U+FFFD, same launch, AFTER A) "
                 f"settled={j_b['final']} refs={j_b['refs']} samples={j_b['samples']}")
 
-          assert not j_a_tofu, (
-              f"arm (j)/#82 setup invalid: context A's list ({FFFD_YES_PROBE}) settled "
-              f"U+FFFD to {j_a['final']}, its OWN tofu floor ({j_a['refs']}) -- Tahoma should "
-              f"cover U+FFFD (confirmed via fontTools against the bundled .ttf); this arm "
-              f"cannot test the leak until A's own resolution is genuine.")
-          assert j_b_tofu, (
-              f"arm (j)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) -- context B "
-              f"({FFFD_NO_PROBE}, none of which cover U+FFFD, confirmed via fontTools) "
-              f"settled U+FFFD to {j_b['final']}, NOT its own tofu floor ({j_b['refs']}) -- "
-              f"context A's earlier, correctly-gated resolution (Tahoma) leaked into B via "
-              f"gfxPlatformFontList's process-wide mReplacementCharFallbackFamily cache, "
-              f"read with no CamouIsFontAllowed() check at all -- B rendered a REAL glyph "
-              f"from a family it was never allowed, not tofu.")
-          print("  (j) replacement-char cache leak (#82):  GREEN -- context B correctly got "
-                f"nothing for U+FFFD ({j_b['final']}, its own tofu floor), unaffected by "
-                f"context A's earlier, different-context resolution")
+          # Collect-then-assert, same as arm (i): a hard assert here would
+          # ALSO kill the script before the final tripwires check, and
+          # this arm's own red (needed on a binary without a #82 fix)
+          # must survive alongside arm (i)'s expected red on the same
+          # control build.
+          j_failures = []
+          if j_a_tofu:
+              j_failures.append(
+                  f"arm (j)/#82 setup invalid: context A's list ({FFFD_YES_PROBE}, bisected "
+                  f"by direct naming, not just fontTools cmap coverage) settled U+FFFD to "
+                  f"{j_a['final']}, its OWN tofu floor ({j_a['refs']}) -- none of the "
+                  f"bisected candidates actually resolved U+FFFD under this build's gated "
+                  f"fallback; this arm cannot test the leak until A's own resolution is "
+                  f"genuine.")
+          elif not j_b_tofu:
+              j_failures.append(
+                  f"arm (j)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) -- context B "
+                  f"({FFFD_NO_PROBE}, none of which cover U+FFFD, confirmed via fontTools) "
+                  f"settled U+FFFD to {j_b['final']}, NOT its own tofu floor ({j_b['refs']}) -- "
+                  f"context A's earlier, correctly-gated resolution leaked into B via "
+                  f"gfxPlatformFontList's process-wide mReplacementCharFallbackFamily cache, "
+                  f"read with no CamouIsFontAllowed() check at all -- B rendered a REAL glyph "
+                  f"from a family it was never allowed, not tofu.")
+          j_ok_msg = (f"context B correctly got nothing for U+FFFD ({j_b['final']}, its own "
+                      f"tofu floor), unaffected by context A's earlier, different-context "
+                      f"resolution")
+          print(f"  (j) replacement-char cache leak (#82):  {'RED' if j_failures else 'GREEN'} "
+                f"-- {j_failures or j_ok_msg}")
+          if j_failures:
+              tripwires.append(f"(j) replacement-char cache leak (#82): {j_failures}")
           # -----------------------------------------------------------
 
           assert not tripwires, (
