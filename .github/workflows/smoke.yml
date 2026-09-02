@@ -787,50 +787,15 @@ jobs:
           # 30.533 immediate, 41.517 after 3s. But a fixed sleep is a
           # diagnostic, not something a guard can rely on for determinism,
           # and one context alone can't say whether the ASYMPTOTIC value
-          # discriminates mac from win. This polls until the measurement
-          # stops changing (3 consecutive identical reads, 250ms apart,
-          # bounded at 10s -- loud failure via a null `stable` if it never
-          # settles) and records that STABLE value for mac, win, and mac2,
-          # plus reference widths for the same glyph in the three CSS
-          # generics at the same size, to identify what's actually
-          # rendering once fallback stops moving.
-          JS_F_STABLE = """async () => {
-            const c = document.createElement('canvas').getContext('2d');
-            c.font = '48px "NoSuchFamilyAtAll"';
-            const samples = [];
-            let prevWidth = null;
-            let stableRun = 0;
-            let polls = 0;
-            const maxPolls = 40;
-            while (polls < maxPolls) {
-              const w = c.measureText('\u6f22').width;
-              samples.push(w);
-              if (prevWidth !== null && w === prevWidth) {
-                stableRun++;
-                if (stableRun >= 3) break;
-              } else {
-                stableRun = 0;
-              }
-              prevWidth = w;
-              await new Promise(r => setTimeout(r, 250));
-              polls++;
-            }
-            const stable = (stableRun >= 3) ? samples[samples.length - 1] : null;
-            const refs = {};
-            for (const fam of ['monospace', 'sans-serif', 'serif']) {
-              c.font = '48px ' + fam;
-              refs[fam] = c.measureText('\u6f22').width;
-            }
-            return {stable: stable, polls: polls, samples: samples, refs: refs};
-          }"""
-
-          # Final diagnostic on this arm (team-lead directive): JS_F_STABLE's
-          # "3 consecutive identical reads" heuristic stopped at a TEMPORARY
-          # plateau (polls=3, samples all 30.533, exited in under a second)
-          # while JS_F_RACE's fixed 3s delay in the SAME run still showed
-          # 41.517 -- the underlying process changes state on a multi-second
-          # timescale, so short-run stability is not convergence. This
-          # samples on a FIXED window (no early-stop logic at all) long
+          # discriminates mac from win. An earlier version of this
+          # diagnostic polled until the measurement stopped changing (3
+          # consecutive identical reads) -- removed after CI showed it
+          # stopped at a TEMPORARY plateau (polls=3, samples all 30.533,
+          # exited in under a second) while JS_F_RACE's fixed 3s delay in
+          # the SAME run still showed 41.517 -- the underlying process
+          # changes state on a multi-second timescale, so short-run
+          # stability is not convergence. This samples on a FIXED window
+          # (no early-stop logic at all) long
           # enough to clear that plateau -- 20 samples, 500ms apart, 10s
           # total -- and reports the raw series plus the final value, for
           # mac, win, and mac2, to answer directly: does the eventual value
@@ -1041,13 +1006,11 @@ jobs:
           f_control = {"mac": one_page("mac", JS_F_CONTROL_MAC),
                        "win": one_page("win", JS_F_CONTROL_WIN)}
           f_race = one_page("mac", JS_F_RACE)
-          f_stable = {"mac": one_page("mac", JS_F_STABLE),
-                      "win": one_page("win", JS_F_STABLE),
-                      "mac2": one_page("mac", JS_F_STABLE)}
           f_final = {"mac": one_page("mac", JS_F_FINAL),
                      "win": one_page("win", JS_F_FINAL),
                      "mac2": one_page("mac", JS_F_FINAL)}
-          f_bisect = one_page("mac", JS_F_BISECT)
+          f_bisect = {"mac": one_page("mac", JS_F_BISECT),
+                      "win": one_page("win", JS_F_BISECT)}
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
@@ -1062,17 +1025,14 @@ jobs:
           print(f"  [win / arm f] positive control -- named 'MS Gothic' width   {f_control['win']}")
           print(f"  [mac / arm f] async cmap-loading race diagnostic -- immediate={f_race['immediate']} delayed(3s)={f_race['delayed']}")
           for label in ("mac", "win", "mac2"):
-              fs = f_stable[label]
-              print(f"  [{label} / arm f] poll-to-stable -- stable={fs['stable']} polls={fs['polls']} "
-                    f"samples={fs['samples']} refs={fs['refs']}")
-          for label in ("mac", "win", "mac2"):
               ff = f_final[label]
               print(f"  [{label} / arm f] fixed-window (20x500ms=10s) -- final={ff['final']} "
                     f"samples={ff['samples']} refs={ff['refs']}")
-          print(f"  [mac / arm f] bisection -- named-CJK widths {f_bisect}")
-          mac_final = f_final["mac"]["final"]
-          matches = [fam for fam, w in f_bisect.items() if w == mac_final]
-          print(f"  [mac / arm f] bisection MATCH for mac's fallback final ({mac_final}): {matches or 'NONE -- not any named bundled CJK family'}")
+          for label in ("mac", "win"):
+              this_final = f_final[label]["final"]
+              print(f"  [{label} / arm f] bisection -- named-CJK widths {f_bisect[label]}")
+              matches = [fam for fam, w in f_bisect[label].items() if w == this_final]
+              print(f"  [{label} / arm f] bisection MATCH for {label}'s fallback final ({this_final}): {matches or 'NONE -- not any named bundled CJK family'}")
           print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
           print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
@@ -1231,18 +1191,25 @@ jobs:
           f_repeatable = (mac_final == mac2_final)
           f_not_tofu_mac = mac_final != f["mac"]
           f_not_tofu_win = win_final != f["win"]
-          # Bisection identifies WHICH family the mac context's settled
-          # value corresponds to (JS_F_BISECT, measured explicitly per
-          # candidate) -- it must be a real match AND a family
-          # FONTS["mac"] (what setFontList() actually installed) really
-          # contains, not merely a number that happens to differ from
-          # win's.
-          mac_bisect_matches = [fam for fam, w in f_bisect.items() if w == mac_final]
-          mac_matches_allowed = [fam for fam in mac_bisect_matches if fam in FONTS["mac"]]
-          # win's settled value must match its own known-real CJK family:
-          # the positive control named "MS Gothic" (confirmed win-only,
-          # in WIN_ONLY) explicitly.
-          win_matches_control = (win_final == f_control["win"])
+          # Bisection identifies WHICH family each context's settled value
+          # corresponds to (JS_F_BISECT, measured explicitly per
+          # candidate, run in BOTH contexts) -- a match must be a family
+          # FONTS[label] (what setFontList() actually installed for that
+          # context) really contains, not merely a number that happens to
+          # differ from the other context's. Win needs this same
+          # bisection, not just a check against its own positive control:
+          # 48 is the shared full-em advance of at least six bundled CJK
+          # families (PingFang HK/SC/TC, Hiragino Sans GB, Heiti SC/TC),
+          # so "win_final == 48" alone couldn't rule out a leak to any of
+          # those. A width matching families both inside and outside the
+          # allowed list is AMBIGUOUS -- cannot confirm which one actually
+          # served it -- and counts as a failure, not a pass because SOME
+          # match happens to be allowed.
+          bisect_matches, bisect_allowed, bisect_disallowed = {}, {}, {}
+          for label, this_final in (("mac", mac_final), ("win", win_final)):
+              bisect_matches[label] = [fam for fam, w in f_bisect[label].items() if w == this_final]
+              bisect_allowed[label] = [fam for fam in bisect_matches[label] if fam in FONTS[label]]
+              bisect_disallowed[label] = [fam for fam in bisect_matches[label] if fam not in FONTS[label]]
 
           f_failures = []
           if not f_repeatable:
@@ -1263,16 +1230,23 @@ jobs:
                   f_failures.append(
                       f"mac and win settled to the SAME value ({mac_final}) -- fallback "
                       f"ignores context")
-              if f_not_tofu_mac and not mac_matches_allowed:
-                  f_failures.append(
-                      f"mac settled value ({mac_final}) does not correspond to any family in "
-                      f"FONTS['mac'] -- bisection matches: {mac_bisect_matches or 'none'}")
-              if f_not_tofu_win and not win_matches_control:
-                  f_failures.append(
-                      f"win settled value ({win_final}) does not match win's own CJK control "
-                      f"('MS Gothic' named explicitly measured {f_control['win']})")
+              for label, not_tofu in (("mac", f_not_tofu_mac), ("win", f_not_tofu_win)):
+                  if not not_tofu:
+                      continue
+                  if not bisect_allowed[label]:
+                      f_failures.append(
+                          f"{label} settled value ({f_final[label]['final']}) does not "
+                          f"correspond to any ALLOWED family in FONTS['{label}'] -- bisection "
+                          f"matches: {bisect_matches[label] or 'none'}")
+                  elif bisect_disallowed[label]:
+                      f_failures.append(
+                          f"{label} settled value ({f_final[label]['final']}) is AMBIGUOUS -- "
+                          f"matches both allowed ({bisect_allowed[label]}) and disallowed "
+                          f"({bisect_disallowed[label]}) candidates; cannot confirm which "
+                          f"family actually served it")
           print(f"  [arm f] repeatable (mac == mac2 settled, separate launches)? {f_repeatable}")
-          print(f"  [arm f] mac settled family match (in FONTS['mac']): {mac_matches_allowed or mac_bisect_matches or 'none'}")
+          print(f"  [arm f] mac settled family match (in FONTS['mac']): {bisect_allowed['mac'] or bisect_matches['mac'] or 'none'}")
+          print(f"  [arm f] win settled family match (in FONTS['win']): {bisect_allowed['win'] or bisect_matches['win'] or 'none'}")
 
           # (g) worker/OffscreenCanvas: expect the worker's answer to
           # match arm (b)'s trusted per-context ground truth for every
@@ -1310,8 +1284,8 @@ jobs:
           print("=== arms (e)-(h) summary ===")
           print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
           print(f"  (f) codepoint fallback:     {'RED' if f_failures else 'GREEN'} -- "
-                f"mac_settled={mac_final} (family={mac_matches_allowed}) mac2_settled={mac2_final} "
-                f"win_settled={win_final} (control={f_control['win']}) failures={f_failures}")
+                f"mac_settled={mac_final} (family={bisect_allowed['mac']}) mac2_settled={mac2_final} "
+                f"win_settled={win_final} (family={bisect_allowed['win']}) failures={f_failures}")
           print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
           print("  (h) face-name lookup: measurement only, no verdict enforced here "
                 "(Task 6 reads the gate from this data):")
