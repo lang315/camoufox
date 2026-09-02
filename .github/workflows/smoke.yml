@@ -1491,7 +1491,18 @@ jobs:
 
           i_a, i_b = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
           i_a_tofu = i_a["final"] in i_a["refs"].values()
-          i_b_tofu = i_b["final"] in i_b["refs"].values()
+          # NOT i_b["refs"]: FONTS["win"] broadly covers CJK, so B's own
+          # generic-family refs (monospace/sans-serif/serif) can ALSO
+          # correctly fall back to the SAME real CJK font B's own gate
+          # finds for "NoSuchFamilyAtAll" -- both routes reach MS Gothic
+          # for entirely legitimate reasons, so "differs from B's own
+          # refs" is a false-negative test for a WORKING fix (caught by
+          # this exact false AssertionError on the first real run: B
+          # settled to 48, refs all 48 too, both correct, not tofu).
+          # i_a's list has zero CJK anywhere, confirmed by i_a_tofu
+          # above, so i_a["final"] is a reliable "genuinely nothing
+          # rendered" baseline to compare B against instead.
+          i_b_tofu = i_b["final"] == i_a["final"]
           print(f"  [arm i / 4b] context A (no-CJK list, first in launch) settled={i_a['final']} "
                 f"refs={i_a['refs']} samples={i_a['samples']}")
           print(f"  [arm i / 4b] context B (FONTS['win'], same launch, AFTER A) settled={i_b['final']} "
@@ -1506,7 +1517,8 @@ jobs:
           assert not i_b_tofu, (
               f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
               f"same launch, measured AFTER context A's genuine miss) settled U+6F22 to "
-              f"{i_b['final']}, its own context's tofu floor ({i_b['refs']}) -- context A's "
+              f"{i_b['final']}, matching context A's confirmed tofu floor "
+              f"({i_a['final']}, no-CJK list) -- context A's "
               f"correct, context-specific miss poisoned gfxPlatformFontList's process-wide "
               f"mCodepointsWithNoFonts cache (keyed only by FontVisibility, not context id), "
               f"so B's FindFontForChar short-circuited via SkipFontFallbackForChar() at "
@@ -1559,6 +1571,89 @@ jobs:
                 f"{i_cost['coldMs']:.2f}ms total; {i_cost['N']} warm (1 scan + cache hits) "
                 f"cycles: {i_cost['warmMs']:.2f}ms total; measured added cost per "
                 f"setFontList() call: {i_cost['perClearOverheadMs']:.3f}ms")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (j): the U+FFFD replacement-char fallback cache leak
+          # (#82), found while checking whether #81's cache was the
+          # only structure of its shape. gfxPlatformFontList's
+          # mReplacementCharFallbackFamily is a SIBLING of
+          # mCodepointsWithNoFonts -- same EnumeratedArray<FontVisibility,
+          # ...> shape, same process-wide scope, same FontVisibility-only
+          # key -- but read at gfxPlatformFontList.cpp's U+FFFD fast
+          # path INSIDE SystemFindFontForChar, before
+          # CommonFontFallback/GlobalFontFallback (and Task 4's gates
+          # inside them) ever run. Unlike #81, this is not a Task-4
+          # regression: before Task 4, BOTH the population and the read
+          # were ungated, so this cache was indistinguishable from the
+          # rest of the leaky fallback path. Task 4's gate closed the
+          # population side (population now goes through gated
+          # Common/GlobalFontFallback) but left the read side open --
+          # a pre-existing hole the gate narrowed but did not close.
+          #
+          # Unlike #81's miss (tofu where a glyph belonged), this reads
+          # a REAL, working font handle cached by an earlier context,
+          # with no gating check on the read at all -- a genuine
+          # cross-context leak, not just a coherence defect.
+          #
+          # Same two-contexts-one-launch shape as arm (i). Context A
+          # gets a list with a family that DOES cover U+FFFD (Tahoma,
+          # confirmed via fontTools against the real bundled .ttf) --
+          # its own gated resolution populates the cache. Context B,
+          # same launch, opened after A, gets a list confirmed (via
+          # fontTools) to cover U+FFFD in NONE of its families -- if
+          # correctly gated, B gets nothing (its own tofu floor); if
+          # leaking, B gets A's cached family's real glyph, which
+          # differs from B's own tofu floor.
+          FFFD_YES_PROBE = ["Tahoma"]
+          FFFD_NO_PROBE = ["Arial", "Calibri", "Times New Roman"]
+
+          JS_4C = """async () => {
+            // Same fixed-window sampling discipline as arm (i)'s
+            // JS_4B -- needed even though the U+FFFD fast path itself
+            // is synchronous, because context A's FIRST-EVER
+            // resolution (before mReplacementCharFallbackFamily is
+            // populated at all) still falls through to the normal,
+            // async-raced Common/GlobalFontFallback path.
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll4"';
+            const samples = [];
+            for (let i = 0; i < 20; i++) {
+              samples.push(c.measureText('�').width);
+              await new Promise(r => setTimeout(r, 500));
+            }
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('�').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+          }"""
+
+          j_a, j_b = two_contexts_one_launch(FFFD_YES_PROBE, FFFD_NO_PROBE, JS_4C)
+          j_a_tofu = j_a["final"] in j_a["refs"].values()
+          j_b_tofu = j_b["final"] in j_b["refs"].values()
+          print(f"  [arm j / #82] context A ({FFFD_YES_PROBE}, has U+FFFD, first in launch) "
+                f"settled={j_a['final']} refs={j_a['refs']} samples={j_a['samples']}")
+          print(f"  [arm j / #82] context B ({FFFD_NO_PROBE}, no U+FFFD, same launch, AFTER A) "
+                f"settled={j_b['final']} refs={j_b['refs']} samples={j_b['samples']}")
+
+          assert not j_a_tofu, (
+              f"arm (j)/#82 setup invalid: context A's list ({FFFD_YES_PROBE}) settled "
+              f"U+FFFD to {j_a['final']}, its OWN tofu floor ({j_a['refs']}) -- Tahoma should "
+              f"cover U+FFFD (confirmed via fontTools against the bundled .ttf); this arm "
+              f"cannot test the leak until A's own resolution is genuine.")
+          assert j_b_tofu, (
+              f"arm (j)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) -- context B "
+              f"({FFFD_NO_PROBE}, none of which cover U+FFFD, confirmed via fontTools) "
+              f"settled U+FFFD to {j_b['final']}, NOT its own tofu floor ({j_b['refs']}) -- "
+              f"context A's earlier, correctly-gated resolution (Tahoma) leaked into B via "
+              f"gfxPlatformFontList's process-wide mReplacementCharFallbackFamily cache, "
+              f"read with no CamouIsFontAllowed() check at all -- B rendered a REAL glyph "
+              f"from a family it was never allowed, not tofu.")
+          print("  (j) replacement-char cache leak (#82):  GREEN -- context B correctly got "
+                f"nothing for U+FFFD ({j_b['final']}, its own tofu floor), unaffected by "
+                f"context A's earlier, different-context resolution")
           # -----------------------------------------------------------
 
           assert not tripwires, (
