@@ -1446,6 +1446,16 @@ jobs:
               with sync_playwright() as pw:
                   b = pw.firefox.launch(
                       executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      # Diagnostic (team-lead directive): force a single
+                      # content process so two contexts in one launch are
+                      # GUARANTEED to share gfxPlatformFontList's
+                      # per-process singleton -- settling whether #81/#82
+                      # need process-sharing to manifest, or whether the
+                      # theory needs re-examination, with no C++ change
+                      # and no rebuild. Default dom.ipc.processCount is 8,
+                      # so two sequential contexts landing in different
+                      # processes (unforced) is entirely plausible.
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
                       env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
                   ctx_a = b.new_context()
                   ctx_a.add_init_script(
