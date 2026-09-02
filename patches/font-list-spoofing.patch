@@ -3,10 +3,11 @@ new file mode 100644
 index 0000000000..abcdef0001
 --- /dev/null
 +++ b/dom/base/FontListManager.cpp
-@@ -0,0 +1,85 @@
+@@ -0,0 +1,91 @@
 +/* Camoufox: Per-context font list manager */
 +#include "FontListManager.h"
 +
++#include "gfxPlatformFontList.h"
 +#include "mozilla/Mutex.h"
 +#include "mozilla/dom/BrowsingContext.h"
 +#include "nsGlobalWindowInner.h"
@@ -47,6 +48,11 @@ index 0000000000..abcdef0001
 +  }
 +  MutexAutoLock lock(sFontListMutex);
 +  sFontLists.InsertOrUpdate(aId, std::move(fontSet));
++  // #81: a context installing its own font list invalidates the
++  // process-wide "no font covers this codepoint" cache -- a codepoint
++  // this context's own list can now serve must not still be answered
++  // by an earlier context's stale miss.
++  gfxPlatformFontList::PlatformFontList()->ClearCodepointsWithNoFonts();
 +}
 +
 +bool FontListManager::HasFontList(uint32_t aId) {
@@ -386,6 +392,31 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    bool allowHidden = bool(aFlags & FindFamiliesFlags::eSearchHiddenFamilies);
    FontVisibility visibilityLevel =
        aFontVisibilityProvider ? aFontVisibilityProvider->GetFontVisibility()
+diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
+index xxxxxxxxxx..yyyyyyyyyy 100644
+--- a/gfx/thebes/gfxPlatformFontList.h
++++ b/gfx/thebes/gfxPlatformFontList.h
+@@ -665,6 +665,20 @@
+     AutoLock lock(mLock);
+     return mCodepointsWithNoFonts[aVisibility].test(aCh);
+   }
++
++  // Camoufox: per-context font list filtering (#44/#81). A context's
++  // negative fallback result belongs to that context's own font
++  // universe; the codepoint-fallback failure cache is process-wide and
++  // must not let one context's genuine miss silently answer for every
++  // later context sharing the same FontVisibility level. Called from
++  // FontListManager::SetFontList() whenever a context installs its own
++  // font list.
++  void ClearCodepointsWithNoFonts() {
++    AutoLock lock(mLock);
++    for (auto& bitset : mCodepointsWithNoFonts) {
++      bitset.reset();
++    }
++  }
+
+   // Return whether the given font-family record should be visible to CSS,
+   // in a context with the given FontVisibility setting.
 diff --git a/gfx/thebes/gfxTextRun.cpp b/gfx/thebes/gfxTextRun.cpp
 index xxxxxxxxxx..yyyyyyyyyy 100644
 --- a/gfx/thebes/gfxTextRun.cpp
