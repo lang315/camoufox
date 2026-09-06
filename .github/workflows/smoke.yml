@@ -579,11 +579,20 @@ jobs:
               # arm (b) could not be blocking for the reason it claims.
               # Measure arm (b) with the same instrument rather than
               # assuming the two differ (#83).
-              B_INIT = ('(() => { const saw = (typeof window.setFontList === "function"); '
-                        'let applied = false; '
-                        'if (saw) { window.setFontList(%s); applied = true; } '
+              # saw=false everywhere says the typeof check failed, but not
+              # why. Distinguish "the binding is absent" from "it is present
+              # and the guard is wrong" by calling it unconditionally and
+              # recording what happens, plus what the window actually
+              # exposes (#83).
+              B_INIT = ('(() => { const out = {saw: (typeof window.setFontList === "function"), '
+                        'inWin: ("setFontList" in window), '
+                        'typ: typeof window.setFontList, '
+                        'fontProps: Object.getOwnPropertyNames(window).filter('
+                        'n => /font/i.test(n)), applied: false, err: null}; '
+                        'try { window.setFontList(%s); out.applied = true; } '
+                        'catch (e) { out.err = String(e).slice(0, 120); } '
                         'const mark = () => { try { document.documentElement.setAttribute('
-                        '"data-fl", JSON.stringify({saw: saw, applied: applied})); } catch (e) {} }; '
+                        '"data-fl", JSON.stringify(out)); } catch (e) {} }; '
                         'mark(); document.addEventListener("DOMContentLoaded", mark); })()')
               fl_b = {}
               for name in ("mac", "win"):
