@@ -1815,6 +1815,124 @@ jobs:
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
+          # Discriminator (#83's true scope): does the leak require a
+          # SINGLE, unresolvable font-family request with nothing else
+          # in the CSS stack to fall back to, or does it also leak when
+          # an explicit generic ("monospace") follows the blocked name
+          # in the SAME request? Team-lead's hypothesis, from arm (b)
+          # staying green at processCount=1 while arm (j) still leaks:
+          # CSS font-stack resolution tries each declared family in
+          # order and stops at the first that resolves -- "monospace"
+          # always resolves to something, so a STACKED request never
+          # needs Gecko's automatic Unicode-fallback machinery, which
+          # is where the process-wide, unguarded cache read lives. A
+          # SINGLE name with nothing after it has nowhere else to go
+          # and DOES enter that path.
+          #
+          # Same shared-process, mac-then-win shape as arm (b) itself:
+          # dom.ipc.processCount=1, mac context first (legitimately
+          # resolving its own MAC_ONLY families, exactly like arm (b)'s
+          # own probe), win context second, measuring those SAME
+          # families it was never allowed -- in BOTH forms, same
+          # families, same launch, same order, only the stack differs.
+          # A NoSuchFontAtAll control in both forms gives each form its
+          # own unresolvable baseline, so "differs from its own
+          # baseline" -- not a hardcoded width -- is what "leaked"
+          # means, same discipline as every other arm here.
+          JS_DISC_MAC = """() => {
+            // Resolve mac's own families for real, exactly like arm
+            // (b)'s probe() does, to populate whatever process-wide
+            // state the leak reads from.
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const widths = {};
+            for (const fam of """ + json.dumps(MAC_ONLY) + """) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText(s).width;
+            }
+            return widths;
+          }"""
+
+          JS_DISC_WIN = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const families = """ + json.dumps(MAC_ONLY + ["NoSuchFontAtAll"]) + """;
+            const single = {}, stacked = {};
+            for (const fam of families) {
+              c.font = '48px "' + fam + '"';
+              single[fam] = c.measureText(s).width;
+              c.font = '48px "' + fam + '", monospace';
+              stacked[fam] = c.measureText(s).width;
+            }
+            return {single: single, stacked: stacked};
+          }"""
+
+          def discriminator_run():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  page_mac = ctx_mac.new_page()
+                  page_mac.goto("data:text/html,<h1>disc-mac</h1>")
+                  mac_result = page_mac.evaluate(JS_DISC_MAC)
+
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  page_win = ctx_win.new_page()
+                  page_win.goto("data:text/html,<h1>disc-win</h1>")
+                  win_result = page_win.evaluate(JS_DISC_WIN)
+
+                  b.close()
+                  return mac_result, win_result
+
+          disc_mac, disc_win = discriminator_run()
+          print(f"  [discriminator / #83 scope] mac context (first, resolving its own "
+                f"families for real): {disc_mac}")
+          print(f"  [discriminator / #83 scope] win context (second, same process), "
+                f"single-name form: {disc_win['single']}")
+          print(f"  [discriminator / #83 scope] win context (second, same process), "
+                f"stacked ', monospace' form: {disc_win['stacked']}")
+
+          disc_single_baseline = disc_win["single"]["NoSuchFontAtAll"]
+          disc_stacked_baseline = disc_win["stacked"]["NoSuchFontAtAll"]
+          disc_single_leaked = [f for f in MAC_ONLY if disc_win["single"][f] != disc_single_baseline]
+          disc_stacked_leaked = [f for f in MAC_ONLY if disc_win["stacked"][f] != disc_stacked_baseline]
+          print(f"  [discriminator / #83 scope] single-name baseline (NoSuchFontAtAll): "
+                f"{disc_single_baseline}; leaked: {disc_single_leaked or 'NONE'}")
+          print(f"  [discriminator / #83 scope] stacked-form baseline (NoSuchFontAtAll, "
+                f"monospace): {disc_stacked_baseline}; leaked: {disc_stacked_leaked or 'NONE'}")
+
+          if disc_single_leaked and not disc_stacked_leaked:
+              print("  [discriminator / #83 scope] VERDICT: hypothesis HOLDS -- single-name "
+                    "form leaks, stacked form does not. #83 is precisely a bare/"
+                    "unresolvable-request leak: a fingerprinter probing a single font name "
+                    "with no fallback (an ordinary font-detection technique) can read back "
+                    "an earlier context's resolution. Narrower mechanism, same severity -- "
+                    "this is exactly the detection #44's per-context list exists to prevent.")
+          elif disc_single_leaked and disc_stacked_leaked:
+              print("  [discriminator / #83 scope] VERDICT: BOTH forms leak -- arm (b)'s "
+                    "green result does not come from stack-resolution avoiding the leaky "
+                    "path; the gate is weaker than arm (b) alone shows. This blocks Task 8's "
+                    "flip pending further investigation.")
+          elif not disc_single_leaked and not disc_stacked_leaked:
+              print("  [discriminator / #83 scope] VERDICT: NEITHER form leaks -- this "
+                    "specific mac/win family pairing does not reproduce #83 at all. The "
+                    "leak may be specific to arm (j)'s U+FFFD probe families or setup, not "
+                    "this one. #83 needs re-scoping again before it means anything.")
+          else:
+              print("  [discriminator / #83 scope] VERDICT: UNEXPECTED -- stacked form "
+                    "leaks but single-name form does not. Re-examine the hypothesis before "
+                    "trusting either reading.")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
           # Arm (j2): last attempt at #82, per team-lead direction. Arm
           # (j) above asked a NARROW per-context list to populate
           # mReplacementCharFallbackFamily; none of ten strong
