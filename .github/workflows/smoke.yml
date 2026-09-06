@@ -399,6 +399,41 @@ jobs:
             printf '  %-24s %s\n' "$n" "$(grep -ac "$n" "$BIN_DIR"/libxul.so 2>/dev/null || echo 0)"
           done
 
+      - name: "is setFontList absent in the default context too (#83 diagnostic)"
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+        run: |
+          # setFontList's WebIDL binding IS in libxul (2 hits, same as three
+          # setters that work), and its Func gate is identical line for line to
+          # setWebGLRenderer's. Every test so far used b.new_context(), where
+          # mUserContextId != 0. Split that variable: does the property appear
+          # in the DEFAULT context, where the id is 0?
+          pip install --quiet 'playwright==1.55.0'
+          python - <<'PY2'
+          import json, os
+          from playwright.sync_api import sync_playwright
+          NAMES = ["setFontList", "setWebGLRenderer", "setNavigatorPlatform", "setSpeechVoices"]
+          INIT = ('(() => { const o = %s.filter(n => typeof window[n] === "function"); '
+                  'const m = () => { try { document.documentElement.setAttribute("data-s", '
+                  'JSON.stringify(o)); } catch (e) {} }; m(); '
+                  'document.addEventListener("DOMContentLoaded", m); })()' % json.dumps(NAMES))
+          READ = '() => document.documentElement.getAttribute("data-s")'
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
+                                    headless=False, env={**os.environ,
+                                    "CAMOU_CONFIG": json.dumps({})})
+              pg = b.new_page()
+              pg.add_init_script(INIT)
+              pg.goto("data:text/html,<h1>d</h1>")
+              print(f"  [default context, id 0]  present: {pg.evaluate(READ)}")
+              ctx = b.new_context()
+              ctx.add_init_script(INIT)
+              p2 = ctx.new_page()
+              p2.goto("data:text/html,<h1>c</h1>")
+              print(f"  [explicit context, id!=0] present: {p2.evaluate(READ)}")
+              b.close()
+          PY2
+
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
         timeout-minutes: 10
         run: |
