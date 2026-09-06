@@ -548,6 +548,14 @@ jobs:
                   f"text measurement says {default['measure'][f]} -- FontFace::Status() is "
                   "answering for a different context than measurement")
 
+          # Moved up from just before arm (e)/(f)/(g) below: arm (b2)
+          # (right after arm (b), further down) is collect-then-assert
+          # too, per team-lead direction, and needs this list to exist
+          # before it runs. Still the SAME list, still first appended to
+          # by (e); moving its creation earlier changes nothing about
+          # (e)/(f)/(g)/(i)/(j)/(j2)'s own behavior.
+          tripwires = []
+
           # bare launch -- no `fonts` key at all, so mFontFamilies holds every
           # bundled family and nothing is deleted from font.system.whitelist.
           # setFontList() per context is the only narrowing in play. Covers
@@ -593,6 +601,73 @@ jobs:
           assert all(win["measure"][f] for f in WIN_ONLY), f"win context: {win['measure']}"
           assert not any(win["measure"][f] for f in MAC_ONLY), (
               f"the win context resolves macOS-only families: {win['measure']}")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (b2): arm (b) above, unchanged, closes each context
+          # before creating the next -- and that sequence turns out to
+          # be the one case in which the per-context leak (#83) cannot
+          # happen (confirmed directly: mac's content process is torn
+          # down and win gets a fresh one, verified by watching
+          # `pgrep -af contentproc` across the close(), not inferred).
+          # A caller that opens several contexts in one browser keeps
+          # them alive at once -- that is the entire reason to use
+          # contexts instead of separate launches -- so arm (b)'s green
+          # documents a real and worth-keeping case, but not the one
+          # #44's per-context feature has to hold up in.
+          #
+          # Arm (b2) is the SAME probe(), the SAME MAC_ONLY/WIN_ONLY
+          # families, the SAME processCount=1 launch as arm (b) --
+          # differing in exactly one thing: the mac (donor) context is
+          # NOT closed before the win (recipient) context is created
+          # and probed. Confirmed by a single-variable pair (this
+          # task's own discriminator): reference ordering alone does
+          # not reproduce the leak; donor liveness alone does, fully,
+          # every family. This arm is EXPECTED RED on every build until
+          # #83 is fixed -- it is not a broken test, it is the honest
+          # state of the feature in the shape it is actually used.
+          # Kept as its own arm rather than folded into arm (b), so a
+          # regression in the CLOSED-donor case (arm (b) going red)
+          # remains separately visible from this one.
+          with sync_playwright() as pw:
+              b2 = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  firefox_user_prefs={"dom.ipc.processCount": 1},
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              ctx2_mac = b2.new_context()
+              ctx2_mac.add_init_script(
+                  'if (typeof window.setFontList === "function") '
+                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+              mac2 = probe(ctx2_mac.new_page())
+              # Deliberately NOT closed here -- the one variable this
+              # arm tests. Arm (b) above calls ctx.close() at this exact
+              # point, before the next context exists.
+              ctx2_win = b2.new_context()
+              ctx2_win.add_init_script(
+                  'if (typeof window.setFontList === "function") '
+                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+              win2 = probe(ctx2_win.new_page())
+              ctx2_mac.close()
+              ctx2_win.close()
+              b2.close()
+
+          print(f"  [donor-alive / mac context] measure {mac2['measure']}")
+          print(f"  [donor-alive / win context, donor still open] measure {win2['measure']}")
+
+          b2_failures = []
+          b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
+          if b2_leaked:
+              b2_failures.append(
+                  f"arm (b2)/#83: win resolved macOS-only families {b2_leaked} it was "
+                  f"never allowed, with the donor (mac) context still open -- the "
+                  f"production shape this feature exists for. See #83.")
+          print(f"  (b2) donor-alive per-context leak (#83):  "
+                f"{'RED (expected -- #83 not yet fixed)' if b2_failures else 'GREEN'} -- "
+                f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
+          if b2_failures:
+              tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
+          # -----------------------------------------------------------
+
           # -----------------------------------------------------------
           # Step 0: the two gates Task 1 added inside gfxPlatformFontList
           # (GetFontList, GetFontFamilyList) have no arm reaching either.
@@ -1278,7 +1353,6 @@ jobs:
                           f"{label}/{fam}: worker {'resolved' if worker_present else 'did not resolve'} "
                           f"it, arm (b) says this context {'has' if ground[fam] else 'does not have'} it")
 
-          tripwires = []
           if e_failures:
               tripwires.append(
                   f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: "
