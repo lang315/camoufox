@@ -1671,16 +1671,40 @@ jobs:
               c.font = '48px ' + fam;
               refs[fam] = c.measureText('�').width;
             }
-            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+            // A GUARANTEED-DIFFERENT tofu reference. The generic families
+            // above are NOT one: a generic resolves within the asking
+            // context's own allowed list, and Segoe UI / Tahoma / Malgun
+            // Gothic all carry U+FFFD (fontTools over bundle/fonts: 46 of
+            // 574 faces cover it; 9 Windows families among them). So in a
+            // context allowed those, `sans-serif` renders the REAL glyph,
+            // fallback renders the same real glyph, the two compare equal,
+            // and a correct resolution reads as "settled to its own tofu
+            // floor". Three #82 setups were declared invalid on exactly
+            // that false negative.
+            // These three are absent from the U+FFFD-covering set, so
+            // naming one yields the true tofu width whether the context is
+            // allowed it (no glyph in the face) or not (gated out).
+            const named = {};
+            for (const fam of ['Arial', 'Calibri', 'Times New Roman',
+                               'Tahoma', 'Segoe UI', 'Malgun Gothic']) {
+              c.font = '48px "' + fam + '"';
+              named[fam] = c.measureText('�').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples,
+                    refs: refs, named: named, tofu: named['Arial']};
           }"""
 
           j_a, j_b = two_contexts_one_launch(FFFD_YES_PROBE, FFFD_NO_PROBE, JS_4C)
-          j_a_tofu = j_a["final"] in j_a["refs"].values()
-          j_b_tofu = j_b["final"] in j_b["refs"].values()
+          # Compare against the guaranteed-different reference, not the
+          # generic families -- see the note in JS_4C.
+          j_a_tofu = j_a["final"] == j_a["tofu"]
+          j_b_tofu = j_b["final"] == j_b["tofu"]
           print(f"  [arm j / #82] context A ({FFFD_YES_PROBE}, has U+FFFD, first in launch) "
-                f"settled={j_a['final']} refs={j_a['refs']} samples={j_a['samples']}")
+                f"settled={j_a['final']} true_tofu={j_a['tofu']} named={j_a['named']} "
+                f"refs={j_a['refs']} samples={j_a['samples']}")
           print(f"  [arm j / #82] context B ({FFFD_NO_PROBE}, no U+FFFD, same launch, AFTER A) "
-                f"settled={j_b['final']} refs={j_b['refs']} samples={j_b['samples']}")
+                f"settled={j_b['final']} true_tofu={j_b['tofu']} named={j_b['named']} "
+                f"refs={j_b['refs']} samples={j_b['samples']}")
 
           # Collect-then-assert, same as arm (i): a hard assert here would
           # ALSO kill the script before the final tripwires check, and
@@ -1692,7 +1716,8 @@ jobs:
               j_failures.append(
                   f"arm (j)/#82 setup invalid: context A's list ({FFFD_YES_PROBE}, bisected "
                   f"by direct naming, not just fontTools cmap coverage) settled U+FFFD to "
-                  f"{j_a['final']}, its OWN tofu floor ({j_a['refs']}) -- none of the "
+                  f"{j_a['final']}, its true tofu width ({j_a['tofu']}, from a family with no "
+                  f"U+FFFD coverage) -- none of the "
                   f"bisected candidates actually resolved U+FFFD under this build's gated "
                   f"fallback; this arm cannot test the leak until A's own resolution is "
                   f"genuine.")
@@ -1700,7 +1725,7 @@ jobs:
               j_failures.append(
                   f"arm (j)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) -- context B "
                   f"({FFFD_NO_PROBE}, none of which cover U+FFFD, confirmed via fontTools) "
-                  f"settled U+FFFD to {j_b['final']}, NOT its own tofu floor ({j_b['refs']}) -- "
+                  f"settled U+FFFD to {j_b['final']}, NOT its true tofu width ({j_b['tofu']}) -- "
                   f"context A's earlier, correctly-gated resolution leaked into B via "
                   f"gfxPlatformFontList's process-wide mReplacementCharFallbackFamily cache, "
                   f"read with no CamouIsFontAllowed() check at all -- B rendered a REAL glyph "
