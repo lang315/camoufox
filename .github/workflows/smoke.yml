@@ -445,6 +445,32 @@ jobs:
 
           probe_setters(None, "no processCount pref")
           probe_setters({"dom.ipc.processCount": 1}, "processCount=1")
+
+          # Neither pref nor context id explains it. Two differences remain
+          # between this step and the #44 guard step, where setFontList is
+          # absent: the guard runs a config launch first in the same Python
+          # process, and its init script carries a 574-family list. Test both.
+          import pathlib as _pl
+          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          BIG = ('(() => { const o = %s.filter(n => typeof window[n] === "function"); '
+                 'try { window.setFontList(%s); } catch (e) {} '
+                 'const m = () => { try { document.documentElement.setAttribute("data-s", '
+                 'JSON.stringify(o)); } catch (e) {} }; m(); '
+                 'document.addEventListener("DOMContentLoaded", m); })()')
+          with sync_playwright() as pw:
+              kw = {"executable_path": os.environ["CAMOUFOX_BIN"], "headless": False,
+                    "env": {**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})}}
+              b1 = pw.firefox.launch(**kw)
+              b1.new_page().goto("data:text/html,<h1>1</h1>")
+              b1.close()
+              kw["env"] = {**os.environ, "CAMOU_CONFIG": json.dumps({})}
+              b2 = pw.firefox.launch(**kw)
+              c2 = b2.new_context()
+              c2.add_init_script(BIG % (json.dumps(NAMES), json.dumps(",".join(FONTS["mac"]))))
+              q = c2.new_page()
+              q.goto("data:text/html,<h1>2</h1>")
+              print(f"  [2nd launch, 574-family init] present: {q.evaluate(READ)}")
+              b2.close()
           PY2
 
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
