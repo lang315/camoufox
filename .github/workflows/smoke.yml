@@ -1311,6 +1311,8 @@ jobs:
 
           assert g["mac"]["baseline48"] > 0 and g["win"]["baseline48"] > 0, (
               "arm (g): monospace baseline measured 0 -- nothing ran")
+          assert h["mac"]["baseline"] > 0 and h["win"]["baseline"] > 0, (
+              "arm (h): monospace baseline measured 0 -- nothing ran")
           assert g["mac"]["gWorkerBaseline"] > 0 and g["win"]["gWorkerBaseline"] > 0, (
               "arm (g): worker's own monospace baseline measured 0 -- the worker ran "
               "but never measured its own reference width, so nothing below can be trusted")
@@ -1550,6 +1552,26 @@ jobs:
                           f"{label}/{fam}: worker {'resolved' if worker_present else 'did not resolve'} "
                           f"it, arm (b) says this context {'has' if ground[fam] else 'does not have'} it")
 
+          # (h) face-name lookup: local('Segoe UI') and local('SegoeUI') --
+          # full name and PostScript name -- both name the SAME face, which
+          # belongs to the WIN_ONLY family "Segoe UI". Ground truth is arm
+          # (b)'s own per-context measurement of that family (mac["measure"]
+          # / win["measure"]["Segoe UI"]), the same trusted reference arm
+          # (g) compares against above -- NOT "mac != win", since a leak
+          # that resolved the SAME wrong face in both contexts would still
+          # show mac == win and pass a same-vs-different check.
+          h_failures = []
+          for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
+              for probe_key, probe_name in (("hFull", "local('Segoe UI')"),
+                                            ("hPs", "local('SegoeUI')")):
+                  resolved = h[label][probe_key] != h[label]["baseline"]
+                  if resolved != ground["Segoe UI"]:
+                      h_failures.append(
+                          f"{label}/{probe_name}: {'resolved' if resolved else 'did not resolve'} "
+                          f"the face (width={h[label][probe_key]} baseline={h[label]['baseline']}), "
+                          f"arm (b) says this context "
+                          f"{'has' if ground['Segoe UI'] else 'does not have'} Segoe UI")
+
           if e_failures:
               tripwires.append(
                   f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: "
@@ -1558,6 +1580,8 @@ jobs:
               tripwires.append(f"(f) codepoint fallback -- settled values: {f_failures}")
           if g_failures:
               tripwires.append(f"(g) worker vs arm (b) per-context ground truth disagree: {g_failures}")
+          if h_failures:
+              tripwires.append(f"(h) face-name lookup vs arm (b) per-context ground truth disagree: {h_failures}")
 
           print("=== arms (e)-(h) summary ===")
           print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
@@ -1565,8 +1589,7 @@ jobs:
                 f"mac_settled={mac_final} (family={bisect_allowed['mac']}) mac2_settled={mac2_final} "
                 f"win_settled={win_final} (family={bisect_allowed['win']}) failures={f_failures}")
           print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
-          print("  (h) face-name lookup: measurement only, no verdict enforced here "
-                "(Task 6 reads the gate from this data):")
+          print(f"  (h) face-name lookup:       {'RED' if h_failures else 'GREEN'} -- {h_failures}")
           print(f"      mac: local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
           print(f"      win: local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
 
