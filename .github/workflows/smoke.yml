@@ -2059,6 +2059,101 @@ jobs:
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
+          # Does closing a context kill its content process (team-lead's
+          # sharper version of the lifetime finding): if so, arm (b)'s
+          # win never shared ANY process with mac, at any
+          # dom.ipc.processCount setting, and its green says nothing
+          # about cross-context sharing either way.
+          #
+          # No content-visible API answers this: web content has no
+          # standard way to read its own OS process id (checked --
+          # Camoufox's own Services.appinfo.processID reference, at
+          # additions/juggler/content/main.js:83, is Juggler's own
+          # PRIVILEGED chrome-context automation code, not something a
+          # page can call; exposing process identity to content would
+          # itself be a fingerprinting surface no browser ships). So
+          # this checks from OUTSIDE, at the OS level, which the CI
+          # runner can do directly and more authoritatively than any
+          # content-side proxy: list this binary's own content-process
+          # PIDs (Gecko's e10s convention: a content process carries
+          # '-contentproc' on its command line, unrelated to Camoufox)
+          # at three checkpoints, for BOTH sequences already measured
+          # above -- donor-closed (arm (b)'s own shape) and donor-alive
+          # (the lifetime variant that leaked).
+          import subprocess
+
+          def content_pids():
+              try:
+                  out = subprocess.run(
+                      ["pgrep", "-af", "contentproc"],
+                      capture_output=True, text=True, timeout=5).stdout.strip()
+              except Exception as e:
+                  return f"ERR: {e}"
+              return out
+
+          def track_pids_donor_closed():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  page_mac = ctx_mac.new_page()
+                  page_mac.goto("data:text/html,<h1>pid-mac</h1>")
+                  after_mac = content_pids()
+                  ctx_mac.close()
+                  after_close = content_pids()
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  page_win = ctx_win.new_page()
+                  page_win.goto("data:text/html,<h1>pid-win</h1>")
+                  after_win = content_pids()
+                  ctx_win.close()
+                  b.close()
+                  return after_mac, after_close, after_win
+
+          def track_pids_donor_alive():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  page_mac = ctx_mac.new_page()
+                  page_mac.goto("data:text/html,<h1>pid-mac2</h1>")
+                  after_mac = content_pids()
+                  # donor stays alive -- no ctx_mac.close() here
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  page_win = ctx_win.new_page()
+                  page_win.goto("data:text/html,<h1>pid-win2</h1>")
+                  after_win = content_pids()
+                  ctx_mac.close()
+                  ctx_win.close()
+                  b.close()
+                  return after_mac, after_win
+
+          pid_after_mac, pid_after_close, pid_after_win = track_pids_donor_closed()
+          print(f"  [pid / donor-closed] content processes after mac page ready:\n{pid_after_mac}")
+          print(f"  [pid / donor-closed] content processes after ctx_mac.close():\n{pid_after_close}")
+          print(f"  [pid / donor-closed] content processes after win page ready:\n{pid_after_win}")
+
+          pid2_after_mac, pid2_after_win = track_pids_donor_alive()
+          print(f"  [pid / donor-alive] content processes after mac page ready:\n{pid2_after_mac}")
+          print(f"  [pid / donor-alive] content processes after win page ready (donor still open):\n{pid2_after_win}")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
           # Arm (j2): last attempt at #82, per team-lead direction. Arm
           # (j) above asked a NARROW per-context list to populate
           # mReplacementCharFallbackFamily; none of ten strong
