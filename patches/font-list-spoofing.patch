@@ -469,7 +469,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    // Ensure resolved font instances are valid; discard them if necessary.
    auto* pfl = gfxPlatformFontList::PlatformFontList();
    if (mFontListGeneration != pfl->GetGeneration()) {
-@@ -2039,6 +2054,11 @@
+@@ -2058,6 +2073,11 @@
  
  already_AddRefed<gfxFont> gfxFontGroup::GetFontAt(uint32_t i, uint32_t aCh,
                                                    bool* aLoading) {
@@ -481,7 +481,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    if (i >= mFonts.Length()) {
      return nullptr;
    }
-@@ -2243,6 +2263,10 @@
+@@ -2262,6 +2282,10 @@
  
  already_AddRefed<gfxFont> gfxFontGroup::GetFirstValidFont(
      uint32_t aCh, StyleGenericFontFamily* aGeneric, bool* aIsFirst) {
@@ -492,7 +492,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    EnsureFontList();
  
    uint32_t count = mFonts.Length();
-@@ -3104,6 +3128,10 @@
+@@ -3129,6 +3153,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
      uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh, Script aRunScript,
      gfxFont* aPrevMatchedFont, FontMatchType* aMatchType) {
