@@ -2635,11 +2635,6 @@ jobs:
           # An expected-red arm that turns GREEN is also reported: it means the
           # defect it guards was fixed somewhere, and this list is now stale.
           EXPECTED_RED = {
-              "(b)": "#44 Task 6, under investigation: mac context stopped resolving "
-                     "Geneva (MAC_ONLY) between builds 34021403701 and 34034555160 "
-                     "-- document.fonts/FontFace.status say it's allowed, canvas "
-                     "measurement says no glyph rendered. Cause (build artifact vs "
-                     "code) not yet determined; see task-6-report.md.",
               "(b2)": "#83, cross-context font leak, donor-alive; unfixed",
               "(j)": "#82, U+FFFD cache; setup has never reproduced the leak",
               "(j2)": "#82, same, bare-context variant",
