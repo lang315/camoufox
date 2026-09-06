@@ -235,15 +235,47 @@ diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList
 index xxxxxxxxxx..yyyyyyyyyy 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -42,4 +42,5 @@
+@@ -41,6 +41,7 @@
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/dom/ContentProcessMessageManager.h"
  #include "mozilla/dom/Document.h"
 +#include "mozilla/dom/FontListManager.h"
  #include "mozilla/gfx/2D.h"
  #include "mozilla/ipc/FileDescriptorUtils.h"
  #include "mozilla/TextUtils.h"
-@@ -1170,38 +1171,69 @@
- bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
-                                          FontVisibility aVisibility) const {
+@@ -1043,6 +1044,11 @@
+ 
+   return lookup;
+ }
++
++// Camoufox: forward declaration -- defined below (after IsVisibleToCSS),
++// but LookupInSharedFaceNameList, which needs it for the face-name lookup
++// gate (#44), is defined earlier in this file than that definition.
++static bool CamouIsFontAllowed(const nsACString& aLowerKey);
+ 
+ gfxFontEntry* gfxPlatformFontList::LookupInSharedFaceNameList(
+     FontVisibilityProvider* aFontVisibilityProvider,
+@@ -1077,6 +1083,19 @@
+     }
+     return nullptr;
+   }
++
++  // Camoufox: face-name lookup filtering (#44/Task 6). A local()
++  // @font-face src resolves by full name or PostScript name via the
++  // face-name tables this function searches -- a path the family-key
++  // gate on FindFamily() cannot see, since these tables are keyed by
++  // face name, not family. Gate on the FAMILY that owns the matched
++  // face; CamouIsFontAllowed's per-context list is keyed by family.
++  nsAutoCString ctxKey(family->Key().AsString(list));
++  GenerateFontListKey(ctxKey);
++  if (!CamouIsFontAllowed(ctxKey)) {
++    return nullptr;
++  }
++
+   gfxFontEntry* fe = CreateFontEntry(face, family);
+   if (fe) {
+     fe->mIsLocalUserFont = true;
+@@ -1172,6 +1191,27 @@
    return aFamily.Visibility() <= aVisibility || IsFontFamilyWhitelistActive();
  }
  
@@ -271,32 +303,19 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
                                        const nsACString& aGenericFamily,
                                        nsTArray<nsString>& aListOfFonts) {
-   AutoLock lock(mLock);
- 
-   if (SharedFontList()) {
-     fontlist::FontList* list = SharedFontList();
-     const fontlist::Family* families = list->Families();
-     if (families) {
+@@ -1184,6 +1224,11 @@
        for (uint32_t i = 0; i < list->NumFamilies(); i++) {
          auto& f = families[i];
          if (!IsVisibleToCSS(f, FontVisibility::User) || f.IsAltLocaleFamily()) {
-           continue;
-         }
++          continue;
++        }
 +        nsAutoCString ctxKey(f.Key().AsString(list));
 +        GenerateFontListKey(ctxKey);
 +        if (!CamouIsFontAllowed(ctxKey)) {
-+          continue;
-+        }
+           continue;
+         }
          // XXX TODO: filter families for aGenericFamily, if supported by
-         // platform
-         aListOfFonts.AppendElement(
-             NS_ConvertUTF8toUTF16(list->LocalizedFamilyName(&f)));
-       }
-     }
-     return;
-   }
- 
-   for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
+@@ -1199,6 +1244,11 @@
      if (!IsVisibleToCSS(*family, FontVisibility::User)) {
        continue;
      }
@@ -308,14 +327,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
      if (family->FilterForFontList(aLangGroup, aGenericFamily)) {
        nsAutoCString localizedFamilyName;
        family->LocalizedName(localizedFamilyName);
-       aListOfFonts.AppendElement(NS_ConvertUTF8toUTF16(localizedFamilyName));
-     }
-   }
-@@ -1213,16 +1245,30 @@
- void gfxPlatformFontList::GetFontFamilyList(
-     nsTArray<RefPtr<gfxFontFamily>>& aFamilyArray) {
-   AutoLock lock(mLock);
-   MOZ_ASSERT(aFamilyArray.IsEmpty());
+@@ -1217,8 +1267,22 @@
    // This doesn't use ToArray, because the caller passes an AutoTArray.
    aFamilyArray.SetCapacity(mFontFamilies.Count());
    for (const auto& family : mFontFamilies.Values()) {
@@ -338,23 +350,19 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  }
  
  already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
-     FontVisibilityProvider* aFontVisibilityProvider, uint32_t aCh,
-     uint32_t aNextCh, Script aRunScript, FontPresentation aPresentation,
-     const gfxFontStyle* aStyle, FontVisibility* aVisibility) {
-   AutoLock lock(mLock);
-@@ -1404,6 +1450,11 @@
+@@ -1390,6 +1454,11 @@
+       gfxFontFamily* fallback =
+           FindFamilyByCanonicalName(nsDependentCString(name));
        if (!fallback || !IsVisibleToCSS(*fallback, level)) {
-         continue;
-       }
++        continue;
++      }
 +      nsAutoCString ctxKey;
 +      GenerateFontListKey(fallback->Name(), ctxKey);
 +      if (!CamouIsFontAllowed(ctxKey)) {
-+        continue;
-+      }
+         continue;
+       }
        fallback->FindFontForChar(&data);
-       if (data.mBestMatch) {
-         RefPtr<gfxFont> font = check(data.mBestMatch, FontFamily(fallback));
-@@ -1480,6 +1526,11 @@
+@@ -1468,6 +1537,11 @@
          if (!IsVisibleToCSS(family, level)) {
            continue;
          }
@@ -366,22 +374,22 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
          if (!family.IsFullyInitialized() &&
              StaticPrefs::gfx_font_rendering_fallback_async() &&
              !XRE_IsParentProcess()) {
-@@ -1506,6 +1552,11 @@
+@@ -1492,6 +1566,11 @@
+     // character
+     for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
        if (!IsVisibleToCSS(*family, level)) {
-         continue;
-       }
++        continue;
++      }
 +      nsAutoCString ctxKey;
 +      GenerateFontListKey(family->Name(), ctxKey);
 +      if (!CamouIsFontAllowed(ctxKey)) {
-+        continue;
-+      }
+         continue;
+       }
        // evaluate all fonts in this family for a match
-       family->FindFontForChar(&data);
-       if (data.mMatchDistance == 0.0) {
-@@ -1632,6 +1678,13 @@
+@@ -1749,6 +1828,13 @@
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
-
+ 
 +  // Per-context font list filtering; the actual chokepoint. Falls back to
 +  // the launch-level "fonts" key when this context installed no list of its
 +  // own -- the default context never does (#44).
@@ -431,7 +439,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  #include "mozilla/dom/BrowsingContext.h"
  #include "mozilla/dom/Document.h"
  #include "nsPIDOMWindow.h"
-
+ 
 @@ -1857,9 +1859,20 @@
          if (auto* bc = win->GetBrowsingContext()) {
            mUserContextId = bc->OriginAttributesRef().mUserContextId;
@@ -452,7 +460,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 +    }
    }
  }
-
+ 
  gfxFontGroup::~gfxFontGroup() {
 @@ -1910,4 +1923,6 @@
  void gfxFontGroup::EnsureFontList() {
@@ -461,7 +469,41 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    // Ensure resolved font instances are valid; discard them if necessary.
    auto* pfl = gfxPlatformFontList::PlatformFontList();
    if (mFontListGeneration != pfl->GetGeneration()) {
-@@ -3931,6 +3946,10 @@
+@@ -2039,6 +2054,11 @@
+ 
+ already_AddRefed<gfxFont> gfxFontGroup::GetFontAt(uint32_t i, uint32_t aCh,
+                                                   bool* aLoading) {
++  // EnsureFontList()'s AutoFontListContext scope ends long before this
++  // function runs; re-establish it here so a userfont's local() src
++  // lookup (LookupLocalFont/LookupInSharedFaceNameList) sees this font
++  // group's context, not context 0 (#44).
++  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
+   if (i >= mFonts.Length()) {
+     return nullptr;
+   }
+@@ -2243,6 +2263,10 @@
+ 
+ already_AddRefed<gfxFont> gfxFontGroup::GetFirstValidFont(
+     uint32_t aCh, StyleGenericFontFamily* aGeneric, bool* aIsFirst) {
++  // Same reasoning as GetFontAt() above -- EnsureFontList() only scopes
++  // AutoFontListContext for its own call, not for this function's
++  // subsequent userfont Load() calls (#44).
++  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
+   EnsureFontList();
+ 
+   uint32_t count = mFonts.Length();
+@@ -3104,6 +3128,10 @@
+ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
+     uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh, Script aRunScript,
+     gfxFont* aPrevMatchedFont, FontMatchType* aMatchType) {
++  // Same reasoning as GetFontAt()/GetFirstValidFont() above -- a userfont
++  // Load() below needs this font group's context in scope (#44).
++  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
++
+   // If the char is a cluster extender, we want to use the same font as the
+   // preceding character if possible. This is preferable to using the font
+   // group because it avoids breaks in shaping within a cluster.
+@@ -3931,6 +3959,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
      FontPresentation aPresentation) {
