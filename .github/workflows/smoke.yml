@@ -572,13 +572,28 @@ jobs:
                   firefox_user_prefs={"dom.ipc.processCount": 1},
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
               ctxs = {}
+              # Same DOM-reported instrumentation as arm (b2). Arm (b2)
+              # reports saw=false for every context, which would mean no
+              # per-context list is ever installed -- and under this bare
+              # launch that means CamouIsFontAllowed allows everything, so
+              # arm (b) could not be blocking for the reason it claims.
+              # Measure arm (b) with the same instrument rather than
+              # assuming the two differ (#83).
+              B_INIT = ('(() => { const saw = (typeof window.setFontList === "function"); '
+                        'let applied = false; '
+                        'if (saw) { window.setFontList(%s); applied = true; } '
+                        'const mark = () => { try { document.documentElement.setAttribute('
+                        '"data-fl", JSON.stringify({saw: saw, applied: applied})); } catch (e) {} }; '
+                        'mark(); document.addEventListener("DOMContentLoaded", mark); })()')
+              fl_b = {}
               for name in ("mac", "win"):
                   ctx = b.new_context()
-                  ctx.add_init_script(
-                      'if (typeof window.setFontList === "function") '
-                      'window.setFontList(%s);' % json.dumps(",".join(FONTS[name])))
-                  ctxs[name] = probe(ctx.new_page())
+                  ctx.add_init_script(B_INIT % json.dumps(",".join(FONTS[name])))
+                  pg = ctx.new_page()
+                  ctxs[name] = probe(pg)
+                  fl_b[name] = pg.evaluate('() => document.documentElement.getAttribute("data-fl")')
                   ctx.close()
+              print(f"  [arm b / #83 instrumentation] setFontList per context {fl_b}")
               b.close()
           mac, win = ctxs["mac"], ctxs["win"]
 
