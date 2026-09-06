@@ -1739,6 +1739,74 @@ jobs:
               tripwires.append(f"(j) replacement-char cache leak (#82): {j_failures}")
           # -----------------------------------------------------------
 
+          # Diagnostic (not scored, no assert -- same discipline as
+          # JS_F_RACE above): arm (j)'s OWN `named` data (printed
+          # above) shows context B (allow-list FFFD_NO_PROBE = Arial/
+          # Calibri/Times New Roman ONLY) resolving Tahoma/Segoe UI/
+          # Malgun Gothic -- none on its own list -- to their REAL,
+          # named widths, not tofu, in the SAME shared-process launch,
+          # AFTER context A had already named all three as its own
+          # (allowed) probe candidates. That is a leak, through
+          # whichever cache backs canvas direct-name font resolution --
+          # not necessarily mReplacementCharFallbackFamily specifically.
+          # Two hypotheses this data alone cannot separate: (a)
+          # order-dependent -- a process-wide cache A's earlier,
+          # legitimate lookup populated, read back by B without
+          # re-checking CamouIsFontAllowed; (b) canvas direct-naming
+          # isn't gated per-context on this build at all, regardless of
+          # order. Discriminator: name the same three families in a
+          # FRESH, ISOLATED, single-context launch (FFFD_NO_PROBE as
+          # the ONLY allow-list, nothing preceding it at all) -- if
+          # still correctly blocked there, the leak is order-dependent
+          # (a); if not, gating is absent outright (b).
+          JS_DIAG_NAMED = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll7"';
+            const tofu = c.measureText('�').width;
+            const widths = {};
+            for (const fam of ['Tahoma', 'Segoe UI', 'Malgun Gothic']) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText('�').width;
+            }
+            return {tofu: tofu, widths: widths};
+          }"""
+
+          def one_page_list(font_list, js):
+              # Same shape as one_page() above, but takes a literal
+              # font list instead of a FONTS[] dict key -- FFFD_NO_PROBE
+              # is a literal list, not in that dict.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(font_list)))
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>4b-diag</h1>")
+                  result = page.evaluate(js)
+                  b.close()
+                  return result
+
+          diag_isolated = one_page_list(FFFD_NO_PROBE, JS_DIAG_NAMED)
+          print(f"  [diagnostic, not scored] ISOLATED single-context launch, "
+                f"FFFD_NO_PROBE-only allow-list, nothing preceding it -- "
+                f"tofu={diag_isolated['tofu']} named={diag_isolated['widths']}")
+          diag_leaked = [f for f, w in diag_isolated["widths"].items() if w != diag_isolated["tofu"]]
+          if diag_leaked:
+              print(f"  [diagnostic] {diag_leaked} resolved to REAL widths even ALONE, "
+                    f"isolated, nothing preceding -- gating for direct-named canvas font "
+                    f"lookups may not hold at all on this build, independent of ordering "
+                    f"(hypothesis b).")
+          else:
+              print(f"  [diagnostic] all three correctly blocked when isolated -- gating "
+                    f"holds ALONE; the leak seen in arm (j)'s context B is order-dependent, "
+                    f"consistent with a process-wide cache populated by context A's earlier, "
+                    f"legitimate resolution and read back by B without re-checking "
+                    f"CamouIsFontAllowed (hypothesis a).")
+          # -----------------------------------------------------------
+
           # -----------------------------------------------------------
           # Arm (j2): last attempt at #82, per team-lead direction. Arm
           # (j) above asked a NARROW per-context list to populate
