@@ -1714,6 +1714,152 @@ jobs:
               tripwires.append(f"(j) replacement-char cache leak (#82): {j_failures}")
           # -----------------------------------------------------------
 
+          # -----------------------------------------------------------
+          # Arm (j2): last attempt at #82, per team-lead direction. Arm
+          # (j) above asked a NARROW per-context list to populate
+          # mReplacementCharFallbackFamily; none of ten strong
+          # candidates did, so that context's OWN gated fallback never
+          # reaches the population site and there is nothing for a
+          # later context to inherit -- correctly reported as "setup
+          # invalid" above, not a false pass.
+          #
+          # Read straight from CamouIsFontAllowed
+          # (patches/font-list-spoofing.patch, gfxPlatformFontList.cpp):
+          #   uint32_t ctx = FontListManager::GetCurrentContext();
+          #   if (ctx != 0 && FontListManager::HasFontList(ctx)) { ...gated...}
+          #   ...else falls through to the (launch-level) "fonts" key...
+          # The gated branch is skipped -- and the launch-level
+          # fallback taken instead -- whenever HasFontList(ctx) is
+          # false, i.e. whenever setFontList() was NEVER called for
+          # that context. That is true for literal userContextId 0
+          # (nothing ever calls setFontList() on it) but also, per this
+          # same read, for ANY context that simply never calls it --
+          # exactly this fork's own established "bare context" pattern
+          # (see one_page_webfont_bare() above, same file). Under
+          # CAMOU_CONFIG={} (empty launch, no "fonts" key),
+          # sLaunchFonts is empty, so CamouIsFontAllowed returns true
+          # for every font name -- a bare launch/context is allowed
+          # everything, which is also the realistic production shape
+          # of a context nobody ever called setFontList() on.
+          def one_page_bare(js):
+              # Same shape as one_page() above, but the context never
+              # calls window.setFontList() at all -- HasFontList(ctx)
+              # stays false for its whole life, so CamouIsFontAllowed
+              # falls through to the (empty) launch-level fonts key.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>4b-bare</h1>")
+                  result = page.evaluate(js)
+                  b.close()
+                  return result
+
+          bare_bisect = one_page_bare(JS_FFFD_BISECT)
+          print(f"  [arm j2 / #82 bare setup] U+FFFD tofu floor (no-op family, bare context): "
+                f"{bare_bisect['tofu']}")
+          print(f"  [arm j2 / #82 bare setup] named-candidate U+FFFD widths under a BARE "
+                f"context (no per-context list, no launch fonts key): {bare_bisect['widths']}")
+          bare_working = [fam for fam, w in bare_bisect["widths"].items() if w != bare_bisect["tofu"]]
+          print(f"  [arm j2 / #82 bare setup] candidates that resolve U+FFFD under a bare "
+                f"context: {bare_working or 'NONE'}")
+
+          j2_failures = []
+          if not bare_working:
+              # Stop condition (team-lead directive): this is the last
+              # attempt on #82 in this task. A bare context is the
+              # least restricted setup this fork can produce -- if
+              # U+FFFD does not resolve here either, it does not
+              # resolve through this build's gated fallback under any
+              # setup tried, which is itself a finding, not a null
+              # result to iterate past.
+              j2_failures.append(
+                  f"arm (j2)/#82 bare-context setup ALSO invalid: none of the bisected "
+                  f"candidates ({FFFD_CANDIDATES}) resolve U+FFFD under a bare context "
+                  f"either (widths {bare_bisect['widths']} all equal tofu "
+                  f"{bare_bisect['tofu']}) -- U+FFFD does not resolve through this build's "
+                  f"gated fallback under the least-restricted setup available. Per the "
+                  f"task's stop condition, no further arm redesign was attempted; this is "
+                  f"reported on #82 as its own finding and may warrant a separate issue.")
+              print(f"  (j2) bare-context U+FFFD population check:  INCONCLUSIVE -- "
+                    f"{j2_failures}")
+          else:
+              def two_contexts_bare_then_narrow(list_b, js):
+                  # Same one-launch-two-contexts shape as
+                  # two_contexts_one_launch() above, but context A
+                  # never calls setFontList() at all -- it must be
+                  # BARE, not narrow, to test whether the
+                  # default-shaped context (nothing ever calls
+                  # setFontList() on it) is what actually populates
+                  # mReplacementCharFallbackFamily in production.
+                  # Deliberately NOT a parameter on
+                  # two_contexts_one_launch(): that helper always
+                  # installs list_a via setFontList, and arm (i)'s
+                  # already-confirmed call site should not change.
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          # Same requirement as two_contexts_one_launch():
+                          # without this, A and B land in separate
+                          # content processes and this arm tests nothing.
+                          firefox_user_prefs={"dom.ipc.processCount": 1},
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      ctx_a = b.new_context()
+                      page_a = ctx_a.new_page()
+                      page_a.goto("data:text/html,<h1>4b-bare-a</h1>")
+                      result_a = page_a.evaluate(js)
+
+                      ctx_b = b.new_context()
+                      ctx_b.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(list_b)))
+                      page_b = ctx_b.new_page()
+                      page_b.goto("data:text/html,<h1>4b-bare-b</h1>")
+                      result_b = page_b.evaluate(js)
+
+                      b.close()
+                      return result_a, result_b
+
+              j2_a, j2_b = two_contexts_bare_then_narrow(FFFD_NO_PROBE, JS_4C)
+              j2_a_tofu = j2_a["final"] in j2_a["refs"].values()
+              j2_b_tofu = j2_b["final"] in j2_b["refs"].values()
+              print(f"  [arm j2 / #82] context A (bare, no setFontList() call at all, first "
+                    f"in launch) settled={j2_a['final']} refs={j2_a['refs']} "
+                    f"samples={j2_a['samples']}")
+              print(f"  [arm j2 / #82] context B ({FFFD_NO_PROBE}, no U+FFFD, same launch, "
+                    f"AFTER A) settled={j2_b['final']} refs={j2_b['refs']} "
+                    f"samples={j2_b['samples']}")
+
+              if j2_a_tofu:
+                  j2_failures.append(
+                      f"arm (j2)/#82 setup invalid: bare context A settled U+FFFD to "
+                      f"{j2_a['final']}, its OWN tofu floor ({j2_a['refs']}) -- inconsistent "
+                      f"with the bisect above showing {bare_working} resolve it under the "
+                      f"same bare setup; needs investigation before this arm's result can "
+                      f"be trusted.")
+              elif not j2_b_tofu:
+                  j2_failures.append(
+                      f"arm (j2)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) CONFIRMED via the "
+                      f"default/bare-context population path -- context B ({FFFD_NO_PROBE}, "
+                      f"none of which cover U+FFFD) settled U+FFFD to {j2_b['final']}, NOT "
+                      f"its own tofu floor ({j2_b['refs']}) -- a bare context (the "
+                      f"production shape of a context nobody ever called setFontList() on, "
+                      f"which CamouIsFontAllowed treats identically to userContextId 0) "
+                      f"populated gfxPlatformFontList's process-wide "
+                      f"mReplacementCharFallbackFamily cache with {bare_working}, and "
+                      f"context B inherited a REAL glyph from a family it was never "
+                      f"allowed, with no CamouIsFontAllowed() check on the read at all.")
+              j2_ok_msg = (f"context B correctly got nothing for U+FFFD ({j2_b['final']}, "
+                           f"its own tofu floor), unaffected by the bare context's earlier "
+                           f"resolution")
+              print(f"  (j2) bare-context replacement-char cache leak (#82):  "
+                    f"{'RED' if j2_failures else 'GREEN'} -- {j2_failures or j2_ok_msg}")
+          if j2_failures:
+              tripwires.append(f"(j2) bare-context replacement-char cache leak (#82): {j2_failures}")
+          # -----------------------------------------------------------
+
           assert not tripwires, (
               "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
               "each close one of these):\n" + "\n".join(tripwires))
