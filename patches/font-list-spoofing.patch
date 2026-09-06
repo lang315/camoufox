@@ -469,41 +469,18 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    // Ensure resolved font instances are valid; discard them if necessary.
    auto* pfl = gfxPlatformFontList::PlatformFontList();
    if (mFontListGeneration != pfl->GetGeneration()) {
-@@ -2058,6 +2073,11 @@
- 
- already_AddRefed<gfxFont> gfxFontGroup::GetFontAt(uint32_t i, uint32_t aCh,
-                                                   bool* aLoading) {
-+  // EnsureFontList()'s AutoFontListContext scope ends long before this
-+  // function runs; re-establish it here so a userfont's local() src
-+  // lookup (LookupLocalFont/LookupInSharedFaceNameList) sees this font
-+  // group's context, not context 0 (#44).
-+  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
-   if (i >= mFonts.Length()) {
-     return nullptr;
-   }
-@@ -2262,6 +2282,10 @@
+@@ -2262,6 +2277,10 @@
  
  already_AddRefed<gfxFont> gfxFontGroup::GetFirstValidFont(
      uint32_t aCh, StyleGenericFontFamily* aGeneric, bool* aIsFirst) {
-+  // Same reasoning as GetFontAt() above -- EnsureFontList() only scopes
-+  // AutoFontListContext for its own call, not for this function's
-+  // subsequent userfont Load() calls (#44).
++  // EnsureFontList()'s AutoFontListContext scope ends before this call;
++  // re-establish it here -- InitScriptRun() calls this first in the
++  // shaping path, so scoping only here is sufficient (#44).
 +  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
    EnsureFontList();
  
    uint32_t count = mFonts.Length();
-@@ -3129,6 +3153,10 @@
- already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
-     uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh, Script aRunScript,
-     gfxFont* aPrevMatchedFont, FontMatchType* aMatchType) {
-+  // Same reasoning as GetFontAt()/GetFirstValidFont() above -- a userfont
-+  // Load() below needs this font group's context in scope (#44).
-+  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
-+
-   // If the char is a cluster extender, we want to use the same font as the
-   // preceding character if possible. This is preferable to using the font
-   // group because it avoids breaks in shaping within a cluster.
-@@ -3931,6 +3959,10 @@
+@@ -3931,6 +3950,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
      FontPresentation aPresentation) {
