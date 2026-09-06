@@ -555,6 +555,13 @@ jobs:
           with sync_playwright() as pw:
               b = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  # #83: this launch previously ran at the default
+                  # dom.ipc.processCount=8, so mac/win almost certainly
+                  # landed in separate content processes and this arm
+                  # could never have observed a cross-process leak.
+                  # Forcing a shared process is the one thing changing
+                  # here -- team-lead directive, re-run before Task 8.
+                  firefox_user_prefs={"dom.ipc.processCount": 1},
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
               ctxs = {}
               for name in ("mac", "win"):
