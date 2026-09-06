@@ -744,6 +744,38 @@ jobs:
               print(f"  [{label}] FontFace.status {r['status']}")
               check_signal(label, r)
 
+          # Cheap discriminator for the Geneva regression (no rebuild): is
+          # its family/cmap data still loading when arm (b) measures it (a
+          # lazy-init/idle-queue timing effect -- LoadCmapsRunnable
+          # initializes one bundled family at a time off the idle queue),
+          # or is it genuinely gated (persists regardless of a wait)? A
+          # fresh launch, mac's own font list, measure Geneva immediately
+          # and again after a 3s idle wait.
+          with sync_playwright() as pw:
+              bg = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              ctxg = bg.new_context()
+              ctxg.add_init_script(
+                  'if (typeof window.setFontList === "function") '
+                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+              pgg = ctxg.new_page()
+              pgg.goto("data:text/html,<h1>g</h1>")
+              GENEVA_JS = (
+                  "() => { const c = document.createElement('canvas').getContext('2d'); "
+                  "const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+'; "
+                  "const w = (f) => { c.font = '72px \"' + f + '\", monospace'; "
+                  "return c.measureText(s).width; }; "
+                  "return {geneva: w('Geneva'), absent: w('__CamouAbsentRef__0001')}; }")
+              geneva_immediate = pgg.evaluate(GENEVA_JS)
+              pgg.wait_for_timeout(3000)
+              geneva_delayed = pgg.evaluate(GENEVA_JS)
+              bg.close()
+          print(f"  [Geneva timing discriminator] immediate={geneva_immediate} "
+                f"(resolved={geneva_immediate['geneva'] != geneva_immediate['absent']})")
+          print(f"  [Geneva timing discriminator] after 3s wait={geneva_delayed} "
+                f"(resolved={geneva_delayed['geneva'] != geneva_delayed['absent']})")
+
           assert mac["measure"] != win["measure"], (
               "the mac and win contexts measured identically -- no per-context signal")
 
