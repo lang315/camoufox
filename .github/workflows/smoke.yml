@@ -1933,6 +1933,132 @@ jobs:
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
+          # Is arm (b)'s green real or structural? #83's discriminator
+          # leaked mac's exact real font widths into win, same shared
+          # process, same run in which arm (b) itself reported green
+          # for the identical families. Two untested differences
+          # between arm (b)'s probe() and the leaking discriminator,
+          # per team-lead direction -- vary ONE at a time so the result
+          # attributes cleanly:
+          #
+          #   1. Reference ordering: probe()'s absentW is measured
+          #      BEFORE the family loop; the discriminator measured its
+          #      baseline AFTER (last). If the leak needs an earlier
+          #      same-context request to seed whatever it reads, taking
+          #      the reference first means arm (b) never reaches that
+          #      state before it has already recorded its answer.
+          #   2. Donor context lifetime: arm (b) calls ctx.close() on
+          #      mac before creating win. The discriminator's leak was
+          #      demonstrated with the donor context still alive.
+          #
+          # Both variants below keep processCount=1 and every other
+          # condition (same FONTS[name] lists, same probe string, same
+          # 72px+monospace stacked form) identical to arm (b)'s own
+          # probe() -- ONLY the one named variable changes in each.
+          # `mac`/`win` (arm (b)'s own already-computed result, same
+          # run) are still in scope below for a same-run comparison.
+
+          # Variant 1: reference-ordering only. Same JS shape as arm
+          # (b)'s probe(), same ctx.close()-before-next lifetime -- only
+          # WHEN absentW is measured moves, from first to last.
+          JS_ORDER_LAST = """(families) => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const w = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
+            const rawWidths = {};
+            for (const f of families) rawWidths[f] = w(f);
+            rawWidths['__impossible__'] = w('__NoSuchFamily__12345');
+            const absentW = w('__CamouAbsentRef__0001');
+            const measure = {};
+            for (const f of families) measure[f] = (rawWidths[f] !== absentW);
+            measure['__impossible__'] = (rawWidths['__impossible__'] !== absentW);
+            return {measure: measure, absentWidth: absentW};
+          }"""
+
+          def run_ordering_variant():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctxs = {}
+                  for name in ("mac", "win"):
+                      ctx = b.new_context()
+                      ctx.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(FONTS[name])))
+                      page = ctx.new_page()
+                      page.goto("data:text/html,<h1>f</h1>")
+                      ctxs[name] = page.evaluate(JS_ORDER_LAST, PROBES)
+                      ctx.close()  # matches arm (b)'s own close-before-next
+                  b.close()
+                  return ctxs["mac"], ctxs["win"]
+
+          order_mac, order_win = run_ordering_variant()
+          print(f"  [variant 1 / ordering-only] mac measure {order_mac['measure']}")
+          print(f"  [variant 1 / ordering-only] win measure {order_win['measure']}")
+          order_leaked = [f for f in MAC_ONLY if order_win["measure"][f]]
+          print(f"  [variant 1 / ordering-only] win resolved MAC_ONLY families it was never "
+                f"allowed: {order_leaked or 'NONE -- unchanged from arm (b)'}")
+
+          # Variant 2: donor-lifetime only. Same JS as arm (b)'s probe()
+          # verbatim (reference still measured FIRST), same reused
+          # probe() helper -- only mac's context is kept alive (not
+          # closed) while win is created and probed.
+          def run_lifetime_variant():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  mac_result = probe(ctx_mac.new_page())
+                  # Deliberately NOT closed here -- the one variable
+                  # under test. arm (b) itself calls ctx.close() at this
+                  # exact point, before the next context exists.
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  win_result = probe(ctx_win.new_page())
+                  ctx_mac.close()
+                  ctx_win.close()
+                  b.close()
+                  return mac_result, win_result
+
+          life_mac, life_win = run_lifetime_variant()
+          print(f"  [variant 2 / lifetime-only] mac measure {life_mac['measure']}")
+          print(f"  [variant 2 / lifetime-only] win measure {life_win['measure']}")
+          life_leaked = [f for f in MAC_ONLY if life_win["measure"][f]]
+          print(f"  [variant 2 / lifetime-only] win resolved MAC_ONLY families it was never "
+                f"allowed, donor still alive: {life_leaked or 'NONE -- unchanged from arm (b)'}")
+
+          print(f"  [variants summary] arm (b) original (this same run): win resolved "
+                f"{[f for f in MAC_ONLY if win['measure'][f]] or 'NONE'}")
+          if order_leaked and not life_leaked:
+              print("  [variants summary] VERDICT: ordering alone flips it -- arm (b)'s "
+                    "green is structural (reference taken before the leak-triggering state "
+                    "exists), not evidence the gate holds.")
+          elif life_leaked and not order_leaked:
+              print("  [variants summary] VERDICT: donor lifetime alone flips it -- arm (b)'s "
+                    "green is structural (closing the donor tears down whatever holds the "
+                    "cached resolution before the recipient ever asks), not evidence the gate "
+                    "holds.")
+          elif order_leaked and life_leaked:
+              print("  [variants summary] VERDICT: BOTH flip it independently -- either is "
+                    "sufficient on its own; arm (b)'s green depends on both conditions arm (b) "
+                    "happens to have (reference-first AND donor-closed), not on the gate.")
+          else:
+              print("  [variants summary] VERDICT: NEITHER flips it -- arm (b)'s green survives "
+                    "both candidate explanations. There is a third, unidentified difference "
+                    "between arm (b)'s setup and the discriminator's; report as such rather "
+                    "than forcing a conclusion.")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
           # Arm (j2): last attempt at #82, per team-lead direction. Arm
           # (j) above asked a NARROW per-context list to populate
           # mReplacementCharFallbackFamily; none of ten strong
