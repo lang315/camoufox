@@ -97,7 +97,7 @@ Two suites, **both required for PRs** (they cover different layers):
 
 ## Verifying spoofing claims (learned the hard way)
 
-Three failures from the #44 fonts work, each of which produced green CI and a
+Five failures from the #44 fonts work, each of which produced green CI and a
 wrong conclusion. They generalise; read them before asserting that a spoof is
 safe, complete, or unreachable.
 
@@ -130,6 +130,50 @@ name**, so it never exercises codepoint fallback (`SystemFindFontForChar` /
 `GlobalFontFallback`), which no patch gates. When a spoof is host- or
 platform-sensitive, a Linux-only measurement is not evidence about Windows or
 macOS. State what a guard cannot see, next to what it proves.
+
+**4. A reference is only a control if it is guaranteed to differ.**
+This one cost more than the other three combined. Six times in the #44 fonts
+work an arm was scored against a reference that could equal the value under
+test, and every time the result looked like a finding:
+
+- CSS `@font-face` compared against `document.fonts` keyed by bare family name,
+  while `FontFace.family` serialises *with* quotes, so every face read `error`.
+- Two CJK faces were assumed to have different advances; both are full-width, so
+  the widths agreed no matter which font resolved.
+- A context's own `monospace`/`sans-serif` refs were used as the "nothing
+  rendered" floor for U+FFFD — but those generics resolve *within* that
+  context's allowed list, which covers U+FFFD, so a correct resolution read as
+  tofu. Three investigations were declared invalid on that.
+- A worker's font widths were compared against a main-thread baseline. Cross
+  thread, and `GetDefaultGeneric` special-cases workers, so a false red would
+  have printed identically to a real one.
+- A `window.__x` global set by an init script was read back with
+  `page.evaluate()`, which runs in an **isolated world** — the fork's own core
+  feature, guarded by the first step of the same workflow. It reported "absent"
+  for every context including the first of a fresh launch.
+- The same instrumentation, once fixed, read the **second** init-script
+  invocation. Playwright runs init scripts on every navigation and `new_page()`
+  lands on `about:blank` first, so a one-shot setter is already consumed by the
+  time the probe navigates. That produced, and I published, a false conclusion
+  that the entire per-context mechanism had never run.
+
+The general form: **a cross-thread, cross-process, cross-world or cross-context
+reference is not a control unless something establishes that the two sides are
+comparable.** Before trusting a red or a green, state what would produce it
+*wrongly* and show that did not happen. Three of the six were caught only by
+contradiction with a fact already known to be true — not by the result looking
+wrong.
+
+**5. The font gate fails open, by construction.**
+`gfxFontGroup` caches its user context id once in its constructor, through
+`mFontVisibilityProvider->GetDocument()` → inner window → `BrowsingContext` —
+four hops, each failing silently to 0. `CamouIsFontAllowed` treats context 0 as
+"no per-context list" and falls through to the launch-level `fonts` key, which
+under a launch that sets no `fonts` is empty and therefore **allows every
+family**. Two separate hops of that chain have already been found failing
+(`OffscreenCanvas::GetDocument()` off-main-thread, and whatever #83 turns out to
+be). Fixing individual hops does not close the class: a gate that cannot
+establish who is asking should deny.
 
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
