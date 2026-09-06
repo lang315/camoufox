@@ -744,13 +744,23 @@ jobs:
               print(f"  [{label}] FontFace.status {r['status']}")
               check_signal(label, r)
 
-          # Cheap discriminator for the Geneva regression (no rebuild): is
-          # its family/cmap data still loading when arm (b) measures it (a
-          # lazy-init/idle-queue timing effect -- LoadCmapsRunnable
-          # initializes one bundled family at a time off the idle queue),
-          # or is it genuinely gated (persists regardless of a wait)? A
-          # fresh launch, mac's own font list, measure Geneva immediately
-          # and again after a 3s idle wait.
+          # Discriminator for the Geneva regression (no rebuild): the width
+          # comparison itself may be lying. `resolved = (w(f) != w(absent))`
+          # assumes the absent-reference's fallback face can never BE the
+          # face under test -- but mac's allowed list is the full macOS set,
+          # and Geneva (historically Mac OS's own default UI sans) is a
+          # entirely plausible generic-sans fallback pick. If the fallback
+          # for an unresolvable name happens to BE Geneva, then Geneva IS
+          # resolving, the two widths agree because they're the SAME face,
+          # and width-based "resolved=False" is a false negative -- the
+          # same reference-not-guaranteed-to-differ defect this plan has
+          # hit before (arm (f)'s CJK em-square collision, arm (j)'s tofu
+          # floor). Break it with rendered pixels, not advance width: two
+          # different faces essentially never rasterize identically at
+          # 72px, even if metrically similar. Helvetica Neue is the
+          # positive control -- known-resolved (measure=True), must
+          # produce a DIFFERENT checksum from the absent-reference, or
+          # this test itself proves nothing.
           with sync_playwright() as pw:
               bg = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
@@ -761,20 +771,35 @@ jobs:
                   'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
               pgg = ctxg.new_page()
               pgg.goto("data:text/html,<h1>g</h1>")
-              GENEVA_JS = (
-                  "() => { const c = document.createElement('canvas').getContext('2d'); "
-                  "const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+'; "
-                  "const w = (f) => { c.font = '72px \"' + f + '\", monospace'; "
-                  "return c.measureText(s).width; }; "
-                  "return {geneva: w('Geneva'), absent: w('__CamouAbsentRef__0001')}; }")
-              geneva_immediate = pgg.evaluate(GENEVA_JS)
-              pgg.wait_for_timeout(3000)
-              geneva_delayed = pgg.evaluate(GENEVA_JS)
+              PIXEL_JS = (
+                  "() => { "
+                  "const draw = (f) => { "
+                  "const c = document.createElement('canvas'); "
+                  "c.width = 300; c.height = 100; "
+                  "const ctx = c.getContext('2d'); "
+                  "ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 300, 100); "
+                  "ctx.fillStyle = 'black'; "
+                  "ctx.font = '72px \"' + f + '\", monospace'; "
+                  "ctx.fillText('mmmmmmmmmmlliWWWWWWW@#$%^&*()_+', 0, 80); "
+                  "const data = ctx.getImageData(0, 0, 300, 100).data; "
+                  "let sum = 0; "
+                  "for (let i = 0; i < data.length; i++) { "
+                  "sum = (Math.imul(sum, 31) + data[i]) >>> 0; } "
+                  "return sum; }; "
+                  "return {geneva: draw('Geneva'), "
+                  "absent: draw('__CamouAbsentRef__0001'), "
+                  "helvetica_neue: draw('Helvetica Neue')}; }")
+              geneva_pixels = pgg.evaluate(PIXEL_JS)
               bg.close()
-          print(f"  [Geneva timing discriminator] immediate={geneva_immediate} "
-                f"(resolved={geneva_immediate['geneva'] != geneva_immediate['absent']})")
-          print(f"  [Geneva timing discriminator] after 3s wait={geneva_delayed} "
-                f"(resolved={geneva_delayed['geneva'] != geneva_delayed['absent']})")
+          control_differs = geneva_pixels["helvetica_neue"] != geneva_pixels["absent"]
+          geneva_pixel_differs = geneva_pixels["geneva"] != geneva_pixels["absent"]
+          print(f"  [Geneva pixel discriminator] checksums: {geneva_pixels}")
+          print(f"  [Geneva pixel discriminator] positive control (Helvetica Neue, "
+                f"known-resolved) differs from absent-reference: {control_differs} "
+                f"{'-- test is valid' if control_differs else '-- TEST ITSELF IS BROKEN, ignore the Geneva result below'}")
+          print(f"  [Geneva pixel discriminator] Geneva differs from absent-reference "
+                f"(pixels, not width): {geneva_pixel_differs} "
+                f"-- {'Geneva DOES resolve; the width-based arm (b) measurement was a false negative' if geneva_pixel_differs else 'Geneva genuinely does not render distinct pixels; the width measurement was correct'}")
 
           assert mac["measure"] != win["measure"], (
               "the mac and win contexts measured identically -- no per-context signal")
