@@ -42,14 +42,56 @@ diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
 index 56e579eb33..5a679f75ba 100644
 --- a/layout/style/FontFace.cpp
 +++ b/layout/style/FontFace.cpp
-@@ -239,7 +239,16 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
+@@ -17,6 +17,11 @@
+ #include "mozilla/dom/FontFaceBinding.h"
+ #include "mozilla/dom/FontFaceImpl.h"
+ #include "mozilla/dom/FontFaceSet.h"
++#include "mozilla/dom/BrowsingContext.h"
++#include "mozilla/dom/FontListManager.h"
++#include "nsAtom.h"
++#include "nsIGlobalObject.h"
++#include "nsPIDOMWindow.h"
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/TypedArray.h"
+ #include "mozilla/dom/UnionTypes.h"
+@@ -239,7 +244,46 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
    mImpl->SetSizeAdjust(aValue, aRv);
  }
  
 -FontFaceLoadStatus FontFace::Status() { return mImpl->Status(); }
++// Camoufox: the user context this FontFace belongs to, or 0 when it has no
++// inner window (a worker global, or a detached document). Derived exactly the
++// way FontFaceSet.cpp derives it for its own entry points, and the way
++// nsGlobalWindowInner::SetFontList() keyed the list when it stored it.
++static uint32_t CamouFontListContextId(nsIGlobalObject* aGlobal) {
++  if (!aGlobal) {
++    return 0;
++  }
++  nsPIDOMWindowInner* inner = aGlobal->GetAsInnerWindow();
++  if (!inner) {
++    return 0;
++  }
++  BrowsingContext* bc = inner->GetBrowsingContext();
++  return bc ? bc->OriginAttributesRef().mUserContextId : 0;
++}
++
 +FontFaceLoadStatus FontFace::Status() {
++  // Nothing scopes a context for a bare FontFace -- one the page never handed
++  // to a FontFaceSet -- so IsFontAllowed() fell back to the launch-level
++  // "fonts" key here in every context. Under a Windows launch a macOS context
++  // reported 'loaded' for Segoe UI and 'error' for Helvetica Neue while canvas
++  // text measurement in that same context said the exact opposite (#44).
++  AutoFontListContext autoFontListCtx(
++      CamouFontListContextId(GetParentObject()));
++
++  // GetFamily() returns the CSS-escaped family name (quoted when it
++  // needs quoting, e.g. '"Segoe UI"'), which then never matches an
++  // unquoted per-context list entry. GetFamilyName() is the raw,
++  // unquoted atom (#44).
 +  nsAutoCString fontFamily;
-+  GetFamily(fontFamily);
++  if (nsAtom* familyName = mImpl->GetFamilyName()) {
++    fontFamily = nsAtomCString(familyName);
++  }
 +
 +  if (mozilla::dom::IsFontAllowed(fontFamily)) {
 +    return FontFaceLoadStatus::Loaded;
@@ -60,13 +102,22 @@ index 56e579eb33..5a679f75ba 100644
  
  Promise* FontFace::Load(ErrorResult& aRv) {
    EnsurePromise();
-@@ -249,7 +258,17 @@ Promise* FontFace::Load(ErrorResult& aRv) {
+@@ -249,7 +293,26 @@ Promise* FontFace::Load(ErrorResult& aRv) {
      return nullptr;
    }
  
 -  mImpl->Load();
++  // Load() consults IsFontAllowed() too, so it needs the same context in
++  // scope as the Status() getter above (#44).
++  AutoFontListContext autoFontListCtx(
++      CamouFontListContextId(GetParentObject()));
++
++  // Same fix as Status() above: use the raw family atom, not the
++  // CSS-escaped (possibly quoted) string (#44).
 +  nsAutoCString fontFamily;
-+  GetFamily(fontFamily);
++  if (nsAtom* familyName = mImpl->GetFamilyName()) {
++    fontFamily = nsAtomCString(familyName);
++  }
 +
 +  if (mozilla::dom::IsFontAllowed(fontFamily)) {
 +    // For allowed fonts, always resolve the promise
@@ -83,15 +134,20 @@ diff --git a/layout/style/FontFaceImpl.cpp b/layout/style/FontFaceImpl.cpp
 index f13782ae6d..abb8d83fb3 100644
 --- a/layout/style/FontFaceImpl.cpp
 +++ b/layout/style/FontFaceImpl.cpp
-@@ -354,21 +354,15 @@ void FontFaceImpl::DoLoad() {
+@@ -354,21 +354,20 @@ void FontFaceImpl::DoLoad() {
  void FontFaceImpl::SetStatus(FontFaceLoadStatus aStatus) {
    gfxFontUtils::AssertSafeThreadOrServoFontMetricsLocked();
  
 -  if (mStatus == aStatus) {
 -    return;
 -  }
++  // GetFamily() returns the CSS-escaped, possibly-quoted family name;
++  // use the raw atom instead so a quoted CSS-rule key is never compared
++  // against unquoted per-context list entries (#44).
 +  nsAutoCString fontFamily;
-+  GetFamily(fontFamily);
++  if (nsAtom* familyName = GetFamilyName()) {
++    fontFamily = nsAtomCString(familyName);
++  }
  
 -  if (aStatus < mStatus) {
 -    // We're being asked to go backwards in status!  Normally, this shouldn't
@@ -115,20 +171,34 @@ diff --git a/layout/style/FontFaceImpl.h b/layout/style/FontFaceImpl.h
 index c94388212e..2826682e7b 100644
 --- a/layout/style/FontFaceImpl.h
 +++ b/layout/style/FontFaceImpl.h
-@@ -8,6 +8,7 @@
+@@ -8,6 +8,8 @@
  #include "gfxUserFontSet.h"
  #include "mozilla/RWLock.h"
  #include "mozilla/dom/FontFaceBinding.h"
 +#include "MaskConfig.hpp"
++#include "mozilla/dom/FontListManager.h"
  #include "nsTHashSet.h"
  
  class gfxFontFaceBufferSource;
-@@ -27,6 +28,20 @@ class UTF8StringOrArrayBufferOrArrayBufferView;
+@@ -27,6 +29,33 @@ class UTF8StringOrArrayBufferOrArrayBufferView;
  
  namespace mozilla::dom {
  
 +// Helper function to check if a font is in the allowed list
 +inline bool IsFontAllowed(const nsACString& aFontName) {
++  // Prefer this context's list. FontFaceSet.cpp scopes an AutoFontListContext
++  // around the FontFaceSet entry points, so document.fonts questions arrive
++  // with a context. Reading only the launch-level "fonts" key here made
++  // document.fonts answer for the launch OS in every context (#44).
++  if (uint32_t ctx = FontListManager::GetCurrentContext();
++      ctx != 0 && FontListManager::HasFontList(ctx)) {
++    nsAutoCString key(aFontName);
++    ToLowerCase(key);
++    return FontListManager::IsFontAllowed(ctx, key);
++  }
++  // No context list: answer from the launch-level "fonts" key, this profile's
++  // own per-OS subset -- never "allow everything", which would hand this read
++  // path the whole launch font set unfiltered (#44).
 +  if (std::vector<std::string> maskValues =
 +          MaskConfig::GetStringListLower("fonts");
 +      !maskValues.empty()) {

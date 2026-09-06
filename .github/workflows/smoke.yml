@@ -385,6 +385,2336 @@ jobs:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
 
+      - name: "which setter bindings reached the build (#83 diagnostic)"
+        run: |
+          # setFontList is the only one of Camoufox's 14 setters missing from
+          # window when an init script runs; setWebGLRenderer uses a Func gate
+          # identical line for line, including the RoverfoxStorageManager call,
+          # and is present. So the gate logic is not the difference -- check
+          # whether the WebIDL binding reached the build at all.
+          # Its own step because the #44 guard step is already at GitHub's
+          # 21000-character limit for a run block.
+          BIN_DIR="$(dirname "${{ steps.bin.outputs.bin }}")"
+          for n in setFontList setWebGLRenderer setNavigatorPlatform setSpeechVoices; do
+            printf '  %-24s %s\n' "$n" "$(grep -ac "$n" "$BIN_DIR"/libxul.so 2>/dev/null || echo 0)"
+          done
+
+      - name: "is setFontList absent in the default context too (#83 diagnostic)"
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+        run: |
+          # setFontList's WebIDL binding IS in libxul (2 hits, same as three
+          # setters that work), and its Func gate is identical line for line to
+          # setWebGLRenderer's. Every test so far used b.new_context(), where
+          # mUserContextId != 0. Split that variable: does the property appear
+          # in the DEFAULT context, where the id is 0?
+          pip install --quiet 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY2'
+          import json, os
+          from playwright.sync_api import sync_playwright
+          NAMES = ["setFontList", "setWebGLRenderer", "setNavigatorPlatform", "setSpeechVoices"]
+          INIT = ('(() => { const o = %s.filter(n => typeof window[n] === "function"); '
+                  'const m = () => { try { document.documentElement.setAttribute("data-s", '
+                  'JSON.stringify(o)); } catch (e) {} }; m(); '
+                  'document.addEventListener("DOMContentLoaded", m); })()' % json.dumps(NAMES))
+          READ = '() => document.documentElement.getAttribute("data-s")'
+          # setFontList IS present in both contexts here, but absent in the
+          # #44 guard step. The remaining difference between the two setups is
+          # firefox_user_prefs={"dom.ipc.processCount": 1}, which this plan
+          # added to those arms during the #83 work. Single-variable test.
+          def probe_setters(prefs, label):
+              with sync_playwright() as pw:
+                  kw = {"executable_path": os.environ["CAMOUFOX_BIN"],
+                        "headless": False,
+                        "env": {**os.environ, "CAMOU_CONFIG": json.dumps({})}}
+                  if prefs:
+                      kw["firefox_user_prefs"] = prefs
+                  b = pw.firefox.launch(**kw)
+                  pg = b.new_page()
+                  pg.add_init_script(INIT)
+                  pg.goto("data:text/html,<h1>d</h1>")
+                  d = pg.evaluate(READ)
+                  ctx = b.new_context()
+                  ctx.add_init_script(INIT)
+                  p2 = ctx.new_page()
+                  p2.goto("data:text/html,<h1>c</h1>")
+                  e = p2.evaluate(READ)
+                  b.close()
+              print(f"  [{label}] default id 0 : {d}")
+              print(f"  [{label}] explicit ctx : {e}")
+
+          probe_setters(None, "no processCount pref")
+          probe_setters({"dom.ipc.processCount": 1}, "processCount=1")
+
+          # Neither pref nor context id explains it. Two differences remain
+          # between this step and the #44 guard step, where setFontList is
+          # absent: the guard runs a config launch first in the same Python
+          # process, and its init script carries a 574-family list. Test both.
+          import pathlib as _pl
+          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          BIG = ('(() => { const o = %s.filter(n => typeof window[n] === "function"); '
+                 'try { window.setFontList(%s); } catch (e) {} '
+                 'const m = () => { try { document.documentElement.setAttribute("data-s", '
+                 'JSON.stringify(o)); } catch (e) {} }; m(); '
+                 'document.addEventListener("DOMContentLoaded", m); })()')
+          with sync_playwright() as pw:
+              kw = {"executable_path": os.environ["CAMOUFOX_BIN"], "headless": False,
+                    "env": {**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})}}
+              b1 = pw.firefox.launch(**kw)
+              b1.new_page().goto("data:text/html,<h1>1</h1>")
+              b1.close()
+              kw["env"] = {**os.environ, "CAMOU_CONFIG": json.dumps({})}
+              b2 = pw.firefox.launch(**kw)
+              c2 = b2.new_context()
+              c2.add_init_script(BIG % (json.dumps(NAMES), json.dumps(",".join(FONTS["mac"]))))
+              q = c2.new_page()
+              q.goto("data:text/html,<h1>2</h1>")
+              print(f"  [2nd launch, 574-family init] present: {q.evaluate(READ)}")
+              # The script above CALLS setFontList, and the setter is one-shot
+              # per user context by design. Playwright runs an init script on
+              # EVERY navigation, and new_page() lands on about:blank first --
+              # so invocation 1 consumes the setter and invocation 2, after
+              # goto(), finds it gone. Read the FIRST invocation, from
+              # about:blank, before navigating anywhere.
+              c3 = b2.new_context()
+              c3.add_init_script(BIG % (json.dumps(NAMES), json.dumps(",".join(FONTS["mac"]))))
+              r = c3.new_page()
+              print(f"  [1st invocation, about:blank] present: {r.evaluate(READ)}")
+              b2.close()
+          PY2
+
+      - name: "Geneva bundled in the artifact? (#44 Task 6 diagnostic)"
+        run: |
+          # arm (b) below: mac context stopped resolving Geneva (MAC_ONLY)
+          # between builds 34021403701 and 34034555160 -- document.fonts and
+          # FontFace.status say it's allowed, canvas measurement says no
+          # glyph rendered. This distinguishes "not in this artifact" from
+          # "present but the resolution path stops it reaching canvas" --
+          # its own step because the #44 guard step is already at GitHub's
+          # 21000-character limit for a run block, and this needs
+          # steps.bin.outputs.bin.
+          BIN_DIR="$(dirname "${{ steps.bin.outputs.bin }}")"
+          echo "--- searching for Geneva* under $BIN_DIR ---"
+          find "$BIN_DIR" -iname 'Geneva*' -exec ls -la {} \; || true
+          echo "--- fonts/macos dir, if present ---"
+          find "$BIN_DIR" -type d -iname macos -exec find {} -maxdepth 1 -type f \; 2>/dev/null | head -20 || true
+          echo "--- fontconfig cache mentions of Geneva (may be empty pre-first-run) ---"
+          find / -xdev -iname '*fontconfig*' -type d 2>/dev/null | head -5 || true
+
+      - name: "per-context font list beats the launch whitelist (#44 regression guard)"
+        timeout-minutes: 10
+        run: |
+
+          # #44 / H2: the per-context filter is the ONLY thing that narrows a
+          # context's font set -- nothing is trimmed at launch time (that flip
+          # is Task 8, not yet landed). Two launches probe both halves of that
+          # claim:
+          #
+          #   config launch (`fonts` = this profile's own Windows subset, same
+          #   as today) -- no context installs a list of its own, so every
+          #   read path must fall back to `fonts`, never answer "allow
+          #   everything":
+          #     (a) the default page (never gets setFontList) resolves only
+          #         the launch `fonts` subset, not macOS families too;
+          #     (c) document.fonts agrees with canvas text measurement --
+          #         different code paths (FontFaceImpl.h's IsFontAllowed via
+          #         FontFaceSet::Check, versus
+          #         gfxPlatformFontList::FindAndAddFamiliesLocked) -- so only
+          #         both being right means the context is coherent;
+          #     (d) a BARE FontFace agrees too: `new FontFace(f,
+          #         'local(f)').status` read straight off the object, never
+          #         added to document.fonts. (c) only covers read paths that
+          #         go THROUGH a FontFaceSet entry point, which is where the
+          #         AutoFontListContext lives; a bare FontFace has none above
+          #         it, so FontFace::Status() ran with no context in scope.
+          #
+          #   bare launch (no `fonts` key at all) -- mFontFamilies then holds
+          #   every bundled family (the Linux package bundles win+mac+linux
+          #   together), nothing is deleted from font.system.whitelist, and
+          #   setFontList() per context is the only thing narrowing the set.
+          #   This is the exact steady state Task 8 makes the product path
+          #   reach, which is what lets every gate in later tasks be measured
+          #   before the flip:
+          #     (b) a mac context resolves mac families and not windows ones,
+          #         and a win context the other way round -- including an OS
+          #         the launch config never had.
+          #
+          # Marker families are DERIVED as set(os) - set(other) - set(other).
+          # 83 of the 815 bundled entries appear in two or more per-OS lists
+          # (Tahoma is in BOTH win and mac), and an eyeballed marker silently
+          # inverts the probe.
+          #
+          # (c) has to add the family to document.fonts first: on a *system*
+          # family document.fonts.check() is vacuously true in FF152, because
+          # FontFaceSetImpl::FindMatchingFontFaces only searches the user font
+          # set and an unmatched family contributes no face to test -- measured,
+          # check('12px "__NoSuchFamily__12345"') === true. Adding the family
+          # routes the question through FontFaceSet::Check -> FontFace::Status()
+          # -> IsFontAllowed, inside the AutoFontListContext scope.
+          #
+          # (d): FontFace::Status() and FontFace::Load() consult IsFontAllowed()
+          # with no AutoFontListContext in scope unless the caller sets one, so
+          # a bare FontFace the page never hands to a FontFaceSet has none above
+          # it. Measured on run 33260827044, before the fix: a mac context
+          # reported 'loaded' for Segoe UI and 'error' for Helvetica Neue while
+          # canvas measurement in that same context said the opposite. Wrong-
+          # but-consistent is one tell; two surfaces contradicting each other
+          # hands a detector a boolean in two lines of JS.
+          #
+          # Fails loudly on no signal: a second impossible family must not
+          # resolve, the canvas must measure a non-zero width, every context
+          # must resolve something, and the mac/win contexts (bare launch)
+          # must not agree.
+          pip install --quiet 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
+          import json, os
+          from playwright.sync_api import sync_playwright
+
+          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
+          WIN_STRICT = set(FONTS["win"]) - set(FONTS["mac"]) - set(FONTS["lin"])
+          MAC_ONLY = ["Helvetica Neue", "PingFang HK", "Geneva"]
+          WIN_ONLY = ["Segoe UI", "Calibri", "MS Gothic"]
+          PROBES = MAC_ONLY + WIN_ONLY
+          assert MAC_STRICT.issuperset(MAC_ONLY), (
+              "these are no longer mac-only in fonts.json, the probe would invert: "
+              f"{sorted(set(MAC_ONLY) - MAC_STRICT)}")
+          assert WIN_STRICT.issuperset(WIN_ONLY), (
+              "these are no longer win-only in fonts.json, the probe would invert: "
+              f"{sorted(set(WIN_ONLY) - WIN_STRICT)}")
+
+          # Two DIFFERENT impossible families: both must fall back to the same
+          # default face, so equal widths. If they ever differ, width comparison
+          # has stopped meaning "did this family resolve".
+          JS = """(families) => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const w = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
+            const absentW = w('__CamouAbsentRef__0001');
+            const measure = {}, fontfaces = {}, status = {};
+            for (const f of families) measure[f] = (w(f) !== absentW);
+            measure['__impossible__'] = (w('__NoSuchFamily__12345') !== absentW);
+            // Bare FontFace objects, read BEFORE anything is handed to
+            // document.fonts: no FontFaceSet entry point sits above this read,
+            // so nothing but FontFace::Status() itself can scope the context.
+            const bare = (f) => new FontFace(f, 'local("' + f + '")').status;
+            for (const f of families) status[f] = bare(f);
+            status['__impossible__'] = bare('__NoSuchFamily__12345');
+            for (const f of families) {
+              document.fonts.add(new FontFace(f, 'local("' + f + '")'));
+              fontfaces[f] = document.fonts.check('12px "' + f + '"');
+            }
+            return {measure: measure, fontfaces: fontfaces, status: status,
+                    absentWidth: absentW};
+          }"""
+
+          def probe(page):
+              page.goto("data:text/html,<h1>f</h1>")
+              return page.evaluate(JS, PROBES)
+
+          def check_signal(label, r):
+              assert r["absentWidth"] > 0, f"{label}: canvas measured 0 -- nothing ran"
+              assert not r["measure"]["__impossible__"], (
+                  f"{label}: an impossible family 'resolved' -- width comparison can no "
+                  "longer tell a hit from a miss")
+              assert any(r["measure"][f] for f in PROBES), (
+                  f"{label}: not one bundled family resolved -- the guard measured nothing")
+
+          # config launch -- `fonts` is this profile's own Windows subset, and
+          # no context installs a per-context list. Covers arms (a), (c), (d).
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})})
+              default = probe(b.new_page())
+              b.close()
+
+          print(f"  [config launch / default] measure        {default['measure']}")
+          print(f"  [config launch / default] document.fonts  {default['fontfaces']}")
+          print(f"  [config launch / default] FontFace.status {default['status']}")
+          check_signal("config launch / default", default)
+
+          # (a) the default context answers from the launch `fonts` subset,
+          # not from every bundled family (the Linux package bundles
+          # win+mac+linux together).
+          assert all(default["measure"][f] for f in WIN_ONLY), (
+              "the default context lost the launch config's own Windows families: "
+              f"{default['measure']}")
+          assert not any(default["measure"][f] for f in MAC_ONLY), (
+              "the default context resolved macOS families under a Windows launch -- a "
+              f"read path answered 'allow everything' instead of `fonts`: {default['measure']}")
+
+          # (c) document.fonts and text measurement are the same context
+          for f in PROBES:
+              assert bool(default["fontfaces"][f]) == default["measure"][f], (
+                  f"document.fonts says {default['fontfaces'][f]} for {f!r} but text "
+                  f"measurement says {default['measure'][f]} -- the two font read paths "
+                  "disagree, so the context is not coherent")
+
+          # (d) a bare FontFace answers for the same context as measurement.
+          assert default["status"]["__impossible__"] == "error", (
+              "config launch / default: a bare FontFace for an impossible family reports "
+              f"{default['status']['__impossible__']!r} -- .status can no longer tell a hit "
+              "from a miss, so this arm is measuring nothing")
+          assert any(default["status"][f] == "loaded" for f in PROBES), (
+              "config launch / default: not one bundled family is 'loaded' on a bare "
+              "FontFace -- the .status arm measured nothing")
+          for f in PROBES:
+              assert (default["status"][f] == "loaded") == default["measure"][f], (
+                  f"new FontFace({f!r}, 'local(...)').status is {default['status'][f]!r} but "
+                  f"text measurement says {default['measure'][f]} -- FontFace::Status() is "
+                  "answering for a different context than measurement")
+
+          # Moved up from just before arm (e)/(f)/(g) below: arm (b2)
+          # (right after arm (b), further down) is collect-then-assert
+          # too, per team-lead direction, and needs this list to exist
+          # before it runs. Still the SAME list, still first appended to
+          # by (e); moving its creation earlier changes nothing about
+          # (e)/(f)/(g)/(i)/(j)/(j2)'s own behavior.
+          tripwires = []
+
+          # bare launch -- no `fonts` key at all, so mFontFamilies holds every
+          # bundled family and nothing is deleted from font.system.whitelist.
+          # setFontList() per context is the only narrowing in play. Covers
+          # arm (b).
+          with sync_playwright() as pw:
+              b = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  # #83: this launch previously ran at the default
+                  # dom.ipc.processCount=8, so mac/win almost certainly
+                  # landed in separate content processes and this arm
+                  # could never have observed a cross-process leak.
+                  # Forcing a shared process is the one thing changing
+                  # here -- team-lead directive, re-run before Task 8.
+                  firefox_user_prefs={"dom.ipc.processCount": 1},
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              ctxs = {}
+              # Same DOM-reported instrumentation as arm (b2). Arm (b2)
+              # reports saw=false for every context, which would mean no
+              # per-context list is ever installed -- and under this bare
+              # launch that means CamouIsFontAllowed allows everything, so
+              # arm (b) could not be blocking for the reason it claims.
+              # Measure arm (b) with the same instrument rather than
+              # assuming the two differ (#83).
+              # saw=false everywhere says the typeof check failed, but not
+              # why. Distinguish "the binding is absent" from "it is present
+              # and the guard is wrong" by calling it unconditionally and
+              # recording what happens, plus what the window actually
+              # exposes (#83).
+              B_INIT = ('(() => { const out = {saw: (typeof window.setFontList === "function"), '
+                        'inWin: ("setFontList" in window), '
+                        'typ: typeof window.setFontList, '
+                        'fontProps: Object.getOwnPropertyNames(window).filter('
+                        'n => /font/i.test(n)), '
+                        # Which of the 14 setters are reachable from an init
+                        # script (main world)? The #57 arm enumerates them with
+                        # page.evaluate(), which runs in an isolated world and
+                        # cannot see them either way, so its 0/14 says nothing.
+                        # setNavigatorPlatform demonstrably applies from an init
+                        # script in this same run, so if it is present here and
+                        # setFontList is not, the difference is specific rather
+                        # than systemic (#83).
+                        'setters: ["setFontSpacingSeed","setAudioFingerprintSeed",'
+                        '"setCanvasSeed","setTimezone","setScreenDimensions",'
+                        '"setScreenColorDepth","setNavigatorPlatform","setNavigatorOscpu",'
+                        '"setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",'
+                        '"setFontList","setSpeechVoices","setWebRTCIPv4"]'
+                        '.filter(n => typeof window[n] === "function"), '
+                        'applied: false, err: null}; '
+                        'try { window.setFontList(%s); out.applied = true; } '
+                        'catch (e) { out.err = String(e).slice(0, 120); } '
+                        'const mark = () => { try { document.documentElement.setAttribute('
+                        '"data-fl", JSON.stringify(out)); } catch (e) {} }; '
+                        'mark(); document.addEventListener("DOMContentLoaded", mark); })()')
+              fl_b = {}
+              for name in ("mac", "win"):
+                  ctx = b.new_context()
+                  ctx.add_init_script(B_INIT % json.dumps(",".join(FONTS[name])))
+                  pg = ctx.new_page()
+                  ctxs[name] = probe(pg)
+                  fl_b[name] = pg.evaluate('() => document.documentElement.getAttribute("data-fl")')
+                  ctx.close()
+              print(f"  [arm b / #83 instrumentation] setFontList per context {fl_b}")
+              b.close()
+          mac, win = ctxs["mac"], ctxs["win"]
+
+          for label, r in (("bare launch / mac context", mac), ("bare launch / win context", win)):
+              print(f"  [{label}] measure        {r['measure']}")
+              print(f"  [{label}] document.fonts  {r['fontfaces']}")
+              print(f"  [{label}] FontFace.status {r['status']}")
+              check_signal(label, r)
+
+          # Discriminator for the Geneva regression (no rebuild): the width
+          # comparison itself may be lying. `resolved = (w(f) != w(absent))`
+          # assumes the absent-reference's fallback face can never BE the
+          # face under test -- but mac's allowed list is the full macOS set,
+          # and Geneva (historically Mac OS's own default UI sans) is a
+          # entirely plausible generic-sans fallback pick. If the fallback
+          # for an unresolvable name happens to BE Geneva, then Geneva IS
+          # resolving, the two widths agree because they're the SAME face,
+          # and width-based "resolved=False" is a false negative -- the
+          # same reference-not-guaranteed-to-differ defect this plan has
+          # hit before (arm (f)'s CJK em-square collision, arm (j)'s tofu
+          # floor). Break it with rendered pixels, not advance width: two
+          # different faces essentially never rasterize identically at
+          # 72px, even if metrically similar. Helvetica Neue is the
+          # positive control -- known-resolved (measure=True), must
+          # produce a DIFFERENT checksum from the absent-reference, or
+          # this test itself proves nothing.
+          with sync_playwright() as pw:
+              bg = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              ctxg = bg.new_context()
+              ctxg.add_init_script(
+                  'if (typeof window.setFontList === "function") '
+                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+              pgg = ctxg.new_page()
+              pgg.goto("data:text/html,<h1>g</h1>")
+              PIXEL_JS = (
+                  "() => { "
+                  "const draw = (f) => { "
+                  "const c = document.createElement('canvas'); "
+                  "c.width = 300; c.height = 100; "
+                  "const ctx = c.getContext('2d'); "
+                  "ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 300, 100); "
+                  "ctx.fillStyle = 'black'; "
+                  "ctx.font = '72px \"' + f + '\", monospace'; "
+                  "ctx.fillText('mmmmmmmmmmlliWWWWWWW@#$%^&*()_+', 0, 80); "
+                  "const data = ctx.getImageData(0, 0, 300, 100).data; "
+                  "let sum = 0; "
+                  "for (let i = 0; i < data.length; i++) { "
+                  "sum = (Math.imul(sum, 31) + data[i]) >>> 0; } "
+                  "return sum; }; "
+                  "return {geneva: draw('Geneva'), "
+                  "absent: draw('__CamouAbsentRef__0001'), "
+                  "helvetica_neue: draw('Helvetica Neue')}; }")
+              geneva_pixels = pgg.evaluate(PIXEL_JS)
+              bg.close()
+          control_differs = geneva_pixels["helvetica_neue"] != geneva_pixels["absent"]
+          geneva_pixel_differs = geneva_pixels["geneva"] != geneva_pixels["absent"]
+          print(f"  [Geneva pixel discriminator] checksums: {geneva_pixels}")
+          print(f"  [Geneva pixel discriminator] positive control (Helvetica Neue, "
+                f"known-resolved) differs from absent-reference: {control_differs} "
+                f"{'-- test is valid' if control_differs else '-- TEST ITSELF IS BROKEN, ignore the Geneva result below'}")
+          print(f"  [Geneva pixel discriminator] Geneva differs from absent-reference "
+                f"(pixels, not width): {geneva_pixel_differs} "
+                f"-- {'Geneva DOES resolve; the width-based arm (b) measurement was a false negative' if geneva_pixel_differs else 'Geneva genuinely does not render distinct pixels; the width measurement was correct'}")
+
+          assert mac["measure"] != win["measure"], (
+              "the mac and win contexts measured identically -- no per-context signal")
+
+          # (b) each context narrows to its own OS, including one the launch
+          # never had.
+          #
+          # These were hard asserts, which predate the collect-then-assert
+          # pattern the later arms use. That cost real signal: a red here
+          # aborts the step and erases every arm below it, and arm (h) --
+          # the only arm Task 6 needs -- went unmeasured across two runs
+          # because Geneva regressed here. An arm that kills the run makes
+          # every later arm unmeasurable in exactly the situation where
+          # someone needs them most.
+          b_failures = []
+          if not all(mac["measure"][f] for f in MAC_ONLY):
+              b_failures.append(
+                  "a mac context cannot resolve macOS families under a bare launch -- the "
+                  f"per-context filter regressed: {mac['measure']}")
+          if any(mac["measure"][f] for f in WIN_ONLY):
+              b_failures.append(
+                  f"the mac context still resolves Windows-only families: {mac['measure']}")
+          if not all(win["measure"][f] for f in WIN_ONLY):
+              b_failures.append(f"win context: {win['measure']}")
+          if any(win["measure"][f] for f in MAC_ONLY):
+              b_failures.append(
+                  f"the win context resolves macOS-only families: {win['measure']}")
+          print(f"  (b) per-context narrowing:  {'RED' if b_failures else 'GREEN'} -- {b_failures}")
+          if b_failures:
+              tripwires.append(f"(b) per-context narrowing: {b_failures}")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (b2): arm (b) above, unchanged, closes each context
+          # before creating the next -- and that sequence turns out to
+          # be the one case in which the per-context leak (#83) cannot
+          # happen (confirmed directly: mac's content process is torn
+          # down and win gets a fresh one, verified by watching
+          # `pgrep -af contentproc` across the close(), not inferred).
+          # A caller that opens several contexts in one browser keeps
+          # them alive at once -- that is the entire reason to use
+          # contexts instead of separate launches -- so arm (b)'s green
+          # documents a real and worth-keeping case, but not the one
+          # #44's per-context feature has to hold up in.
+          #
+          # Arm (b2) is the SAME probe(), the SAME MAC_ONLY/WIN_ONLY
+          # families, the SAME processCount=1 launch as arm (b) --
+          # differing in exactly one thing: the mac (donor) context is
+          # NOT closed before the win (recipient) context is created
+          # and probed. Confirmed by a single-variable pair (this
+          # task's own discriminator): reference ordering alone does
+          # not reproduce the leak; donor liveness alone does, fully,
+          # every family. This arm is EXPECTED RED on every build until
+          # #83 is fixed -- it is not a broken test, it is the honest
+          # state of the feature in the shape it is actually used.
+          # Kept as its own arm rather than folded into arm (b), so a
+          # regression in the CLOSED-donor case (arm (b) going red)
+          # remains separately visible from this one.
+          with sync_playwright() as pw:
+              b2 = pw.firefox.launch(
+                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                  firefox_user_prefs={"dom.ipc.processCount": 1},
+                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              # #83 root-cause instrumentation. The gate can only block
+              # anything when `ctx != 0 && HasFontList(ctx)` -- under this
+              # bare launch there is no `fonts` key, so its fallback branch
+              # reads an empty sLaunchFonts and returns true for everything.
+              # So a context that never installs its own list is allowed
+              # every family, and would look exactly like a leak.
+              # setFontList() is one-shot per user context: the handler
+              # calls DisableFunction(), which writes roverfox.s.* -- and
+              # cross-process-storage.patch makes that pref CROSS-PROCESS.
+              # Record whether each context's init script actually found and
+              # called the function, so a missing list is distinguishable
+              # from a bypassed gate.
+              # Report through the DOM, not a JS global. page.evaluate()
+              # runs in an isolated world (that is Camoufox's core feature,
+              # guarded by the #51/#62 step above), so a `window.__x` the
+              # init script sets in the main world is invisible to the
+              # read -- the first version of this instrumentation reported
+              # saw=False for every context and looked like a finding.
+              # The DOM is shared between worlds; JS globals are not.
+              INIT = ('(() => { const saw = (typeof window.setFontList === "function"); '
+                      'let applied = false; '
+                      'if (saw) { window.setFontList(%s); applied = true; } '
+                      'const mark = () => { try { document.documentElement.setAttribute('
+                      '"data-fl", JSON.stringify({saw: saw, applied: applied})); } catch (e) {} }; '
+                      'mark(); document.addEventListener("DOMContentLoaded", mark); })()')
+              ctx2_mac = b2.new_context()
+              ctx2_mac.add_init_script(INIT % json.dumps(",".join(FONTS["mac"])))
+              pg_mac = ctx2_mac.new_page()
+              mac2 = probe(pg_mac)
+              fl_mac = pg_mac.evaluate('() => document.documentElement.getAttribute("data-fl")')
+              # Deliberately NOT closed here -- the one variable this
+              # arm tests. Arm (b) above calls ctx.close() at this exact
+              # point, before the next context exists.
+              ctx2_win = b2.new_context()
+              ctx2_win.add_init_script(INIT % json.dumps(",".join(FONTS["win"])))
+              pg_win = ctx2_win.new_page()
+              win2 = probe(pg_win)
+              fl_win = pg_win.evaluate('() => document.documentElement.getAttribute("data-fl")')
+              print(f"  [donor-alive / #83 instrumentation] mac setFontList {fl_mac}")
+              print(f"  [donor-alive / #83 instrumentation] win setFontList {fl_win}")
+              fl_win_d = json.loads(fl_win) if fl_win else {"saw": None, "applied": None}
+              # NOTE: saw/applied are read AFTER probe() navigates, which is the
+              # init script's SECOND invocation. setFontList is one-shot per user
+              # context by design and Playwright runs init scripts on every
+              # navigation, so invocation 1 (on about:blank) consumes it and this
+              # reading always shows it absent. Measured directly: first
+              # invocation has it, second does not. So saw=false here does NOT
+              # mean the list was never installed -- it was. Kept as a record of
+              # a wrong reading, not as a signal.
+              ctx2_mac.close()
+              ctx2_win.close()
+              b2.close()
+
+          print(f"  [donor-alive / mac context] measure {mac2['measure']}")
+          print(f"  [donor-alive / win context, donor still open] measure {win2['measure']}")
+
+          b2_failures = []
+          b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
+          if b2_leaked:
+              b2_failures.append(
+                  f"arm (b2)/#83: win resolved macOS-only families {b2_leaked} it was "
+                  f"never allowed, with the donor (mac) context still open -- the "
+                  f"production shape this feature exists for. See #83.")
+          print(f"  (b2) donor-alive per-context leak (#83):  "
+                f"{'RED (expected -- #83 not yet fixed)' if b2_failures else 'GREEN'} -- "
+                f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
+          if b2_failures:
+              tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Step 0: the two gates Task 1 added inside gfxPlatformFontList
+          # (GetFontList, GetFontFamilyList) have no arm reaching either.
+          # Reachability, checked against the FIREFOX_152_0_4_RELEASE tag
+          # (raw.githubusercontent.com/mozilla-firefox/firefox and
+          # searchfox.org/mozilla-central, symbol layout unchanged for
+          # this window):
+          #
+          #   GetFontList -- gfxPlatform::GetFontList() has exactly one
+          #   caller, nsThebesFontEnumerator (gfx/src/
+          #   nsThebesFontEnumerator.cpp:53,119), which implements
+          #   nsIFontEnumerator. Every consumer of that interface --
+          #   browser/components/preferences/config/accessibility.mjs,
+          #   toolkit/content/preferences/Preference.mjs,
+          #   toolkit/mozapps/preferences/fontbuilder.js -- is the
+          #   chrome-privileged about:preferences font-picker UI.
+          #   Instantiating nsIFontEnumerator needs Components.classes,
+          #   which unprivileged page content never has. Chrome-only: no
+          #   page-side probe can reach it. Unmeasured defence-in-depth;
+          #   the gate stays, it is not verified by this guard.
+          #
+          #   GetFontFamilyList -- exactly one caller,
+          #   gfx/thebes/gfxTextRun.cpp:2229, inside
+          #   gfxFontGroup::GetDefaultFont()'s font-of-last-resort loop.
+          #   GetDefaultFont() IS reached from ordinary content text
+          #   shaping -- gfxFontGroup::GetFirstValidFont()'s own last
+          #   resort (gfxTextRun.cpp:2326) and
+          #   gfxFontGroup::FindFontForChar()'s fallback chain
+          #   (gfxTextRun.cpp:3430) both call it -- so this one is not
+          #   chrome-only the way GetFontList is. But its interesting
+          #   branch -- "if CamouIsFontAllowed() filtered the list down
+          #   to nothing, hand back the unfiltered one" -- only opens
+          #   when a context's ENTIRE per-context family set is empty,
+          #   one step before gfxTextRun.cpp's own next fallback
+          #   (pfl->GetDefaultFontEntry(), a separate, non-per-context
+          #   call) and two steps before a MOZ_CRASH
+          #   ("unable to find a usable font"). Every context this guard
+          #   builds installs a real, non-empty OS font list, so normal
+          #   probes never approach that edge, and deliberately emptying
+          #   a context's list to force it risks landing on the
+          #   MOZ_CRASH side of that line inside a CI browser process
+          #   rather than the unfiltered-fallback side. No arm is added
+          #   for it here: both gates are unmeasured defence-in-depth,
+          #   like GetFontList. Stated plainly: the last-resort branch
+          #   deliberately returns every bundled OS's families, unfiltered,
+          #   whenever filtering has emptied a context's set -- a hole by
+          #   construction, not a bug Task 2 introduces or closes.
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arms (e)-(h): the four read paths #44's H2 review found
+          # ungated. Two design lessons from two earlier attempts, both
+          # against this same run_id, before this shape:
+          #
+          #   1. One page per context, not one context serving four
+          #      pages. Sharing ctx_mac across arms (e)-(h) let (e)'s
+          #      @font-face rules for "Segoe UI"/"Helvetica Neue"
+          #      shadow (g)'s later plain c.font lookups for those same
+          #      names on the SAME document -- (g) measured the
+          #      shadowed face, not the system family.
+          #   2. Even with each arm on its OWN page, the per-context
+          #      list still degraded by the 3rd page opened in a
+          #      context that had ALREADY served earlier arms' pages:
+          #      arm (g)'s own MAIN-THREAD measurement, on ITS page
+          #      alone, came back identical for mac and win (every
+          #      family "present" in both) -- the same allow-everything
+          #      shape arm (b) shows only when a context's per-context
+          #      list is entirely absent. Whatever `setFontList()`
+          #      installs is not proven to survive a context serving
+          #      more than one page. So every arm below gets a FRESH
+          #      context of its own (one `setFontList()` call, one
+          #      page, nothing else ever asked of that context) rather
+          #      than sharing ctx_mac/ctx_win across arms. Arm (f) goes
+          #      one step further and gives every measurement (mac,
+          #      win, and the mac2 repeatability control) its own
+          #      FRESH BROWSER LAUNCH, since a shared-context fix does
+          #      not rule out a process-wide confound (e.g. progressive
+          #      cmap-loading state shared by every context in one
+          #      content process) -- and the first attempt at this
+          #      repeatability control (contexts sharing one launch)
+          #      still measured mac2 != mac on an identical list.
+          # -----------------------------------------------------------
+          JS_E = """async () => {
+            // (e) CSS @font-face via a stylesheet rule, not a JS
+            // FontFace object -- FontFaceSet::Check/::Add scope an
+            // AutoFontListContext; InsertRuleFontFace (what a
+            // stylesheet rule goes through during style flush) does
+            // not. Both discriminating families are real markers -- an
+            // invented name reports 'error' in every context and would
+            // never disagree with anything. A third rule, "Tahoma", is
+            // a positive control: it is in BOTH FONTS["mac"] and
+            // FONTS["win"], so a genuinely working readback must never
+            // report 'error' for it in either context -- unlike the
+            // other two, its redness would mean the readback itself is
+            // broken, not that the gate is missing, which is the wrong
+            // kind of red for a tripwire whose job is to tell Task 3
+            // what to fix.
+            //
+            // Discriminator for WHICH kind of broken, per code review:
+            // Tahoma's rule is declared as a bare, unquoted CSS
+            // identifier (valid -- it has no space) instead of a
+            // quoted string, unlike Segoe UI/Helvetica Neue which MUST
+            // be quoted (they contain a space). If FontFace.family
+            // serializes it without quotes and its status comes back
+            // correctly gated where the space-containing families do
+            // not, that points hard at InsertRuleFontFace handing a
+            // QUOTED family key to IsFontAllowed(). Separately, Calibri
+            // (win-only, no spaces) is added via
+            // document.fonts.add(new FontFace(...)) rather than a
+            // stylesheet rule -- FontFaceSet::Add DOES get an
+            // AutoFontListContext scope (Task 1's own patch), unlike
+            // InsertRuleFontFace. If THAT path resolves Calibri
+            // correctly per context, the per-context mechanism itself
+            // works and whatever is wrong is specific to the CSS-rule
+            // path's family key, not a missing scope in general.
+            const sheet = document.createElement('style');
+            sheet.textContent =
+              '@font-face { font-family: "Segoe UI"; src: local("Segoe UI"); }' +
+              '@font-face { font-family: "Helvetica Neue"; src: local("Helvetica Neue"); }' +
+              '@font-face { font-family: Tahoma; src: local(Tahoma); }';
+            document.head.appendChild(sheet);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+            const out = {};
+            const rawFamilies = [];
+            for (const f of document.fonts) {
+              rawFamilies.push(f.family);
+              // FontFace.family serializes as a CSS string, quotes
+              // included -- strip them or every lookup below misses.
+              const fam = f.family.replace(/^["\']|["\']$/g, '');
+              out[fam] = f.status;
+            }
+
+            const jsFace = new FontFace('Calibri', 'local(Calibri)');
+            document.fonts.add(jsFace);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+
+            return {status: out, rawFamilies: rawFamilies, jsFaceStatus: jsFace.status};
+          }"""
+
+          JS_F = """() => {
+            // (f) codepoint fallback: neither context's non-CJK
+            // families cover U+6F22, so this forces
+            // SystemFindFontForChar / GlobalFontFallback, which
+            // nothing gates. Own browser launch, own context, one
+            // page -- see the design note above.
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            return c.measureText('\u6f22').width;
+          }"""
+
+          # Positive control for arm (f), added after a review finding: JS_F's
+          # width alone never proved U+6F22 can render as a real glyph at all
+          # -- if it's tofu everywhere, no gate could ever make mac/win
+          # diverge. Explicitly names each context's own CJK family (real,
+          # allowed, per WIN_ONLY/MAC_ONLY -- WIN_ONLY needed "MS Gothic"
+          # added for this control to even be attemptable, since it had no
+          # CJK-covering entry before). If this width equals JS_F's
+          # impossible-family fallback width, the probe measures tofu in
+          # both cases and arm (f) cannot discriminate regardless of the
+          # gate's correctness.
+          JS_F_CONTROL_MAC = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "PingFang HK"';
+            return c.measureText('\u6f22').width;
+          }"""
+
+          JS_F_CONTROL_WIN = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "MS Gothic"';
+            return c.measureText('\u6f22').width;
+          }"""
+
+          # Diagnostic (not scored, no assert): does JS_F's own measurement
+          # change if repeated after a delay on the SAME page? Source trace
+          # (gfx/thebes/SharedFontList.h: IsFullyInitialized() requires a
+          # computed character map; gfx/thebes/gfxPlatformFontList.cpp's
+          # GlobalFontFallback shared-list loop skips any family that isn't
+          # fully initialized and only fires an ASYNC StartCmapLoadingFromFamily
+          # for it -- gfx.font_rendering.fallback.async defaults to true) says
+          # a brand-new page's first-ever fallback call may race ahead of
+          # cmap loading for every family except whatever few were already
+          # touched during startup, and never reach a genuinely-present,
+          # genuinely-allowed CJK family at all. If `delayed` differs from
+          # `immediate` here, that race is the reason arm (f) cannot
+          # discriminate on this harness, independent of gate correctness.
+          JS_F_RACE = """async () => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const immediate = c.measureText('\u6f22').width;
+            await new Promise(r => setTimeout(r, 3000));
+            const delayed = c.measureText('\u6f22').width;
+            return {immediate: immediate, delayed: delayed};
+          }"""
+
+          # Follow-up diagnostic: JS_F_RACE (this same run's earlier result,
+          # mac only) confirmed the value changes over time on one page --
+          # 30.533 immediate, 41.517 after 3s. But a fixed sleep is a
+          # diagnostic, not something a guard can rely on for determinism,
+          # and one context alone can't say whether the ASYMPTOTIC value
+          # discriminates mac from win. An earlier version of this
+          # diagnostic polled until the measurement stopped changing (3
+          # consecutive identical reads) -- removed after CI showed it
+          # stopped at a TEMPORARY plateau (polls=3, samples all 30.533,
+          # exited in under a second) while JS_F_RACE's fixed 3s delay in
+          # the SAME run still showed 41.517 -- the underlying process
+          # changes state on a multi-second timescale, so short-run
+          # stability is not convergence. This samples on a FIXED window
+          # (no early-stop logic at all) long
+          # enough to clear that plateau -- 20 samples, 500ms apart, 10s
+          # total -- and reports the raw series plus the final value, for
+          # mac, win, and mac2, to answer directly: does the eventual value
+          # discriminate context, or does everything converge to the same
+          # number regardless of which context is asking?
+          JS_F_FINAL = """async () => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const samples = [];
+            for (let i = 0; i < 20; i++) {
+              samples.push(c.measureText('漢').width);
+              await new Promise(r => setTimeout(r, 500));
+            }
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('漢').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+          }"""
+
+          # Bisection (team-lead directive): the mac context's fallback
+          # value (41.517) is not PingFang HK's own width (48, per the
+          # positive control) -- something ELSE is serving U+6F22 in the
+          # mac context. Identify it by naming, not inferring: measure
+          # U+6F22 explicitly against every CJK-capable family actually
+          # present in bundle/fonts/ across all three bundled OSes (exact
+          # family names extracted locally via fontTools from the real
+          # .ttf/.ttc/.otf files -- not guessed), in the MAC context. If a
+          # name outside MAC_ONLY/FONTS["mac"] measures 41.517, the gate
+          # leaks; if nothing does, fallback is reaching something not in
+          # the bundle at all (a runner font).
+          JS_F_BISECT = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const candidates = [
+              'PingFang HK', 'PingFang SC', 'PingFang TC',
+              'Hiragino Sans GB', 'Heiti SC', 'Heiti TC',
+              'Apple SD Gothic Neo',
+              'MS Gothic', 'MS PGothic', 'SimSun', 'NSimSun',
+              'Malgun Gothic', 'Microsoft YaHei', 'Microsoft JhengHei',
+              'Yu Gothic',
+              'Noto Sans SC', 'Noto Sans TC', 'Noto Sans JP', 'Noto Sans KR',
+            ];
+            const widths = {};
+            for (const fam of candidates) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText('漢').width;
+            }
+            return widths;
+          }"""
+
+          JS_G = """async () => {
+            // (g) worker / OffscreenCanvas: GetDocument() is null off
+            // the main thread, so the context id falls to 0 there and
+            // the per-context list is never consulted. Verdict
+            // compares the worker against arm (b)'s trusted per-
+            // context ground truth, not against this page's own main-
+            // thread reading -- printed here for the record, but see
+            // the design note above on why it cannot be trusted as a
+            // baseline on its own.
+            //
+            // The worker is spawned and awaited FIRST, before this
+            // page's main thread has touched any of these families at
+            // all -- if Gecko memoizes a (family, context) resolution
+            // anywhere below the per-call IsFontAllowed check, a
+            // worker whose own context propagation were genuinely
+            // broken could otherwise read a cache entry the main
+            // thread's correctly-gated lookup had just warmed, and
+            // produce this exact symmetric per-context-correct data
+            // for the wrong reason. Doing gMain second removes that
+            // path entirely: nothing on this page has resolved any of
+            // these families before the worker answers.
+            //
+            // The worker reports its own identity alongside the widths
+            // -- self.constructor.name and typeof document -- so a
+            // silent fallback to a main-thread measurement (this
+            // OffscreenCanvas is created INSIDE the worker, never
+            // transferred in from the page) fails loudly instead of
+            // scoring a vacuous green.
+            const workerSrc = `onmessage = () => {
+              const c = new OffscreenCanvas(8, 8).getContext('2d');
+              // The worker's own baseline, not the page's -- these run on
+              // different threads and a cross-thread baseline is only a
+              // valid reference if the two sides are guaranteed to agree.
+              // They aren't: gfxTextRun.cpp special-cases pref-font
+              // resolution for worker threads (GetDefaultGeneric), so a
+              // worker's plain 'monospace' width is not proven equal to
+              // the main thread's without measuring it directly here.
+              c.font = '48px monospace';
+              const wBaseline = c.measureText('mmmmmmmmmmlli').width;
+              const widths = {};
+              for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
+                c.font = '48px "' + f + '", monospace';
+                widths[f] = c.measureText('mmmmmmmmmmlli').width;
+              }
+              postMessage({widths: widths, baseline: wBaseline,
+                          ctor: self.constructor.name,
+                          docType: typeof document});
+            }`;
+            const gWorker = await new Promise((resolve, reject) => {
+              const w = new Worker(URL.createObjectURL(
+                new Blob([workerSrc], {type: 'text/javascript'})));
+              const timer = setTimeout(
+                () => reject(new Error('worker never responded (10s)')), 10000);
+              w.onmessage = (ev) => { clearTimeout(timer); resolve(ev.data); };
+              w.onerror = (ev) => { clearTimeout(timer); reject(new Error('worker error: ' + ev.message)); };
+              w.postMessage(null);
+            });
+
+            // Only now -- after the worker has already answered -- does
+            // this page's main thread touch any of these families.
+            const c = document.createElement('canvas').getContext('2d');
+            const s48 = 'mmmmmmmmmmlli';
+            const baseline48 = (() => {
+              c.font = '48px monospace';
+              return c.measureText(s48).width;
+            })();
+            const gMain = {};
+            for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
+              c.font = '48px "' + f + '", monospace';
+              gMain[f] = c.measureText(s48).width;
+            }
+            return {gMain: gMain, gWorker: gWorker.widths,
+                    gWorkerBaseline: gWorker.baseline, gWorkerCtor: gWorker.ctor,
+                    gWorkerDocType: gWorker.docType, baseline48: baseline48};
+          }"""
+
+          JS_H = """async () => {
+            // (h) face-name lookup: only reached when a local()
+            // @font-face src is actually USED to render text
+            // (gfxUserFontSet::FindPlatformFont at font-matching time)
+            // -- never via FontFace.load(), which font-hijacker.patch
+            // answers purely from IsFontAllowed() without ever calling
+            // mImpl->Load(). Full-name and PostScript-name forms,
+            // printed regardless of verdict -- Task 6 designs the gate
+            // from what these print.
+            const sheet = document.createElement('style');
+            sheet.textContent =
+              '@font-face { font-family: "ProbeH_full"; src: local("Segoe UI"); }' +
+              '@font-face { font-family: "ProbeH_ps"; src: local("SegoeUI"); }';
+            document.head.appendChild(sheet);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+            const c = document.createElement('canvas').getContext('2d');
+            const s48 = 'mmmmmmmmmmlli';
+            c.font = '48px monospace';
+            const baseline = c.measureText(s48).width;
+            c.font = '48px "ProbeH_full", monospace';
+            const hFull = c.measureText(s48).width;
+            c.font = '48px "ProbeH_ps", monospace';
+            const hPs = c.measureText(s48).width;
+            return {hFull: hFull, hPs: hPs, baseline: baseline};
+          }"""
+
+          JS_WEBFONT = """async (fontDataUri) => {
+            // Out-of-scope observation for #44 (measured, not fixed here --
+            // see the Task 3 brief). font-hijacker.patch's SetStatus()
+            // answers status purely from IsFontAllowed() for EVERY
+            // @font-face, not just the OS-name surface Tasks 1-3 spoof. An
+            // ordinary web font loaded by URL, whose family is in no OS
+            // list at all, asks IsFontAllowed() a question it can only
+            // answer 'no' to. A bare, unquoted, single-word invented
+            // family name isolates this from the quoting bug Task 3 fixes:
+            // IsFontAllowed() never has a chance to match it against any
+            // list entry regardless of quoting.
+            //
+            // status alone cannot tell "reported failed" apart from
+            // "genuinely failed" -- both look like 'error'. The
+            // discriminating control is render evidence: does the glyph
+            // width actually change from a plain-monospace fallback, which
+            // only happens if the browser truly loaded and is using this
+            // font's outlines.
+            const FAMILY = 'CamouProbeWebFont';
+            const sheet = document.createElement('style');
+            sheet.textContent =
+                '@font-face { font-family: ' + FAMILY + '; src: url("' + fontDataUri + '"); }';
+            document.head.appendChild(sheet);
+            document.body.offsetHeight;
+            await document.fonts.ready;
+            const face = [...document.fonts].find(
+                f => f.family.replace(/^["\']|["\']$/g, '') === FAMILY);
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlli';
+            c.font = '72px monospace';
+            const baseline = c.measureText(s).width;
+            c.font = '72px "' + FAMILY + '", monospace';
+            const probeWidth = c.measureText(s).width;
+            return {
+              status: face ? face.status : 'NO_FACE_FOUND',
+              rendered: Math.abs(probeWidth - baseline) > 1,
+              probeWidth: probeWidth,
+              baseline: baseline,
+            };
+          }"""
+
+          def one_page(fonts_key, js):
+              # A brand-new launch, a brand-new context, exactly one
+              # page: the strongest isolation available, since sharing
+              # even just a context (never mind a whole launch) across
+              # more than one page was already shown to degrade the
+              # per-context list.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS[fonts_key])))
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>f</h1>")
+                  result = page.evaluate(js)
+                  b.close()
+                  return result
+
+          e = {"mac": one_page("mac", JS_E), "win": one_page("win", JS_E)}
+          f = {"mac": one_page("mac", JS_F), "win": one_page("win", JS_F),
+               "mac2": one_page("mac", JS_F)}
+          f_control = {"mac": one_page("mac", JS_F_CONTROL_MAC),
+                       "win": one_page("win", JS_F_CONTROL_WIN)}
+          f_race = one_page("mac", JS_F_RACE)
+          f_final = {"mac": one_page("mac", JS_F_FINAL),
+                     "win": one_page("win", JS_F_FINAL),
+                     "mac2": one_page("mac", JS_F_FINAL)}
+          f_bisect = {"mac": one_page("mac", JS_F_BISECT),
+                      "win": one_page("win", JS_F_BISECT)}
+          g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
+          h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
+
+          print(f"  [mac / arm e] document.fonts status {e['mac']['status']} raw families {e['mac']['rawFamilies']}")
+          print(f"  [win / arm e] document.fonts status {e['win']['status']} raw families {e['win']['rawFamilies']}")
+          print(f"  [mac / arm e] document.fonts.add(new FontFace('Calibri', ...)).status = {e['mac']['jsFaceStatus']!r}")
+          print(f"  [win / arm e] document.fonts.add(new FontFace('Calibri', ...)).status = {e['win']['jsFaceStatus']!r}")
+          print(f"  [mac / arm f] CJK fallback width      {f['mac']}")
+          print(f"  [mac2 / arm f] CJK fallback width (dup mac list, own launch) {f['mac2']}")
+          print(f"  [win / arm f] CJK fallback width      {f['win']}")
+          print(f"  [mac / arm f] positive control -- named 'PingFang HK' width {f_control['mac']}")
+          print(f"  [win / arm f] positive control -- named 'MS Gothic' width   {f_control['win']}")
+          print(f"  [mac / arm f] async cmap-loading race diagnostic -- immediate={f_race['immediate']} delayed(3s)={f_race['delayed']}")
+          for label in ("mac", "win", "mac2"):
+              ff = f_final[label]
+              print(f"  [{label} / arm f] fixed-window (20x500ms=10s) -- final={ff['final']} "
+                    f"samples={ff['samples']} refs={ff['refs']}")
+          for label in ("mac", "win"):
+              this_final = f_final[label]["final"]
+              print(f"  [{label} / arm f] bisection -- named-CJK widths {f_bisect[label]}")
+              matches = [fam for fam, w in f_bisect[label].items() if w == this_final]
+              print(f"  [{label} / arm f] bisection MATCH for {label}'s fallback final ({this_final}): {matches or 'NONE -- not any named bundled CJK family'}")
+          print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']} (main baseline {g['mac']['baseline48']})")
+          print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (worker's OWN baseline {g['mac']['gWorkerBaseline']} -- the verdict below, unlike the print above, compares against this, not the main-thread baseline48)")
+          print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
+          print(f"  [win / arm g] main thread widths (this page only, not a trusted baseline) {g['win']['gMain']} (main baseline {g['win']['baseline48']})")
+          print(f"  [win / arm g] worker widths      {g['win']['gWorker']} (worker's OWN baseline {g['win']['gWorkerBaseline']} -- the verdict below, unlike the print above, compares against this, not the main-thread baseline48)")
+          print(f"  [win / arm g] worker identity    ctor={g['win']['gWorkerCtor']!r} typeof document={g['win']['gWorkerDocType']!r}")
+          print(f"  [mac / arm h] local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
+          print(f"  [win / arm h] local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
+
+          assert g["mac"]["baseline48"] > 0 and g["win"]["baseline48"] > 0, (
+              "arm (g): monospace baseline measured 0 -- nothing ran")
+          assert h["mac"]["baseline"] > 0 and h["win"]["baseline"] > 0, (
+              "arm (h): monospace baseline measured 0 -- nothing ran")
+          assert g["mac"]["gWorkerBaseline"] > 0 and g["win"]["gWorkerBaseline"] > 0, (
+              "arm (g): worker's own monospace baseline measured 0 -- the worker ran "
+              "but never measured its own reference width, so nothing below can be trusted")
+          assert set(g["mac"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
+              f"arm (g): mac worker returned {g['mac']['gWorker']} -- did the Worker even run?")
+          assert set(g["win"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
+              f"arm (g): win worker returned {g['win']['gWorker']} -- did the Worker even run?")
+          # Prove the measurement genuinely ran off the main thread before
+          # trusting anything about the widths: a fallback that silently
+          # measured on the main thread and reported it as "the worker's"
+          # answer would look exactly like a real, gated result.
+          for label in ("mac", "win"):
+              assert g[label]["gWorkerCtor"] == "DedicatedWorkerGlobalScope", (
+                  f"arm (g): {label} worker reported self.constructor.name = "
+                  f"{g[label]['gWorkerCtor']!r}, not 'DedicatedWorkerGlobalScope' -- "
+                  "this did not run in a worker, the whole arm is unverified")
+              assert g[label]["gWorkerDocType"] == "undefined", (
+                  f"arm (g): {label} worker reported typeof document = "
+                  f"{g[label]['gWorkerDocType']!r}, not 'undefined' -- "
+                  "this ran somewhere with a document, the whole arm is unverified")
+          assert f["mac"] > 0 and f["win"] > 0 and f["mac2"] > 0, (
+              f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
+              f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
+          # Positive control: prove U+6F22 can render as a real, non-tofu
+          # glyph at all before trusting anything about arm (f)'s fallback
+          # measurement. If naming the context's own CJK family produces the
+          # SAME width as JS_F's impossible-family fallback, the probe has
+          # been measuring tofu in both cases and no gate could ever make
+          # this arm discriminate -- that would be a probe-design defect,
+          # not evidence about the gate.
+          assert f_control["mac"] != f["mac"], (
+              f"arm (f) positive control: naming 'PingFang HK' explicitly measured the "
+              f"SAME width ({f_control['mac']}) as the impossible-family fallback "
+              f"({f['mac']}) on mac -- U+6F22 never rendered as a real glyph here, so "
+              f"this arm cannot prove anything about the gate")
+          assert f_control["win"] != f["win"], (
+              f"arm (f) positive control: naming 'MS Gothic' explicitly measured the "
+              f"SAME width ({f_control['win']}) as the impossible-family fallback "
+              f"({f['win']}) on win -- U+6F22 never rendered as a real glyph here, so "
+              f"this arm cannot prove anything about the gate")
+
+          # Well-formedness floor for arm (e): document.fonts has
+          # exactly the 3 rules this page declared, non-empty, real
+          # family strings. This is a pure "did anything even run" gate
+          # -- kept as an early hard assert, unlike Tahoma's positive
+          # control below, which is itself part of the evidence the
+          # discriminator needs and must not be allowed to mask it.
+          for label in ("mac", "win"):
+              raw = sorted(f.strip('"').strip("'") for f in e[label]["rawFamilies"])
+              assert raw == ["Helvetica Neue", "Segoe UI", "Tahoma"], (
+                  f"arm (e): {label} document.fonts has {raw!r}, not exactly the 3 rules "
+                  "this page declared -- the readback is malformed, not a gating question")
+
+          # (e) CSS @font-face: expect NO disagreement between
+          # document.fonts and the arm (b) measurement (mac/win dicts,
+          # already validated above) for the same family in the same
+          # context. Pre-gate, InsertRuleFontFace runs with no context
+          # in scope, so IsFontAllowed() falls through to allow-all and
+          # a family arm (b) says this context doesn't have still
+          # reports 'loaded'. That disagreement is the red. Tahoma is
+          # included here too, not as a separate early hard-assert like
+          # (a)-(d)'s __impossible__ check -- it is in BOTH
+          # FONTS["mac"] and FONTS["win"] (not from arm (b)'s
+          # PROBES-based measurement, which never covers it), so its
+          # ground truth is hardcoded True/"loaded" for both contexts.
+          # Folding it into e_failures rather than a standalone assert
+          # means a broken Tahoma reading still surfaces as evidence
+          # instead of crashing before the discriminator below runs.
+          e_ground = {
+              "mac": {"Segoe UI": mac["measure"]["Segoe UI"],
+                      "Helvetica Neue": mac["measure"]["Helvetica Neue"], "Tahoma": True},
+              "win": {"Segoe UI": win["measure"]["Segoe UI"],
+                      "Helvetica Neue": win["measure"]["Helvetica Neue"], "Tahoma": True},
+          }
+          e_failures = []
+          for label, ground in e_ground.items():
+              for fam, present in ground.items():
+                  expect = "loaded" if present else "error"
+                  got = e[label]["status"].get(fam)
+                  if got != expect:
+                      e_failures.append(
+                          f"{label}/{fam}: document.fonts status is {got!r} but expected "
+                          f"{expect!r} ({'arm (b) measurement' if fam != 'Tahoma' else 'Tahoma is in both FONTS[mac] and FONTS[win]'})")
+
+          # Discriminator: does document.fonts.add(new FontFace(...)) --
+          # the ALREADY-SCOPED path -- resolve "Calibri" (win-only)
+          # correctly per context, and does the bare-identifier Tahoma
+          # rule (no quotes needed in its source) resolve correctly,
+          # where the space-containing (always-quoted) Segoe UI /
+          # Helvetica Neue rules do not? The combination tells Task 3
+          # which defect this tripwire is actually reporting.
+          js_face_expect = {"mac": "error", "win": "loaded"}  # Calibri is win-only
+          js_face_correct = all(
+              e[label]["jsFaceStatus"] == js_face_expect[label] for label in ("mac", "win"))
+          tahoma_bare_correct = all(
+              e[label]["status"].get("Tahoma") == "loaded" for label in ("mac", "win"))
+          print(f"  [arm e] document.fonts.add() path correct per context? {js_face_correct}")
+          print(f"  [arm e] bare-identifier Tahoma rule correct per context? {tahoma_bare_correct}")
+          if js_face_correct and tahoma_bare_correct:
+              hypothesis = (
+                  "SUPPORTS the quoting hypothesis: document.fonts.add() resolves Calibri "
+                  "correctly per context AND the bare-identifier Tahoma rule also resolves "
+                  "correctly, while the space-containing (always-quoted) Segoe UI/Helvetica "
+                  "Neue rules do not -- InsertRuleFontFace is handing IsFontAllowed() a "
+                  "QUOTED family key for names that need quoting in CSS, and that mismatch "
+                  "-- not a missing context scope -- is the defect Task 3 should fix.")
+          elif js_face_correct and not tahoma_bare_correct:
+              hypothesis = (
+                  "PARTIALLY supports the CSS-rule-key hypothesis: document.fonts.add() "
+                  "resolves Calibri correctly (the per-context mechanism itself works), but "
+                  "Tahoma still fails even as a bare, unquoted identifier -- so quoting "
+                  "alone does not explain it; something else about InsertRuleFontFace's "
+                  "family key is broken, still specific to the CSS-rule path, not a missing "
+                  "context scope in general (which would predict allow-all/'loaded', not "
+                  "uniform 'error').")
+          else:
+              hypothesis = (
+                  "REFUTES the CSS-rule-specific hypothesis: document.fonts.add(), the "
+                  "ALREADY-SCOPED path per Task 1's own patch, ALSO fails to resolve Calibri "
+                  "correctly per context -- whatever is broken is not specific to "
+                  "InsertRuleFontFace or CSS-rule parsing; the per-context mechanism itself "
+                  "is unreliable somewhere broader, and Task 3 needs to look there first.")
+          print(f"  [arm e] hypothesis: {hypothesis}")
+
+          # (f) codepoint fallback: expect the mac and win contexts to
+          # each resolve their OWN real CJK family in a correctly-gated
+          # world -- not merely "different from each other", but each
+          # settled value corresponding to a family that context is
+          # actually allowed. Ungated, fallback ignores context entirely
+          # and both resolve the same font (or the same tofu box) --
+          # that sameness is the red.
+          #
+          # Scored on the SETTLED value (f_final), not the immediate one
+          # (f): the immediate measurement is taken inside
+          # GlobalFontFallback's async cmap-loading window
+          # (gfx.font_rendering.fallback.async defaults true -- see the
+          # Task 4 report's source trace) and is architecturally
+          # guaranteed to be the .notdef/tofu box regardless of gate
+          # correctness -- every context's OWN `f[label]` immediate
+          # measurement already IS that tofu floor (confirmed repeatable
+          # and reference-matched across every prior run of this arm), so
+          # it doubles as the per-context "known tofu" baseline below
+          # without needing a hardcoded constant. f_final samples on a
+          # fixed 10s window, well past that race.
+          mac_final = f_final["mac"]["final"]
+          win_final = f_final["win"]["final"]
+          mac2_final = f_final["mac2"]["final"]
+          f_repeatable = (mac_final == mac2_final)
+          f_not_tofu_mac = mac_final != f["mac"]
+          f_not_tofu_win = win_final != f["win"]
+          # Bisection identifies WHICH family each context's settled value
+          # corresponds to (JS_F_BISECT, measured explicitly per
+          # candidate, run in BOTH contexts) -- a match must be a family
+          # FONTS[label] (what setFontList() actually installed for that
+          # context) really contains, not merely a number that happens to
+          # differ from the other context's. Win needs this same
+          # bisection, not just a check against its own positive control:
+          # 48 is the shared full-em advance of at least six bundled CJK
+          # families (PingFang HK/SC/TC, Hiragino Sans GB, Heiti SC/TC),
+          # so "win_final == 48" alone couldn't rule out a leak to any of
+          # those. A width matching families both inside and outside the
+          # allowed list is AMBIGUOUS -- cannot confirm which one actually
+          # served it -- and counts as a failure, not a pass because SOME
+          # match happens to be allowed.
+          bisect_matches, bisect_allowed, bisect_disallowed = {}, {}, {}
+          for label, this_final in (("mac", mac_final), ("win", win_final)):
+              bisect_matches[label] = [fam for fam, w in f_bisect[label].items() if w == this_final]
+              bisect_allowed[label] = [fam for fam in bisect_matches[label] if fam in FONTS[label]]
+              bisect_disallowed[label] = [fam for fam in bisect_matches[label] if fam not in FONTS[label]]
+
+          f_failures = []
+          if not f_repeatable:
+              f_failures.append(
+                  f"mac settled value not repeatable across separate launches on the same "
+                  f"list: mac={mac_final} mac2={mac2_final} -- width is not a deterministic "
+                  f"function of the list, this arm proves nothing")
+          else:
+              if not f_not_tofu_mac:
+                  f_failures.append(
+                      f"mac settled value ({mac_final}) never left the tofu/no-render floor "
+                      f"({f['mac']}) inside the 10s window -- fallback found nothing")
+              if not f_not_tofu_win:
+                  f_failures.append(
+                      f"win settled value ({win_final}) never left the tofu/no-render floor "
+                      f"({f['win']}) inside the 10s window -- fallback found nothing")
+              if f_not_tofu_mac and f_not_tofu_win and mac_final == win_final:
+                  f_failures.append(
+                      f"mac and win settled to the SAME value ({mac_final}) -- fallback "
+                      f"ignores context")
+              for label, not_tofu in (("mac", f_not_tofu_mac), ("win", f_not_tofu_win)):
+                  if not not_tofu:
+                      continue
+                  if not bisect_allowed[label]:
+                      f_failures.append(
+                          f"{label} settled value ({f_final[label]['final']}) does not "
+                          f"correspond to any ALLOWED family in FONTS['{label}'] -- bisection "
+                          f"matches: {bisect_matches[label] or 'none'}")
+                  elif bisect_disallowed[label]:
+                      f_failures.append(
+                          f"{label} settled value ({f_final[label]['final']}) is AMBIGUOUS -- "
+                          f"matches both allowed ({bisect_allowed[label]}) and disallowed "
+                          f"({bisect_disallowed[label]}) candidates; cannot confirm which "
+                          f"family actually served it")
+          print(f"  [arm f] repeatable (mac == mac2 settled, separate launches)? {f_repeatable}")
+          print(f"  [arm f] mac settled family match (in FONTS['mac']): {bisect_allowed['mac'] or bisect_matches['mac'] or 'none'}")
+          print(f"  [arm f] win settled family match (in FONTS['win']): {bisect_allowed['win'] or bisect_matches['win'] or 'none'}")
+
+          # (g) worker/OffscreenCanvas: expect the worker's answer to
+          # match arm (b)'s trusted per-context ground truth for every
+          # family in a correctly-gated world -- NOT this page's own
+          # main-thread reading, which cannot be trusted as a baseline
+          # (see the design note above). GetDocument() is null off the
+          # main thread, so the context id falls to 0 there and
+          # sLaunchFonts is empty under this bare launch, so
+          # CamouIsFontAllowed falls through to allow-all -- the worker
+          # should see every family regardless of context. That
+          # disagreement with arm (b) is the red. Tahoma is printed for
+          # the record (both contexts should resolve it either way) but
+          # skipped here -- arm (b)'s ground truth only covers
+          # MAC_ONLY/WIN_ONLY, and Tahoma is neither, so it has no
+          # ground-truth entry to compare against.
+          #
+          # "Present" is decided against the WORKER'S OWN monospace
+          # baseline (gWorkerBaseline), not the main thread's (baseline48).
+          # Those are two different threads' font resolutions; nothing
+          # guarantees they numerically agree even when both are correct
+          # (gfxTextRun.cpp's GetDefaultGeneric special-cases worker
+          # threads for pref-font resolution). A comparison whose two
+          # sides can differ for a reason unrelated to #44 is not a valid
+          # discriminator.
+          g_failures = []
+          for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
+              for fam in ("Segoe UI", "Helvetica Neue"):
+                  worker_present = g[label]["gWorker"][fam] != g[label]["gWorkerBaseline"]
+                  if worker_present != ground[fam]:
+                      g_failures.append(
+                          f"{label}/{fam}: worker {'resolved' if worker_present else 'did not resolve'} "
+                          f"it, arm (b) says this context {'has' if ground[fam] else 'does not have'} it")
+
+          # (h) face-name lookup: local('Segoe UI') and local('SegoeUI') --
+          # full name and PostScript name -- both name the SAME face, which
+          # belongs to the WIN_ONLY family "Segoe UI". Ground truth is arm
+          # (b)'s own per-context measurement of that family (mac["measure"]
+          # / win["measure"]["Segoe UI"]), the same trusted reference arm
+          # (g) compares against above -- NOT "mac != win", since a leak
+          # that resolved the SAME wrong face in both contexts would still
+          # show mac == win and pass a same-vs-different check.
+          h_failures = []
+          for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
+              for probe_key, probe_name in (("hFull", "local('Segoe UI')"),
+                                            ("hPs", "local('SegoeUI')")):
+                  resolved = h[label][probe_key] != h[label]["baseline"]
+                  if resolved != ground["Segoe UI"]:
+                      h_failures.append(
+                          f"{label}/{probe_name}: {'resolved' if resolved else 'did not resolve'} "
+                          f"the face (width={h[label][probe_key]} baseline={h[label]['baseline']}), "
+                          f"arm (b) says this context "
+                          f"{'has' if ground['Segoe UI'] else 'does not have'} Segoe UI")
+
+          if e_failures:
+              tripwires.append(
+                  f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: "
+                  f"{e_failures}. Discriminator result -- {hypothesis}")
+          if f_failures:
+              tripwires.append(f"(f) codepoint fallback -- settled values: {f_failures}")
+          if g_failures:
+              tripwires.append(f"(g) worker vs arm (b) per-context ground truth disagree: {g_failures}")
+          if h_failures:
+              tripwires.append(f"(h) face-name lookup vs arm (b) per-context ground truth disagree: {h_failures}")
+
+          print("=== arms (e)-(h) summary ===")
+          print(f"  (e) CSS @font-face:         {'RED (expected)' if e_failures else 'GREEN'} -- {e_failures}")
+          print(f"  (f) codepoint fallback:     {'RED' if f_failures else 'GREEN'} -- "
+                f"mac_settled={mac_final} (family={bisect_allowed['mac']}) mac2_settled={mac2_final} "
+                f"win_settled={win_final} (family={bisect_allowed['win']}) failures={f_failures}")
+          print(f"  (g) worker/OffscreenCanvas: {'RED (expected)' if g_failures else 'GREEN'} -- {g_failures}")
+          print(f"  (h) face-name lookup:       {'RED' if h_failures else 'GREEN'} -- {h_failures}")
+          print(f"      mac: local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
+          print(f"      win: local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
+
+          # Web-font measurement (out of scope for this task -- see the
+          # comment on JS_WEBFONT above). A local .ttf on the runner
+          # supplies real font bytes for a data: URI src -- the browser
+          # only ever sees these as ordinary web-font bytes, not a host
+          # font, so the host-font-deletion machinery is irrelevant here.
+          import base64, glob
+
+          def find_test_font():
+              for c in (
+                  "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                  "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+              ):
+                  if os.path.exists(c):
+                      return c
+              hits = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
+              return hits[0] if hits else None
+
+          webfont_path = find_test_font()
+          if webfont_path is None:
+              print("  [web-font] SKIP: no local .ttf found on the runner to embed")
+          else:
+              with open(webfont_path, "rb") as fh:
+                  webfont_b64 = base64.b64encode(fh.read()).decode("ascii")
+              webfont_uri = "data:font/ttf;base64," + webfont_b64
+
+              def one_page_webfont(fonts_key, js, arg):
+                  # Same shape as one_page() above, but page.evaluate() here
+                  # needs an argument (the data: URI) -- kept as its own
+                  # function rather than changing one_page()'s signature.
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      ctx = b.new_context()
+                      ctx.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(FONTS[fonts_key])))
+                      page = ctx.new_page()
+                      page.goto("data:text/html,<h1>f</h1>")
+                      result = page.evaluate(js, arg)
+                      b.close()
+                      return result
+
+              webfont = one_page_webfont("mac", JS_WEBFONT, webfont_uri)
+              print(f"  [web-font] font file used: {webfont_path} ({len(webfont_b64)} b64 chars)")
+              print(f"  [web-font] document.fonts status = {webfont['status']!r}")
+              print(f"  [web-font] rendered (probe width {webfont['probeWidth']} vs "
+                    f"monospace baseline {webfont['baseline']})? {webfont['rendered']}")
+              if webfont['status'] == 'error' and webfont['rendered']:
+                  print("  [web-font] FINDING (out of scope, not fixed here): "
+                        "document.fonts reports 'error' for an ordinary web font "
+                        "that the canvas evidence shows the browser actually "
+                        "rendered -- SetStatus() answers every @font-face from "
+                        "IsFontAllowed(), not just the OS-name spoofing surface "
+                        "#44 targets. A page can watch its own web font render "
+                        "while document.fonts calls it failed. Recorded for "
+                        "issue #44; intentionally not fixed by this task.")
+              elif webfont['status'] == 'loaded' and not webfont['rendered']:
+                  print("  [web-font] unexpected: status says 'loaded' but no "
+                        "render evidence -- treat this measurement as unreliable, "
+                        "not a clean answer either way.")
+              else:
+                  print("  [web-font] status and render evidence agree -- no "
+                        "production-wide surface shown by this measurement.")
+
+              if webfont['status'] == 'error' and not webfont['rendered']:
+                  # Review pushback: status and render evidence agreeing
+                  # does NOT mean "no problem" here -- it means the web font
+                  # is consistently blocked rather than inconsistently
+                  # reported, and "camoufox blocks web fonts" would itself
+                  # be a far bigger tell than #44. But one sample through a
+                  # data: URI on a data: page can fail for reasons that have
+                  # nothing to do with font gating (CSP, origin rules, a
+                  # malformed payload). Discriminator: does this same page
+                  # render under a BARE launch/context instead -- no
+                  # CAMOU_CONFIG "fonts" key, no setFontList() call at all,
+                  # so IsFontAllowed()'s own second branch
+                  # (FontFaceImpl.h) falls through to allow-everything?
+                  def one_page_webfont_bare(js, arg):
+                      # Deliberately NOT one_page_webfont() above: this one
+                      # must skip the setFontList() call entirely, not just
+                      # pass a different fonts_key -- there must be no
+                      # per-context list AND no launch-level list installed.
+                      with sync_playwright() as pw:
+                          b = pw.firefox.launch(
+                              executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                              env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                          ctx = b.new_context()
+                          page = ctx.new_page()
+                          page.goto("data:text/html,<h1>f</h1>")
+                          result = page.evaluate(js, arg)
+                          b.close()
+                          return result
+
+                  webfont_bare = one_page_webfont_bare(JS_WEBFONT, webfont_uri)
+                  print(f"  [web-font/bare] document.fonts status = {webfont_bare['status']!r}")
+                  print(f"  [web-font/bare] rendered (probe width {webfont_bare['probeWidth']} vs "
+                        f"monospace baseline {webfont_bare['baseline']})? {webfont_bare['rendered']}")
+                  if webfont_bare['rendered']:
+                      print("  [web-font] DISCRIMINATOR: renders under the bare launch/context "
+                            "(IsFontAllowed falls through to allow-everything) but NOT under the "
+                            "per-context-list measurement above -- pins the non-render to font "
+                            "gating specifically. This is a real defect, out of scope for #44 "
+                            "and NOT fixed by this task -- it needs its own issue and its own plan.")
+                  else:
+                      print("  [web-font] DISCRIMINATOR: fails to render under the bare "
+                            "launch/context too, where IsFontAllowed() allows everything -- the "
+                            "non-render cannot be font gating. The probe's own setup is at fault "
+                            "(most likely the data: URI font payload -- decode failure, MIME "
+                            "type, or the raw .ttf needing a woff2 wrapper instead), not a gating "
+                            "defect. The question stays open, not closed: next step would be "
+                            "checking for a console font-decode error, or trying a woff2 payload.")
+
+          # -----------------------------------------------------------
+          # Arm (i): the negative fallback cache Task 4's gate made
+          # reachable (#81 / Task 4b). gfxPlatformFontList's
+          # mCodepointsWithNoFonts is a process-wide "no font covers
+          # this codepoint" cache, keyed only by FontVisibility --
+          # unrelated to mUserContextId. gfxFontGroup::FindFontForChar
+          # consults it via SkipFontFallbackForChar() at
+          # gfxTextRun.cpp:3450, BEFORE reaching
+          # WhichSystemFontSupportsChar at :3506 -- Task 4's gate. A
+          # cache hit short-circuits FindFontForChar and returns
+          # early; the gate never runs.
+          #
+          # Before Task 4 a fallback miss was almost impossible (the
+          # scan was unfiltered, nearly always found something).
+          # After Task 4 a miss is the correct, expected outcome
+          # whenever a context's own list covers nothing for a
+          # codepoint -- which is exactly what makes this cache
+          # reachable in normal operation for the first time.
+          #
+          # This arm must do the OPPOSITE of every other arm in this
+          # guard: ONE launch, TWO contexts, IN ORDER. Every other arm
+          # gives each measurement its own fresh launch specifically
+          # for isolation -- which is exactly why none of them can see
+          # this bug (the cache always starts empty). Context A gets a
+          # list covering NOTHING for U+6F22 (a genuine, correct miss
+          # that poisons the process-wide cache); context B, same
+          # launch, opened AFTER A, gets a list that DOES cover it. B
+          # rendering tofu is the bug -- B's own gate never ran because
+          # the cache answered before FindFontForChar ever reached it.
+          # B rendering its own real glyph is the fix.
+          NO_CJK_PROBE = ["Calibri", "Segoe UI", "Arial"]
+
+          def two_contexts_one_launch(list_a, list_b, js):
+              # Deliberately NOT one_page(): every other helper in this
+              # file gives each measurement its own fresh launch. This
+              # arm needs the opposite -- one launch serving two
+              # contexts in sequence, so a launch-lifetime cache set by
+              # the first can be observed (or not) by the second.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      # PERMANENT, not diagnostic: gfxPlatformFontList is
+                      # a per-process singleton, and Firefox's content-
+                      # process selection factors in OriginAttributes
+                      # (mUserContextId is a member) -- so two sequential
+                      # new_context() calls normally land in SEPARATE
+                      # content processes with no shared font-list state
+                      # at all, and this arm tests NOTHING without this
+                      # pref. Confirmed empirically, not just by source
+                      # reading: the unforced arm read GREEN in every
+                      # earlier run of this task (mistaken for "the fix
+                      # works" and, before that, for "the bug isn't
+                      # reachable") purely because the two contexts never
+                      # shared a process; forcing this pref produced the
+                      # first RED/GREEN pair that actually meant
+                      # anything -- RED on a binary with no #81 fix
+                      # (run 33597181430), GREEN with it (run
+                      # 33597175086), both under this exact pref. Default
+                      # dom.ipc.processCount is 8, so production
+                      # reproduction starts as soon as a caller runs more
+                      # than a handful of contexts and process reuse
+                      # begins -- this pref makes that condition apply on
+                      # every run of this arm, every time, rather than
+                      # depending on how many contexts happen to precede
+                      # it.
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_a = b.new_context()
+                  ctx_a.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(list_a)))
+                  page_a = ctx_a.new_page()
+                  page_a.goto("data:text/html,<h1>4b-a</h1>")
+                  result_a = page_a.evaluate(js)
+
+                  ctx_b = b.new_context()
+                  ctx_b.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(list_b)))
+                  page_b = ctx_b.new_page()
+                  page_b.goto("data:text/html,<h1>4b-b</h1>")
+                  result_b = page_b.evaluate(js)
+
+                  b.close()
+                  return result_a, result_b
+
+          JS_4B = """async () => {
+            // Same fixed-window sampling discipline as arm (f)'s
+            // JS_F_FINAL -- no early-stop heuristic, long enough to
+            // clear the async cmap-loading window this fork's
+            // fallback path goes through (see the Task 4 report's
+            // source trace) -- so a genuinely-covered context isn't
+            // mistaken for a poisoned one just because it hasn't
+            // settled yet.
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll"';
+            const samples = [];
+            for (let i = 0; i < 20; i++) {
+              samples.push(c.measureText('漢').width);
+              await new Promise(r => setTimeout(r, 500));
+            }
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('漢').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+          }"""
+
+          i_a, i_b = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
+          i_a_tofu = i_a["final"] in i_a["refs"].values()
+          # NOT i_b["refs"]: FONTS["win"] broadly covers CJK, so B's own
+          # generic-family refs (monospace/sans-serif/serif) can ALSO
+          # correctly fall back to the SAME real CJK font B's own gate
+          # finds for "NoSuchFamilyAtAll" -- both routes reach MS Gothic
+          # for entirely legitimate reasons, so "differs from B's own
+          # refs" is a false-negative test for a WORKING fix (caught by
+          # this exact false AssertionError on the first real run: B
+          # settled to 48, refs all 48 too, both correct, not tofu).
+          # i_a's list has zero CJK anywhere, confirmed by i_a_tofu
+          # above, so i_a["final"] is a reliable "genuinely nothing
+          # rendered" baseline to compare B against instead.
+          i_b_tofu = i_b["final"] == i_a["final"]
+          print(f"  [arm i / 4b] context A (no-CJK list, first in launch) settled={i_a['final']} "
+                f"refs={i_a['refs']} samples={i_a['samples']}")
+          print(f"  [arm i / 4b] context B (FONTS['win'], same launch, AFTER A) settled={i_b['final']} "
+                f"refs={i_b['refs']} samples={i_b['samples']}")
+
+          # Collect-then-assert (team-lead directive), matching arms
+          # (e)/(f)/(g): a hard `assert` here KILLS THE SCRIPT before any
+          # arm below it runs -- and arm (i) is EXPECTED red on any
+          # binary without the #81 fix, which is exactly the control
+          # build arm (j) also needs. An inline assert made arm (j)
+          # structurally unmeasurable on the one build where its own red
+          # matters most (confirmed: run 33599430397, arm (i) correctly
+          # red on the control build, arm (j) never printed anything at
+          # all because the script died first). Every arm in this guard
+          # must run and print, every time, before anything asserts.
+          i_failures = []
+          if not i_a_tofu:
+              i_failures.append(
+                  f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
+                  f"U+6F22 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
+                  f"either the probe list accidentally covers this codepoint, or something else "
+                  f"is wrong with the setup. This arm cannot test the cache-poisoning bug until "
+                  f"A's own miss is genuine.")
+          elif i_b_tofu:
+              i_failures.append(
+                  f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
+                  f"same launch, measured AFTER context A's genuine miss) settled U+6F22 to "
+                  f"{i_b['final']}, matching context A's confirmed tofu floor "
+                  f"({i_a['final']}, no-CJK list) -- context A's "
+                  f"correct, context-specific miss poisoned gfxPlatformFontList's process-wide "
+                  f"mCodepointsWithNoFonts cache (keyed only by FontVisibility, not context id), "
+                  f"so B's FindFontForChar short-circuited via SkipFontFallbackForChar() at "
+                  f"gfxTextRun.cpp:3450 before ever reaching WhichSystemFontSupportsChar's gate "
+                  f"at :3506 -- B never got a chance to resolve its own real CJK font, even "
+                  f"though its own list ({FONTS['win'][:3]}... plus MS Gothic et al.) covers "
+                  f"this codepoint.")
+          i_ok_msg = f"context B resolved its own real font ({i_b['final']}), unaffected by context A's earlier miss"
+          print(f"  (i) negative fallback cache (#81):  {'RED' if i_failures else 'GREEN'} -- "
+                f"{i_failures or i_ok_msg}")
+          if i_failures:
+              tripwires.append(f"(i) negative fallback cache (#81): {i_failures}")
+
+          # Cost measurement REMOVED (was JS_4B_COST): window.setFontList()
+          # is one-shot per user context by design --
+          # nsGlobalWindowInner::SetFontList calls
+          # FontListManager::DisableFunction(userContextId) immediately
+          # after installing the list, which deletes the WebIDL-exposed
+          # property for that context. Calling it repeatedly in a loop
+          # (this measurement's original design) throws "window.setFontList
+          # is not a function" on the second call -- confirmed via the
+          # actual traceback in runs 33595475459 and 33596116918, both of
+          # which crashed HERE, before ever reaching arm (j)'s own code
+          # below. This is a bug in this measurement, not in arm (j) or in
+          # any product code -- redesigning to use one fresh context per
+          # cold sample (each getting exactly one setFontList() call, as
+          # designed) is deferred until a fix candidate is settled, since
+          # the previous fix (afebedc) this was measuring is itself
+          # superseded -- see the Task 4b report.
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (j): the U+FFFD replacement-char fallback cache leak
+          # (#82), found while checking whether #81's cache was the
+          # only structure of its shape. gfxPlatformFontList's
+          # mReplacementCharFallbackFamily is a SIBLING of
+          # mCodepointsWithNoFonts -- same EnumeratedArray<FontVisibility,
+          # ...> shape, same process-wide scope, same FontVisibility-only
+          # key -- but read at gfxPlatformFontList.cpp's U+FFFD fast
+          # path INSIDE SystemFindFontForChar, before
+          # CommonFontFallback/GlobalFontFallback (and Task 4's gates
+          # inside them) ever run. Unlike #81, this is not a Task-4
+          # regression: before Task 4, BOTH the population and the read
+          # were ungated, so this cache was indistinguishable from the
+          # rest of the leaky fallback path. Task 4's gate closed the
+          # population side (population now goes through gated
+          # Common/GlobalFontFallback) but left the read side open --
+          # a pre-existing hole the gate narrowed but did not close.
+          #
+          # Unlike #81's miss (tofu where a glyph belonged), this reads
+          # a REAL, working font handle cached by an earlier context,
+          # with no gating check on the read at all -- a genuine
+          # cross-context leak, not just a coherence defect.
+          #
+          # Same two-contexts-one-launch shape as arm (i). Context A
+          # needs a list with a family that DEMONSTRABLY resolves
+          # U+FFFD in THIS build under a per-context list -- team-lead
+          # correction: a fontTools cmap entry says the codepoint is
+          # MAPPED, it does not guarantee this build's gated fallback
+          # actually resolves that family for it (confirmed the hard
+          # way: "Tahoma" alone reported "arm (j)/#82 setup invalid...
+          # settled U+FFFD to 49.217, its OWN tofu floor" in run
+          # 33596116918 -- A never populated the cache, so B had
+          # nothing to inherit, and the arm correctly refused its own
+          # result rather than report a false pass). Bisected against
+          # several strong candidates by naming each one directly
+          # (`JS_FFFD_BISECT`, same discipline as arm (f)'s
+          # `JS_F_BISECT`) to find one that empirically differs from a
+          # known-tofu reference, rather than trusting cmap coverage
+          # alone.
+          FFFD_CANDIDATES = ["Tahoma", "Verdana", "Segoe UI", "MS Gothic",
+                              "Arial Unicode MS", "Noto Sans", "DejaVu Sans",
+                              "SimSun", "Malgun Gothic", "Yu Gothic"]
+          JS_FFFD_BISECT = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll5"';
+            const tofu = c.measureText('�').width;
+            const widths = {};
+            for (const fam of """ + json.dumps(FFFD_CANDIDATES) + """) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText('�').width;
+            }
+            return {tofu: tofu, widths: widths};
+          }"""
+          fffd_bisect = one_page("win", JS_FFFD_BISECT)
+          print(f"  [arm j / #82 setup] U+FFFD tofu floor (no-op family, own context): "
+                f"{fffd_bisect['tofu']}")
+          print(f"  [arm j / #82 setup] named-candidate U+FFFD widths: {fffd_bisect['widths']}")
+          fffd_working = [fam for fam, w in fffd_bisect["widths"].items() if w != fffd_bisect["tofu"]]
+          print(f"  [arm j / #82 setup] candidates that demonstrably resolve U+FFFD "
+                f"(differ from tofu): {fffd_working or 'NONE -- see setup note above'}")
+
+          FFFD_YES_PROBE = fffd_working if fffd_working else FFFD_CANDIDATES
+          FFFD_NO_PROBE = ["Arial", "Calibri", "Times New Roman"]
+
+          JS_4C = """async () => {
+            // Same fixed-window sampling discipline as arm (i)'s
+            // JS_4B -- needed even though the U+FFFD fast path itself
+            // is synchronous, because context A's FIRST-EVER
+            // resolution (before mReplacementCharFallbackFamily is
+            // populated at all) still falls through to the normal,
+            // async-raced Common/GlobalFontFallback path.
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll4"';
+            const samples = [];
+            for (let i = 0; i < 20; i++) {
+              samples.push(c.measureText('�').width);
+              await new Promise(r => setTimeout(r, 500));
+            }
+            const refs = {};
+            for (const fam of ['monospace', 'sans-serif', 'serif']) {
+              c.font = '48px ' + fam;
+              refs[fam] = c.measureText('�').width;
+            }
+            // A GUARANTEED-DIFFERENT tofu reference. The generic families
+            // above are NOT one: a generic resolves within the asking
+            // context's own allowed list, and Segoe UI / Tahoma / Malgun
+            // Gothic all carry U+FFFD (fontTools over bundle/fonts: 46 of
+            // 574 faces cover it; 9 Windows families among them). So in a
+            // context allowed those, `sans-serif` renders the REAL glyph,
+            // fallback renders the same real glyph, the two compare equal,
+            // and a correct resolution reads as "settled to its own tofu
+            // floor". Three #82 setups were declared invalid on exactly
+            // that false negative.
+            // These three are absent from the U+FFFD-covering set, so
+            // naming one yields the true tofu width whether the context is
+            // allowed it (no glyph in the face) or not (gated out).
+            const named = {};
+            for (const fam of ['Arial', 'Calibri', 'Times New Roman',
+                               'Tahoma', 'Segoe UI', 'Malgun Gothic']) {
+              c.font = '48px "' + fam + '"';
+              named[fam] = c.measureText('�').width;
+            }
+            return {final: samples[samples.length - 1], samples: samples,
+                    refs: refs, named: named, tofu: named['Arial']};
+          }"""
+
+          j_a, j_b = two_contexts_one_launch(FFFD_YES_PROBE, FFFD_NO_PROBE, JS_4C)
+          # Compare against the guaranteed-different reference, not the
+          # generic families -- see the note in JS_4C.
+          j_a_tofu = j_a["final"] == j_a["tofu"]
+          j_b_tofu = j_b["final"] == j_b["tofu"]
+          print(f"  [arm j / #82] context A ({FFFD_YES_PROBE}, has U+FFFD, first in launch) "
+                f"settled={j_a['final']} true_tofu={j_a['tofu']} named={j_a['named']} "
+                f"refs={j_a['refs']} samples={j_a['samples']}")
+          print(f"  [arm j / #82] context B ({FFFD_NO_PROBE}, no U+FFFD, same launch, AFTER A) "
+                f"settled={j_b['final']} true_tofu={j_b['tofu']} named={j_b['named']} "
+                f"refs={j_b['refs']} samples={j_b['samples']}")
+
+          # Collect-then-assert, same as arm (i): a hard assert here would
+          # ALSO kill the script before the final tripwires check, and
+          # this arm's own red (needed on a binary without a #82 fix)
+          # must survive alongside arm (i)'s expected red on the same
+          # control build.
+          j_failures = []
+          if j_a_tofu:
+              j_failures.append(
+                  f"arm (j)/#82 setup invalid: context A's list ({FFFD_YES_PROBE}, bisected "
+                  f"by direct naming, not just fontTools cmap coverage) settled U+FFFD to "
+                  f"{j_a['final']}, its true tofu width ({j_a['tofu']}, from a family with no "
+                  f"U+FFFD coverage) -- none of the "
+                  f"bisected candidates actually resolved U+FFFD under this build's gated "
+                  f"fallback; this arm cannot test the leak until A's own resolution is "
+                  f"genuine.")
+          elif not j_b_tofu:
+              j_failures.append(
+                  f"arm (j)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) -- context B "
+                  f"({FFFD_NO_PROBE}, none of which cover U+FFFD, confirmed via fontTools) "
+                  f"settled U+FFFD to {j_b['final']}, NOT its true tofu width ({j_b['tofu']}) -- "
+                  f"context A's earlier, correctly-gated resolution leaked into B via "
+                  f"gfxPlatformFontList's process-wide mReplacementCharFallbackFamily cache, "
+                  f"read with no CamouIsFontAllowed() check at all -- B rendered a REAL glyph "
+                  f"from a family it was never allowed, not tofu.")
+          j_ok_msg = (f"context B correctly got nothing for U+FFFD ({j_b['final']}, its own "
+                      f"tofu floor), unaffected by context A's earlier, different-context "
+                      f"resolution")
+          print(f"  (j) replacement-char cache leak (#82):  {'RED' if j_failures else 'GREEN'} "
+                f"-- {j_failures or j_ok_msg}")
+          if j_failures:
+              tripwires.append(f"(j) replacement-char cache leak (#82): {j_failures}")
+          # -----------------------------------------------------------
+
+          # Diagnostic (not scored, no assert -- same discipline as
+          # JS_F_RACE above): arm (j)'s OWN `named` data (printed
+          # above) shows context B (allow-list FFFD_NO_PROBE = Arial/
+          # Calibri/Times New Roman ONLY) resolving Tahoma/Segoe UI/
+          # Malgun Gothic -- none on its own list -- to their REAL,
+          # named widths, not tofu, in the SAME shared-process launch,
+          # AFTER context A had already named all three as its own
+          # (allowed) probe candidates. That is a leak, through
+          # whichever cache backs canvas direct-name font resolution --
+          # not necessarily mReplacementCharFallbackFamily specifically.
+          # Two hypotheses this data alone cannot separate: (a)
+          # order-dependent -- a process-wide cache A's earlier,
+          # legitimate lookup populated, read back by B without
+          # re-checking CamouIsFontAllowed; (b) canvas direct-naming
+          # isn't gated per-context on this build at all, regardless of
+          # order. Discriminator: name the same three families in a
+          # FRESH, ISOLATED, single-context launch (FFFD_NO_PROBE as
+          # the ONLY allow-list, nothing preceding it at all) -- if
+          # still correctly blocked there, the leak is order-dependent
+          # (a); if not, gating is absent outright (b).
+          JS_DIAG_NAMED = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '48px "NoSuchFamilyAtAll7"';
+            const tofu = c.measureText('�').width;
+            const widths = {};
+            for (const fam of ['Tahoma', 'Segoe UI', 'Malgun Gothic']) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText('�').width;
+            }
+            return {tofu: tofu, widths: widths};
+          }"""
+
+          def one_page_list(font_list, js):
+              # Same shape as one_page() above, but takes a literal
+              # font list instead of a FONTS[] dict key -- FFFD_NO_PROBE
+              # is a literal list, not in that dict.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  ctx.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(font_list)))
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>4b-diag</h1>")
+                  result = page.evaluate(js)
+                  b.close()
+                  return result
+
+          diag_isolated = one_page_list(FFFD_NO_PROBE, JS_DIAG_NAMED)
+          print(f"  [diagnostic, not scored] ISOLATED single-context launch, "
+                f"FFFD_NO_PROBE-only allow-list, nothing preceding it -- "
+                f"tofu={diag_isolated['tofu']} named={diag_isolated['widths']}")
+          diag_leaked = [f for f, w in diag_isolated["widths"].items() if w != diag_isolated["tofu"]]
+          if diag_leaked:
+              print(f"  [diagnostic] {diag_leaked} resolved to REAL widths even ALONE, "
+                    f"isolated, nothing preceding -- gating for direct-named canvas font "
+                    f"lookups may not hold at all on this build, independent of ordering "
+                    f"(hypothesis b).")
+          else:
+              print(f"  [diagnostic] all three correctly blocked when isolated -- gating "
+                    f"holds ALONE; the leak seen in arm (j)'s context B is order-dependent, "
+                    f"consistent with a process-wide cache populated by context A's earlier, "
+                    f"legitimate resolution and read back by B without re-checking "
+                    f"CamouIsFontAllowed (hypothesis a).")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Discriminator (#83's true scope): does the leak require a
+          # SINGLE, unresolvable font-family request with nothing else
+          # in the CSS stack to fall back to, or does it also leak when
+          # an explicit generic ("monospace") follows the blocked name
+          # in the SAME request? Team-lead's hypothesis, from arm (b)
+          # staying green at processCount=1 while arm (j) still leaks:
+          # CSS font-stack resolution tries each declared family in
+          # order and stops at the first that resolves -- "monospace"
+          # always resolves to something, so a STACKED request never
+          # needs Gecko's automatic Unicode-fallback machinery, which
+          # is where the process-wide, unguarded cache read lives. A
+          # SINGLE name with nothing after it has nowhere else to go
+          # and DOES enter that path.
+          #
+          # Same shared-process, mac-then-win shape as arm (b) itself:
+          # dom.ipc.processCount=1, mac context first (legitimately
+          # resolving its own MAC_ONLY families, exactly like arm (b)'s
+          # own probe), win context second, measuring those SAME
+          # families it was never allowed -- in BOTH forms, same
+          # families, same launch, same order, only the stack differs.
+          # A NoSuchFontAtAll control in both forms gives each form its
+          # own unresolvable baseline, so "differs from its own
+          # baseline" -- not a hardcoded width -- is what "leaked"
+          # means, same discipline as every other arm here.
+          JS_DISC_MAC = """() => {
+            // Resolve mac's own families for real, exactly like arm
+            // (b)'s probe() does, to populate whatever process-wide
+            // state the leak reads from.
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const widths = {};
+            for (const fam of """ + json.dumps(MAC_ONLY) + """) {
+              c.font = '48px "' + fam + '"';
+              widths[fam] = c.measureText(s).width;
+            }
+            return widths;
+          }"""
+
+          JS_DISC_WIN = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const families = """ + json.dumps(MAC_ONLY + ["NoSuchFontAtAll"]) + """;
+            const single = {}, stacked = {};
+            for (const fam of families) {
+              c.font = '48px "' + fam + '"';
+              single[fam] = c.measureText(s).width;
+              c.font = '48px "' + fam + '", monospace';
+              stacked[fam] = c.measureText(s).width;
+            }
+            return {single: single, stacked: stacked};
+          }"""
+
+          def discriminator_run():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  page_mac = ctx_mac.new_page()
+                  page_mac.goto("data:text/html,<h1>disc-mac</h1>")
+                  mac_result = page_mac.evaluate(JS_DISC_MAC)
+
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  page_win = ctx_win.new_page()
+                  page_win.goto("data:text/html,<h1>disc-win</h1>")
+                  win_result = page_win.evaluate(JS_DISC_WIN)
+
+                  b.close()
+                  return mac_result, win_result
+
+          disc_mac, disc_win = discriminator_run()
+          print(f"  [discriminator / #83 scope] mac context (first, resolving its own "
+                f"families for real): {disc_mac}")
+          print(f"  [discriminator / #83 scope] win context (second, same process), "
+                f"single-name form: {disc_win['single']}")
+          print(f"  [discriminator / #83 scope] win context (second, same process), "
+                f"stacked ', monospace' form: {disc_win['stacked']}")
+
+          disc_single_baseline = disc_win["single"]["NoSuchFontAtAll"]
+          disc_stacked_baseline = disc_win["stacked"]["NoSuchFontAtAll"]
+          disc_single_leaked = [f for f in MAC_ONLY if disc_win["single"][f] != disc_single_baseline]
+          disc_stacked_leaked = [f for f in MAC_ONLY if disc_win["stacked"][f] != disc_stacked_baseline]
+          print(f"  [discriminator / #83 scope] single-name baseline (NoSuchFontAtAll): "
+                f"{disc_single_baseline}; leaked: {disc_single_leaked or 'NONE'}")
+          print(f"  [discriminator / #83 scope] stacked-form baseline (NoSuchFontAtAll, "
+                f"monospace): {disc_stacked_baseline}; leaked: {disc_stacked_leaked or 'NONE'}")
+
+          if disc_single_leaked and not disc_stacked_leaked:
+              print("  [discriminator / #83 scope] VERDICT: hypothesis HOLDS -- single-name "
+                    "form leaks, stacked form does not. #83 is precisely a bare/"
+                    "unresolvable-request leak: a fingerprinter probing a single font name "
+                    "with no fallback (an ordinary font-detection technique) can read back "
+                    "an earlier context's resolution. Narrower mechanism, same severity -- "
+                    "this is exactly the detection #44's per-context list exists to prevent.")
+          elif disc_single_leaked and disc_stacked_leaked:
+              print("  [discriminator / #83 scope] VERDICT: BOTH forms leak -- arm (b)'s "
+                    "green result does not come from stack-resolution avoiding the leaky "
+                    "path; the gate is weaker than arm (b) alone shows. This blocks Task 8's "
+                    "flip pending further investigation.")
+          elif not disc_single_leaked and not disc_stacked_leaked:
+              print("  [discriminator / #83 scope] VERDICT: NEITHER form leaks -- this "
+                    "specific mac/win family pairing does not reproduce #83 at all. The "
+                    "leak may be specific to arm (j)'s U+FFFD probe families or setup, not "
+                    "this one. #83 needs re-scoping again before it means anything.")
+          else:
+              print("  [discriminator / #83 scope] VERDICT: UNEXPECTED -- stacked form "
+                    "leaks but single-name form does not. Re-examine the hypothesis before "
+                    "trusting either reading.")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Is arm (b)'s green real or structural? #83's discriminator
+          # leaked mac's exact real font widths into win, same shared
+          # process, same run in which arm (b) itself reported green
+          # for the identical families. Two untested differences
+          # between arm (b)'s probe() and the leaking discriminator,
+          # per team-lead direction -- vary ONE at a time so the result
+          # attributes cleanly:
+          #
+          #   1. Reference ordering: probe()'s absentW is measured
+          #      BEFORE the family loop; the discriminator measured its
+          #      baseline AFTER (last). If the leak needs an earlier
+          #      same-context request to seed whatever it reads, taking
+          #      the reference first means arm (b) never reaches that
+          #      state before it has already recorded its answer.
+          #   2. Donor context lifetime: arm (b) calls ctx.close() on
+          #      mac before creating win. The discriminator's leak was
+          #      demonstrated with the donor context still alive.
+          #
+          # Both variants below keep processCount=1 and every other
+          # condition (same FONTS[name] lists, same probe string, same
+          # 72px+monospace stacked form) identical to arm (b)'s own
+          # probe() -- ONLY the one named variable changes in each.
+          # `mac`/`win` (arm (b)'s own already-computed result, same
+          # run) are still in scope below for a same-run comparison.
+
+          # Variant 1: reference-ordering only. Same JS shape as arm
+          # (b)'s probe(), same ctx.close()-before-next lifetime -- only
+          # WHEN absentW is measured moves, from first to last.
+          JS_ORDER_LAST = """(families) => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const w = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
+            const rawWidths = {};
+            for (const f of families) rawWidths[f] = w(f);
+            rawWidths['__impossible__'] = w('__NoSuchFamily__12345');
+            const absentW = w('__CamouAbsentRef__0001');
+            const measure = {};
+            for (const f of families) measure[f] = (rawWidths[f] !== absentW);
+            measure['__impossible__'] = (rawWidths['__impossible__'] !== absentW);
+            return {measure: measure, absentWidth: absentW};
+          }"""
+
+          def run_ordering_variant():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctxs = {}
+                  for name in ("mac", "win"):
+                      ctx = b.new_context()
+                      ctx.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(FONTS[name])))
+                      page = ctx.new_page()
+                      page.goto("data:text/html,<h1>f</h1>")
+                      ctxs[name] = page.evaluate(JS_ORDER_LAST, PROBES)
+                      ctx.close()  # matches arm (b)'s own close-before-next
+                  b.close()
+                  return ctxs["mac"], ctxs["win"]
+
+          order_mac, order_win = run_ordering_variant()
+          print(f"  [variant 1 / ordering-only] mac measure {order_mac['measure']}")
+          print(f"  [variant 1 / ordering-only] win measure {order_win['measure']}")
+          order_leaked = [f for f in MAC_ONLY if order_win["measure"][f]]
+          print(f"  [variant 1 / ordering-only] win resolved MAC_ONLY families it was never "
+                f"allowed: {order_leaked or 'NONE -- unchanged from arm (b)'}")
+
+          # Variant 2: donor-lifetime only. Same JS as arm (b)'s probe()
+          # verbatim (reference still measured FIRST), same reused
+          # probe() helper -- only mac's context is kept alive (not
+          # closed) while win is created and probed.
+          def run_lifetime_variant():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  mac_result = probe(ctx_mac.new_page())
+                  # Deliberately NOT closed here -- the one variable
+                  # under test. arm (b) itself calls ctx.close() at this
+                  # exact point, before the next context exists.
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  win_result = probe(ctx_win.new_page())
+                  ctx_mac.close()
+                  ctx_win.close()
+                  b.close()
+                  return mac_result, win_result
+
+          life_mac, life_win = run_lifetime_variant()
+          print(f"  [variant 2 / lifetime-only] mac measure {life_mac['measure']}")
+          print(f"  [variant 2 / lifetime-only] win measure {life_win['measure']}")
+          life_leaked = [f for f in MAC_ONLY if life_win["measure"][f]]
+          print(f"  [variant 2 / lifetime-only] win resolved MAC_ONLY families it was never "
+                f"allowed, donor still alive: {life_leaked or 'NONE -- unchanged from arm (b)'}")
+
+          print(f"  [variants summary] arm (b) original (this same run): win resolved "
+                f"{[f for f in MAC_ONLY if win['measure'][f]] or 'NONE'}")
+          if order_leaked and not life_leaked:
+              print("  [variants summary] VERDICT: ordering alone flips it -- arm (b)'s "
+                    "green is structural (reference taken before the leak-triggering state "
+                    "exists), not evidence the gate holds.")
+          elif life_leaked and not order_leaked:
+              print("  [variants summary] VERDICT: donor lifetime alone flips it -- arm (b)'s "
+                    "green is structural (closing the donor tears down whatever holds the "
+                    "cached resolution before the recipient ever asks), not evidence the gate "
+                    "holds.")
+          elif order_leaked and life_leaked:
+              print("  [variants summary] VERDICT: BOTH flip it independently -- either is "
+                    "sufficient on its own; arm (b)'s green depends on both conditions arm (b) "
+                    "happens to have (reference-first AND donor-closed), not on the gate.")
+          else:
+              print("  [variants summary] VERDICT: NEITHER flips it -- arm (b)'s green survives "
+                    "both candidate explanations. There is a third, unidentified difference "
+                    "between arm (b)'s setup and the discriminator's; report as such rather "
+                    "than forcing a conclusion.")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Does closing a context kill its content process (team-lead's
+          # sharper version of the lifetime finding): if so, arm (b)'s
+          # win never shared ANY process with mac, at any
+          # dom.ipc.processCount setting, and its green says nothing
+          # about cross-context sharing either way.
+          #
+          # No content-visible API answers this: web content has no
+          # standard way to read its own OS process id (checked --
+          # Camoufox's own Services.appinfo.processID reference, at
+          # additions/juggler/content/main.js:83, is Juggler's own
+          # PRIVILEGED chrome-context automation code, not something a
+          # page can call; exposing process identity to content would
+          # itself be a fingerprinting surface no browser ships). So
+          # this checks from OUTSIDE, at the OS level, which the CI
+          # runner can do directly and more authoritatively than any
+          # content-side proxy: list this binary's own content-process
+          # PIDs (Gecko's e10s convention: a content process carries
+          # '-contentproc' on its command line, unrelated to Camoufox)
+          # at three checkpoints, for BOTH sequences already measured
+          # above -- donor-closed (arm (b)'s own shape) and donor-alive
+          # (the lifetime variant that leaked).
+          import subprocess
+
+          def content_pids():
+              try:
+                  out = subprocess.run(
+                      ["pgrep", "-af", "contentproc"],
+                      capture_output=True, text=True, timeout=5).stdout.strip()
+              except Exception as e:
+                  return f"ERR: {e}"
+              return out
+
+          def track_pids_donor_closed():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  page_mac = ctx_mac.new_page()
+                  page_mac.goto("data:text/html,<h1>pid-mac</h1>")
+                  after_mac = content_pids()
+                  ctx_mac.close()
+                  after_close = content_pids()
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  page_win = ctx_win.new_page()
+                  page_win.goto("data:text/html,<h1>pid-win</h1>")
+                  after_win = content_pids()
+                  ctx_win.close()
+                  b.close()
+                  return after_mac, after_close, after_win
+
+          def track_pids_donor_alive():
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx_mac = b.new_context()
+                  ctx_mac.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  page_mac = ctx_mac.new_page()
+                  page_mac.goto("data:text/html,<h1>pid-mac2</h1>")
+                  after_mac = content_pids()
+                  # donor stays alive -- no ctx_mac.close() here
+                  ctx_win = b.new_context()
+                  ctx_win.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
+                  page_win = ctx_win.new_page()
+                  page_win.goto("data:text/html,<h1>pid-win2</h1>")
+                  after_win = content_pids()
+                  ctx_mac.close()
+                  ctx_win.close()
+                  b.close()
+                  return after_mac, after_win
+
+          pid_after_mac, pid_after_close, pid_after_win = track_pids_donor_closed()
+          print(f"  [pid / donor-closed] content processes after mac page ready:\n{pid_after_mac}")
+          print(f"  [pid / donor-closed] content processes after ctx_mac.close():\n{pid_after_close}")
+          print(f"  [pid / donor-closed] content processes after win page ready:\n{pid_after_win}")
+
+          pid2_after_mac, pid2_after_win = track_pids_donor_alive()
+          print(f"  [pid / donor-alive] content processes after mac page ready:\n{pid2_after_mac}")
+          print(f"  [pid / donor-alive] content processes after win page ready (donor still open):\n{pid2_after_win}")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (j2): last attempt at #82, per team-lead direction. Arm
+          # (j) above asked a NARROW per-context list to populate
+          # mReplacementCharFallbackFamily; none of ten strong
+          # candidates did, so that context's OWN gated fallback never
+          # reaches the population site and there is nothing for a
+          # later context to inherit -- correctly reported as "setup
+          # invalid" above, not a false pass.
+          #
+          # Read straight from CamouIsFontAllowed
+          # (patches/font-list-spoofing.patch, gfxPlatformFontList.cpp):
+          #   uint32_t ctx = FontListManager::GetCurrentContext();
+          #   if (ctx != 0 && FontListManager::HasFontList(ctx)) { ...gated...}
+          #   ...else falls through to the (launch-level) "fonts" key...
+          # The gated branch is skipped -- and the launch-level
+          # fallback taken instead -- whenever HasFontList(ctx) is
+          # false, i.e. whenever setFontList() was NEVER called for
+          # that context. That is true for literal userContextId 0
+          # (nothing ever calls setFontList() on it) but also, per this
+          # same read, for ANY context that simply never calls it --
+          # exactly this fork's own established "bare context" pattern
+          # (see one_page_webfont_bare() above, same file). Under
+          # CAMOU_CONFIG={} (empty launch, no "fonts" key),
+          # sLaunchFonts is empty, so CamouIsFontAllowed returns true
+          # for every font name -- a bare launch/context is allowed
+          # everything, which is also the realistic production shape
+          # of a context nobody ever called setFontList() on.
+          def one_page_bare(js):
+              # Same shape as one_page() above, but the context never
+              # calls window.setFontList() at all -- HasFontList(ctx)
+              # stays false for its whole life, so CamouIsFontAllowed
+              # falls through to the (empty) launch-level fonts key.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>4b-bare</h1>")
+                  result = page.evaluate(js)
+                  b.close()
+                  return result
+
+          bare_bisect = one_page_bare(JS_FFFD_BISECT)
+          print(f"  [arm j2 / #82 bare setup] U+FFFD tofu floor (no-op family, bare context): "
+                f"{bare_bisect['tofu']}")
+          print(f"  [arm j2 / #82 bare setup] named-candidate U+FFFD widths under a BARE "
+                f"context (no per-context list, no launch fonts key): {bare_bisect['widths']}")
+          bare_working = [fam for fam, w in bare_bisect["widths"].items() if w != bare_bisect["tofu"]]
+          print(f"  [arm j2 / #82 bare setup] candidates that resolve U+FFFD under a bare "
+                f"context: {bare_working or 'NONE'}")
+
+          j2_failures = []
+          if not bare_working:
+              # Stop condition (team-lead directive): this is the last
+              # attempt on #82 in this task. A bare context is the
+              # least restricted setup this fork can produce -- if
+              # U+FFFD does not resolve here either, it does not
+              # resolve through this build's gated fallback under any
+              # setup tried, which is itself a finding, not a null
+              # result to iterate past.
+              j2_failures.append(
+                  f"arm (j2)/#82 bare-context setup ALSO invalid: none of the bisected "
+                  f"candidates ({FFFD_CANDIDATES}) resolve U+FFFD under a bare context "
+                  f"either (widths {bare_bisect['widths']} all equal tofu "
+                  f"{bare_bisect['tofu']}) -- U+FFFD does not resolve through this build's "
+                  f"gated fallback under the least-restricted setup available. Per the "
+                  f"task's stop condition, no further arm redesign was attempted; this is "
+                  f"reported on #82 as its own finding and may warrant a separate issue.")
+              print(f"  (j2) bare-context U+FFFD population check:  INCONCLUSIVE -- "
+                    f"{j2_failures}")
+          else:
+              def two_contexts_bare_then_narrow(list_b, js):
+                  # Same one-launch-two-contexts shape as
+                  # two_contexts_one_launch() above, but context A
+                  # never calls setFontList() at all -- it must be
+                  # BARE, not narrow, to test whether the
+                  # default-shaped context (nothing ever calls
+                  # setFontList() on it) is what actually populates
+                  # mReplacementCharFallbackFamily in production.
+                  # Deliberately NOT a parameter on
+                  # two_contexts_one_launch(): that helper always
+                  # installs list_a via setFontList, and arm (i)'s
+                  # already-confirmed call site should not change.
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          # Same requirement as two_contexts_one_launch():
+                          # without this, A and B land in separate
+                          # content processes and this arm tests nothing.
+                          firefox_user_prefs={"dom.ipc.processCount": 1},
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      ctx_a = b.new_context()
+                      page_a = ctx_a.new_page()
+                      page_a.goto("data:text/html,<h1>4b-bare-a</h1>")
+                      result_a = page_a.evaluate(js)
+
+                      ctx_b = b.new_context()
+                      ctx_b.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(list_b)))
+                      page_b = ctx_b.new_page()
+                      page_b.goto("data:text/html,<h1>4b-bare-b</h1>")
+                      result_b = page_b.evaluate(js)
+
+                      b.close()
+                      return result_a, result_b
+
+              j2_a, j2_b = two_contexts_bare_then_narrow(FFFD_NO_PROBE, JS_4C)
+              j2_a_tofu = j2_a["final"] in j2_a["refs"].values()
+              j2_b_tofu = j2_b["final"] in j2_b["refs"].values()
+              print(f"  [arm j2 / #82] context A (bare, no setFontList() call at all, first "
+                    f"in launch) settled={j2_a['final']} refs={j2_a['refs']} "
+                    f"samples={j2_a['samples']}")
+              print(f"  [arm j2 / #82] context B ({FFFD_NO_PROBE}, no U+FFFD, same launch, "
+                    f"AFTER A) settled={j2_b['final']} refs={j2_b['refs']} "
+                    f"samples={j2_b['samples']}")
+
+              if j2_a_tofu:
+                  j2_failures.append(
+                      f"arm (j2)/#82 setup invalid: bare context A settled U+FFFD to "
+                      f"{j2_a['final']}, its OWN tofu floor ({j2_a['refs']}) -- inconsistent "
+                      f"with the bisect above showing {bare_working} resolve it under the "
+                      f"same bare setup; needs investigation before this arm's result can "
+                      f"be trusted.")
+              elif not j2_b_tofu:
+                  j2_failures.append(
+                      f"arm (j2)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) CONFIRMED via the "
+                      f"default/bare-context population path -- context B ({FFFD_NO_PROBE}, "
+                      f"none of which cover U+FFFD) settled U+FFFD to {j2_b['final']}, NOT "
+                      f"its own tofu floor ({j2_b['refs']}) -- a bare context (the "
+                      f"production shape of a context nobody ever called setFontList() on, "
+                      f"which CamouIsFontAllowed treats identically to userContextId 0) "
+                      f"populated gfxPlatformFontList's process-wide "
+                      f"mReplacementCharFallbackFamily cache with {bare_working}, and "
+                      f"context B inherited a REAL glyph from a family it was never "
+                      f"allowed, with no CamouIsFontAllowed() check on the read at all.")
+              j2_ok_msg = (f"context B correctly got nothing for U+FFFD ({j2_b['final']}, "
+                           f"its own tofu floor), unaffected by the bare context's earlier "
+                           f"resolution")
+              print(f"  (j2) bare-context replacement-char cache leak (#82):  "
+                    f"{'RED' if j2_failures else 'GREEN'} -- {j2_failures or j2_ok_msg}")
+          if j2_failures:
+              tripwires.append(f"(j2) bare-context replacement-char cache leak (#82): {j2_failures}")
+          # -----------------------------------------------------------
+
+          # Separate arms that are red because a known defect is still open
+          # from arms that are red because something broke. Without this the
+          # workflow is permanently red -- arm (b2) guards #83 and arms (j)/(j2)
+          # guard #82, neither of which is fixed -- and a genuinely new
+          # regression would be invisible under an already-failing run.
+          # An expected-red arm that turns GREEN is also reported: it means the
+          # defect it guards was fixed somewhere, and this list is now stale.
+          EXPECTED_RED = {
+              "(b2)": "#83, cross-context font leak, donor-alive; unfixed",
+              "(j)": "#82, U+FFFD cache; setup has never reproduced the leak",
+              "(j2)": "#82, same, bare-context variant",
+          }
+          expected, unexpected = [], []
+          for t in tripwires:
+              tag = next((k for k in EXPECTED_RED if t.startswith(k)), None)
+              (expected if tag else unexpected).append(t if not tag else f"{t[:120]}...")
+          print("=== tripwire triage ===")
+          for k, why in EXPECTED_RED.items():
+              hit = any(t.startswith(k) for t in tripwires)
+              print(f"  {k:5} {'RED (expected)' if hit else 'GREEN -- was expected red, so '
+                    'the defect it guards may be fixed; update EXPECTED_RED'}  {why}")
+          for t in unexpected:
+              print(f"  UNEXPECTED RED: {t}")
+          assert not unexpected, (
+              f"{len(unexpected)} arm(s) red for a reason this guard does not already "
+              f"know about:\n" + "\n".join(unexpected))
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
+
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
         run: |
