@@ -409,7 +409,7 @@ jobs:
           # mUserContextId != 0. Split that variable: does the property appear
           # in the DEFAULT context, where the id is 0?
           pip install --quiet 'playwright==1.55.0'
-          python - <<'PY2'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY2'
           import json, os
           from playwright.sync_api import sync_playwright
           NAMES = ["setFontList", "setWebGLRenderer", "setNavigatorPlatform", "setSpeechVoices"]
