@@ -1133,12 +1133,22 @@ jobs:
             // scoring a vacuous green.
             const workerSrc = `onmessage = () => {
               const c = new OffscreenCanvas(8, 8).getContext('2d');
+              // The worker's own baseline, not the page's -- these run on
+              // different threads and a cross-thread baseline is only a
+              // valid reference if the two sides are guaranteed to agree.
+              // They aren't: gfxTextRun.cpp special-cases pref-font
+              // resolution for worker threads (GetDefaultGeneric), so a
+              // worker's plain 'monospace' width is not proven equal to
+              // the main thread's without measuring it directly here.
+              c.font = '48px monospace';
+              const wBaseline = c.measureText('mmmmmmmmmmlli').width;
               const widths = {};
               for (const f of ['Segoe UI', 'Helvetica Neue', 'Tahoma']) {
                 c.font = '48px "' + f + '", monospace';
                 widths[f] = c.measureText('mmmmmmmmmmlli').width;
               }
-              postMessage({widths: widths, ctor: self.constructor.name,
+              postMessage({widths: widths, baseline: wBaseline,
+                          ctor: self.constructor.name,
                           docType: typeof document});
             }`;
             const gWorker = await new Promise((resolve, reject) => {
@@ -1164,7 +1174,8 @@ jobs:
               c.font = '48px "' + f + '", monospace';
               gMain[f] = c.measureText(s48).width;
             }
-            return {gMain: gMain, gWorker: gWorker.widths, gWorkerCtor: gWorker.ctor,
+            return {gMain: gMain, gWorker: gWorker.widths,
+                    gWorkerBaseline: gWorker.baseline, gWorkerCtor: gWorker.ctor,
                     gWorkerDocType: gWorker.docType, baseline48: baseline48};
           }"""
 
@@ -1289,17 +1300,20 @@ jobs:
               print(f"  [{label} / arm f] bisection -- named-CJK widths {f_bisect[label]}")
               matches = [fam for fam, w in f_bisect[label].items() if w == this_final]
               print(f"  [{label} / arm f] bisection MATCH for {label}'s fallback final ({this_final}): {matches or 'NONE -- not any named bundled CJK family'}")
-          print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']}")
-          print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (baseline {g['mac']['baseline48']})")
+          print(f"  [mac / arm g] main thread widths (this page only, not a trusted baseline) {g['mac']['gMain']} (main baseline {g['mac']['baseline48']})")
+          print(f"  [mac / arm g] worker widths      {g['mac']['gWorker']} (worker's OWN baseline {g['mac']['gWorkerBaseline']} -- the verdict below, unlike the print above, compares against this, not the main-thread baseline48)")
           print(f"  [mac / arm g] worker identity    ctor={g['mac']['gWorkerCtor']!r} typeof document={g['mac']['gWorkerDocType']!r}")
-          print(f"  [win / arm g] main thread widths (this page only, not a trusted baseline) {g['win']['gMain']}")
-          print(f"  [win / arm g] worker widths      {g['win']['gWorker']} (baseline {g['win']['baseline48']})")
+          print(f"  [win / arm g] main thread widths (this page only, not a trusted baseline) {g['win']['gMain']} (main baseline {g['win']['baseline48']})")
+          print(f"  [win / arm g] worker widths      {g['win']['gWorker']} (worker's OWN baseline {g['win']['gWorkerBaseline']} -- the verdict below, unlike the print above, compares against this, not the main-thread baseline48)")
           print(f"  [win / arm g] worker identity    ctor={g['win']['gWorkerCtor']!r} typeof document={g['win']['gWorkerDocType']!r}")
           print(f"  [mac / arm h] local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
           print(f"  [win / arm h] local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
 
           assert g["mac"]["baseline48"] > 0 and g["win"]["baseline48"] > 0, (
               "arm (g): monospace baseline measured 0 -- nothing ran")
+          assert g["mac"]["gWorkerBaseline"] > 0 and g["win"]["gWorkerBaseline"] > 0, (
+              "arm (g): worker's own monospace baseline measured 0 -- the worker ran "
+              "but never measured its own reference width, so nothing below can be trusted")
           assert set(g["mac"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
               f"arm (g): mac worker returned {g['mac']['gWorker']} -- did the Worker even run?")
           assert set(g["win"]["gWorker"].keys()) == {"Segoe UI", "Helvetica Neue", "Tahoma"}, (
@@ -1518,10 +1532,19 @@ jobs:
           # skipped here -- arm (b)'s ground truth only covers
           # MAC_ONLY/WIN_ONLY, and Tahoma is neither, so it has no
           # ground-truth entry to compare against.
+          #
+          # "Present" is decided against the WORKER'S OWN monospace
+          # baseline (gWorkerBaseline), not the main thread's (baseline48).
+          # Those are two different threads' font resolutions; nothing
+          # guarantees they numerically agree even when both are correct
+          # (gfxTextRun.cpp's GetDefaultGeneric special-cases worker
+          # threads for pref-font resolution). A comparison whose two
+          # sides can differ for a reason unrelated to #44 is not a valid
+          # discriminator.
           g_failures = []
           for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
               for fam in ("Segoe UI", "Helvetica Neue"):
-                  worker_present = g[label]["gWorker"][fam] != g[label]["baseline48"]
+                  worker_present = g[label]["gWorker"][fam] != g[label]["gWorkerBaseline"]
                   if worker_present != ground[fam]:
                       g_failures.append(
                           f"{label}/{fam}: worker {'resolved' if worker_present else 'did not resolve'} "
