@@ -418,20 +418,33 @@ jobs:
                   'JSON.stringify(o)); } catch (e) {} }; m(); '
                   'document.addEventListener("DOMContentLoaded", m); })()' % json.dumps(NAMES))
           READ = '() => document.documentElement.getAttribute("data-s")'
-          with sync_playwright() as pw:
-              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
-                                    headless=False, env={**os.environ,
-                                    "CAMOU_CONFIG": json.dumps({})})
-              pg = b.new_page()
-              pg.add_init_script(INIT)
-              pg.goto("data:text/html,<h1>d</h1>")
-              print(f"  [default context, id 0]  present: {pg.evaluate(READ)}")
-              ctx = b.new_context()
-              ctx.add_init_script(INIT)
-              p2 = ctx.new_page()
-              p2.goto("data:text/html,<h1>c</h1>")
-              print(f"  [explicit context, id!=0] present: {p2.evaluate(READ)}")
-              b.close()
+          # setFontList IS present in both contexts here, but absent in the
+          # #44 guard step. The remaining difference between the two setups is
+          # firefox_user_prefs={"dom.ipc.processCount": 1}, which this plan
+          # added to those arms during the #83 work. Single-variable test.
+          def probe_setters(prefs, label):
+              with sync_playwright() as pw:
+                  kw = {"executable_path": os.environ["CAMOUFOX_BIN"],
+                        "headless": False,
+                        "env": {**os.environ, "CAMOU_CONFIG": json.dumps({})}}
+                  if prefs:
+                      kw["firefox_user_prefs"] = prefs
+                  b = pw.firefox.launch(**kw)
+                  pg = b.new_page()
+                  pg.add_init_script(INIT)
+                  pg.goto("data:text/html,<h1>d</h1>")
+                  d = pg.evaluate(READ)
+                  ctx = b.new_context()
+                  ctx.add_init_script(INIT)
+                  p2 = ctx.new_page()
+                  p2.goto("data:text/html,<h1>c</h1>")
+                  e = p2.evaluate(READ)
+                  b.close()
+              print(f"  [{label}] default id 0 : {d}")
+              print(f"  [{label}] explicit ctx : {e}")
+
+          probe_setters(None, "no processCount pref")
+          probe_setters({"dom.ipc.processCount": 1}, "processCount=1")
           PY2
 
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
