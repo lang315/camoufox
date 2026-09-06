@@ -388,6 +388,18 @@ jobs:
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
         timeout-minutes: 10
         run: |
+          # #83: setFontList is the ONLY one of Camoufox's 14 setters missing
+          # from window when an init script runs -- setWebGLRenderer, which uses
+          # a byte-identical Func gate down to the RoverfoxStorageManager call,
+          # is present. So the gate logic is not the difference. Check whether
+          # the WebIDL binding reached the build at all before looking further.
+          BIN_DIR="$(dirname "${{ steps.bin.outputs.bin }}")"
+          echo "--- setter names present in the built binary ---"
+          for n in setFontList setWebGLRenderer setNavigatorPlatform setSpeechVoices; do
+            c=$(grep -rc "$n" "$BIN_DIR"/libxul.so 2>/dev/null | head -1)
+            echo "  $n: ${c:-0}"
+          done
+
           # #44 / H2: the per-context filter is the ONLY thing that narrows a
           # context's font set -- nothing is trimmed at launch time (that flip
           # is Task 8, not yet landed). Two launches probe both halves of that
