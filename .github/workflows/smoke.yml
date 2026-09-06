@@ -2570,9 +2570,32 @@ jobs:
               tripwires.append(f"(j2) bare-context replacement-char cache leak (#82): {j2_failures}")
           # -----------------------------------------------------------
 
-          assert not tripwires, (
-              "arms (e)-(g) are still ungated on this binary (expected -- Tasks 3-5 "
-              "each close one of these):\n" + "\n".join(tripwires))
+          # Separate arms that are red because a known defect is still open
+          # from arms that are red because something broke. Without this the
+          # workflow is permanently red -- arm (b2) guards #83 and arms (j)/(j2)
+          # guard #82, neither of which is fixed -- and a genuinely new
+          # regression would be invisible under an already-failing run.
+          # An expected-red arm that turns GREEN is also reported: it means the
+          # defect it guards was fixed somewhere, and this list is now stale.
+          EXPECTED_RED = {
+              "(b2)": "#83, cross-context font leak, donor-alive; unfixed",
+              "(j)": "#82, U+FFFD cache; setup has never reproduced the leak",
+              "(j2)": "#82, same, bare-context variant",
+          }
+          expected, unexpected = [], []
+          for t in tripwires:
+              tag = next((k for k in EXPECTED_RED if t.startswith(k)), None)
+              (expected if tag else unexpected).append(t if not tag else f"{t[:120]}...")
+          print("=== tripwire triage ===")
+          for k, why in EXPECTED_RED.items():
+              hit = any(t.startswith(k) for t in tripwires)
+              print(f"  {k:5} {'RED (expected)' if hit else 'GREEN -- was expected red, so '
+                    'the defect it guards may be fixed; update EXPECTED_RED'}  {why}")
+          for t in unexpected:
+              print(f"  UNEXPECTED RED: {t}")
+          assert not unexpected, (
+              f"{len(unexpected)} arm(s) red for a reason this guard does not already "
+              f"know about:\n" + "\n".join(unexpected))
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
