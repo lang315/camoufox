@@ -813,11 +813,14 @@ jobs:
               print(f"  [donor-alive / #83 instrumentation] mac setFontList {fl_mac}")
               print(f"  [donor-alive / #83 instrumentation] win setFontList {fl_win}")
               fl_win_d = json.loads(fl_win) if fl_win else {"saw": None, "applied": None}
-              if fl_win_d.get("applied") is False:
-                  print("  [donor-alive / #83 instrumentation] ROOT CAUSE CANDIDATE: the win "
-                        "context never installed a font list, so CamouIsFontAllowed fell through "
-                        "to an empty sLaunchFonts and allowed every family. Not a bypassed gate "
-                        "-- an absent one.")
+              # NOTE: saw/applied are read AFTER probe() navigates, which is the
+              # init script's SECOND invocation. setFontList is one-shot per user
+              # context by design and Playwright runs init scripts on every
+              # navigation, so invocation 1 (on about:blank) consumes it and this
+              # reading always shows it absent. Measured directly: first
+              # invocation has it, second does not. So saw=false here does NOT
+              # mean the list was never installed -- it was. Kept as a record of
+              # a wrong reading, not as a signal.
               ctx2_mac.close()
               ctx2_win.close()
               b2.close()
