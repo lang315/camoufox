@@ -730,15 +730,31 @@ jobs:
               "the mac and win contexts measured identically -- no per-context signal")
 
           # (b) each context narrows to its own OS, including one the launch
-          # never had
-          assert all(mac["measure"][f] for f in MAC_ONLY), (
-              "a mac context cannot resolve macOS families under a bare launch -- the "
-              f"per-context filter regressed: {mac['measure']}")
-          assert not any(mac["measure"][f] for f in WIN_ONLY), (
-              f"the mac context still resolves Windows-only families: {mac['measure']}")
-          assert all(win["measure"][f] for f in WIN_ONLY), f"win context: {win['measure']}"
-          assert not any(win["measure"][f] for f in MAC_ONLY), (
-              f"the win context resolves macOS-only families: {win['measure']}")
+          # never had.
+          #
+          # These were hard asserts, which predate the collect-then-assert
+          # pattern the later arms use. That cost real signal: a red here
+          # aborts the step and erases every arm below it, and arm (h) --
+          # the only arm Task 6 needs -- went unmeasured across two runs
+          # because Geneva regressed here. An arm that kills the run makes
+          # every later arm unmeasurable in exactly the situation where
+          # someone needs them most.
+          b_failures = []
+          if not all(mac["measure"][f] for f in MAC_ONLY):
+              b_failures.append(
+                  "a mac context cannot resolve macOS families under a bare launch -- the "
+                  f"per-context filter regressed: {mac['measure']}")
+          if any(mac["measure"][f] for f in WIN_ONLY):
+              b_failures.append(
+                  f"the mac context still resolves Windows-only families: {mac['measure']}")
+          if not all(win["measure"][f] for f in WIN_ONLY):
+              b_failures.append(f"win context: {win['measure']}")
+          if any(win["measure"][f] for f in MAC_ONLY):
+              b_failures.append(
+                  f"the win context resolves macOS-only families: {win['measure']}")
+          print(f"  (b) per-context narrowing:  {'RED' if b_failures else 'GREEN'} -- {b_failures}")
+          if b_failures:
+              tripwires.append(f"(b) per-context narrowing: {b_failures}")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
