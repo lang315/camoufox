@@ -421,19 +421,47 @@ diff --git a/gfx/thebes/gfxTextRun.cpp b/gfx/thebes/gfxTextRun.cpp
 index xxxxxxxxxx..yyyyyyyyyy 100644
 --- a/gfx/thebes/gfxTextRun.cpp
 +++ b/gfx/thebes/gfxTextRun.cpp
-@@ -36,3 +36,4 @@
+@@ -33,8 +33,10 @@
+ #include "nsStyleUtil.h"
+ #include "nsUnicodeProperties.h"
+ #include "SharedFontList-impl.h"
  #include "TextDrawTarget.h"
 +#include "mozilla/dom/FontListManager.h"
++#include "mozilla/dom/WorkerPrivate.h"
+ #include "mozilla/dom/BrowsingContext.h"
+ #include "mozilla/dom/Document.h"
+ #include "nsPIDOMWindow.h"
 
- #ifdef XP_WIN
-@@ -1910,4 +1911,6 @@
+@@ -1857,9 +1859,20 @@
+         if (auto* bc = win->GetBrowsingContext()) {
+           mUserContextId = bc->OriginAttributesRef().mUserContextId;
+         }
+       }
+-    }
++    } else if (mozilla::dom::WorkerPrivate* wp =
++                   mozilla::dom::GetCurrentThreadWorkerPrivate()) {
++      // Camoufox (#44): worker/OffscreenCanvas font group -- GetDocument()
++      // is null off the main thread, so the branch above never runs and
++      // this context id fell back to the initializer's 0. A worker's own
++      // origin attributes carry the same mUserContextId as the
++      // BrowsingContext that spawned it (WorkerPrivate.cpp populates
++      // mLoadInfo.mOriginAttributes from the parent document's load
++      // context) -- the same value nsGlobalWindowInner::SetFontList()
++      // keyed the list under.
++      mUserContextId = wp->GetOriginAttributes().mUserContextId;
++    }
+   }
+ }
+
+ gfxFontGroup::~gfxFontGroup() {
+@@ -1910,4 +1923,6 @@
  void gfxFontGroup::EnsureFontList() {
 +  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
 +
    // Ensure resolved font instances are valid; discard them if necessary.
    auto* pfl = gfxPlatformFontList::PlatformFontList();
    if (mFontListGeneration != pfl->GetGeneration()) {
-@@ -3931,6 +3934,10 @@
+@@ -3931,6 +3946,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
      FontPresentation aPresentation) {
