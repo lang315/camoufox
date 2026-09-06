@@ -634,19 +634,42 @@ jobs:
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
                   firefox_user_prefs={"dom.ipc.processCount": 1},
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+              # #83 root-cause instrumentation. The gate can only block
+              # anything when `ctx != 0 && HasFontList(ctx)` -- under this
+              # bare launch there is no `fonts` key, so its fallback branch
+              # reads an empty sLaunchFonts and returns true for everything.
+              # So a context that never installs its own list is allowed
+              # every family, and would look exactly like a leak.
+              # setFontList() is one-shot per user context: the handler
+              # calls DisableFunction(), which writes roverfox.s.* -- and
+              # cross-process-storage.patch makes that pref CROSS-PROCESS.
+              # Record whether each context's init script actually found and
+              # called the function, so a missing list is distinguishable
+              # from a bypassed gate.
+              INIT = ('window.__flSaw = (typeof window.setFontList === "function"); '
+                      'window.__flApplied = false; '
+                      'if (window.__flSaw) { window.setFontList(%s); '
+                      'window.__flApplied = true; }')
               ctx2_mac = b2.new_context()
-              ctx2_mac.add_init_script(
-                  'if (typeof window.setFontList === "function") '
-                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
-              mac2 = probe(ctx2_mac.new_page())
+              ctx2_mac.add_init_script(INIT % json.dumps(",".join(FONTS["mac"])))
+              pg_mac = ctx2_mac.new_page()
+              mac2 = probe(pg_mac)
+              fl_mac = pg_mac.evaluate('() => ({saw: window.__flSaw, applied: window.__flApplied})')
               # Deliberately NOT closed here -- the one variable this
               # arm tests. Arm (b) above calls ctx.close() at this exact
               # point, before the next context exists.
               ctx2_win = b2.new_context()
-              ctx2_win.add_init_script(
-                  'if (typeof window.setFontList === "function") '
-                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
-              win2 = probe(ctx2_win.new_page())
+              ctx2_win.add_init_script(INIT % json.dumps(",".join(FONTS["win"])))
+              pg_win = ctx2_win.new_page()
+              win2 = probe(pg_win)
+              fl_win = pg_win.evaluate('() => ({saw: window.__flSaw, applied: window.__flApplied})')
+              print(f"  [donor-alive / #83 instrumentation] mac setFontList {fl_mac}")
+              print(f"  [donor-alive / #83 instrumentation] win setFontList {fl_win}")
+              if not fl_win["applied"]:
+                  print("  [donor-alive / #83 instrumentation] ROOT CAUSE CANDIDATE: the win "
+                        "context never installed a font list, so CamouIsFontAllowed fell through "
+                        "to an empty sLaunchFonts and allowed every family. Not a bypassed gate "
+                        "-- an absent one.")
               ctx2_mac.close()
               ctx2_win.close()
               b2.close()
