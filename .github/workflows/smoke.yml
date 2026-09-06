@@ -588,7 +588,22 @@ jobs:
                         'inWin: ("setFontList" in window), '
                         'typ: typeof window.setFontList, '
                         'fontProps: Object.getOwnPropertyNames(window).filter('
-                        'n => /font/i.test(n)), applied: false, err: null}; '
+                        'n => /font/i.test(n)), '
+                        // Which of Camoufox's 14 setters are reachable from an
+                        // init script (main world)? The #57 arm enumerates them
+                        // with page.evaluate(), which runs in an isolated world
+                        // and cannot see them either way -- so its 0/14 says
+                        // nothing. setNavigatorPlatform demonstrably works from
+                        // an init script in this same run, so if it is present
+                        // here and setFontList is not, the difference is
+                        // specific to setFontList rather than systemic (#83).
+                        'setters: ["setFontSpacingSeed","setAudioFingerprintSeed",'
+                        '"setCanvasSeed","setTimezone","setScreenDimensions",'
+                        '"setScreenColorDepth","setNavigatorPlatform","setNavigatorOscpu",'
+                        '"setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",'
+                        '"setFontList","setSpeechVoices","setWebRTCIPv4"]'
+                        '.filter(n => typeof window[n] === "function"), '
+                        'applied: false, err: null}; '
                         'try { window.setFontList(%s); out.applied = true; } '
                         'catch (e) { out.err = String(e).slice(0, 120); } '
                         'const mark = () => { try { document.documentElement.setAttribute('
