@@ -470,6 +470,16 @@ jobs:
               q = c2.new_page()
               q.goto("data:text/html,<h1>2</h1>")
               print(f"  [2nd launch, 574-family init] present: {q.evaluate(READ)}")
+              # The script above CALLS setFontList, and the setter is one-shot
+              # per user context by design. Playwright runs an init script on
+              # EVERY navigation, and new_page() lands on about:blank first --
+              # so invocation 1 consumes the setter and invocation 2, after
+              # goto(), finds it gone. Read the FIRST invocation, from
+              # about:blank, before navigating anywhere.
+              c3 = b2.new_context()
+              c3.add_init_script(BIG % (json.dumps(NAMES), json.dumps(",".join(FONTS["mac"]))))
+              r = c3.new_page()
+              print(f"  [1st invocation, about:blank] present: {r.evaluate(READ)}")
               b2.close()
           PY2
 
