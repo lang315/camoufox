@@ -483,6 +483,24 @@ jobs:
               b2.close()
           PY2
 
+      - name: "Geneva bundled in the artifact? (#44 Task 6 diagnostic)"
+        run: |
+          # arm (b) below: mac context stopped resolving Geneva (MAC_ONLY)
+          # between builds 34021403701 and 34034555160 -- document.fonts and
+          # FontFace.status say it's allowed, canvas measurement says no
+          # glyph rendered. This distinguishes "not in this artifact" from
+          # "present but the resolution path stops it reaching canvas" --
+          # its own step because the #44 guard step is already at GitHub's
+          # 21000-character limit for a run block, and this needs
+          # steps.bin.outputs.bin.
+          BIN_DIR="$(dirname "${{ steps.bin.outputs.bin }}")"
+          echo "--- searching for Geneva* under $BIN_DIR ---"
+          find "$BIN_DIR" -iname 'Geneva*' -exec ls -la {} \; || true
+          echo "--- fonts/macos dir, if present ---"
+          find "$BIN_DIR" -type d -iname macos -exec find {} -maxdepth 1 -type f \; 2>/dev/null | head -20 || true
+          echo "--- fontconfig cache mentions of Geneva (may be empty pre-first-run) ---"
+          find / -xdev -iname '*fontconfig*' -type d 2>/dev/null | head -5 || true
+
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
         timeout-minutes: 10
         run: |
@@ -2617,6 +2635,11 @@ jobs:
           # An expected-red arm that turns GREEN is also reported: it means the
           # defect it guards was fixed somewhere, and this list is now stale.
           EXPECTED_RED = {
+              "(b)": "#44 Task 6, under investigation: mac context stopped resolving "
+                     "Geneva (MAC_ONLY) between builds 34021403701 and 34034555160 "
+                     "-- document.fonts/FontFace.status say it's allowed, canvas "
+                     "measurement says no glyph rendered. Cause (build artifact vs "
+                     "code) not yet determined; see task-6-report.md.",
               "(b2)": "#83, cross-context font leak, donor-alive; unfixed",
               "(j)": "#82, U+FFFD cache; setup has never reproduced the leak",
               "(j2)": "#82, same, bare-context variant",
