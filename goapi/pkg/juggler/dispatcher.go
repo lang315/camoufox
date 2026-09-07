@@ -8,6 +8,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // rawEnvelope captures the union of request, response and event shapes
@@ -70,10 +71,36 @@ type Connection struct {
 	nextSubID atomic.Uint64
 	subs      map[string]map[uint64]EventHandler // method → id→handler, "" key is wildcard
 
+	holdMu sync.Mutex
+	holds  map[string]*sessionHold // sessionId → events buffered since its attach
+
 	closeOnce sync.Once
 	closed    chan struct{}
 	closeErr  error
 }
+
+// sessionHold buffers the events a freshly attached session emits
+// between Browser.attachedToTarget and the moment its owner finishes
+// registering handlers. Handlers are keyed by method only, so an event
+// that arrives inside that window matches nothing and would otherwise
+// be dropped by deliverEvent -- which is how a new page could lose its
+// first Page.frameAttached / Runtime.executionContextCreated.
+type sessionHold struct {
+	queue []Event
+	at    time.Time
+}
+
+const (
+	// sessionHoldTTL bounds an unclaimed hold (attach for a target the
+	// client never wraps, or a NewPage that failed after the attach).
+	sessionHoldTTL = 30 * time.Second
+	// sessionHoldMax caps one hold's queue. Owners claim within
+	// microseconds, so this is a safety valve, not a working limit;
+	// events past it are dropped, as they were before buffering existed.
+	sessionHoldMax = 256
+
+	attachedToTargetMethod = "Browser.attachedToTarget"
+)
 
 // NewConnection starts a reader goroutine and returns a ready connection.
 func NewConnection(p *Pipe) *Connection {
@@ -81,6 +108,7 @@ func NewConnection(p *Pipe) *Connection {
 		pipe:    p,
 		pending: make(map[uint64]chan *rawEnvelope),
 		subs:    make(map[string]map[uint64]EventHandler),
+		holds:   make(map[string]*sessionHold),
 		closed:  make(chan struct{}),
 	}
 	go c.readLoop()
@@ -160,6 +188,83 @@ func (c *Connection) On(method string, h EventHandler) Subscription {
 	return Subscription{method: method, id: id}
 }
 
+// ReplaySession delivers, in arrival order, every event that landed for
+// sessionID between its Browser.attachedToTarget and now, then resumes
+// live delivery for it. Call it exactly once, straight after registering
+// the handlers for a session named by an attach event; calling it for an
+// unknown or already-claimed session is a no-op.
+func (c *Connection) ReplaySession(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	// Held while dispatching so the read loop, which takes the same
+	// lock in holdEvent, cannot interleave a newer event ahead of the
+	// replayed ones.
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	h := c.holds[sessionID]
+	delete(c.holds, sessionID)
+	c.sweepHoldsLocked(time.Now())
+	if h == nil {
+		return
+	}
+	for _, ev := range h.queue {
+		c.dispatch(ev)
+	}
+}
+
+// beginHold starts buffering sessionID's events. Called from the read
+// loop before the attach event itself is dispatched, so the hold is in
+// place before the client can even learn the session id.
+func (c *Connection) beginHold(sessionID string) {
+	if sessionID == "" {
+		return
+	}
+	now := time.Now()
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	c.sweepHoldsLocked(now)
+	if _, ok := c.holds[sessionID]; !ok {
+		c.holds[sessionID] = &sessionHold{at: now}
+	}
+}
+
+// holdEvent buffers ev if its session is still held, reporting whether
+// it took ownership of the event.
+func (c *Connection) holdEvent(ev Event) bool {
+	if ev.SessionID == "" {
+		return false
+	}
+	c.holdMu.Lock()
+	defer c.holdMu.Unlock()
+	h := c.holds[ev.SessionID]
+	if h == nil {
+		return false
+	}
+	if len(h.queue) < sessionHoldMax {
+		h.queue = append(h.queue, ev)
+	}
+	return true
+}
+
+func (c *Connection) sweepHoldsLocked(now time.Time) {
+	for id, h := range c.holds {
+		if now.Sub(h.at) > sessionHoldTTL {
+			delete(c.holds, id)
+		}
+	}
+}
+
+func sessionIDFromAttach(params json.RawMessage) string {
+	var p struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(params, &p); err != nil {
+		return ""
+	}
+	return p.SessionID
+}
+
 // Off deregisters a handler returned from On. No-op for the zero Subscription.
 func (c *Connection) Off(sub Subscription) {
 	if sub.id == 0 {
@@ -225,9 +330,18 @@ func (c *Connection) deliverResponse(env rawEnvelope) {
 
 func (c *Connection) deliverEvent(env rawEnvelope) {
 	ev := Event{SessionID: env.SessionID, Method: env.Method, Params: env.Params}
+	if env.Method == attachedToTargetMethod {
+		c.beginHold(sessionIDFromAttach(env.Params))
+	} else if c.holdEvent(ev) {
+		return
+	}
+	c.dispatch(ev)
+}
+
+func (c *Connection) dispatch(ev Event) {
 	c.subsMu.RLock()
 	var handlers []EventHandler
-	for _, h := range c.subs[env.Method] {
+	for _, h := range c.subs[ev.Method] {
 		handlers = append(handlers, h)
 	}
 	for _, h := range c.subs[""] {
