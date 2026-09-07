@@ -2,7 +2,7 @@ diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
 new file mode 100644
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,158 @@
+@@ -0,0 +1,161 @@
 +#include "CanvasSeedManager.h"
 +#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
@@ -80,6 +80,9 @@ new file mode 100644
 +  if (!win) {
 +    return false;
 +  }
++  // Camoufox: sealed once this window's init scripts have run, so page
++  // script never sees the setter (FrameTree -> camouSealFingerprintSetters).
++  if (win->CamouSettersSealed()) return false;
 +  uint32_t userContextId = 0;
 +  if (BrowsingContext* bc = win->GetBrowsingContext()) {
 +    userContextId = bc->OriginAttributesRef().mUserContextId;
