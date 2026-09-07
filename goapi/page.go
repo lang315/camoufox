@@ -68,6 +68,11 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 
 	p.subscribe()
 	p.registerFrameEvents()
+	// The juggler emits this session's Page.frameAttached and
+	// Runtime.executionContextCreated right after attaching, which can
+	// be before the handlers above exist. The connection buffers a
+	// session's events from its attach event onward; claim them now.
+	c.b.conn.ReplaySession(att.SessionID)
 	// Wait for the main-world execution context so the first
 	// Evaluate doesn't fail. about:blank fires this within ms.
 	select {
