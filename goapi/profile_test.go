@@ -2,6 +2,7 @@ package camoufox_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,25 +16,54 @@ import (
 // regression was that no -profile was passed, so Firefox used a persistent
 // default profile keyed per install path and every WithFirefoxUserPref
 // written by one launch was inherited by the next.
+//
+// The probe used to be dom.w3c_touch_events.enabled read back as
+// window.TouchEvent. That measures nothing since
+// patches/touchscreen-fingerprint-spoofing.patch: TouchEvent::PrefEnabled now
+// answers from the CAMOU config whenever navigator.maxTouchPoints is *present*
+// (MaskConfig::HasKey is presence-only, additions/camoucfg/MaskConfig.hpp), and
+// every one of the 123 fingerprint presets carries that key -- so for a default
+// Launch the pref never reaches window.TouchEvent at all. The 22 Windows
+// presets that report a digitizer turned the assertion red (smoke runs
+// 34127073311 / 34127869783); the other 101 report 0 and would have hidden a
+// real leak. Inert in both directions.
+//
+// dom.webnotifications.enabled replaces it: Notification::PrefEnabled
+// (dom/notification/Notification.cpp) returns exactly
+// StaticPrefs::dom_webnotifications_enabled(), the pref defaults to true, and
+// nothing under patches/, additions/ or settings/ mentions webnotifications, so
+// no Camoufox spoof intercepts it. The first launch asserts the pref really
+// does gate window.Notification, so the second launch's assertion is a control
+// and not a value that would read the same either way.
 func TestLaunchUsesAThrowawayProfile(t *testing.T) {
 	if os.Getenv("CAMOUFOX_BIN") == "" {
 		t.Skip("set CAMOUFOX_BIN to run")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
 		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
 		camoufox.WithHeadless(true),
-		camoufox.WithFirefoxUserPref("dom.w3c_touch_events.enabled", 1))
+		camoufox.WithFirefoxUserPref("dom.webnotifications.enabled", false))
 	if err != nil {
 		t.Fatalf("first launch: %v", err)
+	}
+	gone, err := notificationIsUndefined(ctx, b)
+	if err != nil {
+		_ = b.Close()
+		t.Fatalf("first launch: %v", err)
+	}
+	if gone != true {
+		_ = b.Close()
+		t.Fatalf("dom.webnotifications.enabled=false did not gate window.Notification "+
+			"(typeof-undefined = %v): the probe pref is dead, this is not a profile leak", gone)
 	}
 	if err := b.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
-	// A second launch that sets no touch pref must not inherit the first's.
+	// A second launch that sets no notification pref must not inherit the first's.
 	b2, err := camoufox.Launch(ctx,
 		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
 		camoufox.WithHeadless(true))
@@ -41,22 +71,33 @@ func TestLaunchUsesAThrowawayProfile(t *testing.T) {
 		t.Fatalf("second launch: %v", err)
 	}
 	defer b2.Close()
-	bc, err := b2.NewContext(ctx)
+	got, err := notificationIsUndefined(ctx, b2)
 	if err != nil {
-		t.Fatalf("context: %v", err)
+		t.Fatalf("second launch: %v", err)
+	}
+	if got != false {
+		t.Errorf("second launch inherited dom.webnotifications.enabled from the first; "+
+			"window.Notification should be defined, typeof-undefined = %v", got)
+	}
+}
+
+// notificationIsUndefined opens a page in a fresh context and reports whether
+// window.Notification is absent there, i.e. whether dom.webnotifications.enabled
+// is off for that launch.
+func notificationIsUndefined(ctx context.Context, b *camoufox.Browser) (any, error) {
+	bc, err := b.NewContext(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("context: %w", err)
 	}
 	p, err := bc.NewPage(ctx)
 	if err != nil {
-		t.Fatalf("page: %v", err)
+		return nil, fmt.Errorf("page: %w", err)
 	}
-	got, err := p.Evaluate(ctx, `typeof window.TouchEvent === 'undefined'`)
+	v, err := p.Evaluate(ctx, `typeof window.Notification === 'undefined'`)
 	if err != nil {
-		t.Fatalf("evaluate: %v", err)
+		return nil, fmt.Errorf("evaluate: %w", err)
 	}
-	if got != true {
-		t.Errorf("second launch inherited dom.w3c_touch_events.enabled from the first; "+
-			"window.TouchEvent should be undefined, got %v", got)
-	}
+	return v, nil
 }
 
 // The profile directory goapi creates must not survive Close().
