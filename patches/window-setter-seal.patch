@@ -27,7 +27,7 @@ index 8657d3282b..d8889edb6a 100644
  #include "JSOracleParent.h"
  #include "ThirdPartyUtil.h"
  #include "VsyncSource.h"
-@@ -2781,6 +2785,74 @@ void ChromeUtils::CamouGetMouseTrajectory(GlobalObject& aGlobal, long aFromX,
+@@ -2781,6 +2785,77 @@ void ChromeUtils::CamouGetMouseTrajectory(GlobalObject& aGlobal, long aFromX,
    aPoints.AppendElements(flattenedPoints.data(), flattenedPoints.size());
  }
  
@@ -43,6 +43,9 @@ index 8657d3282b..d8889edb6a 100644
 +    "setFontList", "setFontSpacingSeed",
 +    "setAudioFingerprintSeed", "setSpeechVoices",
 +    "setTimezone",
++    // Camoufox fork addition, not upstream's: setCanvasSeed is the fork's own
++    // setter (canvas-spoofing.patch). Keep it here across upstream syncs.
++    "setCanvasSeed",
 +};
 +
 +/* static */
@@ -69,7 +72,7 @@ index 8657d3282b..d8889edb6a 100644
 +
 +  // Closing the gate alone is not enough. These names are handed out lazily by
 +  // the DOM resolve hook, and the generated init script materialises all
-+  // fifteen with its `typeof w.setX === "function"` probe before deciding
++  // sixteen with its `typeof w.setX === "function"` probe before deciding
 +  // which to call -- so a name may already be sitting on the global. Delete
 +  // those; the closed gate is what stops the hook offering them again.
 +  if (!win->HasJSGlobal()) {
