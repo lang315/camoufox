@@ -56,6 +56,12 @@
     "window.screenX": "int",
     "window.screenY": "int",
     "window.devicePixelRatio": "double[>0]",
+
+    "screen:orientation": "str",
+    "screen:orientationAngle": "int[>=0]",
+    "cssMedia:colorGamut": "str",
+    "cssMedia:dynamicRange": "str",
+    "cssMedia:prefersColorScheme": "str",
     
     "document.body.clientWidth$__DOC_BODY": "int[>=0]",
     "document.body.clientHeight$__DOC_BODY": "int[>=0]",
