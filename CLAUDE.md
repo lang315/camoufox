@@ -97,7 +97,7 @@ Two suites, **both required for PRs** (they cover different layers):
 
 ## Verifying spoofing claims (learned the hard way)
 
-Five failures from the #44 fonts work, each of which produced green CI and a
+Six failures from the #44 fonts work, each of which produced green CI and a
 wrong conclusion. They generalise; read them before asserting that a spoof is
 safe, complete, or unreachable.
 
@@ -174,6 +174,21 @@ family**. Two separate hops of that chain have already been found failing
 (`OffscreenCanvas::GetDocument()` off-main-thread, and whatever #83 turns out to
 be). Fixing individual hops does not close the class: a gate that cannot
 establish who is asking should deny.
+
+**6. Read the state back before you name it.**
+Three times in one day of the #44 work, a specific detail was asserted without
+reading it: a commit sha quoted from memory that existed nowhere in the repo
+(twice), a claim that a file "no longer appears" in rehearsal output that had
+been truncated with `tail` before the filename lines, and a duplicate 90-minute
+build dispatched because a subagent's idle notification was read as "has not
+acted" instead of checking the run list. None changed a conclusion, but two went
+into commit messages on a pushed branch and one wasted a build.
+
+The cost here is asymmetric: reading back a sha, an output tail, or a run list
+takes seconds, and this repo's feedback loops are 40-95 minutes. Anything that
+goes into a commit message, an issue, or a PR body is a claim someone will act
+on later — check it against the actual state rather than against what you
+remember doing.
 
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
