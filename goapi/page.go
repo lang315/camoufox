@@ -228,43 +228,49 @@ func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error 
 	}
 
 	conn := p.bc.b.conn
-	doneCh := make(chan struct{}, 1)
+	// The waiters have to be registered before Page.navigate so nothing
+	// the navigation emits can be missed, but the navigation's identity
+	// only arrives in that call's result. Handlers therefore append to
+	// an ordered queue that this goroutine drains once the id is known:
+	// a load that belongs to the document already on screen (the initial
+	// about:blank, say) is seen before this navigation commits and is
+	// ignored rather than mistaken for completion.
+	q := &navQueue{notify: make(chan struct{}, 1)}
 	var subs []juggler.Subscription
-	switch opt.WaitUntil {
-	case WaitUntilCommit:
-		subs = append(subs, conn.On("Page.navigationCommitted", func(ev juggler.Event) {
-			if ev.SessionID != p.session.ID() {
-				return
-			}
-			var nc juggler.NavigationCommittedEvent
-			if err := json.Unmarshal(ev.Params, &nc); err != nil {
-				return
-			}
-			if nc.FrameID == frame {
-				select {
-				case doneCh <- struct{}{}:
-				default:
-				}
-			}
-		}))
-	default:
-		target := string(opt.WaitUntil)
-		subs = append(subs, conn.On("Page.eventFired", func(ev juggler.Event) {
-			if ev.SessionID != p.session.ID() {
-				return
-			}
-			var fired juggler.EventFiredEvent
-			if err := json.Unmarshal(ev.Params, &fired); err != nil {
-				return
-			}
-			if fired.Name == target && fired.FrameID == frame {
-				select {
-				case doneCh <- struct{}{}:
-				default:
-				}
-			}
-		}))
-	}
+	subs = append(subs, conn.On("Page.navigationCommitted", func(ev juggler.Event) {
+		if ev.SessionID != p.session.ID() {
+			return
+		}
+		var nc juggler.NavigationCommittedEvent
+		if err := json.Unmarshal(ev.Params, &nc); err != nil || nc.FrameID != frame {
+			return
+		}
+		id := ""
+		if nc.NavigationID != nil {
+			id = *nc.NavigationID
+		}
+		q.push(navObs{kind: navCommitted, navID: id})
+	}))
+	subs = append(subs, conn.On("Page.navigationAborted", func(ev juggler.Event) {
+		if ev.SessionID != p.session.ID() {
+			return
+		}
+		var na juggler.NavigationAbortedEvent
+		if err := json.Unmarshal(ev.Params, &na); err != nil || na.FrameID != frame {
+			return
+		}
+		q.push(navObs{kind: navAborted, navID: na.NavigationID, text: na.ErrorText})
+	}))
+	subs = append(subs, conn.On("Page.eventFired", func(ev juggler.Event) {
+		if ev.SessionID != p.session.ID() {
+			return
+		}
+		var fired juggler.EventFiredEvent
+		if err := json.Unmarshal(ev.Params, &fired); err != nil || fired.FrameID != frame {
+			return
+		}
+		q.push(navObs{kind: navFired, text: fired.Name})
+	}))
 	defer func() {
 		for _, s := range subs {
 			conn.Off(s)
@@ -276,14 +282,93 @@ func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error 
 	if err := p.session.Call(ctx, "Page.navigate", params, &res); err != nil {
 		return fmt.Errorf("camoufox: navigate: %w", err)
 	}
-	select {
-	case <-doneCh:
+	if res.NavigationID == nil || *res.NavigationID == "" {
+		// No new document was started: a same-document (hash) navigation,
+		// or the URL was already there. Playwright treats this as done.
 		return nil
-	case <-time.After(opt.Timeout):
-		return fmt.Errorf("camoufox: goto: timed out waiting for %s", opt.WaitUntil)
-	case <-ctx.Done():
-		return ctx.Err()
 	}
+	navID := *res.NavigationID
+
+	timeout := time.NewTimer(opt.Timeout)
+	defer timeout.Stop()
+	target := string(opt.WaitUntil)
+	committed := false
+	for {
+		obs, ok := q.pop()
+		if !ok {
+			select {
+			case <-q.notify:
+			case <-timeout.C:
+				return fmt.Errorf("camoufox: goto: timed out waiting for %s", opt.WaitUntil)
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			continue
+		}
+		switch obs.kind {
+		case navCommitted:
+			if obs.navID != navID {
+				continue
+			}
+			committed = true
+			if opt.WaitUntil == WaitUntilCommit {
+				return nil
+			}
+		case navAborted:
+			if obs.navID != navID {
+				continue
+			}
+			return fmt.Errorf("camoufox: goto: navigation aborted: %s", obs.text)
+		case navFired:
+			if committed && obs.text == target {
+				return nil
+			}
+		}
+	}
+}
+
+type navObsKind int
+
+const (
+	navCommitted navObsKind = iota
+	navAborted
+	navFired
+)
+
+// navObs is one navigation-relevant event from the main frame, held in
+// arrival order so Goto can score it against the navigation id that
+// Page.navigate only reports after the handlers are already live.
+type navObs struct {
+	kind  navObsKind
+	navID string
+	text  string // errorText for navAborted, event name for navFired
+}
+
+type navQueue struct {
+	mu     sync.Mutex
+	items  []navObs
+	notify chan struct{}
+}
+
+func (q *navQueue) push(o navObs) {
+	q.mu.Lock()
+	q.items = append(q.items, o)
+	q.mu.Unlock()
+	select {
+	case q.notify <- struct{}{}:
+	default:
+	}
+}
+
+func (q *navQueue) pop() (navObs, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.items) == 0 {
+		return navObs{}, false
+	}
+	o := q.items[0]
+	q.items = q.items[1:]
+	return o, true
 }
 
 // Evaluate runs expression in the main world and returns the value.
