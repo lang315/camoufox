@@ -480,7 +480,19 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    EnsureFontList();
  
    uint32_t count = mFonts.Length();
-@@ -3931,6 +3950,10 @@
+@@ -3129,6 +3148,11 @@
+ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
+     uint32_t aCh, uint32_t aPrevCh, uint32_t aNextCh, Script aRunScript,
+     gfxFont* aPrevMatchedFont, FontMatchType* aMatchType) {
++  // Same reasoning as GetFirstValidFont() above -- a userfont Load()
++  // below needs this font group's context in scope; GetFirstValidFont()
++  // alone was not sufficient for arm (h) (#44).
++  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
++
+   // If the char is a cluster extender, we want to use the same font as the
+   // preceding character if possible. This is preferable to using the font
+   // group because it avoids breaks in shaping within a cluster.
+@@ -3931,6 +3955,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
      FontPresentation aPresentation) {
