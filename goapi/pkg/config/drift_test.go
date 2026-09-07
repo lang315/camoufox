@@ -12,19 +12,22 @@ import (
 
 // knownConfigOnlyKeys are CAMOU keys the patched binary reads and config.go
 // emits, but which are not yet registered in settings/properties.json (the
-// canonical schema). They are live — shipped in patches (css-media-spoofing,
-// media-codec-spoofing, screen-orientation-spoofing) — so properties.json
-// simply lags. Freezing them here means a NEW divergence fails the test while
-// this documented lag passes. When properties.json is updated to register a
-// key, remove it from this set. See plan/anti-detect-review-and-optimize.md (T10).
+// canonical schema). They are live — shipped in media-codec-spoofing — so
+// properties.json simply lags. Freezing them here means a NEW divergence fails
+// the test while this documented lag passes. When properties.json is updated to
+// register a key, remove it from this set. See
+// plan/anti-detect-review-and-optimize.md (T10).
+//
+// The cssMedia:* and screen:orientation* keys that used to sit here were
+// declared in properties.json during the beta.31 sync, so they are gone.
+//
+// The two below are read by a raw data.find("mediaCapabilities:...") in
+// additions/camoucfg/MaskConfig.hpp. Upstream's schema guard
+// (pythonlib/tests/test_config_schema.py) only matches MaskConfig::Get*/Has*
+// string literals, so it cannot see them: this set is their only watchdog.
 var knownConfigOnlyKeys = map[string]bool{
-	"cssMedia:colorGamut":            true,
-	"cssMedia:dynamicRange":          true,
-	"cssMedia:prefersColorScheme":    true,
 	"mediaCapabilities:canPlayType":  true,
 	"mediaCapabilities:decodingInfo": true,
-	"screen:orientation":             true,
-	"screen:orientationAngle":        true,
 }
 
 // configJSONKeys reflects the top-level CAMOU_CONFIG keys config.Config emits.
