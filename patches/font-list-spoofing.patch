@@ -153,7 +153,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 @@ -534,5 +534,12 @@
      "nsPluginArray.cpp",
  ]
- 
+
 +# FontListManager compiled separately (includes RoverfoxStorageManager.h)
 +SOURCES += ["FontListManager.cpp"]
 +
@@ -177,7 +177,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 @@ -7477,6 +7478,25 @@
    mSharedWorkers.RemoveElement(aSharedWorker);
  }
- 
+
 +void nsGlobalWindowInner::SetFontList(const nsAString& aFontList,
 +                                      ErrorResult& aRv) {
 +  uint32_t userContextId = 0;
@@ -205,9 +205,9 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
 @@ -685,6 +685,9 @@
- 
+
    void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
- 
+
 +  // Per-context font list spoofing
 +  void SetFontList(const nsAString& aFontList, mozilla::ErrorResult& aRv);
 +
@@ -221,7 +221,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 @@ -892,6 +892,12 @@ partial interface Window {
    readonly attribute VisualViewport visualViewport;
  };
- 
+
 +// Per-context font list
 +partial interface Window {
 +  [Throws, Func="mozilla::dom::FontListManager::IsFunctionEnabledForWebIDL"]
@@ -422,7 +422,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 +      bitset.reset();
 +    }
 +  }
- 
+
    // Return whether the given font-family record should be visible to CSS,
    // in a context with the given FontVisibility setting.
 diff --git a/gfx/thebes/gfxTextRun.cpp b/gfx/thebes/gfxTextRun.cpp
@@ -474,30 +474,13 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  already_AddRefed<gfxFont> gfxFontGroup::GetFirstValidFont(
      uint32_t aCh, StyleGenericFontFamily* aGeneric, bool* aIsFirst) {
 +  // EnsureFontList()'s AutoFontListContext scope ends before this call;
-+  // re-establish it here -- alone this does not cover arm (h)'s local()
-+  // src path, reached via fallback inside FindFontForChar (#44).
++  // re-establish it here -- InitScriptRun() calls this first in the
++  // shaping path, so scoping only here is sufficient (#44).
 +  mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
    EnsureFontList();
  
    uint32_t count = mFonts.Length();
-@@ -3450,10 +3469,16 @@
-       }
-     }
-   }
- 
-   if (fontListLength == 0) {
-+    // Camoufox (#44): pref-font and system-fallback search below --
-+    // scoped here too since neither the pre-loop first-font path nor
-+    // the loop above alone satisfied arm (h). WhichSystemFontSupportsChar
-+    // below already has its own guard (Task 4).
-+    mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
-+
-     RefPtr<gfxFont> defaultFont = GetDefaultFont();
-     if (defaultFont->HasCharacter(aCh) ||
-         (fallbackChar && defaultFont->HasCharacter(fallbackChar))) {
-       if (CheckCandidate(defaultFont, FontMatchType::Kind::kFontGroup)) {
-         return defaultFont.forget();
-@@ -3931,6 +3956,10 @@
+@@ -3931,6 +3950,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
      FontPresentation aPresentation) {
