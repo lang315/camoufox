@@ -99,6 +99,13 @@ type NavigationCommittedEvent struct {
 	Name         string  `json:"name"`
 }
 
+// NavigationAbortedEvent — Page.navigationAborted.
+type NavigationAbortedEvent struct {
+	FrameID      string `json:"frameId"`
+	NavigationID string `json:"navigationId"`
+	ErrorText    string `json:"errorText"`
+}
+
 // EventFiredEvent — Page.eventFired ('load' / 'DOMContentLoaded').
 type EventFiredEvent struct {
 	FrameID string `json:"frameId"`

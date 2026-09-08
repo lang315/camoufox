@@ -11,6 +11,30 @@ const {Helper} = ChromeUtils.importESModule('chrome://juggler/content/Helper.js'
 
 const helper = new Helper();
 
+// Camoufox: Playwright's InitScript constructor wraps every body it is given:
+//
+//   (() => {
+//         <source>
+//       })();
+//
+// so a caller's leading `mw:` ends up *inside* the arrow function, where it is a
+// label statement -- valid JavaScript that parses, runs, and does nothing. That
+// is why the prefix appeared to be accepted on init scripts while changing
+// nothing (#738). Match the prefix in both positions: wrapped, as Playwright
+// sends it, and bare, as a direct Juggler client would.
+const INIT_SCRIPT_WRAPPER = /^\s*\(\(\)\s*=>\s*\{([\s\S]*)\}\)\(\);?\s*$/;
+const MAIN_WORLD_PREFIX = 'mw:';
+
+// Returns the script with the prefix stripped when it asks for the main world,
+// or null when it is an ordinary init script.
+function mainWorldInitScript(script) {
+  const wrapped = INIT_SCRIPT_WRAPPER.exec(script);
+  const body = (wrapped ? wrapped[1] : script).trimStart();
+  if (!body.startsWith(MAIN_WORLD_PREFIX))
+    return null;
+  return body.slice(MAIN_WORLD_PREFIX.length);
+}
+
 export class FrameTree {
   constructor(rootBrowsingContext) {
     helper.decorateAsEventEmitter(this);
@@ -435,6 +459,7 @@ class Frame {
       wsid: webSocketSerialID + '',
       opcode: frame.opCode,
       data: frame.opCode !== 1 ? btoa(frame.payload) : frame.payload,
+      timestamp: frame.timeStamp / 1_000_000,
     });
     this._webSocketListener = {
       QueryInterface: ChromeUtils.generateQI([Ci.nsIWebSocketEventListener, ]),
@@ -505,6 +530,7 @@ class Frame {
           wsid: webSocketSerialID + '',
           opcode: frame.opCode,
           data: frame.opCode !== 1 ? btoa(frame.payload) : frame.payload,
+          timestamp: frame.timeStamp / 1_000_000,
         });
       },
     };
@@ -535,6 +561,24 @@ class Frame {
   }
 
   _createIsolatedContext(name, useMaster = false) {
+    // Camoufox: run the default world as the page's own world -- upstream
+    // Playwright semantics, where evaluate() sees page globals and can hand back
+    // real handles.
+    //
+    // This gives up the property the fork exists for: automation JS becomes
+    // visible to the page again. It is here so the vendored Playwright
+    // conformance suite can run against upstream semantics (tests/conftest.py);
+    // it is not a scraping mode. Camoufox's own isolation is covered by
+    // tests/patches/isolated-evaluate.py, which must keep running without it.
+    if (!name && ChromeUtils.camouGetBool('disableWorldIsolation', false)) {
+      const domWindow = this.domWindow();
+      const world = this._runtime.createExecutionContext(domWindow, domWindow, {
+        frameId: this.id(),
+        name,
+      });
+      this._worldNameToContext.set(name, world);
+      return world;
+    }
     let sandbox;
     if (useMaster && ChromeUtils.camouGetBool('forceScopeAccess', false)) {
       sandbox = this._getMasterSandbox();
@@ -592,7 +636,7 @@ class Frame {
     // page.evaluate() lands; Playwright's own utility world has no business
     // reaching into the page.
     if (!name && ChromeUtils.camouGetBool('allowMainWorld', false))
-      world.enableMainWorld(this.domWindow());
+      world.enableMainWorld(() => this.domWindow());
     this._worldNameToContext.set(name, world);
     return world;
   }
@@ -648,6 +692,12 @@ class Frame {
     // global means state written by evaluate() on one page is still there on
     // the next -- every other world starts empty per document.
     this._masterSandbox = null;
+    // Camoufox: open the window.setXxx() fingerprint setters for the init
+    // scripts below. A window is created sealed, so this is the only moment
+    // they exist -- see nsGlobalWindowInner::CamouSettersSealed.
+    const camouInnerWindowId = this.domWindow().windowGlobalChild.innerWindowId;
+    ChromeUtils.camouUnsealFingerprintSetters(camouInnerWindowId);
+
     this._createIsolatedContext('', true);
     for (const [name, world] of this._frameTree._isolatedWorlds) {
       if (name)
@@ -657,31 +707,21 @@ class Frame {
       for (const [name, script] of world._bindings)
         executionContext.addBinding(name, script);
       for (const script of world._scriptsToEvaluateOnNewDocument)
-        executionContext.evaluateScriptSafely(script);
+        this._evaluateInitScript(executionContext, script);
     }
 
-    // Camoufox (#57): the spoofing setters self-destruct only when CALLED, so
-    // every field an init script leaves unset keeps its setter on window -- and
-    // a context with no init script at all keeps all 14, which is one line for
-    // a page to fingerprint the browser with. Init scripts have just run and
-    // the page's own script has not, so this is the last moment any setter is
-    // legitimately needed.
+    // Close them again. The init scripts have had their turn and page script
+    // has not run yet, so this is the last moment at which nobody untrusted has
+    // been able to look.
     //
-    // Only tear down on a real document. Two reasons, and the second cost a
-    // build to find: a caller may add init scripts between opening a page and
-    // its first navigation, and -- as the about:blank branch below says -- this
-    // runs before location has been set, so href is sometimes '' or undefined.
-    // Testing `!== 'about:blank'` let those through and disabled the setters
-    // before any init script had run, which left the fingerprint unapplied
-    // (navigator.platform read the host's real value).
-    const href = this.domWindow()?.location?.href;
-    if (href && !href.startsWith('about:')) {
-      try {
-        this.docShell().disableSpoofSetters();
-      } catch (e) {
-        // An older binary without the method must not break navigation.
-      }
-    }
+    // Trusting each setter to remove itself when called only ever covered the
+    // setters a given fingerprint happened to set. A value the config left
+    // alone (no timezone, no IPv6) left its setter sitting on window, and a
+    // launch that registers no init script at all -- Camoufox() +
+    // browser.new_page(), the documented default -- left all fifteen. Fifteen
+    // window properties no other Firefox has is a sharper fingerprint than
+    // anything they were hiding.
+    ChromeUtils.camouSealFingerprintSetters(camouInnerWindowId);
 
     const url = this.domWindow().location?.href;
     if (url === 'about:blank' && !this._url) {
@@ -691,6 +731,37 @@ class Frame {
     }
 
     this._updateJavaScriptDisabled();
+  }
+
+  // Camoufox: run an init script in the world it asked for.
+  //
+  // Init scripts land in the default world, which is a sandbox the page cannot
+  // see -- so a script meant to patch what a *site* observes silently patched
+  // nothing, while page.evaluate() read it back happily from the sandbox and
+  // every automation-side check kept reporting success (#738). The `mw:` prefix
+  // is the same opt-in page.evaluate() already has (Runtime.js).
+  //
+  // Refusals here are loud on purpose. evaluateScriptSafely() routes everything
+  // into dump(), so a dropped script is invisible; for a spoofing tool, silently
+  // not spoofing is the worst failure available.
+  _evaluateInitScript(executionContext, script) {
+    const mainWorldSource = mainWorldInitScript(script);
+    if (mainWorldSource === null) {
+      executionContext.evaluateScriptSafely(script);
+      return;
+    }
+    if (!ChromeUtils.camouGetBool('allowMainWorld', false)) {
+      dump('JUGGLER: init script requested the main world with "mw:", but main ' +
+           'world access is off. Launch with main_world_eval=True. Script NOT run.\n');
+      return;
+    }
+    const mainWorldContext = executionContext.mainWorldContext();
+    if (!mainWorldContext) {
+      dump('JUGGLER: init script requested the main world, but this world has no ' +
+           'main-world twin. Script NOT run.\n');
+      return;
+    }
+    mainWorldContext.evaluateScriptSafely(mainWorldSource);
   }
 
   _updateJavaScriptDisabled() {

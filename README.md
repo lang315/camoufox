@@ -48,6 +48,27 @@
       • <code>CAMOUFOX40</code> - 40% off to ISP (Static) Proxies<br>
     </td>
   </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://node-proxy.com" target="_blank">
+        <img width="380" alt="nodeproxy" src="https://github.com/user-attachments/assets/c25b50a7-cd7d-49ee-bfc1-3b3671ff55ed" />
+      </a>
+    </td>
+    <td valign="middle">
+      <strong>Need proxies for Camoufox?</strong><br>
+      Use <strong><a href="https://node-proxy.com">Node Proxy</a></strong> — a provider of <strong>datacenter, residential and mobile proxies</strong> offering high speed, security and near-100% uptime. <strong>Fully tested and supported in Camoufox.</strong><br>
+      <strong>What sets them apart from other providers</strong><br>
+      • 90+ IP score<br>
+      • HTTP + SOCKS5 — multiprotocol support<br>
+      • Discounts for retail customers<br>
+      • Full B2B support<br>
+      • Ethically sourced IP addresses<br>
+      • Special terms for Enterprise clients<br>
+     <strong>Want to support Camoufox?</strong><br>
+     Just use my promo code <strong><code>CAMOUFOX</code></strong> — it gets you a <strong>30% discount</strong> and supports the developer at the same time.<br>
+     <strong><a href="https://node-proxy.com">Get started at node-proxy.com →</a></strong>
+    </td>
+  </tr>
 </table>
 
 ## Tools & Services
@@ -125,14 +146,14 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
 <table>
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://proxyempire.io/?ref=camoufox&utm_source=camoufox" target="_blank">
+      <a href="https://proxyempire.io/?ref=camoufox&utm_source=github&utm_medium=paid_referral&utm_campaign=open_source_sponsorship&utm_content=camoufox" target="_blank">
         <img width="380" alt="proxyempire" src="https://github.com/user-attachments/assets/d1c5f849-5cb0-4aff-b48c-530bda2ee03f"/>
       </a>
     </td>
     <td valign="middle">
       <b>🚀 Camoufox × ProxyEmpire</b><br>
       Running Camoufox? Your proxy layer decides whether you scale — or get blocked.<br>
-      <a href="https://proxyempire.io/?ref=camoufox&utm_source=camoufox">ProxyEmpire</a> delivers:<br>
+      <a href="https://proxyempire.io/?ref=camoufox&utm_source=github&utm_medium=paid_referral&utm_campaign=open_source_sponsorship&utm_content=camoufox">ProxyEmpire</a> delivers:<br>
       • 🌍 30M+ Residential IPs (170+ countries)<br>
       • 📱 4G/5G Mobile Proxies<br>
       • 🔄 Rotating & Sticky Sessions<br>

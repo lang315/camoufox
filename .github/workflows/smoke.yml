@@ -175,8 +175,9 @@ jobs:
         timeout-minutes: 8
         run: |
           # The setters self-destruct only when CALLED, so every field a config
-          # leaves unset kept its setter on window -- all 14 in a context that
-          # runs no init script, which is the first thing anyone writes:
+          # leaves unset kept its setter on window -- every one of them in a
+          # context that runs no init script, which is the first thing anyone
+          # writes:
           #   Camoufox(...) then browser.new_page().
           # A page needed one line to identify the browser. Juggler now tears
           # them down right after the init-script loop.
@@ -184,17 +185,48 @@ jobs:
           # Both arms matter: the default context is the serious half, and the
           # explicit-context arm proves teardown does not run so early that a
           # per-context value stops applying.
+          #
+          # NAMES is the closed list; the sweep is the open one, so a setter
+          # added later is caught without anyone remembering to edit NAMES.
           pip install --quiet 'playwright==1.55.0'
           python - <<'PY'
           import json, os
           from playwright.sync_api import sync_playwright
 
+          # Every Camoufox window.setXxx(); keep in step with dom/webidl/Window.webidl.
           NAMES = ["setFontSpacingSeed","setAudioFingerprintSeed","setCanvasSeed","setTimezone",
                    "setScreenDimensions","setScreenColorDepth","setNavigatorPlatform",
-                   "setNavigatorOscpu","setNavigatorHardwareConcurrency","setWebGLVendor",
-                   "setWebGLRenderer","setFontList","setSpeechVoices","setWebRTCIPv4"]
-          LEFT = "() => (%s).filter(n => typeof window[n] !== 'undefined')" % json.dumps(NAMES)
+                   "setNavigatorOscpu","setNavigatorUserAgent",
+                   "setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",
+                   "setFontList","setSpeechVoices","setWebRTCIPv4","setWebRTCIPv6"]
+          # Firefox's own set[A-Z] names on window. setScrollMarks and setCursor are
+          # chrome-only, setResizable is a content-visible 4.x no-op; none is ours.
+          NATIVE = ["setTimeout","setInterval","setResizable","setScrollMarks","setCursor"]
+
+          # One evaluate per arm: the closed list, the open sweep, and a control.
+          # The sweep walks window and its prototype chain -- a [Global] interface
+          # hands its members out as own properties of the global, but sweeping the
+          # chain too costs nothing and does not depend on that staying true.
+          # natives is the control: page.evaluate runs in an isolated world in this
+          # fork, and a sweep that could see nothing would report an empty stray
+          # list forever. If setTimeout is not in it, the sweep proves nothing.
+          PROBE = """() => {
+            const named = %s.filter(n => typeof window[n] !== 'undefined');
+            const native = new Set(%s);
+            const seen = new Set();
+            for (let o = window; o; o = Object.getPrototypeOf(o))
+              for (const n of Object.getOwnPropertyNames(o)) seen.add(n);
+            const all = [...seen].filter(n => /^set[A-Z]/.test(n));
+            return {named: named, stray: all.filter(n => !native.has(n)),
+                    natives: all.filter(n => native.has(n))};
+          }""" % (json.dumps(NAMES), json.dumps(NATIVE))
           PLATFORM = "() => navigator.platform"
+
+          def report(label, r):
+              pad = " " * len(label)
+              print(f"{label}: {len(r['named'])}/{len(NAMES)} left -> {r['named']}")
+              print(f"{pad}  stray set[A-Z] -> {r['stray']}")
+              print(f"{pad}  sweep can see  -> {r['natives']}")
 
           with sync_playwright() as pw:
               b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
@@ -202,8 +234,8 @@ jobs:
 
               page = b.new_page()
               page.goto("data:text/html,<h1>d</h1>")
-              default_left = page.evaluate(LEFT)
-              print(f"default context : {len(default_left)}/14 left -> {default_left}")
+              default_res = page.evaluate(PROBE)
+              report("default context ", default_res)
               page.close()
 
               ctx = b.new_context()
@@ -212,16 +244,21 @@ jobs:
                   'window.setNavigatorPlatform("FakePlatform99");')
               p2 = ctx.new_page()
               p2.goto("data:text/html,<h1>c</h1>")
-              ctx_left = p2.evaluate(LEFT)
+              ctx_res = p2.evaluate(PROBE)
               platform = p2.evaluate(PLATFORM)
-              print(f"explicit context: {len(ctx_left)}/14 left -> {ctx_left}")
+              report("explicit context", ctx_res)
               print(f"                  navigator.platform = {platform}")
               ctx.close(); b.close()
 
-          assert not default_left, (
-              f"{len(default_left)} setters still on window in the default context: {default_left}")
-          assert not ctx_left, (
-              f"{len(ctx_left)} setters still on window after init scripts: {ctx_left}")
+          for label, r in (("default", default_res), ("explicit", ctx_res)):
+              assert "setTimeout" in r["natives"], (
+                  f"the {label} context sweep is blind -- it cannot see setTimeout, "
+                  "so an empty stray list proves nothing")
+              assert not r["named"], (
+                  f"{len(r['named'])} setters still on window in the {label} context: "
+                  f"{r['named']}")
+              assert not r["stray"], (
+                  f"unlisted set[A-Z] names on window in the {label} context: {r['stray']}")
           assert platform == "FakePlatform99", (
               f"teardown ran too early -- the per-context value did not apply: {platform}")
           PY

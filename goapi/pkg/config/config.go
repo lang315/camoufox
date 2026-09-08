@@ -205,6 +205,11 @@ type Config struct {
 	// it fixes here.
 	AllowAddonNewtab *bool `json:"allowAddonNewtab,omitempty"`
 
+	// Arrived with the beta.31 sync (upstream 0169975 declared
+	// media:spoof_codecs, dc201dd added disableWorldIsolation).
+	MediaSpoofCodecs      *bool `json:"media:spoof_codecs,omitempty"`
+	DisableWorldIsolation *bool `json:"disableWorldIsolation,omitempty"`
+
 	// Extra allows callers to inject keys not yet captured by named fields
 	// (forward-compat with new CAMOU_CONFIG properties).
 	Extra map[string]any `json:"-"`
