@@ -243,7 +243,19 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/ipc/FileDescriptorUtils.h"
  #include "mozilla/TextUtils.h"
-@@ -1069,6 +1070,11 @@ gfxFontEntry* gfxPlatformFontList::LookupInFaceNameLists(
+@@ -50,6 +51,11 @@
+ 
+ #include <numeric>
+ 
++// DIAGNOSTIC (diag/44-h-context, never merged): for the face-name lookup
++// context log below. printf_stderr lives in mozilla/glue/Debug.h, which this
++// file does not include, so the log uses fprintf directly.
++#include <cstdio>
++
+ using namespace mozilla;
+ using mozilla::intl::Locale;
+ using mozilla::intl::LocaleParser;
+@@ -1069,12 +1075,36 @@ gfxFontEntry* gfxPlatformFontList::LookupInFaceNameLists(
    return lookup;
  }
  
@@ -252,10 +264,48 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 +// gate (#44), is defined earlier in this file than that definition.
 +static bool CamouIsFontAllowed(const nsACString& aLowerKey);
 +
++// DIAGNOSTIC (diag/44-h-context, never merged): which context does a
++// src: local() lookup run under at the face-name lookup site? Appends to
++// /tmp/camou-h-ctx.log -- the content process needs
++// MOZ_DISABLE_CONTENT_SANDBOX=1 to be allowed that write -- and mirrors the
++// same line to stderr. aAllowed is -1 where the gate was not reached.
++static void CamouDiagLogCtx(const char* aWhere, const char* aReq,
++                            const char* aFamily, int aAllowed) {
++  uint32_t dctx = mozilla::dom::FontListManager::GetCurrentContext();
++  int hasList = mozilla::dom::FontListManager::HasFontList(dctx) ? 1 : 0;
++  if (FILE* f = fopen("/tmp/camou-h-ctx.log", "a")) {
++    fprintf(f, "CAMOU-H %s req=%s fam=%s ctx=%u hasList=%d allowed=%d\n",
++            aWhere, aReq, aFamily, dctx, hasList, aAllowed);
++    fclose(f);
++  }
++  fprintf(stderr, "CAMOU-H %s req=%s fam=%s ctx=%u hasList=%d allowed=%d\n",
++          aWhere, aReq, aFamily, dctx, hasList, aAllowed);
++}
++
  gfxFontEntry* gfxPlatformFontList::LookupInSharedFaceNameList(
      FontVisibilityProvider* aFontVisibilityProvider,
      const nsACString& aFaceName, WeightRange aWeightForEntry,
-@@ -1102,6 +1108,19 @@ gfxFontEntry* gfxPlatformFontList::LookupInSharedFaceNameList(
+     StretchRange aStretchForEntry, SlantStyleRange aStyleForEntry) {
+   nsAutoCString keyName(aFaceName);
+   ToLowerCase(keyName);
++  CamouDiagLogCtx("enter", keyName.get(), "-", -1);
+   fontlist::FontList* list = SharedFontList();
+   fontlist::Family* family = nullptr;
+   fontlist::Face* face = nullptr;
+@@ -1091,17 +1121,34 @@ gfxFontEntry* gfxPlatformFontList::LookupInSharedFaceNameList(
+     list->SearchForLocalFace(keyName, &family, &face);
+   }
+   if (!face || !family) {
++    CamouDiagLogCtx("miss-noface", keyName.get(), "-", -1);
+     return nullptr;
+   }
+   FontVisibility level = aFontVisibilityProvider
+                              ? aFontVisibilityProvider->GetFontVisibility()
+                              : FontVisibility::User;
+   if (!IsVisibleToCSS(*family, level)) {
++    CamouDiagLogCtx("miss-visibility", keyName.get(), "-", -1);
+     if (aFontVisibilityProvider) {
+       aFontVisibilityProvider->ReportBlockedFontFamily(*family);
      }
      return nullptr;
    }
@@ -268,6 +318,8 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
 +  // face; CamouIsFontAllowed's per-context list is keyed by family.
 +  nsAutoCString ctxKey(family->Key().AsString(list));
 +  GenerateFontListKey(ctxKey);
++  CamouDiagLogCtx("gate", keyName.get(), ctxKey.get(),
++                  CamouIsFontAllowed(ctxKey) ? 1 : 0);
 +  if (!CamouIsFontAllowed(ctxKey)) {
 +    return nullptr;
 +  }
@@ -275,7 +327,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    gfxFontEntry* fe = CreateFontEntry(face, family);
    if (fe) {
      fe->mIsLocalUserFont = true;
-@@ -1197,6 +1216,27 @@ bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
+@@ -1197,6 +1244,27 @@ bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
    return aFamily.Visibility() <= aVisibility || IsFontFamilyWhitelistActive();
  }
  
@@ -303,7 +355,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
                                        const nsACString& aGenericFamily,
                                        nsTArray<nsString>& aListOfFonts) {
-@@ -1211,6 +1251,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
+@@ -1211,6 +1279,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
          if (!IsVisibleToCSS(f, FontVisibility::User) || f.IsAltLocaleFamily()) {
            continue;
          }
@@ -315,7 +367,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
          // XXX TODO: filter families for aGenericFamily, if supported by
          // platform
          aListOfFonts.AppendElement(
-@@ -1224,6 +1269,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
+@@ -1224,6 +1297,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
      if (!IsVisibleToCSS(*family, FontVisibility::User)) {
        continue;
      }
@@ -327,7 +379,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
      if (family->FilterForFontList(aLangGroup, aGenericFamily)) {
        nsAutoCString localizedFamilyName;
        family->LocalizedName(localizedFamilyName);
-@@ -1242,8 +1292,22 @@ void gfxPlatformFontList::GetFontFamilyList(
+@@ -1242,8 +1320,22 @@ void gfxPlatformFontList::GetFontFamilyList(
    // This doesn't use ToArray, because the caller passes an AutoTArray.
    aFamilyArray.SetCapacity(mFontFamilies.Count());
    for (const auto& family : mFontFamilies.Values()) {
@@ -350,7 +402,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
  }
  
  already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
-@@ -1417,6 +1481,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
+@@ -1417,6 +1509,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
        if (!fallback || !IsVisibleToCSS(*fallback, level)) {
          continue;
        }
@@ -362,7 +414,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
        fallback->FindFontForChar(&data);
        if (data.mBestMatch) {
          RefPtr<gfxFont> font = check(data.mBestMatch, FontFamily(fallback));
-@@ -1502,6 +1571,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1502,6 +1599,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
                                   family.Key().AsString(SharedFontList()))) {
            continue;
          }
@@ -376,7 +428,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
          if (!family.IsFullyInitialized() &&
              StaticPrefs::gfx_font_rendering_fallback_async() &&
              !XRE_IsParentProcess()) {
-@@ -1535,6 +1611,12 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1535,6 +1639,12 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
            continue;
          }
        }
@@ -389,7 +441,7 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
        // evaluate all fonts in this family for a match
        family->FindFontForChar(&data);
        if (data.mMatchDistance == 0.0) {
-@@ -1800,6 +1882,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -1800,6 +1910,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      return false;
    }
  

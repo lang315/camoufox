@@ -2751,6 +2751,15 @@ jobs:
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
+          # DIAGNOSTIC (diag/44-h-context, never merged): the content process
+          # writes /tmp/camou-h-ctx.log, which the content sandbox would refuse.
+          MOZ_DISABLE_CONTENT_SANDBOX: "1"
+
+      - name: "diag: face-name lookup context log"
+        if: always()
+        run: |
+          echo "=== /tmp/camou-h-ctx.log ==="
+          cat /tmp/camou-h-ctx.log || echo "(no log written)"
 
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
