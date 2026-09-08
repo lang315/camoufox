@@ -1,4 +1,5 @@
 import http.server
+import json
 import socketserver
 import subprocess
 import sys
@@ -74,3 +75,43 @@ def start_http_server() -> int:
     port = server.server_address[1]
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return port
+
+
+# The test page hands its results over through a DOM node rather than a JS
+# global: page.evaluate() runs in juggler's isolated world on this fork
+# (#51/#62), where a global written by page script is invisible, but a real
+# node is not (see build-tester/scripts/test_page_template.html). This mirrors
+# build-tester/scripts/runner.py's collect_results.
+_RESULTS_NODE = "__camoufoxResults__"
+_READ_RESULTS = (
+    "() => { const n = document.getElementById(%r); return n ? n.textContent : null; }" % _RESULTS_NODE
+)
+
+
+def _revive(value):
+    """Undo the tagging the page applied to values JSON cannot carry."""
+    if isinstance(value, list):
+        return [_revive(item) for item in value]
+    if isinstance(value, dict):
+        if "__undefined__" in value:
+            return None
+        nonfinite = value.get("__nonfinite__")
+        if nonfinite is not None:
+            return float(nonfinite)
+        return {key: _revive(item) for key, item in value.items()}
+    return value
+
+
+async def collect_results(page, timeout: int = 120000):
+    """Wait for the page's checks to finish, then read them back.
+
+    Returns (results, error): exactly one is None.
+    """
+    await page.wait_for_selector(f"#{_RESULTS_NODE}", state="attached", timeout=timeout)
+    raw = await page.evaluate(_READ_RESULTS)
+    if not raw:
+        return None, "results node was empty"
+    payload = _revive(json.loads(raw))
+    if payload.get("error"):
+        return None, payload["error"]
+    return payload.get("results"), None
