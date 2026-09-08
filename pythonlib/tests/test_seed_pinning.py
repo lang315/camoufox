@@ -27,6 +27,7 @@ from pathlib import Path
 # Make `import camoufox` resolve to the in-tree pythonlib without an install.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from camoufox import utils  # noqa: E402
 from camoufox.addons import DefaultAddons  # noqa: E402
 from camoufox.fingerprints import from_preset  # noqa: E402
 from camoufox.utils import launch_options  # noqa: E402
@@ -68,12 +69,23 @@ def test_from_preset_partial_pin_still_randomizes_the_rest():
 
 # --- launch_options(): already correct, locked in as a regression guard -----
 
-def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path):
+def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parent.parent.parent
     props_src = repo_root / 'settings' / 'properties.json'
     (tmp_path / 'properties.json').write_bytes(props_src.read_bytes())
     fake_exe = tmp_path / 'camoufox-bin'
     fake_exe.write_bytes(b'')
+
+    # On Linux, get_env_vars() reads the bundled fontconfig from beside the
+    # supplied binary (upstream fc3392e) instead of from the managed install,
+    # so this fake bundle has to carry one. See test_executable_path_bundle.py.
+    (tmp_path / 'fontconfig' / 'linux').mkdir(parents=True)
+    (tmp_path / 'fontconfig' / 'linux' / 'fonts.conf').write_text(
+        '<?xml version="1.0"?><fontconfig><dir prefix="cwd">fonts</dir></fontconfig>'
+    )
+    (tmp_path / 'fonts').mkdir()
+    # The generated runtime conf goes to the cache dir; keep it out of the real one.
+    monkeypatch.setattr(utils, 'INSTALL_DIR', tmp_path / 'cache')
 
     result = launch_options(
         config={'fonts:spacing_seed': 111222, 'audio:seed': 333444, 'canvas:seed': 555666},
