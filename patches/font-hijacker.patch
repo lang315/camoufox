@@ -319,23 +319,25 @@ diff --git a/layout/style/FontFaceImpl.h b/layout/style/FontFaceImpl.h
  #include "nsTHashSet.h"
  
  class gfxFontFaceBufferSource;
-@@ -27,6 +29,25 @@
+@@ -27,6 +29,27 @@ class UTF8StringOrArrayBufferOrArrayBufferView;
  
  namespace mozilla::dom {
  
 +// Helper function to check if a font is in the allowed list
 +inline bool IsFontAllowed(const nsACString& aFontName) {
-+  // Prefer this context's list. FontFaceSet.cpp scopes an AutoFontListContext
-+  // around the FontFaceSet entry points, so document.fonts questions arrive
-+  // with a context. Reading only the launch-level "fonts" key here made
-+  // document.fonts answer for the launch OS in every context (#44).
++  // Per-context list first (#44): a context that installed a list of its
++  // own through setFontList() is limited to it. The launch-level allowlist
++  // still applies on top -- the two intersect here exactly as they do on
++  // every C++ read path (MaskedFontListBlocks, then CamouIsFontAllowed), so
++  // document.fonts cannot report a face that text rendering will refuse.
 +  if (uint32_t ctx = FontListManager::GetCurrentContext();
 +      ctx != 0 && FontListManager::HasFontList(ctx)) {
 +    nsAutoCString key(aFontName);
 +    ToLowerCase(key);
-+    return FontListManager::IsFontAllowed(ctx, key);
++    if (!FontListManager::IsFontAllowed(ctx, key)) {
++      return false;
++    }
 +  }
-+  // No per-context list: the launch-level allowlist, in one place.
 +  std::string fontName(aFontName.BeginReading(), aFontName.Length());
 +  std::transform(fontName.begin(), fontName.end(), fontName.begin(),
 +                 [](unsigned char c) { return std::tolower(c); });
