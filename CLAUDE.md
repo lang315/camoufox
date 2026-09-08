@@ -168,9 +168,12 @@ wrong.
 `gfxFontGroup` caches its user context id once in its constructor, through
 `mFontVisibilityProvider->GetDocument()` → inner window → `BrowsingContext` —
 four hops, each failing silently to 0. `CamouIsFontAllowed` treats context 0 as
-"no per-context list" and falls through to the launch-level `fonts` key, which
-under a launch that sets no `fonts` is empty and therefore **allows every
-family**. Two separate hops of that chain have already been found failing
+"no per-context list" and **returns `true`, allowing every family**. It never
+consults the launch-level `fonts` key: that question is answered separately by
+`MaskedFontListBlocks` / `MaskConfig::IsFontAllowed`, at the sites that carry a
+`FontVisibilityProvider`. So a failed context id is not caught further down —
+nothing re-asks the question this gate could not answer. Two separate hops of
+that chain have already been found failing
 (`OffscreenCanvas::GetDocument()` off-main-thread, and whatever #83 turns out to
 be). Fixing individual hops does not close the class: a gate that cannot
 establish who is asking should deny.
@@ -196,6 +199,19 @@ assuming a font change is complete): `SystemFindFontForChar` /
 worker + `OffscreenCanvas` (`GetDocument()` is null off-main-thread, so the
 context id falls to 0); `LookupLocalFont` / `LookupInFaceNameLists` (matched by
 full/PostScript name, not family key).
+
+`fix/44-fonts-h2` (PR #84) closed four of those entries: codepoint fallback
+through `CommonFontFallback` and `GlobalFontFallback`, which
+`SystemFindFontForChar` reaches — smoke arm (f); the CSS `@font-face` path,
+gated in `FontFaceImpl::SetStatus`, which `FontFaceSet::InsertRuleFontFace`
+reaches during style flush — arm (e); the worker and `OffscreenCanvas` context
+id, given a real value from `WorkerPrivate` — arm (g); and face-name lookup
+through `LookupInSharedFaceNameList` — arm (h). Still ungated after it:
+`gfxFontGroup::GetDefaultFont()`'s shared-list branch, the last-resort walk;
+the non-shared `LookupInFaceNameLists` and `CommonFontFallback` `else`
+branches, dormant while `gfx.e10s.font-list.shared` is true; and
+`LookupLocalFont` on the macOS and Windows platform font lists, which a Linux
+guard cannot see.
 
 ## Constraints when editing this repo
 
