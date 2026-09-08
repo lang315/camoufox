@@ -1700,8 +1700,11 @@ jobs:
           # win context of this same run (arm (g), main thread, same text,
           # same 48px, same monospace stack). Advance widths are a property
           # of the font file, not of the context -- Tahoma measures
-          # identically in both contexts above -- so that reference is
-          # guaranteed to differ from every other face. The previous verdict,
+          # identically in both contexts above -- so that reference differs
+          # from every face this arm can otherwise reach in this run --
+          # monospace, sans-serif and serif, checked below. Metric-compatible
+          # families exist by design, so this is a per-run check, not a
+          # universal. The previous verdict,
           # `width != baseline`, could not tell "resolved Segoe UI" from
           # "local() was blocked and text fell back to a non-monospace face":
           # diag run 34211089822 logged the gate BLOCKING both mac probes
@@ -1714,10 +1717,14 @@ jobs:
           # companion for this arm is a follow-up.
           h_failures = []
           segoe_ref = g["win"]["gMain"]["Segoe UI"]
-          if segoe_ref == g["win"]["baseline48"]:
+          h_ref_clash = [name for name, w in (("monospace baseline", g["win"]["baseline48"]),
+                                              ("sans-serif", h["win"]["sans"]),
+                                              ("serif", h["win"]["serif"]))
+                         if segoe_ref == w]
+          if h_ref_clash:
               h_failures.append(
-                  f"control invalid: the win context did not resolve Segoe UI by family "
-                  f"name (arm g main thread = baseline {segoe_ref}), so there is no "
+                  f"control invalid: the win context's family-name Segoe UI width ({segoe_ref}) "
+                  f"equals its {' and '.join(h_ref_clash)} width, so it cannot serve as the "
                   f"genuine-face reference for this run")
           for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
               for probe_key, probe_name in (("hFull", "local('Segoe UI')"),
