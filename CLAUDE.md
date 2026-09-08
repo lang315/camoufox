@@ -113,13 +113,18 @@ Windows and macOS. The claim was plausible, repeated in a PR body, a plan
 document and a shipped docstring, and never checked against `Makefile`.
 
 **2. "Unreachable" is a claim about ALL paths, not the one you looked at.**
-`FontFaceImpl::SetStatus` consults `IsFontAllowed` with no `AutoFontListContext`,
-so it answers for the launch OS in every context. This was dismissed as
-unreachable after checking only `FontFace::Load()` — which the fork rewrites to
-resolve immediately, so it genuinely is safe. But CSS `@font-face` rules reach
-`SetStatus` through `FontFaceSet::InsertRuleFontFace` during style flush, which
-is *not* wrapped (only `Check` and `Add` are). Enumerate the callers before
-declaring a path dead; "I checked the obvious one" is not a reachability proof.
+`FontFaceImpl::SetStatus` consults `IsFontAllowed` with no `AutoFontListContext`
+of its own. This was dismissed as unreachable after checking only
+`FontFace::Load()` — which the fork rewrites to resolve immediately, so it
+genuinely is safe. But CSS `@font-face` rules reach `SetStatus` through
+`FontFaceSet::InsertRuleFontFace` during style flush, which is *not* wrapped.
+On the beta.31 tree exactly two entry points carry an `AutoFontListContext`:
+`FontFaceSet::Load` (`layout/style/FontFaceSet.cpp:137`, scope at `:152`) and
+`FontFaceSet::Check` (`:182`, scope at `:195`). `FontFaceSet::Add` (`:250`) and
+`FontFaceSet::InsertRuleFontFace` (`:391`) carry none, so whatever context the
+CSS-rule path answers in, it is covered by measurement and not by a scope.
+Enumerate the callers before declaring a path dead; "I checked the obvious one"
+is not a reachability proof.
 
 **3. A guard only answers the question it was asked.**
 The #44 guard was genuinely well built — real tripwires, verified it could go
@@ -206,7 +211,18 @@ through `CommonFontFallback` and `GlobalFontFallback`, which
 gated in `FontFaceImpl::SetStatus`, which `FontFaceSet::InsertRuleFontFace`
 reaches during style flush — arm (e); the worker and `OffscreenCanvas` context
 id, given a real value from `WorkerPrivate` — arm (g); and face-name lookup
-through `LookupInSharedFaceNameList` — arm (h). Still ungated after it:
+through `LookupInSharedFaceNameList` — arm (h).
+
+The `@font-face` entry is closed **in the shape arm (e) measures**, not by a
+scope — `InsertRuleFontFace` still carries no `AutoFontListContext`, per lesson
+2 above. What backs it is smoke run 34213805428, where the same three CSS rules
+got opposite per-context `FontFace.status` answers: the mac context reported
+`Segoe UI` error and `Helvetica Neue` loaded, the win context the reverse, both
+matching arm (b)'s per-context ground truth. The arm's own discriminator in that
+run named the defect a quoted family key rather than a missing context scope.
+Treat any different shape as unmeasured.
+
+Still ungated after it:
 `gfxFontGroup::GetDefaultFont()`'s shared-list branch, the last-resort walk;
 the non-shared `LookupInFaceNameLists` and `CommonFontFallback` `else`
 branches, dormant while `gfx.e10s.font-list.shared` is true; and
