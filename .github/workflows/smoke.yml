@@ -1327,11 +1327,15 @@ jobs:
             const s48 = 'mmmmmmmmmmlli';
             c.font = '48px monospace';
             const baseline = c.measureText(s48).width;
+            c.font = '48px sans-serif';
+            const sans = c.measureText(s48).width;
+            c.font = '48px serif';
+            const serif = c.measureText(s48).width;
             c.font = '48px "ProbeH_full", monospace';
             const hFull = c.measureText(s48).width;
             c.font = '48px "ProbeH_ps", monospace';
             const hPs = c.measureText(s48).width;
-            return {hFull: hFull, hPs: hPs, baseline: baseline};
+            return {hFull: hFull, hPs: hPs, baseline: baseline, sans: sans, serif: serif};
           }"""
 
           JS_WEBFONT = """async (fontDataUri) => {
@@ -1515,6 +1519,7 @@ jobs:
               "win": {"Segoe UI": win["measure"]["Segoe UI"],
                       "Helvetica Neue": win["measure"]["Helvetica Neue"], "Tahoma": True},
           }
+          # CAVEAT: arm (b)'s "ground truth" is valid only in the donor-closed shape it measures (see the #83 discriminator below); a donor-alive companion for this arm is a follow-up.
           e_failures = []
           for label, ground in e_ground.items():
               for fam, present in ground.items():
@@ -1671,6 +1676,7 @@ jobs:
           # threads for pref-font resolution). A comparison whose two
           # sides can differ for a reason unrelated to #44 is not a valid
           # discriminator.
+          # CAVEAT: arm (b)'s "ground truth" is valid only in the donor-closed shape it measures (see the #83 discriminator below); a donor-alive companion for this arm is a follow-up.
           g_failures = []
           for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
               for fam in ("Segoe UI", "Helvetica Neue"):
@@ -1688,16 +1694,49 @@ jobs:
           # (g) compares against above -- NOT "mac != win", since a leak
           # that resolved the SAME wrong face in both contexts would still
           # show mac == win and pass a same-vs-different check.
+          #
+          # "Resolved" means the probe rendered the GENUINE Segoe UI face:
+          # its width equals Segoe UI's width measured by family name in the
+          # win context of this same run (arm (g), main thread, same text,
+          # same 48px, same monospace stack). Advance widths are a property
+          # of the font file, not of the context -- Tahoma measures
+          # identically in both contexts above -- so that reference is
+          # guaranteed to differ from every other face. The previous verdict,
+          # `width != baseline`, could not tell "resolved Segoe UI" from
+          # "local() was blocked and text fell back to a non-monospace face":
+          # diag run 34211089822 logged the gate BLOCKING both mac probes
+          # (ctx with list, allowed=0) while the mac page still measured
+          # 375.7 -- neither Segoe UI (448.4) nor monospace (507.5) -- and the
+          # old verdict called that a leak for four consecutive runs.
+          #
+          # CAVEAT: arm (b)'s "ground truth" is valid only in the donor-closed
+          # shape it measures (see the #83 discriminator below); a donor-alive
+          # companion for this arm is a follow-up.
           h_failures = []
+          segoe_ref = g["win"]["gMain"]["Segoe UI"]
+          if segoe_ref == g["win"]["baseline48"]:
+              h_failures.append(
+                  f"control invalid: the win context did not resolve Segoe UI by family "
+                  f"name (arm g main thread = baseline {segoe_ref}), so there is no "
+                  f"genuine-face reference for this run")
           for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
               for probe_key, probe_name in (("hFull", "local('Segoe UI')"),
                                             ("hPs", "local('SegoeUI')")):
-                  resolved = h[label][probe_key] != h[label]["baseline"]
+                  w = h[label][probe_key]
+                  resolved = abs(w - segoe_ref) < 0.01
+                  fell_back_to = ("monospace" if w == h[label]["baseline"] else
+                                  "sans-serif" if w == h[label]["sans"] else
+                                  "serif" if w == h[label]["serif"] else
+                                  "an unidentified face")
+                  print(f"  [{label} / arm h] {probe_name}: width={w} segoe={segoe_ref} "
+                        f"baseline={h[label]['baseline']} sans={h[label]['sans']} "
+                        f"serif={h[label]['serif']} -> "
+                        f"{'resolved Segoe UI' if resolved else 'fell back to ' + fell_back_to}")
                   if resolved != ground["Segoe UI"]:
                       h_failures.append(
                           f"{label}/{probe_name}: {'resolved' if resolved else 'did not resolve'} "
-                          f"the face (width={h[label][probe_key]} baseline={h[label]['baseline']}), "
-                          f"arm (b) says this context "
+                          f"the Segoe UI face (width={w} segoe={segoe_ref} "
+                          f"baseline={h[label]['baseline']}), arm (b) says this context "
                           f"{'has' if ground['Segoe UI'] else 'does not have'} Segoe UI")
 
           if e_failures:
