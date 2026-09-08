@@ -97,7 +97,7 @@ Two suites, **both required for PRs** (they cover different layers):
 
 ## Verifying spoofing claims (learned the hard way)
 
-Three failures from the #44 fonts work, each of which produced green CI and a
+Six failures from the #44 fonts work, each of which produced green CI and a
 wrong conclusion. They generalise; read them before asserting that a spoof is
 safe, complete, or unreachable.
 
@@ -113,13 +113,18 @@ Windows and macOS. The claim was plausible, repeated in a PR body, a plan
 document and a shipped docstring, and never checked against `Makefile`.
 
 **2. "Unreachable" is a claim about ALL paths, not the one you looked at.**
-`FontFaceImpl::SetStatus` consults `IsFontAllowed` with no `AutoFontListContext`,
-so it answers for the launch OS in every context. This was dismissed as
-unreachable after checking only `FontFace::Load()` — which the fork rewrites to
-resolve immediately, so it genuinely is safe. But CSS `@font-face` rules reach
-`SetStatus` through `FontFaceSet::InsertRuleFontFace` during style flush, which
-is *not* wrapped (only `Check` and `Add` are). Enumerate the callers before
-declaring a path dead; "I checked the obvious one" is not a reachability proof.
+`FontFaceImpl::SetStatus` consults `IsFontAllowed` with no `AutoFontListContext`
+of its own. This was dismissed as unreachable after checking only
+`FontFace::Load()` — which the fork rewrites to resolve immediately, so it
+genuinely is safe. But CSS `@font-face` rules reach `SetStatus` through
+`FontFaceSet::InsertRuleFontFace` during style flush, which is *not* wrapped.
+On the beta.31 tree exactly two entry points carry an `AutoFontListContext`:
+`FontFaceSet::Load` (`layout/style/FontFaceSet.cpp:137`, scope at `:152`) and
+`FontFaceSet::Check` (`:182`, scope at `:195`). `FontFaceSet::Add` (`:250`) and
+`FontFaceSet::InsertRuleFontFace` (`:391`) carry none, so whatever context the
+CSS-rule path answers in, it is covered by measurement and not by a scope.
+Enumerate the callers before declaring a path dead; "I checked the obvious one"
+is not a reachability proof.
 
 **3. A guard only answers the question it was asked.**
 The #44 guard was genuinely well built — real tripwires, verified it could go
@@ -131,12 +136,98 @@ name**, so it never exercises codepoint fallback (`SystemFindFontForChar` /
 platform-sensitive, a Linux-only measurement is not evidence about Windows or
 macOS. State what a guard cannot see, next to what it proves.
 
+**4. A reference is only a control if it is guaranteed to differ.**
+This one cost more than the other three combined. Six times in the #44 fonts
+work an arm was scored against a reference that could equal the value under
+test, and every time the result looked like a finding:
+
+- CSS `@font-face` compared against `document.fonts` keyed by bare family name,
+  while `FontFace.family` serialises *with* quotes, so every face read `error`.
+- Two CJK faces were assumed to have different advances; both are full-width, so
+  the widths agreed no matter which font resolved.
+- A context's own `monospace`/`sans-serif` refs were used as the "nothing
+  rendered" floor for U+FFFD — but those generics resolve *within* that
+  context's allowed list, which covers U+FFFD, so a correct resolution read as
+  tofu. Three investigations were declared invalid on that.
+- A worker's font widths were compared against a main-thread baseline. Cross
+  thread, and `GetDefaultGeneric` special-cases workers, so a false red would
+  have printed identically to a real one.
+- A `window.__x` global set by an init script was read back with
+  `page.evaluate()`, which runs in an **isolated world** — the fork's own core
+  feature, guarded by the first step of the same workflow. It reported "absent"
+  for every context including the first of a fresh launch.
+- The same instrumentation, once fixed, read the **second** init-script
+  invocation. Playwright runs init scripts on every navigation and `new_page()`
+  lands on `about:blank` first, so a one-shot setter is already consumed by the
+  time the probe navigates. That produced, and I published, a false conclusion
+  that the entire per-context mechanism had never run.
+
+The general form: **a cross-thread, cross-process, cross-world or cross-context
+reference is not a control unless something establishes that the two sides are
+comparable.** Before trusting a red or a green, state what would produce it
+*wrongly* and show that did not happen. Three of the six were caught only by
+contradiction with a fact already known to be true — not by the result looking
+wrong.
+
+**5. The font gate fails open, by construction.**
+`gfxFontGroup` caches its user context id once in its constructor, through
+`mFontVisibilityProvider->GetDocument()` → inner window → `BrowsingContext` —
+four hops, each failing silently to 0. `CamouIsFontAllowed` treats context 0 as
+"no per-context list" and **returns `true`, allowing every family**. It never
+consults the launch-level `fonts` key: that question is answered separately by
+`MaskedFontListBlocks` / `MaskConfig::IsFontAllowed`, at the sites that carry a
+`FontVisibilityProvider`. So a failed context id is not caught further down —
+nothing re-asks the question this gate could not answer. Two separate hops of
+that chain have already been found failing
+(`OffscreenCanvas::GetDocument()` off-main-thread, and whatever #83 turns out to
+be). Fixing individual hops does not close the class: a gate that cannot
+establish who is asking should deny.
+
+**6. Read the state back before you name it.**
+Three times in one day of the #44 work, a specific detail was asserted without
+reading it: a commit sha quoted from memory that existed nowhere in the repo
+(twice), a claim that a file "no longer appears" in rehearsal output that had
+been truncated with `tail` before the filename lines, and a duplicate 90-minute
+build dispatched because a subagent's idle notification was read as "has not
+acted" instead of checking the run list. None changed a conclusion, but two went
+into commit messages on a pushed branch and one wasted a build.
+
+The cost here is asymmetric: reading back a sha, an output tail, or a run list
+takes seconds, and this repo's feedback loops are 40-95 minutes. Anything that
+goes into a commit message, an issue, or a PR body is a claim someone will act
+on later — check it against the actual state rather than against what you
+remember doing.
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
 worker + `OffscreenCanvas` (`GetDocument()` is null off-main-thread, so the
 context id falls to 0); `LookupLocalFont` / `LookupInFaceNameLists` (matched by
 full/PostScript name, not family key).
+
+`fix/44-fonts-h2` (PR #84) closed four of those entries: codepoint fallback
+through `CommonFontFallback` and `GlobalFontFallback`, which
+`SystemFindFontForChar` reaches — smoke arm (f); the CSS `@font-face` path,
+gated in `FontFaceImpl::SetStatus`, which `FontFaceSet::InsertRuleFontFace`
+reaches during style flush — arm (e); the worker and `OffscreenCanvas` context
+id, given a real value from `WorkerPrivate` — arm (g); and face-name lookup
+through `LookupInSharedFaceNameList` — arm (h).
+
+The `@font-face` entry is closed **in the shape arm (e) measures**, not by a
+scope — `InsertRuleFontFace` still carries no `AutoFontListContext`, per lesson
+2 above. What backs it is smoke run 34213805428, where the same three CSS rules
+got opposite per-context `FontFace.status` answers: the mac context reported
+`Segoe UI` error and `Helvetica Neue` loaded, the win context the reverse, both
+matching arm (b)'s per-context ground truth. The arm's own discriminator in that
+run named the defect a quoted family key rather than a missing context scope.
+Treat any different shape as unmeasured.
+
+Still ungated after it:
+`gfxFontGroup::GetDefaultFont()`'s shared-list branch, the last-resort walk;
+the non-shared `LookupInFaceNameLists` and `CommonFontFallback` `else`
+branches, dormant while `gfx.e10s.font-list.shared` is true; and
+`LookupLocalFont` on the macOS and Windows platform font lists, which a Linux
+guard cannot see.
 
 ## Constraints when editing this repo
 
