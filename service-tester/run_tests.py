@@ -33,7 +33,7 @@ if sys.platform == "win32":
 from pathlib import Path
 from typing import Optional
 
-from _bundle import ensure_bundle, start_http_server
+from _bundle import collect_results, ensure_bundle, start_http_server
 from _certificate import (
     compute_cross_profile,
     generate_certificate,
@@ -82,26 +82,20 @@ async def _run_os_group(AsyncCamoufox, AsyncNewContext, launch_kwargs, entries,
                     return_exceptions=True,
                 )
 
-                # Wait for all tests to complete
-                print(f"  Waiting for all tests to complete...")
-                await asyncio.gather(
-                    *[p.wait_for_function("!!window.__testComplete__", timeout=120_000)
-                      for p in pages],
-                    return_exceptions=True,
-                )
-
+                # The page hands its results off through a DOM node; collect_results
+                # waits for it (page.evaluate() cannot see page-world globals on this
+                # fork, so the old window.__testComplete__ wait never returned).
                 # Collect results
                 print(f"  Collecting results from {len(open_contexts)} contexts...")
                 for ctx_data in open_contexts:
                     page = ctx_data["page"]
                     profile = ctx_data["profile"]
                     try:
-                        test_error = await page.evaluate("window.__testError__")
+                        results, test_error = await collect_results(page)
                         if test_error:
                             pr = {"profile": profile, "results": None, "grade": "F",
                                   "passCount": 0, "totalChecks": 0, "error": test_error}
                         else:
-                            results = await page.evaluate("window.__testResults__")
                             adjust_cross_os_font_checks(profile["os"], results)
                             pass_count, total_checks = count_all_checks(results)
                             grade = compute_grade(pass_count, total_checks)
