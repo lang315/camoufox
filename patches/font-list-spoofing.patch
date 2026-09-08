@@ -480,25 +480,23 @@ index xxxxxxxxxx..yyyyyyyyyy 100644
    EnsureFontList();
  
    uint32_t count = mFonts.Length();
-@@ -3223,12 +3242,18 @@
-       presentation = FontPresentation::TextExplicit;
+@@ -3450,10 +3469,16 @@
+       }
      }
    }
  
-   if (!isJoinControl && !wasJoinCauser && !isVarSelector &&
-       !nextIsVarSelector && presentation == FontPresentation::Any) {
-+    // Camoufox (#44): Geneva resolves via this first-listed-family fast
-+    // path (attempts 1/2 scoped the loop below and left arm (h) red
-+    // without touching Geneva) -- scope here on the chance arm (h)'s
-+    // probe font is also index 0, reached before the loop ever runs.
+   if (fontListLength == 0) {
++    // Camoufox (#44): pref-font and system-fallback search below --
++    // scoped here too since neither the pre-loop first-font path nor
++    // the loop above alone satisfied arm (h). WhichSystemFontSupportsChar
++    // below already has its own guard (Task 4).
 +    mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);
 +
-     RefPtr<gfxFont> firstFont = GetFontAt(0, aCh, &loading);
-     if (firstFont) {
-       if (firstFont->HasCharacter(aCh) ||
-           (fallbackChar && firstFont->HasCharacter(fallbackChar))) {
-         *aMatchType = {FontMatchType::Kind::kFontGroup, mFonts[0].Generic()};
-         return firstFont.forget();
+     RefPtr<gfxFont> defaultFont = GetDefaultFont();
+     if (defaultFont->HasCharacter(aCh) ||
+         (fallbackChar && defaultFont->HasCharacter(fallbackChar))) {
+       if (CheckCandidate(defaultFont, FontMatchType::Kind::kFontGroup)) {
+         return defaultFont.forget();
 @@ -3931,6 +3956,10 @@
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
