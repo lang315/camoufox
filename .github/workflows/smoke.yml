@@ -710,6 +710,23 @@ jobs:
           # (e)/(f)/(g)/(i)/(j)/(j2)'s own behavior.
           tripwires = []
 
+          # C5 (from this task's review): an arm that reports "unmeasured",
+          # "setup invalid" or "control invalid" has measured NOTHING -- it is
+          # red because its own preconditions failed, not because the defect it
+          # guards is still open. The EXPECTED_RED triage table at the end of
+          # this step prints "RED (expected) ... unfixed" for every arm that
+          # reaches `tripwires`, which asserts a verdict such an arm never
+          # produced -- run 34322535132 did exactly that for (i2), (j) and (j2).
+          # Arms record themselves here as well, and the table annotates them.
+          unmeasured_arms = {}
+
+          def note_unmeasured(tag, failures, verdict_marker):
+              # `verdict_marker` is the substring ONLY the arm's real leak/bug
+              # branch emits. No marker anywhere in the arm's failure strings
+              # means the arm never reached its verdict branch.
+              if failures and not any(verdict_marker in f for f in failures):
+                  unmeasured_arms[tag] = failures[0][:220]
+
           # #83 / #82 process instrumentation. content_pids() is unchanged and
           # was moved up from the pid block further down -- arms (b2r), (j) and
           # (j2) all need it now, and it was defined after all three.
@@ -1041,6 +1058,14 @@ jobs:
           #  * The measurement itself is arm (b)'s own JS/PROBES, so a genuinely
           #    absent signal (nothing resolves, impossible family resolves) is
           #    still caught by check_signal below, exactly as in arm (b).
+          #  * A VACUOUS DONOR. check_signal only asks whether a context
+          #    resolved SOMETHING, and the mac donor satisfies that by resolving
+          #    anything at all. If mac never resolved the macOS-only families
+          #    there was nothing for win to leak, win's clean result is
+          #    guaranteed under H1 and H2 alike, and a GREEN here means nothing.
+          #    Arm (b), which is this arm's control, asserts it with its own
+          #    `if not all(mac["measure"][f] for f in MAC_ONLY)`; this arm had
+          #    dropped that assertion and now makes it too, as setup invalid.
           B2R_INIT = ('(() => { const saw = (typeof window.setFontList === "function"); '
                       'let applied = false; '
                       'if (saw) { window.setFontList(%s); applied = true; } '
@@ -1117,6 +1142,22 @@ jobs:
                       f"called on the document that was measured. That context has no list, "
                       f"is therefore allowed every family, and any 'leak' below would be an "
                       f"artefact of this setup rather than #83.")
+              if label == "mac" and not all(b2r["mac"]["res"]["measure"][f] for f in MAC_ONLY):
+                  # C2 (from this task's review): arm (b)'s own donor assertion
+                  # -- its `if not all(mac["measure"][f] for f in MAC_ONLY)` --
+                  # which this arm had dropped. A GREEN here reads "win
+                  # resolved none of MAC_ONLY", which is evidence for H1 only if
+                  # the mac donor resolved them in the first place. Without this
+                  # the gate would read a vacuous GREEN as H1 CONFIRMED -- the
+                  # "a reference is only a control if it is guaranteed to differ"
+                  # failure of CLAUDE.md lesson 4, on the donor side. Geneva in
+                  # particular has been the subject of two regression bisects on
+                  # this repo (ca29ceb, fc07cd4), so this is not hypothetical.
+                  b2r_failures.append(
+                      f"arm (b2r) setup invalid: the mac donor resolved "
+                      f"{b2r['mac']['res']['measure']} -- it never resolved the macOS-only "
+                      f"families, so there was nothing for win to leak and win's clean result "
+                      f"is vacuous.")
           if not b2r_failures:
               b2r_leaked = [f for f in MAC_ONLY if b2r["win"]["res"]["measure"][f]]
               if b2r_leaked:
@@ -1126,6 +1167,25 @@ jobs:
                       f"macOS-only families {b2r_leaked} with the donor alive -- H1 is "
                       f"REFUTED; the leak survives the reorder and the cause is not process "
                       f"placement.")
+          # C3 (from this task's review): a (b2r) RED has three distinct causes
+          # and only one of them is a verdict on H1. `no signal` (the
+          # check_signal try/except above) and `setup invalid` (three variants,
+          # C2's donor check included) both mean the arm measured nothing;
+          # reading either as "the leak survives the reorder" would draw a
+          # conclusion from an arm that never ran. The kind is computed here and
+          # printed on its own `[b2r / kind]` line -- deliberately NOT a second
+          # line beginning "  (b2r) ", which the readback grep would then pick up
+          # twice -- so the gate rule reads one token instead of matching prose.
+          if not b2r_failures:
+              b2r_kind = "GREEN -- H1 CONFIRMED"
+          elif any(f.startswith("arm (b2r)/#83:") for f in b2r_failures):
+              b2r_kind = "RED, leak -- H1 REFUTED"
+          else:
+              b2r_kinds = sorted({"no signal" if f.startswith("arm (b2r) no signal:")
+                                  else "setup invalid" for f in b2r_failures})
+              b2r_kind = ("RED, " + "/".join(b2r_kinds) +
+                          " -- NEITHER, this arm measured nothing and refutes nothing")
+          print(f"  [b2r / kind] {b2r_kind}")
           print(f"  (b2r) #83 discriminator (init script on the document under test):  "
                 f"{'RED' if b2r_failures else 'GREEN'} -- "
                 f"{b2r_failures or 'win saw none of the macOS-only families -- H1 CONFIRMED: the list is process-local and the leak is process placement, not a broken gate'}")
@@ -2025,7 +2085,17 @@ jobs:
             return widths;
           }"""
 
-          hp_families, hp_errs = mac_bundle_families()
+          # M1 (from this task's review): arm (k)'s fontTools import is wrapped
+          # and this one was not, while this call runs FIRST -- a
+          # pip-succeeds-then-import-fails would abort the whole step before
+          # arms (k), (i), (i2), (j) and (j2). Wrapping it makes the "this is a
+          # DIAGNOSTIC, it changes no verdict" claim above true without
+          # qualification: a failure lands in the SKIP branch below.
+          try:
+              hp_families, hp_errs = mac_bundle_families()
+          except Exception as exc:
+              hp_families = []
+              hp_errs = [f"mac_bundle_families: {type(exc).__name__}: {exc}"]
           print(f"  [arm h' / #88] enumerated {len(hp_families)} family names from "
                 f"bundle/fonts/macos; {len(hp_errs)} file(s) could not be read: {hp_errs}")
           if not hp_families:
@@ -2306,11 +2376,18 @@ jobs:
                       f"the probe measured {k_bare['probeWidth']}, not {K_EXPECT}. The payload "
                       f"or the @font-face rule is at fault, not the gate, and this arm cannot "
                       f"say anything about #80 until the bare control renders.")
-              elif abs(k_bare["baseline"] - K_EXPECT) < 0.01:
+              elif (abs(k_bare["baseline"] - K_EXPECT) < 0.01
+                    or abs(k_list["baseline"] - K_EXPECT) < 0.01):
+                  # M6 (from this task's review): wrong-GREEN cause 2 above says
+                  # "the monospace baseline for the same string is measured and
+                  # must not equal 1920", but only the bare launch's baseline was
+                  # checked. Both launches measure one, and either reaching
+                  # K_EXPECT destroys the identification.
                   k_failures.append(
                       f"arm (k) control invalid: the monospace baseline for the same string is "
-                      f"also {k_bare['baseline']}, so {K_EXPECT} no longer identifies the "
-                      f"probe face.")
+                      f"also {K_EXPECT} in at least one launch (bare {k_bare['baseline']}, "
+                      f"per-context list {k_list['baseline']}), so {K_EXPECT} no longer "
+                      f"identifies the probe face.")
               else:
                   if k_list["status"] != "loaded":
                       k_failures.append(
@@ -2556,6 +2633,7 @@ jobs:
                       'window.setFontList(%s);' % json.dumps(",".join(list_a)))
                   page_a = ctx_a.new_page()
                   page_a.goto("data:text/html,<h1>i2-a</h1>")
+                  pids_a = tab_pids()
 
                   ctx_b = b.new_context()
                   ctx_b.add_init_script(
@@ -2563,7 +2641,7 @@ jobs:
                       'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                   page_b = ctx_b.new_page()
                   page_b.goto("data:text/html,<h1>i2-b</h1>")
-                  pids = tab_pids()
+                  pids_b = tab_pids()
 
                   # Both installs are done, so both clears are spent. Only now
                   # does anything render.
@@ -2571,24 +2649,51 @@ jobs:
                   result_b = page_b.evaluate(js)
 
                   b.close()
-                  return result_a, result_b, {"after_both": pids}
+                  # C4 (from this task's review): TWO samples, taken in the same
+                  # shape arms (j)/(j2) take theirs -- after A's navigation and
+                  # after B's, both before either render -- so this arm can run
+                  # their "no NEW tab pid appeared for B" test rather than an
+                  # exact-cardinality one.
+                  return result_a, result_b, {"after_a": pids_a, "after_b": pids_b}
 
+          # C4 (from this task's review): fission.autostart=False, which arms (j)
+          # and (j2) already pass and this arm did not, even though it is the arm
+          # least likely to be able to score. #83's process table (run
+          # 34008395471) shows dom.ipc.processCount=1 alone does not reliably
+          # collapse two contexts into one content process.
           i2_a, i2_b, i2_pids = two_contexts_installs_first(
-              NO_CJK_PROBE, FONTS["win"], JS_4B)
+              NO_CJK_PROBE, FONTS["win"], JS_4B,
+              extra_prefs={"fission.autostart": False})
           i2_a_tofu = i2_a["final"] in i2_a["refs"].values()
-          i2_b_tofu = i2_b["final"] == i2_a["final"]
+          # M4 (from this task's review): a 0.01 tolerance, matching every other
+          # comparison the new arms make. The exact `==` inherited from arm (i)
+          # would call a real leak clean on a one-ulp difference. The
+          # `i2_a_tofu` line above keeps arm (i)'s exact form deliberately: it
+          # was not flagged and is not part of this repair.
+          i2_b_tofu = abs(i2_b["final"] - i2_a["final"]) < 0.01
           print(f"  [arm i2 / #81] context A (no-CJK list, installed first, rendered first) "
                 f"settled={i2_a['final']} refs={i2_a['refs']} samples={i2_a['samples']}")
           print(f"  [arm i2 / #81] context B (FONTS['win'], installed BEFORE A rendered) "
                 f"settled={i2_b['final']} refs={i2_b['refs']} samples={i2_b['samples']}")
-          print(f"  [arm i2 / #81] tab pids after both navigations: {i2_pids}")
+          print(f"  [arm i2 / #81] tab pids after A / after B: {i2_pids}")
 
           i2_failures = []
-          if isinstance(i2_pids["after_both"], str) or len(i2_pids["after_both"]) != 1:
+          if isinstance(i2_pids["after_a"], str) or isinstance(i2_pids["after_b"], str):
               i2_failures.append(
-                  f"arm (i2)/#81 unmeasured: tab pids were {i2_pids['after_both']}, not a "
-                  f"single shared process. mCodepointsWithNoFonts is a per-process member, so "
-                  f"A's miss cannot reach B and this arm tests nothing.")
+                  f"arm (i2)/#81 unmeasured: could not read the content-process table "
+                  f"({i2_pids}) -- mCodepointsWithNoFonts is a per-process member, so without "
+                  f"the pids this arm cannot tell a working gate from two isolated processes.")
+          elif (i2_pids["after_b"] - i2_pids["after_a"]) or not i2_pids["after_a"]:
+              # C4: arms (j)/(j2)'s exact test, for the reason they give -- a
+              # lingering or preallocated content process makes strict
+              # cardinality false on runs that DID share a process, which is what
+              # run 34322535132 printed here: two identical tab pids, scored
+              # "unmeasured". What is asserted is that B got no NEW tab process.
+              i2_failures.append(
+                  f"arm (i2)/#81 unmeasured: a new content process appeared for B. Tab pids "
+                  f"were {sorted(i2_pids['after_a'])} after A's navigation and "
+                  f"{sorted(i2_pids['after_b'])} after B's, so A's miss cannot reach B and "
+                  f"this arm tests nothing.")
           elif not i2_a_tofu:
               i2_failures.append(
                   f"arm (i2)/#81 setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) "
@@ -2606,11 +2711,14 @@ jobs:
                   f"own list covers, and B's gate never ran because "
                   f"SkipFontFallbackForChar answered first. The clear-on-install fix cannot "
                   f"see this order; the read-path check is what closes it.")
+          i2_ok_msg = (f"context B rendered its own glyph ({i2_b['final']}) rather than A's "
+                       f"tofu floor ({i2_a['final']}), in tab process(es) "
+                       f"{sorted(i2_pids['after_b']) if not isinstance(i2_pids['after_b'], str) else i2_pids['after_b']}")
           print(f"  (i2) negative fallback cache, ordering case (#81):  "
-                f"{'RED' if i2_failures else 'GREEN'} -- "
-                f"{i2_failures or f'context B rendered its own glyph ({i2_b['final']}) rather than A tofu floor ({i2_a['final']}), in tab process {i2_pids['after_both']}'}")
+                f"{'RED' if i2_failures else 'GREEN'} -- {i2_failures or i2_ok_msg}")
           if i2_failures:
               tripwires.append(f"(i2) negative fallback cache, ordering case (#81): {i2_failures}")
+              note_unmeasured("(i2)", i2_failures, "NEGATIVE FALLBACK CACHE BUG")
           # -----------------------------------------------------------
 
           # Cost measurement REMOVED (was JS_4B_COST): window.setFontList()
@@ -2762,8 +2870,16 @@ jobs:
           #     answered both and `final != tofu` was false during a real leak.
           #     Replaced below by positive identification: B leaks iff B's
           #     automatic fallback measures the SAME width as the donor's own
-          #     directly-named Tahoma, and the arm refuses to score unless that
-          #     signature is proven different from B's own tofu floor.
+          #     directly-named Tahoma. The FIRST repair then reinstated
+          #     named['Arial'] two lines later as a "control invalid" floor,
+          #     which is the same defect again: Arial carries no U+FFFD glyph,
+          #     so it routes through the very cache under test and reads the
+          #     donor's width during a real leak -- firing "control invalid" and
+          #     making the leak branch unreachable exactly when the leak is real.
+          #     The floor is now fffd_bisect["tofu"], measured in its own launch
+          #     BEFORE any candidate family is named, so the cache is empty when
+          #     it is taken and it cannot equal the donor's Tahoma width. B's
+          #     named Arial is printed as a diagnostic and scores nothing.
           #  2. Donor and recipient in different content processes.
           #     mReplacementCharFallbackFamily is a member of gfxPlatformFontList,
           #     a per-process singleton, so a split pair tests nothing and would
@@ -2781,12 +2897,18 @@ jobs:
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
           j_sig = j_a["named"]["Tahoma"]      # the leak signature
-          j_b_floor = j_b["named"]["Arial"]   # B's true tofu, no U+FFFD coverage
+          # DIAGNOSTIC ONLY (wrong-GREEN item 1 above): Arial has no U+FFFD
+          # glyph, so this routes through the same system fallback as `final`
+          # and can equal j_sig during a real leak. Printed, never compared.
+          j_b_arial = j_b["named"]["Arial"]
+          # The scoring floor: measured in the bisect's own launch before any
+          # candidate family was named, so the cache was empty when it was taken.
+          j_floor = fffd_bisect["tofu"]
           print(f"  [arm j / #82] context A ({FFFD_DONOR}, donor, first in launch, stays open) "
                 f"settled={j_a['final']} named-Tahoma={j_sig} named={j_a['named']} "
                 f"refs={j_a['refs']} samples={j_a['samples']}")
           print(f"  [arm j / #82] context B ({FFFD_NO_PROBE}, no U+FFFD coverage, same launch, "
-                f"AFTER A) settled={j_b['final']} own-tofu-floor={j_b_floor} "
+                f"AFTER A) settled={j_b['final']} named-Arial(diagnostic)={j_b_arial} "
                 f"named={j_b['named']} refs={j_b['refs']} samples={j_b['samples']}")
           print(f"  [arm j / #82] tab pids after A / after B: {j_pids}")
           print(f"  [arm j / #82] cross-check (printed, not scored): donor Tahoma U+FFFD "
@@ -2822,18 +2944,21 @@ jobs:
                   f"so mReplacementCharFallbackFamily was never populated with Tahoma and "
                   f"there is nothing for context B to inherit. Check whether "
                   f"gfx.font_rendering.fallback.async=false actually applied.")
-          elif abs(j_sig - j_b_floor) < 0.01:
+          elif abs(j_sig - j_floor) < 0.01:
               j_failures.append(
                   f"arm (j)/#82 control invalid: the leak signature ({j_sig}, the donor's "
-                  f"Tahoma) equals context B's own tofu floor ({j_b_floor}, its named Arial), "
-                  f"so a leak and a correct block would read identically. This arm cannot "
-                  f"discriminate on this build.")
+                  f"directly-named Tahoma, measured in this arm's own launch) equals the run's "
+                  f"U+FFFD tofu floor ({j_floor}, taken in the bisect launch before any "
+                  f"candidate family was named), so a leak and a correct block would read "
+                  f"identically. This arm cannot discriminate on this build.")
           elif abs(j_b["final"] - j_sig) < 0.01:
               j_failures.append(
                   f"arm (j)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) -- context B "
                   f"({FFFD_NO_PROBE}, none of which cover U+FFFD) settled U+FFFD at "
                   f"{j_b['final']}, which is the donor's own Tahoma width ({j_sig}) and not "
-                  f"B's tofu floor ({j_b_floor}). Both contexts shared tab process(es) "
+                  f"the run's tofu floor ({j_floor}); B's named Arial, a diagnostic that routes "
+                  f"through the same fallback and scores nothing, read {j_b_arial}. "
+                  f"Both contexts shared tab process(es) "
                   f"{sorted(j_pids['after_a'])}. B rendered a REAL glyph from a family it was "
                   f"never allowed, inherited through gfxPlatformFontList's process-wide "
                   f"mReplacementCharFallbackFamily, which is read at "
@@ -2842,11 +2967,13 @@ jobs:
                       f"Tahoma ({j_sig}); the donor did populate the cache "
                       f"(A settled {j_a['final']}), the two shared "
                       f"process(es) {sorted(j_pids['after_a']) if not isinstance(j_pids['after_a'], str) else j_pids['after_a']}, "
-                      f"and B's own floor is {j_b_floor}")
+                      f"the run's tofu floor is {j_floor}, and B's named Arial "
+                      f"(a diagnostic only) is {j_b_arial}")
           print(f"  (j) replacement-char cache leak (#82):  {'RED' if j_failures else 'GREEN'} "
                 f"-- {j_failures or j_ok_msg}")
           if j_failures:
               tripwires.append(f"(j) replacement-char cache leak (#82): {j_failures}")
+              note_unmeasured("(j)", j_failures, "REPLACEMENT-CHAR CACHE LEAK")
           # -----------------------------------------------------------
 
           # Diagnostic (not scored, no assert -- same discipline as
@@ -3367,20 +3494,36 @@ jobs:
               # matches, the arm cannot identify what the donor resolved and
               # says so rather than falling back to a floor comparison, which is
               # the exact defect this repair removes.
+              #
+              # WHAT WOULD MAKE THIS ARM PRINT A LEAK WRONGLY -- the mode run
+              # 34322535132 actually hit. The bare donor settled at the run's own
+              # tofu floor, i.e. it resolved no real face at all; B then settled
+              # at that same universal tofu, which is the CORRECT outcome, and
+              # the arm printed "LEAK CONFIRMED". Its guard missed it because the
+              # guard compared against j2_b["named"]["Arial"], a named-family
+              # width that itself lacks U+FFFD coverage, rather than against a
+              # "nothing rendered" floor. The floor is now bare_bisect["tofu"],
+              # measured in its own bare launch before any candidate is named,
+              # and a donor sitting on it is scored `setup invalid` -- the same
+              # shape arm (j) uses.
               j2_a, j2_b, j2_pids = two_contexts_bare_then_narrow(
                   FFFD_NO_PROBE, JS_4C,
                   extra_prefs={"gfx.font_rendering.fallback.async": False,
                                "fission.autostart": False})
               j2_sig_families = [fam for fam, w in j2_a["named"].items()
                                  if abs(w - j2_a["final"]) < 0.01]
-              j2_b_floor = j2_b["named"]["Arial"]
+              # DIAGNOSTIC ONLY, for arm (j)'s reason: Arial has no U+FFFD glyph
+              # and routes through the cache under test. Printed, never compared.
+              j2_b_arial = j2_b["named"]["Arial"]
+              j2_floor = bare_bisect["tofu"]
               print(f"  [arm j2 / #82] context A (bare, no setFontList call at all, first in "
                     f"launch, stays open) settled={j2_a['final']} named={j2_a['named']} "
                     f"refs={j2_a['refs']} samples={j2_a['samples']}")
               print(f"  [arm j2 / #82] the donor's settled width matches these named families: "
                     f"{j2_sig_families or 'NONE'}")
               print(f"  [arm j2 / #82] context B ({FFFD_NO_PROBE}, no U+FFFD coverage, same "
-                    f"launch, AFTER A) settled={j2_b['final']} own-tofu-floor={j2_b_floor} "
+                    f"launch, AFTER A) settled={j2_b['final']} "
+                    f"named-Arial(diagnostic)={j2_b_arial} "
                     f"named={j2_b['named']} refs={j2_b['refs']} samples={j2_b['samples']}")
               print(f"  [arm j2 / #82] tab pids after A / after B: {j2_pids}")
 
@@ -3395,6 +3538,22 @@ jobs:
                       f"{sorted(j2_pids['after_a'])} after A and {sorted(j2_pids['after_b'])} "
                       f"after B, so donor and recipient did not share the gfxPlatformFontList "
                       f"singleton. Not a verdict either way.")
+              elif abs(j2_a["final"] - j2_floor) < 0.01:
+                  # Ordered BEFORE the sig-families check on purpose. When the
+                  # donor resolves nothing, families that also lack U+FFFD
+                  # coverage still "match" its settled width, so j2_sig_families
+                  # is non-empty and names nothing: run 34322535132 derived
+                  # ['Calibri'] that way and the arm went on to print a leak. A
+                  # donor sitting on the tofu floor is a setup failure, and it is
+                  # now the first thing tested.
+                  j2_failures.append(
+                      f"arm (j2)/#82 setup invalid: the bare donor settled U+FFFD at "
+                      f"{j2_a['final']}, which is the run's own bare-context tofu floor "
+                      f"({j2_floor}, taken in the bisect launch before any candidate was "
+                      f"named). The donor resolved no real face, so nothing was written to "
+                      f"mReplacementCharFallbackFamily and B settling at the same width is the "
+                      f"correct outcome rather than a leak. The derived signature "
+                      f"{j2_sig_families} names only families that also fail to cover U+FFFD.")
               elif not j2_sig_families:
                   j2_failures.append(
                       f"arm (j2)/#82 setup invalid: the bare donor settled U+FFFD at "
@@ -3402,30 +3561,29 @@ jobs:
                       f"({j2_a['named']}). The face now in mReplacementCharFallbackFamily "
                       f"cannot be identified, so no positive-identification verdict is "
                       f"available and this arm will not fall back to a floor comparison.")
-              elif abs(j2_a["final"] - j2_b_floor) < 0.01:
-                  j2_failures.append(
-                      f"arm (j2)/#82 control invalid: the leak signature ({j2_a['final']}, "
-                      f"from {j2_sig_families}) equals context B's own tofu floor "
-                      f"({j2_b_floor}), so a leak and a correct block would read identically.")
               elif abs(j2_b["final"] - j2_a["final"]) < 0.01:
                   j2_failures.append(
                       f"arm (j2)/#82: REPLACEMENT-CHAR CACHE LEAK (#82) CONFIRMED via the "
                       f"bare-context population path -- context B ({FFFD_NO_PROBE}, none of "
                       f"which cover U+FFFD) settled U+FFFD at {j2_b['final']}, the same width "
                       f"the bare donor settled at ({j2_a['final']}, identified as "
-                      f"{j2_sig_families}) and not B's own floor ({j2_b_floor}). Both shared "
+                      f"{j2_sig_families}) and not the run's bare tofu floor ({j2_floor}); "
+                      f"B's named Arial, a diagnostic that routes through the same fallback "
+                      f"and scores nothing, read {j2_b_arial}. Both shared "
                       f"tab process(es) {sorted(j2_pids['after_a'])}. A bare context -- the "
                       f"production shape of one nobody ever called setFontList on, which "
                       f"CamouIsFontAllowed treats exactly like userContextId 0 -- populated "
                       f"the process-wide cache and B inherited a real glyph from a family it "
                       f"was never allowed.")
               j2_ok_msg = (f"context B settled U+FFFD at {j2_b['final']}, which is NOT the "
-                           f"bare donor's {j2_a['final']} ({j2_sig_families}); B's own floor "
-                           f"is {j2_b_floor}")
+                           f"bare donor's {j2_a['final']} ({j2_sig_families}); the run's bare "
+                           f"tofu floor is {j2_floor}, and B's named Arial (a diagnostic only) "
+                           f"is {j2_b_arial}")
               print(f"  (j2) bare-context replacement-char cache leak (#82):  "
                     f"{'RED' if j2_failures else 'GREEN'} -- {j2_failures or j2_ok_msg}")
           if j2_failures:
               tripwires.append(f"(j2) bare-context replacement-char cache leak (#82): {j2_failures}")
+              note_unmeasured("(j2)", j2_failures, "REPLACEMENT-CHAR CACHE LEAK")
           # -----------------------------------------------------------
 
           # Separate arms that are red because a known defect is still open
@@ -3455,8 +3613,21 @@ jobs:
           print("=== tripwire triage ===")
           for k, why in EXPECTED_RED.items():
               hit = any(t.startswith(k) for t in tripwires)
-              print(f"  {k:5} {'RED (expected)' if hit else 'GREEN -- was expected red, so '
-                    'the defect it guards may be fixed; update EXPECTED_RED'}  {why}")
+              if hit and k in unmeasured_arms:
+                  # C5: this arm is red because its OWN preconditions failed. It
+                  # reached no verdict, so the table must not assert that the
+                  # defect it guards is still unfixed.
+                  state = "RED but UNMEASURED -- no verdict; does NOT assert:"
+              elif hit:
+                  state = "RED (expected)"
+              else:
+                  state = ("GREEN -- was expected red, so the defect it guards may be "
+                           "fixed; update EXPECTED_RED")
+              print(f"  {k:5} {state}  {why}")
+          if unmeasured_arms:
+              print("=== UNMEASURED (red, but the arm measured nothing -- not a verdict) ===")
+              for tag, first in unmeasured_arms.items():
+                  print(f"  {tag:5} {first}")
           for t in unexpected:
               print(f"  UNEXPECTED RED: {t}")
           assert not unexpected, (
