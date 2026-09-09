@@ -2408,6 +2408,16 @@ jobs:
                 f"{k_failures or f'status loaded and width {K_EXPECT} under both launches'}")
           if k_failures:
               tripwires.append(f"(k) url() web font under a fonts list (#80): {k_failures}")
+              # R1 (from this task's re-review): arm (k) was the one arm left
+              # carrying C5's defect. Three of its five k_failures branches are
+              # precondition failures -- probe invalid when fontTools could not
+              # build the face, probe invalid when the bare control did not
+              # render, control invalid when a monospace baseline reaches
+              # K_EXPECT -- and all five reach tripwires, so any of the three
+              # printed "(k) RED (expected) ... #80 ... unfixed", a verdict the
+              # arm never produced. The marker is unique to the two verdict
+              # branches, which are the only strings carrying "arm (k)/#80:".
+              note_unmeasured("(k)", k_failures, "arm (k)/#80:")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
