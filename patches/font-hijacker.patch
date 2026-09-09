@@ -179,7 +179,7 @@ diff --git a/gfx/thebes/moz.build b/gfx/thebes/moz.build
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
 diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
-index 56e579eb33..5a679f75ba 100644
+index 56e579eb33..e0d11cbaa3 100644
 --- a/layout/style/FontFace.cpp
 +++ b/layout/style/FontFace.cpp
 @@ -17,6 +17,11 @@
@@ -194,7 +194,7 @@ index 56e579eb33..5a679f75ba 100644
  #include "mozilla/dom/Promise.h"
  #include "mozilla/dom/TypedArray.h"
  #include "mozilla/dom/UnionTypes.h"
-@@ -239,7 +244,46 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
+@@ -239,7 +244,50 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
    mImpl->SetSizeAdjust(aValue, aRv);
  }
  
@@ -233,7 +233,11 @@ index 56e579eb33..5a679f75ba 100644
 +    fontFamily = nsAtomCString(familyName);
 +  }
 +
-+  if (mozilla::dom::IsFontAllowed(fontFamily)) {
++  // #80: same skip as FontFaceImpl::SetStatus. This getter is the one a page
++  // reads most often, and on the JS FontFace path it runs before the face has
++  // a gfxUserFontEntry at all -- which is why the test is on the descriptor
++  // block rather than the entry.
++  if (mImpl->CamouHasNonLocalSource() || mozilla::dom::IsFontAllowed(fontFamily)) {
 +    return FontFaceLoadStatus::Loaded;
 +  } else {
 +    return FontFaceLoadStatus::Error;
@@ -242,7 +246,7 @@ index 56e579eb33..5a679f75ba 100644
  
  Promise* FontFace::Load(ErrorResult& aRv) {
    EnsurePromise();
-@@ -249,7 +293,26 @@ Promise* FontFace::Load(ErrorResult& aRv) {
+@@ -249,7 +297,28 @@ Promise* FontFace::Load(ErrorResult& aRv) {
      return nullptr;
    }
  
@@ -259,7 +263,9 @@ index 56e579eb33..5a679f75ba 100644
 +    fontFamily = nsAtomCString(familyName);
 +  }
 +
-+  if (mozilla::dom::IsFontAllowed(fontFamily)) {
++  // #80: same skip as Status() above, so `new FontFace(f, 'url(...)').load()`
++  // resolves instead of rejecting for a family the page invented.
++  if (mImpl->CamouHasNonLocalSource() || mozilla::dom::IsFontAllowed(fontFamily)) {
 +    // For allowed fonts, always resolve the promise
 +    mLoaded->MaybeResolve(this);
 +  } else {
@@ -271,24 +277,17 @@ index 56e579eb33..5a679f75ba 100644
    return mLoaded;
  }
 diff --git a/layout/style/FontFaceImpl.cpp b/layout/style/FontFaceImpl.cpp
-index f13782ae6d..abb8d83fb3 100644
+index f13782ae6d..166629c58b 100644
 --- a/layout/style/FontFaceImpl.cpp
 +++ b/layout/style/FontFaceImpl.cpp
-@@ -354,21 +354,20 @@ void FontFaceImpl::DoLoad() {
+@@ -354,21 +354,25 @@ void FontFaceImpl::DoLoad() {
  void FontFaceImpl::SetStatus(FontFaceLoadStatus aStatus) {
    gfxFontUtils::AssertSafeThreadOrServoFontMetricsLocked();
  
 -  if (mStatus == aStatus) {
 -    return;
 -  }
-+  // GetFamily() returns the CSS-escaped, possibly-quoted family name;
-+  // use the raw atom instead so a quoted CSS-rule key is never compared
-+  // against unquoted per-context list entries (#44).
-+  nsAutoCString fontFamily;
-+  if (nsAtom* familyName = GetFamilyName()) {
-+    fontFamily = nsAtomCString(familyName);
-+  }
- 
+-
 -  if (aStatus < mStatus) {
 -    // We're being asked to go backwards in status!  Normally, this shouldn't
 -    // happen.  But it can if the FontFace had a user font entry that had
@@ -296,7 +295,20 @@ index f13782ae6d..abb8d83fb3 100644
 -    // if we used a local() rule.  For now, just ignore the request to
 -    // go backwards in status.
 -    return;
-+  if (IsFontAllowed(fontFamily)) {
++  // GetFamily() returns the CSS-escaped, possibly-quoted family name;
++  // use the raw atom instead so a quoted CSS-rule key is never compared
++  // against unquoted per-context list entries (#44).
++  nsAutoCString fontFamily;
++  if (nsAtom* familyName = GetFamilyName()) {
++    fontFamily = nsAtomCString(familyName);
++  }
++
++  // #80: a url() or ArrayBuffer face's family name is invented by the page and
++  // can never be in an OS font list, so the family gate can only ever answer
++  // "no" for it. Skip the gate for those; keep it for local()-only faces,
++  // whose family name genuinely names a host font. Note this does NOT restore
++  // real load status -- aStatus is still discarded here, tracked separately.
++  if (CamouHasNonLocalSource() || IsFontAllowed(fontFamily)) {
 +    mStatus = FontFaceLoadStatus::Loaded;
 +  } else {
 +    mStatus = FontFaceLoadStatus::Error;
@@ -307,6 +319,38 @@ index f13782ae6d..abb8d83fb3 100644
    if (mInFontFaceSet) {
      mFontFaceSet->OnFontFaceStatusChanged(this);
    }
+@@ -712,6 +716,31 @@ bool FontFaceImpl::GetAttributesFromRule(
+   return true;
+ }
+ 
++bool FontFaceImpl::CamouHasNonLocalSource() const {
++  // An ArrayBuffer face has no `src` descriptor at all, so the URL scan below
++  // would answer false for bytes the page supplied directly. mSourceType is
++  // private, which is one reason this is a member and not a free helper.
++  if (mSourceType == eSourceType_Buffer) {
++    return true;
++  }
++  StyleLockedFontFaceRule* data = GetData();
++  if (!data) {
++    return false;  // cannot tell -> keep the gate
++  }
++  AutoTArray<StyleFontFaceSourceListComponent, 8> sources;
++  Servo_FontFaceRule_GetSources(data, &sources);
++  for (const auto& s : sources) {
++    // IsUrl(), not !IsLocal(). The list is flat and interleaves
++    // FormatHintKeyword, FormatHintString and TechFlags components
++    // (servo/components/style/font_face.rs:227-236), so !IsLocal() would
++    // count a format hint as a URL source.
++    if (s.IsUrl()) {
++      return true;
++    }
++  }
++  return false;
++}
++
+ nsAtom* FontFaceImpl::GetFamilyName() const {
+   return Servo_FontFaceRule_GetFamilyName(GetData());
+ }
 diff --git a/layout/style/FontFaceImpl.h b/layout/style/FontFaceImpl.h
 --- a/layout/style/FontFaceImpl.h
 +++ b/layout/style/FontFaceImpl.h
@@ -347,6 +391,25 @@ diff --git a/layout/style/FontFaceImpl.h b/layout/style/FontFaceImpl.h
  class FontFaceImpl final {
    NS_INLINE_DECL_THREADSAFE_REFCOUNTING(FontFaceImpl)
  
+@@ -118,6 +141,18 @@ class FontFaceImpl final {
+    */
+   nsAtom* GetFamilyName() const;
+ 
++  /**
++   * Camoufox (#80): true when this face's bytes come from the page rather than
++   * from a host-installed font -- any url() source, or an ArrayBuffer face.
++   *
++   * Read from the descriptor block, NOT from mUserFontEntry. On the JS
++   * `new FontFace(...)` path the entry stays null until the face is added to a
++   * set (FontFaceSetImpl::InsertNonRuleFontFace), so an mUserFontEntry-based
++   * test would answer false in exactly the case a page most often uses --
++   * `f.load()` and `f.status` read before `document.fonts.add(f)`.
++   */
++  bool CamouHasNonLocalSource() const;
++
+   /**
+    * Returns whether this object is CSS-connected, i.e. reflecting an
+    * @font-face rule.
 diff --git a/layout/style/moz.build b/layout/style/moz.build
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
