@@ -3532,7 +3532,12 @@ jobs:
               """
               width_match = abs(a["final"] - b["named"]) < 0.01
               calib_ok = a["calib"] == b["calib"]
-              px_match = calib_ok and a["pxFallback"] == b["pxNamed"]
+              # Which face served A, by rasterisation rather than by advance.
+              # B's table is the reference because B's list ALLOWS these
+              # families, so B's rendering of each is genuinely that family.
+              px_faces = sorted(f for f, h in b["pxNamedW"].items()
+                                if h == a["pxFallback"])
+              px_match = calib_ok and bool(px_faces)
               matches = sorted(f for f, w in b["namedW"].items()
                                if abs(w - a["final"]) < 0.01)
               print(f"  [{tag}] A's own-list candidates for U+FF71, named directly (no family "
@@ -3543,12 +3548,17 @@ jobs:
               print(f"  [{tag}] cross-context checksum control (Arial, allowed by both lists): "
                     f"A={a['calib']} B={b['calib']} -> "
                     f"{'valid' if calib_ok else 'INVALID -- identity claim falls back to width'}")
-              print(f"  [{tag}] A's fallback U+FF71 pixels={a['pxFallback']} vs B's named "
-                    f"MS Gothic pixels={b['pxNamed']} -> "
-                    f"{'SAME FACE' if px_match else 'differ'}")
+              print(f"  [{tag}] A's fallback U+FF71 checksum={a['pxFallback']}; B's per-family "
+                    f"checksums {b['pxNamedW']} -> A's face is "
+                    f"{px_faces or 'NONE OF THEM -- unidentified'}")
+              print(f"  [{tag}] for comparison, naming those families inside A itself: "
+                    f"{a['pxNamedW']}")
               fired = width_match and (px_match or not calib_ok)
-              print(f"  [{tag}] refused-list context rendered a real glyph? {fired}")
-              return fired, matches, px_match
+              print(f"  [{tag}] refused-list context rendered a NAMED real CJK face? {fired}"
+                    + ("" if fired else
+                       " -- the width matches a CJK family's advance but the rasterisation "
+                       "matches none of them, so what served A is NOT one of these faces"))
+              return fired, (px_faces or matches), px_match
 
           def two_contexts_one_launch(list_a, list_b, js, extra_prefs=None):
               # extra_prefs is additive and defaults to nothing, so arm (i)'s
@@ -3685,10 +3695,21 @@ jobs:
               for (let i = 0; i < d.length; i++) { h = (Math.imul(h, 31) + d[i]) >>> 0; }
               return h;
             };
+            // Per-family checksums, so a face can be NAMED rather than only
+            // excluded. Matching A's fallback against B's table says which
+            // face served A; matching it against A's OWN table says whether
+            // naming a family inside A reaches the same face A already falls
+            // back to.
+            const pxNamedW = {};
+            for (const fam of ['MS Gothic', 'Yu Gothic', 'Microsoft YaHei',
+                               'Microsoft JhengHei', 'PingFang HK']) {
+              pxNamedW[fam] = sum('"' + fam + '"', '\uff71');
+            }
             return {final: samples[samples.length - 1], samples: samples,
                     refs: refs, named: named, ownList: ownList, namedW: namedW,
                     pxFallback: sum('"NoSuchFamilyAtAll"', '\uff71'),
                     pxNamed: sum('"MS Gothic"', '\uff71'),
+                    pxNamedW: pxNamedW,
                     calib: sum('"Arial"', 'AWmi')};
           }"""
 
@@ -4941,10 +4962,16 @@ jobs:
           # #81 measurement path below is left intact for the case where A
           # does settle at its own floor.
           EXPECTED_RED = {
-              "(i)": ("#94/#88 -- the refused-list context renders U+FF71 itself, so A never "
-                      "misses and #81's precondition does not hold on this binary. Returns to "
-                      "EXPECTED_GREEN in Task 7, once A1/A2 gate that path."),
-              "(i2)": ("#94/#88 -- same, ordering case."),
+              "(i)": ("#81 is not measurable on this binary: context A's list refuses every CJK "
+                      "family, yet A settles U+FF71 at 24 -- the same advance a directly-named "
+                      "CJK family gets in context B -- so a correctly-resolving B and a poisoned "
+                      "one produce one number. Run 34486317657's identity check says A's face is "
+                      "NOT B's MS Gothic (checksums 70891568 vs 175460272, cross-context control "
+                      "valid), so what serves A is an unidentified face at a CJK advance, not a "
+                      "named CJK family. Whether that is #94's ungated pref-font memo, #88's last "
+                      "resort or a hexbox is open. Returns to EXPECTED_GREEN in Task 7, once "
+                      "A1/A2 gate that path and A can miss again."),
+              "(i2)": ("Same, ordering case."),
           }
           # The arms that guard defects this branch DOES close, so each must be
           # GREEN here. Listed so the run prints a per-arm verdict line for
