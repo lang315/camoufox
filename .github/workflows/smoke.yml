@@ -33,6 +33,34 @@ jobs:
             libxt6 libxcomposite1 libxdamage1 libxrandr2 libpci3 \
             libasound2t64 speech-dispatcher \
             || sudo apt-get install -y --no-install-recommends libasound2 speech-dispatcher
+          # #90 / arm (n5): speech-dispatcher ALONE registers exactly one voice,
+          # named "Default" -- runs 34501017054, 34503994177, 34504036128,
+          # 34506253452, 34508157395 and 34510848820 all read
+          # `registry: ['Default']`. It is a server with no synthesiser module
+          # attached. setSpeechVoices FILTERS the registry rather than adding to
+          # it, so with one voice no per-context fixture can separate a leak
+          # from a correct refusal and arm (n5) reports setup-invalid. A module
+          # is what makes #90 measurable at all.
+          #
+          # PACKAGE NAMES ARE PRINTED, NOT ASSUMED. `apt-cache policy` runs for
+          # each candidate before the install, so the log says what this runner
+          # actually offers rather than what someone remembered; the install is
+          # then tolerant, and `spd-say -L` plus `dpkg -l` record what landed.
+          # If none of it works the arm still reports setup-invalid and says so.
+          for _p in espeak-ng speech-dispatcher-espeak-ng speech-dispatcher-espeak; do
+            echo "--- apt-cache policy $_p ---"
+            apt-cache policy "$_p" 2>&1 | head -4 || true
+          done
+          sudo apt-get install -y espeak-ng speech-dispatcher-espeak-ng \
+            || sudo apt-get install -y espeak-ng speech-dispatcher-espeak \
+            || sudo apt-get install -y espeak-ng \
+            || echo "!! no espeak module installed -- (n5) will stay unmeasurable"
+          echo "--- dpkg: what actually landed ---"
+          dpkg -l 2>/dev/null | grep -E 'speech-dispatcher|espeak' || true
+          echo "--- spd-say -L (voices the daemon can offer) ---"
+          timeout 30 spd-say -L 2>&1 | head -25 || true
+          echo "--- speech-dispatcher modules configured ---"
+          grep -hE '^\s*AddModule' /etc/speech-dispatcher/speechd.conf 2>/dev/null || true
 
       - name: Download linux artifact
         env:
