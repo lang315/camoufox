@@ -951,9 +951,9 @@ jobs:
                     f"{_absent['width']} ({'differs' if _w_ok else 'SAME'}); pixels "
                     f"{'differ' if _p_ok else 'SAME'} -> "
                     f"{'ACCEPT' if (_w_ok and _p_ok) else 'reject'}")
-              if _w_ok and _p_ok:
-                  MAC_THIRD = _c
-                  break
+              if _w_ok and _p_ok and MAC_THIRD is None:
+                  MAC_THIRD = _c   # first accepted wins; the rest still measure
+                                   # and print, so the log shows all three
           _pre_summary = {_c: _pre[_c] for _c in MAC_CANDIDATES}
           assert MAC_THIRD, (
               f"MAC_ONLY precheck SETUP-INVALID: not one of {MAC_CANDIDATES} renders in a mac "
@@ -1454,6 +1454,17 @@ jobs:
           mac_res, win_res = b_resolved["mac"], b_resolved["win"]
 
           b_failures = []
+          # Same tripwire arm (a) carries for MAC_ONLY, added for symmetry: a mac
+          # family that the presence probe says is THERE in the win context is a
+          # leak whatever the two non-canvas reads say. Without this, a family in
+          # b_collided whose reads both say absent scores False and passes
+          # silently, while arm (a) in the same shape goes red.
+          for f in MAC_ONLY:
+              if b_naming["win"]["present"][f]:
+                  b_failures.append(
+                      f"the win context resolved {f!r}: the presence probe (source "
+                      f"{b_naming['win']['presentSource']}) says it is there, whatever the "
+                      f"width comparison read -- {b_naming['win']['present']}")
           if not all(mac_res[f] for f in MAC_ONLY):
               b_failures.append(
                   "a mac context cannot resolve macOS families under a bare launch -- the "
@@ -3509,7 +3520,7 @@ jobs:
           # B rendering its own real glyph is the fix.
           NO_CJK_PROBE = ["Calibri", "Segoe UI", "Arial"]
 
-          def ungated_render(a, b, tag):
+          def ungated_render(a, b, tag, b_list):
               """A's list refuses every CJK family. Did A still render U+FF71?
 
               Wave 3, team-lead decision: this observation is the DEFECT this
@@ -3530,14 +3541,20 @@ jobs:
               same in both contexts; when it does not, the claim falls back to
               width alone and says so rather than pretending to identity.
               """
+              # The table is only a reference while context B ALLOWS every family
+              # in it: B's reading of a family B refuses is B's own fallback, so
+              # a match against it names a face nothing measured.
+              _refused = [f for f in b["pxNamedW"] if f not in b_list]
+              assert not _refused, (
+                  f"{tag}: the per-family checksum table holds {_refused}, which context B "
+                  f"refuses. B's entry for a refused family is B's OWN fallback, so a match "
+                  f"would name a face that was never measured. Keep the table to families B "
+                  f"allows.")
               width_match = abs(a["final"] - b["named"]) < 0.01
               calib_ok = a["calib"] == b["calib"]
               # Which face served A, by rasterisation rather than by advance.
-              # B's table is the reference because B's list ALLOWS these
-              # families, so B's rendering of each is genuinely that family.
               px_faces = sorted(f for f, h in b["pxNamedW"].items()
                                 if h == a["pxFallback"])
-              px_match = calib_ok and bool(px_faces)
               matches = sorted(f for f, w in b["namedW"].items()
                                if abs(w - a["final"]) < 0.01)
               print(f"  [{tag}] A's own-list candidates for U+FF71, named directly (no family "
@@ -3553,12 +3570,18 @@ jobs:
                     f"{px_faces or 'NONE OF THEM -- unidentified'}")
               print(f"  [{tag}] for comparison, naming those families inside A itself: "
                     f"{a['pxNamedW']}")
-              fired = width_match and (px_match or not calib_ok)
+              # A broken control must make a verdict HARDER, never easier. The
+              # earlier form was `width_match and (px_match or not calib_ok)`,
+              # which discarded the identity evidence exactly when it could not
+              # be trusted and left the verdict resting on a width comparison
+              # that is unconditionally true on this bundle. Every other control
+              # in this guard refuses a verdict when it collides; so does this.
+              fired = width_match and calib_ok and bool(px_faces)
               print(f"  [{tag}] refused-list context rendered a NAMED real CJK face? {fired}"
                     + ("" if fired else
-                       " -- the width matches a CJK family's advance but the rasterisation "
-                       "matches none of them, so what served A is NOT one of these faces"))
-              return fired, (px_faces or matches), px_match
+                       f" -- width_match={width_match} control_valid={calib_ok} "
+                       f"face_matched={px_faces or 'none'}"))
+              return fired, px_faces, matches, calib_ok, width_match
 
           def two_contexts_one_launch(list_a, list_b, js, extra_prefs=None):
               # extra_prefs is additive and defaults to nothing, so arm (i)'s
@@ -3671,9 +3694,16 @@ jobs:
             // Named U+FF71-covering families, so a match can be NAMED rather
             // than inferred. Coverage read locally with fontTools off
             // bundle/fonts/.
+            // Every family here must be ALLOWED in context B. B's reading of a
+            // family B REFUSES is B's own fallback, not that family, so a match
+            // against it would name a face that was never measured. PingFang HK
+            // was in this list and is mac-only: it tied Microsoft YaHei at
+            // 70891568 in run 34491802439 for exactly that reason, and with
+            // YaHei removed it would have produced a confident wrong name.
+            // Asserted against FONTS["win"] on the Python side.
             const namedW = {};
             for (const fam of ['MS Gothic', 'Yu Gothic', 'Microsoft YaHei',
-                               'Microsoft JhengHei', 'PingFang HK']) {
+                               'Microsoft JhengHei']) {
               c.font = '48px "' + fam + '"';
               namedW[fam] = c.measureText('\uff71').width;
             }
@@ -3702,7 +3732,7 @@ jobs:
             // back to.
             const pxNamedW = {};
             for (const fam of ['MS Gothic', 'Yu Gothic', 'Microsoft YaHei',
-                               'Microsoft JhengHei', 'PingFang HK']) {
+                               'Microsoft JhengHei']) {
               pxNamedW[fam] = sum('"' + fam + '"', '\uff71');
             }
             return {final: samples[samples.length - 1], samples: samples,
@@ -3754,25 +3784,39 @@ jobs:
           # red on the control build, arm (j) never printed anything at
           # all because the script died first). Every arm in this guard
           # must run and print, every time, before anything asserts.
-          i_ungated, i_match, i_px = ungated_render(i_a, i_b, "arm i / 4b")
+          i_ungated, i_faces, i_match, i_calib, i_wmatch = ungated_render(
+              i_a, i_b, "arm i / 4b", FONTS["win"])
 
           i_failures = []
           i_verdict = False
           if i_ungated:
               # FIRST, because when this fires A did not miss at all and every
               # branch below would be scoring against a floor that is really a
-              # rendered glyph. Team-lead decision, wave 3: this is the verdict
-              # #94/#88 predicts, not an invalid setup.
+              # rendered glyph. The face is NAMED from the run's own checksum
+              # table -- never a literal, which is how wave 1's "MS Gothic"
+              # survived into a string the same run's table refuted.
               i_verdict = True
               i_failures.append(
                   f"(i) refused-list context rendered U+FF71 at {i_a['final']} -- an ungated "
                   f"read path served it (#94/#88); #81 cannot be measured until that path is "
                   f"gated. A's list ({NO_CJK_PROBE}) holds no CJK family and A's own candidates "
-                  f"read {i_a['ownList']}; the matching named family is "
-                  f"{i_match or 'none by width'}, and "
-                  + ("A's fallback rasterises IDENTICALLY to B's directly-named MS Gothic, so it "
-                     "is that face" if i_px else
-                     "the cross-context checksum control failed, so this rests on width alone"))
+                  f"read {i_a['ownList']}. A's fallback rasterises identically to "
+                  f"{i_faces} named in context B (checksum {i_a['pxFallback']}), so that "
+                  f"is the face; by advance alone {i_match} were indistinguishable.")
+          elif i_wmatch and not i_calib:
+              i_failures.append(
+                  f"arm (i) setup invalid: A settled U+FF71 at {i_a['final']}, the same "
+                  f"advance a directly-named CJK family gets in B, so width cannot decide -- and "
+                  f"the cross-context checksum control is broken (A={i_a['calib']} "
+                  f"B={i_b['calib']}), so identity cannot decide either. No verdict about "
+                  f"#94/#88 or #81.")
+          elif i_wmatch:
+              i_failures.append(
+                  f"arm (i) setup invalid: A settled U+FF71 at {i_a['final']}, the same "
+                  f"advance a directly-named CJK family gets in B, but A's fallback checksum "
+                  f"{i_a['pxFallback']} matches NONE of the families B allows "
+                  f"({i_b['pxNamedW']}) -- the serving face is unidentified, so neither "
+                  f"#94/#88 nor #81 can be decided.")
           elif not i_a_tofu:
               i_failures.append(
                   f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
@@ -3780,13 +3824,6 @@ jobs:
                   f"either the probe list accidentally covers this codepoint, or something else "
                   f"is wrong with the setup. This arm cannot test the cache-poisoning bug until "
                   f"A's own miss is genuine.")
-          elif not i_named_ok:
-              i_failures.append(
-                  f"arm (i)/4b setup invalid: context B's DIRECTLY-NAMED MS Gothic measures "
-                  f"{i_b['named']} for U+FF71 and context A's tofu floor is {i_a['final']} -- "
-                  f"the two are within 0.01, so a correctly-resolving B would settle at the "
-                  f"same number as a poisoned one and this arm cannot tell them apart. No "
-                  f"verdict about #81 either way.")
           elif i_b_tofu:
               i_failures.append(
                   f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
@@ -3804,7 +3841,12 @@ jobs:
           print(f"  (i) negative fallback cache (#81):  {'RED' if i_failures else 'GREEN'} -- "
                 f"{i_failures or i_ok_msg}")
           if i_failures:
-              tripwires.append(f"(i) negative fallback cache (#81): {i_failures}")
+              # Two prefixes, because these two cases must triage differently.
+              # EXPECTED_RED matches the #94/#88 prefix ONLY, so a genuine #81
+              # red keeps its own prefix, misses the table, and fails the step.
+              _pfx = ("(i) #94/#88 refused-list render:" if i_verdict
+                      else "(i) #81 negative cache:")
+              tripwires.append(f"{_pfx} {i_failures}")
               # (i) is expected GREEN here, so an unmeasured red would be
               # reported as a regression in #81's fix rather than as an arm
               # whose own setup failed -- the same gap (i2), (j), (j2), (k) and
@@ -3912,25 +3954,39 @@ jobs:
                 f"settled={i2_b['final']} refs={i2_b['refs']} samples={i2_b['samples']}")
           print(f"  [arm i2 / #81] tab pids after A / after B: {i2_pids}")
 
-          i2_ungated, i2_match, i2_px = ungated_render(i2_a, i2_b, "arm i2 / #81")
+          i2_ungated, i2_faces, i2_match, i2_calib, i2_wmatch = ungated_render(
+              i2_a, i2_b, "arm i2 / #81", FONTS["win"])
 
           i2_failures = []
           i2_verdict = False
           if i2_ungated:
               # FIRST, because when this fires A did not miss at all and every
               # branch below would be scoring against a floor that is really a
-              # rendered glyph. Team-lead decision, wave 3: this is the verdict
-              # #94/#88 predicts, not an invalid setup.
+              # rendered glyph. The face is NAMED from the run's own checksum
+              # table -- never a literal, which is how wave 1's "MS Gothic"
+              # survived into a string the same run's table refuted.
               i2_verdict = True
               i2_failures.append(
                   f"(i2) refused-list context rendered U+FF71 at {i2_a['final']} -- an ungated "
                   f"read path served it (#94/#88); #81 cannot be measured until that path is "
                   f"gated. A's list ({NO_CJK_PROBE}) holds no CJK family and A's own candidates "
-                  f"read {i2_a['ownList']}; the matching named family is "
-                  f"{i2_match or 'none by width'}, and "
-                  + ("A's fallback rasterises IDENTICALLY to B's directly-named MS Gothic, so it "
-                     "is that face" if i2_px else
-                     "the cross-context checksum control failed, so this rests on width alone"))
+                  f"read {i2_a['ownList']}. A's fallback rasterises identically to "
+                  f"{i2_faces} named in context B (checksum {i2_a['pxFallback']}), so that "
+                  f"is the face; by advance alone {i2_match} were indistinguishable.")
+          elif i2_wmatch and not i2_calib:
+              i2_failures.append(
+                  f"arm (i2) setup invalid: A settled U+FF71 at {i2_a['final']}, the same "
+                  f"advance a directly-named CJK family gets in B, so width cannot decide -- and "
+                  f"the cross-context checksum control is broken (A={i2_a['calib']} "
+                  f"B={i2_b['calib']}), so identity cannot decide either. No verdict about "
+                  f"#94/#88 or #81.")
+          elif i2_wmatch:
+              i2_failures.append(
+                  f"arm (i2) setup invalid: A settled U+FF71 at {i2_a['final']}, the same "
+                  f"advance a directly-named CJK family gets in B, but A's fallback checksum "
+                  f"{i2_a['pxFallback']} matches NONE of the families B allows "
+                  f"({i2_b['pxNamedW']}) -- the serving face is unidentified, so neither "
+                  f"#94/#88 nor #81 can be decided.")
           elif isinstance(i2_pids["after_a"], str) or isinstance(i2_pids["after_b"], str):
               i2_failures.append(
                   f"arm (i2)/#81 unmeasured: could not read the content-process table "
@@ -3953,12 +4009,6 @@ jobs:
                   f"settled U+FF71 at {i2_a['final']}, which is not one of its own generic "
                   f"refs ({i2_a['refs']}) -- A resolved something, wrote no miss, and there is "
                   f"nothing for B to inherit.")
-          elif not i2_named_ok:
-              i2_failures.append(
-                  f"arm (i2)/#81 setup invalid: context B's DIRECTLY-NAMED MS Gothic measures "
-                  f"{i2_b['named']} for U+FF71 and context A's tofu floor is {i2_a['final']} -- "
-                  f"within 0.01, so a correctly-resolving B is indistinguishable from a "
-                  f"poisoned one. No verdict about #81 either way.")
           elif i2_b_tofu:
               i2_failures.append(
                   f"arm (i2)/#81: NEGATIVE FALLBACK CACHE BUG, ordering case -- both contexts "
@@ -3976,7 +4026,12 @@ jobs:
           print(f"  (i2) negative fallback cache, ordering case (#81):  "
                 f"{'RED' if i2_failures else 'GREEN'} -- {i2_failures or i2_ok_msg}")
           if i2_failures:
-              tripwires.append(f"(i2) negative fallback cache, ordering case (#81): {i2_failures}")
+              # Two prefixes, because these two cases must triage differently.
+              # EXPECTED_RED matches the #94/#88 prefix ONLY, so a genuine #81
+              # red keeps its own prefix, misses the table, and fails the step.
+              _pfx = ("(i2) #94/#88 refused-list render:" if i2_verdict
+                      else "(i2) #81 negative cache:")
+              tripwires.append(f"{_pfx} {i2_failures}")
               if not i2_verdict:
                   note_unmeasured("(i2)", i2_failures, "NEGATIVE FALLBACK CACHE BUG")
           # -----------------------------------------------------------
@@ -4961,8 +5016,16 @@ jobs:
           # them back to EXPECTED_GREEN once A1/A2 are in the binary, and the
           # #81 measurement path below is left intact for the case where A
           # does settle at its own floor.
+          # (tag, (tripwire_prefix, why)). The prefix is what the triage matches
+          # on, the way KNOWN_UNMEASURABLE carries a signature: these arms emit
+          # TWO kinds of red and only one of them is expected here.
+          #   "(i) #94/#88 refused-list render: [...]"  -> absorbed, this table
+          #   "(i) #81 negative cache: [...]"           -> UNEXPECTED, fails the step
+          # A setup-invalid also carries the #81 prefix, so it misses this table
+          # and lands in the unmeasured bucket, which fails the step too.
           EXPECTED_RED = {
-              "(i)": ("#94/#88 -- context A's list refuses every CJK family and A is served one "
+              "(i)": ("(i) #94/#88 refused-list render:",
+                      "#94/#88 -- context A's list refuses every CJK family and A is served one "
                       "anyway, so A never misses and #81's precondition does not hold on this "
                       "binary. A's floor and a directly-named CJK family's width in context B are "
                       "then one number, and a correctly-resolving B is indistinguishable from a "
@@ -4970,8 +5033,14 @@ jobs:
                       "advance -- read its `A's face is` line for this run rather than trusting "
                       "this text, which must stay true across runs. Returns to EXPECTED_GREEN in "
                       "Task 7, once A1/A2 gate that path and A can miss again."),
-              "(i2)": ("#94/#88 -- same, ordering case."),
+              "(i2)": ("(i2) #94/#88 refused-list render:", "#94/#88 -- same, ordering case."),
           }
+          for _k, _v in EXPECTED_RED.items():
+              assert isinstance(_v, tuple) and len(_v) == 2 and _v[0].startswith(_k), (
+                  f"EXPECTED_RED[{_k}] must be (tripwire_prefix, why) whose prefix starts with "
+                  f"the tag: {_v!r}. A prefix that does not match what the arm emits would "
+                  f"absorb every red the arm can produce, including the one this table is "
+                  f"deliberately not excusing.")
           # The arms that guard defects this branch DOES close, so each must be
           # GREEN here. Listed so the run prints a per-arm verdict line for
           # each even when every one passes -- Phase D's readback needs a line
@@ -5026,20 +5095,24 @@ jobs:
                       "may have become measurable."),
               "(j2)": ("34428270062", None,
                        "#82: same, bare-donor variant."),
-              "(f)": ("34475502454", None,
+              "(f)": ("34491802439", None,
                       "#44 codepoint fallback is unmeasurable BY ADVANCE WIDTH under "
-                      "FONTCONFIG_FILE. The first cause is fixed: U+6F22 drew a full em in "
-                      "every bundled CJK face AND in most of their .notdef glyphs, so run "
-                      "34475502454's bisection read 48 for every candidate in both "
-                      "contexts; the probe codepoint is now U+FF71, 0.5 em in MS Gothic / "
-                      "PingFang HK / Yu Gothic against a 1.0 em .notdef, which restores "
-                      "the tofu floor. What survives is that the two contexts' own named "
-                      "CJK families measure the SAME 0.5 em, so `mac == win` is as "
-                      "consistent with a correct per-context resolution as with a leak and "
-                      "no codepoint choice fixes it -- only a discriminator that is not an "
-                      "advance, i.e. the pixel checksum this step already uses for the "
-                      "MAC_ONLY precheck. The arm records which cause fired. Falls through "
-                      "to a step failure the moment it reaches a real verdict again."),
+                      "FONTCONFIG_FILE. LIVE CAUSE, the one the arm records on every run: "
+                      "the tofu floor COLLIDES. Run 34491802439 prints `tofu floor -- named "
+                      "'PingFang HK' width 24 vs impossible-family fallback 24: COLLIDES, "
+                      "no floor` for mac and the same for win with MS Gothic, so the "
+                      "impossible-family fallback lands on a real CJK face at the named "
+                      "family's own advance and there is no floor left to score against -- "
+                      "the same ungated path arms (i)/(i2) name. A SECOND cause sits behind "
+                      "it: PingFang HK and MS Gothic are both 0.5 em at U+FF71, so even "
+                      "with a floor `mac == win` could not be a verdict. BACKGROUND, "
+                      "already fixed: U+6F22 drew a full em in every bundled CJK face and "
+                      "in most of their .notdef glyphs, which is why the codepoint moved to "
+                      "U+FF71. Needs a discriminator that is not an advance -- the pixel "
+                      "checksum this step already uses in three places -- or U+FFE8, the "
+                      "only codepoint both faces cover at different advances that no "
+                      "bundled Latin face covers. Falls through to a step failure the "
+                      "moment this arm reaches a real verdict again."),
           }
           for _k, _v in KNOWN_UNMEASURABLE.items():
               assert isinstance(_v, tuple) and len(_v) == 3 and _v[0].isdigit(), (
@@ -5063,7 +5136,7 @@ jobs:
           # evidence for a fix this PR claims.
           expected, unmeasurable, unmeasured, unexpected = [], [], [], []
           for t in tripwires:
-              tag = next((k for k in EXPECTED_RED if t.startswith(k)), None)
+              tag = next((k for k, (_p, _w) in EXPECTED_RED.items() if t.startswith(_p)), None)
               if tag:
                   expected.append(f"{t[:120]}...")
                   continue
@@ -5076,8 +5149,8 @@ jobs:
               tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
               (unmeasured if tag else unexpected).append(t)
           print("=== tripwire triage ===")
-          for k, why in EXPECTED_RED.items():
-              hit = any(t.startswith(k) for t in tripwires)
+          for k, (_pfx, why) in EXPECTED_RED.items():
+              hit = any(t.startswith(_pfx) for t in tripwires)
               if hit and k in unmeasured_arms:
                   # C5: this arm is red because its OWN preconditions failed. It
                   # reached no verdict, so the table must not assert that the
