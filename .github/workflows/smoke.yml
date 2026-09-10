@@ -3509,6 +3509,47 @@ jobs:
           # B rendering its own real glyph is the fix.
           NO_CJK_PROBE = ["Calibri", "Segoe UI", "Arial"]
 
+          def ungated_render(a, b, tag):
+              """A's list refuses every CJK family. Did A still render U+FF71?
+
+              Wave 3, team-lead decision: this observation is the DEFECT this
+              round is about (#94's pref-font memo built at ctx 0 and read
+              ungated -- U+FF71 is lang group `ja`, so `font.name-list.*.ja`
+              reaches a bundled CJK face -- or #88's last resort). It is a
+              verdict, not an invalid setup, and #81 cannot be measured
+              underneath it.
+
+              Two independent answers, both from this run. WIDTH: A's settled
+              value equals what a directly-named CJK family measures in
+              context B, which DOES allow it. IDENTITY: A's fallback
+              rasterisation of U+FF71 checksums the same as B's directly-named
+              MS Gothic. Two faces at one advance do not rasterise alike, so
+              identity is what says WHICH face -- the advance alone could not
+              (CLAUDE.md lesson 4). The cross-context checksum comparison is
+              only a control while a family BOTH lists allow checksums the
+              same in both contexts; when it does not, the claim falls back to
+              width alone and says so rather than pretending to identity.
+              """
+              width_match = abs(a["final"] - b["named"]) < 0.01
+              calib_ok = a["calib"] == b["calib"]
+              px_match = calib_ok and a["pxFallback"] == b["pxNamed"]
+              matches = sorted(f for f, w in b["namedW"].items()
+                               if abs(w - a["final"]) < 0.01)
+              print(f"  [{tag}] A's own-list candidates for U+FF71, named directly (no family "
+                    f"in this list covers it, and Gecko shows codepoint fallback rather than a "
+                    f"font's own .notdef): {a['ownList']}")
+              print(f"  [{tag}] B's named U+FF71-covering families {b['namedW']} -> matching "
+                    f"A's settled {a['final']}: {matches or 'none'}")
+              print(f"  [{tag}] cross-context checksum control (Arial, allowed by both lists): "
+                    f"A={a['calib']} B={b['calib']} -> "
+                    f"{'valid' if calib_ok else 'INVALID -- identity claim falls back to width'}")
+              print(f"  [{tag}] A's fallback U+FF71 pixels={a['pxFallback']} vs B's named "
+                    f"MS Gothic pixels={b['pxNamed']} -> "
+                    f"{'SAME FACE' if px_match else 'differ'}")
+              fired = width_match and (px_match or not calib_ok)
+              print(f"  [{tag}] refused-list context rendered a real glyph? {fired}")
+              return fired, matches, px_match
+
           def two_contexts_one_launch(list_a, list_b, js, extra_prefs=None):
               # extra_prefs is additive and defaults to nothing, so arm (i)'s
               # already-confirmed RED/GREEN pair (runs 33597181430 / 33597175086)
@@ -3605,8 +3646,50 @@ jobs:
             // the very same MS Gothic and would make a working fix look broken.
             c.font = '48px "MS Gothic"';
             const named = c.measureText('\uff71').width;
+            // What each family of the NO-CJK list measures for U+FF71 when
+            // named directly. Gecko never shows a font's own .notdef here: a
+            // family that exists but lacks the glyph goes to codepoint
+            // fallback, so these read whatever served the context. That is
+            // exactly the point -- they are printed as the context's own
+            // candidates, and if they equal the settled value then the
+            // "floor" is not a floor.
+            const ownList = {};
+            for (const fam of """ + json.dumps(NO_CJK_PROBE) + """) {
+              c.font = '48px "' + fam + '"';
+              ownList[fam] = c.measureText('\uff71').width;
+            }
+            // Named U+FF71-covering families, so a match can be NAMED rather
+            // than inferred. Coverage read locally with fontTools off
+            // bundle/fonts/.
+            const namedW = {};
+            for (const fam of ['MS Gothic', 'Yu Gothic', 'Microsoft YaHei',
+                               'Microsoft JhengHei', 'PingFang HK']) {
+              c.font = '48px "' + fam + '"';
+              namedW[fam] = c.measureText('\uff71').width;
+            }
+            // Identity, not advance. Two faces at the same advance do not
+            // rasterise the same, so this is what turns "A settled at MS
+            // Gothic's width" into "A rendered MS Gothic". `calib` is the
+            // control for comparing checksums ACROSS the two contexts: a
+            // family both lists allow must checksum identically in both, or
+            // the cross-context comparison is not a control at all.
+            const sum = (f, t) => {
+              const cv = document.createElement('canvas');
+              cv.width = 120; cv.height = 80;
+              const x = cv.getContext('2d');
+              x.fillStyle = 'white'; x.fillRect(0, 0, 120, 80);
+              x.fillStyle = 'black'; x.font = '48px ' + f;
+              x.fillText(t, 4, 60);
+              const d = x.getImageData(0, 0, 120, 80).data;
+              let h = 0;
+              for (let i = 0; i < d.length; i++) { h = (Math.imul(h, 31) + d[i]) >>> 0; }
+              return h;
+            };
             return {final: samples[samples.length - 1], samples: samples,
-                    refs: refs, named: named};
+                    refs: refs, named: named, ownList: ownList, namedW: namedW,
+                    pxFallback: sum('"NoSuchFamilyAtAll"', '\uff71'),
+                    pxNamed: sum('"MS Gothic"', '\uff71'),
+                    calib: sum('"Arial"', 'AWmi')};
           }"""
 
           i_a, i_b, i_pids = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
@@ -3650,8 +3733,26 @@ jobs:
           # red on the control build, arm (j) never printed anything at
           # all because the script died first). Every arm in this guard
           # must run and print, every time, before anything asserts.
+          i_ungated, i_match, i_px = ungated_render(i_a, i_b, "arm i / 4b")
+
           i_failures = []
-          if not i_a_tofu:
+          i_verdict = False
+          if i_ungated:
+              # FIRST, because when this fires A did not miss at all and every
+              # branch below would be scoring against a floor that is really a
+              # rendered glyph. Team-lead decision, wave 3: this is the verdict
+              # #94/#88 predicts, not an invalid setup.
+              i_verdict = True
+              i_failures.append(
+                  f"(i) refused-list context rendered U+FF71 at {i_a['final']} -- an ungated "
+                  f"read path served it (#94/#88); #81 cannot be measured until that path is "
+                  f"gated. A's list ({NO_CJK_PROBE}) holds no CJK family and A's own candidates "
+                  f"read {i_a['ownList']}; the matching named family is "
+                  f"{i_match or 'none by width'}, and "
+                  + ("A's fallback rasterises IDENTICALLY to B's directly-named MS Gothic, so it "
+                     "is that face" if i_px else
+                     "the cross-context checksum control failed, so this rests on width alone"))
+          elif not i_a_tofu:
               i_failures.append(
                   f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
                   f"U+FF71 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
@@ -3688,7 +3789,12 @@ jobs:
               # whose own setup failed -- the same gap (i2), (j), (j2), (k) and
               # (b2r) already close. "NEGATIVE FALLBACK CACHE BUG" is the
               # marker only this arm's leak branch emits.
-              note_unmeasured("(i)", i_failures, "NEGATIVE FALLBACK CACHE BUG")
+              # Two verdict branches now, and note_unmeasured() takes one
+              # marker, so the #94/#88 branch is excluded explicitly. Without
+              # this an arm that reached a real verdict would be annotated
+              # "RED but UNMEASURED -- no verdict".
+              if not i_verdict:
+                  note_unmeasured("(i)", i_failures, "NEGATIVE FALLBACK CACHE BUG")
 
           # -----------------------------------------------------------
           # Arm (i2): #81 in the ordinary caller shape. Arm (i) above installs
@@ -3785,8 +3891,26 @@ jobs:
                 f"settled={i2_b['final']} refs={i2_b['refs']} samples={i2_b['samples']}")
           print(f"  [arm i2 / #81] tab pids after A / after B: {i2_pids}")
 
+          i2_ungated, i2_match, i2_px = ungated_render(i2_a, i2_b, "arm i2 / #81")
+
           i2_failures = []
-          if isinstance(i2_pids["after_a"], str) or isinstance(i2_pids["after_b"], str):
+          i2_verdict = False
+          if i2_ungated:
+              # FIRST, because when this fires A did not miss at all and every
+              # branch below would be scoring against a floor that is really a
+              # rendered glyph. Team-lead decision, wave 3: this is the verdict
+              # #94/#88 predicts, not an invalid setup.
+              i2_verdict = True
+              i2_failures.append(
+                  f"(i2) refused-list context rendered U+FF71 at {i2_a['final']} -- an ungated "
+                  f"read path served it (#94/#88); #81 cannot be measured until that path is "
+                  f"gated. A's list ({NO_CJK_PROBE}) holds no CJK family and A's own candidates "
+                  f"read {i2_a['ownList']}; the matching named family is "
+                  f"{i2_match or 'none by width'}, and "
+                  + ("A's fallback rasterises IDENTICALLY to B's directly-named MS Gothic, so it "
+                     "is that face" if i2_px else
+                     "the cross-context checksum control failed, so this rests on width alone"))
+          elif isinstance(i2_pids["after_a"], str) or isinstance(i2_pids["after_b"], str):
               i2_failures.append(
                   f"arm (i2)/#81 unmeasured: could not read the content-process table "
                   f"({i2_pids}) -- mCodepointsWithNoFonts is a per-process member, so without "
@@ -3832,7 +3956,8 @@ jobs:
                 f"{'RED' if i2_failures else 'GREEN'} -- {i2_failures or i2_ok_msg}")
           if i2_failures:
               tripwires.append(f"(i2) negative fallback cache, ordering case (#81): {i2_failures}")
-              note_unmeasured("(i2)", i2_failures, "NEGATIVE FALLBACK CACHE BUG")
+              if not i2_verdict:
+                  note_unmeasured("(i2)", i2_failures, "NEGATIVE FALLBACK CACHE BUG")
           # -----------------------------------------------------------
 
           # Cost measurement REMOVED (was JS_4B_COST): window.setFontList()
@@ -4799,7 +4924,28 @@ jobs:
           # dict stays rather than being deleted: it is the machinery for
           # triaging a future measured-but-unfixed defect, and the loop below
           # prints nothing when it is empty.
-          EXPECTED_RED = {}
+          # Phase 0 only. Arms (i)/(i2) ask whether a poisoned negative cache
+          # makes context B render context A's miss -- and on this bundle A
+          # does not miss: a list refusing every CJK family still renders
+          # U+FF71 as a real glyph, served by a read path nothing gates
+          # (#94's pref-font memo built at ctx 0, or #88's last resort). That
+          # is the defect this round fixes, it is a verdict rather than a
+          # broken fixture, and #81 is unmeasurable underneath it.
+          #
+          # CONSEQUENCE, stated because it is a real cost: EXPECTED_RED is
+          # consulted FIRST in the triage below, so while these two sit here
+          # they cannot fail the step whichever way they go red -- including
+          # for the #81 leak itself. That is the price of a Phase 0 baseline
+          # on a binary where the precondition does not hold. Task 7 moves
+          # them back to EXPECTED_GREEN once A1/A2 are in the binary, and the
+          # #81 measurement path below is left intact for the case where A
+          # does settle at its own floor.
+          EXPECTED_RED = {
+              "(i)": ("#94/#88 -- the refused-list context renders U+FF71 itself, so A never "
+                      "misses and #81's precondition does not hold on this binary. Returns to "
+                      "EXPECTED_GREEN in Task 7, once A1/A2 gate that path."),
+              "(i2)": ("#94/#88 -- same, ordering case."),
+          }
           # The arms that guard defects this branch DOES close, so each must be
           # GREEN here. Listed so the run prints a per-arm verdict line for
           # each even when every one passes -- Phase D's readback needs a line
@@ -4811,11 +4957,18 @@ jobs:
                       "re-probe tests",
               "(b2r)": "#83, same, with the init script on the document under test; "
                        "measures the flush, not the key -- see (b2)'s re-probe",
-              "(i)": "#81, negative fallback cache",
-              "(i2)": "#81 ordering case -- both lists installed before either context "
-                      "renders",
+              # (i) and (i2) moved to EXPECTED_RED above for Phase 0 -- an arm
+              # in both tables prints two contradictory rows. Task 7 moves them
+              # back here, unchanged:
+              #   "(i)":  "#81, negative fallback cache",
+              #   "(i2)": "#81 ordering case -- both lists installed before "
+              #           "either context renders",
               "(k)": "#80, url() web fonts under a configured fonts list",
           }
+          assert not (set(EXPECTED_RED) & set(EXPECTED_GREEN)), (
+              "an arm is in both EXPECTED_RED and EXPECTED_GREEN: "
+              f"{sorted(set(EXPECTED_RED) & set(EXPECTED_GREEN))}. The triage table walks both, "
+              "so it would print two contradictory rows for it.")
           # Arms this binary cannot measure AT ALL, for a reason in the build
           # rather than in the arm. Distinct from unmeasured_arms, which is a
           # per-run accident: this is a standing property of the bundle, read
