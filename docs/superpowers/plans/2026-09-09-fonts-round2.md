@@ -3409,15 +3409,12 @@ Before: <(j)/(j2) lines from `<SMOKE_B>`, showing context B settling at the dono
 
 #81 stays fixed by the read-path change rather than by clear-on-install; the clear is kept.
 
-## #83 — <branch A: "the list now reaches the process that renders" | branch B: "measured, not fixed">
+## #83 — the fontconfig name→family memo in front of the gate
 
-<Branch A: the arm (b2r) discriminator, the storage asymmetry it proved, the
-PutString/hydration fix, and why hydration is in IsFunctionEnabledForWebIDL rather than in
-HasFontList/IsFontAllowed — Preferences::InitStaticMembers asserts main thread or Servo
-traversal, and CamouIsFontAllowed also runs on workers.>
-
-<Branch B: arm (b2r) refuted H1; the MOZ_LOG line and what the `ctx=`/`hasList=` histogram
-from run `<SMOKE_FINAL>` names; #83 stays open.>
+**Resolved: neither template branch.** Branch B was taken (the Phase B gate returned
+H1 REFUTED), and then the `MOZ_LOG` layer branch B installed located the real mechanism, so
+#83 was fixed after all. See the Outcome section at the end of this plan for what shipped;
+the PR body carries the evidence.
 
 Evidence: arms (b2) and (b2r), runs `<SMOKE_B>` (before) and `<SMOKE_FINAL>` (after).
 
@@ -3555,3 +3552,93 @@ previous fonts work an arm was scored against a reference that could equal the v
 test, and each time the result looked like a finding. If an arm's refusal branch is dropped to
 make a run go green, the run stops being evidence.
 
+
+---
+
+# Outcome
+
+Written after the work landed. Where this section and the plan above disagree, this section
+is what happened.
+
+## The Phase B gate returned H1 REFUTED, and #83 was fixed anyway
+
+The plan makes the #83 fix conditional on hypothesis H1 — that the per-context list is stored
+in a process that does not render, so the leak is process placement. Phase B run `34322535132`
+refuted it: the recipient context resolves the *donor's* families and is refused its own,
+`__impossible__` stays `False`, and no process is created at any sample point. An
+allow-everything result is what H1 predicts and it did not occur.
+
+Branch B was therefore taken, which the plan defines as "#83 is measured, not fixed" with
+arms `(b2)` and `(b2r)` staying `RED (expected)`. **That is not the final state.** Branch B's
+deliverable was a `MOZ_LOG` diagnostic layer (`dc09791`, `51543bb`, `1486fb1`), and reading
+its output from the Phase D0 run located the actual mechanism:
+`gfxFcPlatformFontList::mFcSubstituteCache`, a process-global name→family memo consulted
+before the base `FindAndAddFamiliesLocked` where the per-context gate lives, keyed without a
+user context id. The recon is `.superpowers/sdd-fonts2/recon-83-gate-bypass.md`.
+
+#83 was then fixed in `163ee25`, outside the plan's conditional: the user context id is
+appended to both `mFcSubstituteCache`'s and `mGenericMappings`' keys, a new virtual
+`gfxPlatformFontList::ClearFontNameCaches()` is overridden on the fontconfig list, and
+`FontListManager::SetFontList` calls it beside the existing `ClearCodepointsWithNoFonts()`.
+
+**Arms `(b2)` and `(b2r)` are `EXPECTED_GREEN` in the shipped workflow, not expected red.**
+`EXPECTED_RED` is empty. Any statement above that they "stay RED" is superseded.
+
+## Other deviations from the plan
+
+**The seed restore `4e868c5`.** The Task 5 review found that
+`ClearCodepointsWithNoFonts()` was calling `bitset.reset()`, wiping upstream's seeded C0/C1
+control, PUA and noncharacter ranges on every `setFontList`. That would let a spoofed context
+render a glyph where an unspoofed browser renders tofu. Fixed by
+`bitset = mCodepointsWithNoFontsInitial`. Not in the plan; one line; it forced a Linux rebuild.
+
+**Arms `(j)` and `(j2)` are `KNOWN_UNMEASURABLE`, not red and not green.** The plan expects
+them to measure #82. They cannot on this bundle: the default font is DejaVu Sans, which covers
+U+FFFD, so `gfxFontGroup::FindFontForChar` returns before `SystemFindFontForChar` is ever
+reached and `mReplacementCharFallbackFamily` is neither read nor written. Every run reads
+`fffd-cache` 0 and no U+FFFD `global-fallback` or `sys-fallback` line. #82's read-path gate is
+fixed by reading and the issue is **not** closed. A third triage bucket was added
+(`3ef9d27`, `9cc7c62`) that asserts nothing and prints both the standing structural reason and
+what the arm observed on that run.
+
+**Generic families now fall to the ungated default face under a per-context list.** A
+consequence of keying `mGenericMappings`, found in the final review and filed as **#92**. The
+pre-fix value was itself the cross-context leak, so this is leak versus no-leak rather than
+regression versus a clean baseline — but the new state is single-page observable where the old
+one needed two contexts to correlate, so it is not a strict improvement. Measured on Linux CI
+only, one bundle, one spoof.
+
+## Builds — three at one sha, plus two Linux rebuilds
+
+The plan says "three builds, all at the same head sha". The final state is five:
+
+| target | run id | sha |
+|---|---|---|
+| linux x86_64 | `34422082698` | `a9376f1` |
+| windows x86_64 | `34422108489` | `a9376f1` |
+| macos arm64 | `34422137774` | `a9376f1` |
+| linux x86_64 | `34424092217` | `4e868c5` (seed restore) |
+| linux x86_64 | `34432908522` | `163ee25` (#83 memo keying) |
+
+**The Linux binary under final test is at `163ee25`. The Windows and macOS artifacts are
+still at `a9376f1`**, which predates both the seed restore and the memo keying. Two
+consequences the plan does not record:
+
+- The native-Windows probe for #87 covers the lookup-time allowlist flip and nothing else.
+  `task-8b-report.md` records the probed artifact as `sha=a9376f1`.
+- Both test suites ran on the macOS artifact at `a9376f1`, so they are evidence about the
+  branch minus those two commits. The claim those two builds support is that the branch
+  compiles on Windows and macOS at `a9376f1`, not at the head.
+
+## Smoke runs and what each covers
+
+| run | workflow @ | binary | covers |
+|---|---|---|---|
+| `34322535132` | `a8a1032` | `34236331658` @ `8990915` | Phase B, the before picture and the H1 gate |
+| `34428270062` | `cae66f3` | `34422082698` @ `a9376f1` | Phase D0; failed the guard on two expected-green arms coming back unmeasurable; the run whose log located the `mFcSubstituteCache` bypass |
+| `34431222344` | `9cc7c62` | `34424092217` @ `4e868c5` | run of record for #80, #81, #82, #88 |
+| `34435557241` | `163ee25` | `34432908522` @ `163ee25` | first run on the #83 fix |
+| `34435628304` | `deee875` | `34432908522` @ `163ee25` | run of record for #83, including the donor re-probe |
+
+`git diff 163ee25 HEAD -- patches/` is empty, so every commit after `163ee25` is workflow-only
+and the last two runs carry the shipped patch set exactly.
