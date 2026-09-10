@@ -975,19 +975,25 @@ jobs:
               b = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})})
-              _pg_default = b.new_page()
+              # Explicit context, the way every other launch in this step does
+              # it: Playwright refuses new_page() on the implicit context that
+              # b.new_page() creates ("Please use browser.new_context()", run
+              # 34474487872). No `fonts` option, so still a context with no
+              # per-context list, which is what arms (a)/(c)/(d) are about.
+              _ctx_default = b.new_context()
+              _pg_default = _ctx_default.new_page()
               default = probe(_pg_default, "a-default")
-              # Same BrowserContext as `default` -- `.context.new_page()`, not
-              # `b.new_page()`, which would make a FRESH context and so a
-              # reference nothing establishes as comparable. A fresh DOCUMENT
-              # though: probe() leaves six `local()` FontFace objects in
-              # document.fonts, and a document web font resolves through
-              # LookupLocalFont, a different (and per CLAUDE.md partly ungated)
-              # read path from the family lookup this arm is about. Measuring
-              # in that document would let the wrong path answer. The
-              # `absentMono == absentWidth` assert below is what establishes
-              # the two documents are comparable.
-              _pg_name = _pg_default.context.new_page()
+              # Same BrowserContext as `default`, so the same context id and
+              # the same font list. A second b.new_context() would be a FRESH
+              # context and so a reference nothing establishes as comparable.
+              # A fresh DOCUMENT though: probe() leaves six `local()` FontFace
+              # objects in document.fonts, and a document web font resolves
+              # through LookupLocalFont, a different (and per CLAUDE.md partly
+              # ungated) read path from the family lookup this arm is about.
+              # Measuring in that document would let the wrong path answer.
+              # The `absentMono == absentWidth` assert below is what
+              # establishes the two documents are comparable.
+              _pg_name = _ctx_default.new_page()
               _pg_name.goto("data:text/html,<h1>a-fallback</h1>")
               naming = _pg_name.evaluate(NAMING_JS, [FALLBACK_CANDS, PROBES])
               b.close()
@@ -997,8 +1003,9 @@ jobs:
           print(f"  [config launch / default] FontFace.status {default['status']}")
           check_signal("config launch / default", default)
 
-          # Two absent sentinels, two scripts, one page: if they disagree the
-          # width apparatus is not reproducible and nothing below means anything.
+          # Two absent sentinels, two scripts, two documents of one context: if
+          # they disagree the width apparatus is not reproducible across those
+          # documents and nothing below means anything.
           assert naming["absentMono"] == default["absentWidth"], (
               f"config launch / default: the naming probe's absent reference "
               f"{naming['absentMono']} differs from probe()'s {default['absentWidth']} in "
