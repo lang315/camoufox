@@ -572,7 +572,13 @@ jobs:
           find / -xdev -iname '*fontconfig*' -type d 2>/dev/null | head -5 || true
 
       - name: "per-context font list beats the launch whitelist (#44 regression guard)"
-        timeout-minutes: 10
+        # 10 -> 20. Run 34501017054 died here: the six Task 2 arms add seven
+        # browser launches to the ~20 this step already makes, and run
+        # 34496121342 needed 4m53s for the old set. It reached arm (n5) and was
+        # killed with only (n7) left. The bound still exists -- it is there to
+        # kill a hung browser, not to cap the work -- it is just no longer set
+        # below what the step does.
+        timeout-minutes: 20
         run: |
 
           # #44 / H2: the per-context filter is the ONLY thing that narrows a
@@ -3541,7 +3547,39 @@ jobs:
           #  * A `default-unfiltered` line for this context means the gated walk
           #    found nothing resident and the tail fired -- a fixture bug, not a
           #    fix. Counted and reported.
+          #
+          # THE `iiiii` vs `mmmmm` SHAPE ALONE IS NOT ENOUGH, and run
+          # 34501017054 is why. This arm's first version scored monospace by
+          # `iiiii == mmmmm` with sans-serif on the same strings as its control.
+          # That run measured 215/215 for monospace, sans-serif, serif AND for
+          # Menlo named directly -- 215 = 5 x 43.35, Menlo's fixed advance
+          # (fontTools, off bundle/fonts/macos/Menlo.ttc). So all three generics
+          # had resolved to Menlo: #92 reproducing in the OPPOSITE direction to
+          # the one the arm was written for. The control demanded that
+          # sans-serif differ on i/m, which is exactly what the defect prevents,
+          # so the arm reported `control invalid` and scored nothing.
+          #
+          # Comparing a generic against Menlo cannot fix that either: a
+          # monospaced face and a TOFU BOX have the same advance for every
+          # glyph, so "sans-serif measured Menlo's width" and "sans-serif
+          # rendered nothing" are one number on this bundle (43 is also the
+          # U+E000 tofu floor arms (n1) and (n4) measured).
+          #
+          # So each generic is scored against the list member OF ITS OWN KIND,
+          # named directly in the same context and run: sans-serif against
+          # Helvetica Neue, serif against Times, monospace against Menlo. Those
+          # three are one family from each of A2's three rows, all mac-only, and
+          # the arm ASSERTS their `mmmmm` widths are pairwise distinct before
+          # scoring anything -- if two collide the arm names the pair and stops.
+          # Menlo is REQUIRED for the further reason spec-review I8 gives:
+          # without a monospace-row family the helper's fallback maps monospace
+          # and sans-serif onto the same family.
           N2_LIST = ["Menlo", "Helvetica Neue", "Times"]
+          # generic -> the fixture family that generic MUST resolve to, and the
+          # JS key its direct measurement lands under.
+          N2_OWN = {"monospace": ("Menlo", "menlo"),
+                    "sans-serif": ("Helvetica Neue", "hn"),
+                    "serif": ("Times", "times")}
           JS_N2 = """() => {
             const c = document.createElement('canvas').getContext('2d');
             const w = (font, s) => { c.font = font; return c.measureText(s).width; };
@@ -3550,8 +3588,12 @@ jobs:
               out[g + ':i'] = w('72px ' + g, 'iiiii');
               out[g + ':m'] = w('72px ' + g, 'mmmmm');
             }
-            out['menlo:i'] = w('72px "Menlo"', 'iiiii');
-            out['menlo:m'] = w('72px "Menlo"', 'mmmmm');
+            for (const [fam, key] of [['Menlo', 'menlo'],
+                                      ['Helvetica Neue', 'hn'],
+                                      ['Times', 'times']]) {
+              out[key + ':i'] = w('72px "' + fam + '"', 'iiiii');
+              out[key + ':m'] = w('72px "' + fam + '"', 'mmmmm');
+            }
             return out;
           }"""
 
@@ -3563,25 +3605,60 @@ jobs:
           print(f"  [arm n2 / #92] mono i/m={n2['monospace:i']}/{n2['monospace:m']} "
                 f"sans i/m={n2['sans-serif:i']}/{n2['sans-serif:m']} "
                 f"serif i/m={n2['serif:i']}/{n2['serif:m']} "
-                f"menlo i/m={n2['menlo:i']}/{n2['menlo:m']} "
+                f"| named directly: menlo={n2['menlo:m']} hn={n2['hn:m']} "
+                f"times={n2['times:m']} "
                 f"generic-map={len(n2_gm)} fontlist={len(n2_fl)} "
                 f"default-unfiltered={len(n2_du)}")
+          for _g, (_fam, _key) in sorted(N2_OWN.items()):
+              print(f"      {_g:11} 'mmmmm'={n2[_g + ':m']} vs its own-kind list "
+                    f"member {_fam}={n2[_key + ':m']} -> "
+                    f"{'MATCH' if abs(n2[_g + ':m'] - n2[_key + ':m']) < 0.01 else 'DIFFERS'}")
           for _ln in (n2_gm + n2_fl + n2_du)[-8:]:
               print(f"      {_ln}")
 
           n2_failures = []
           n2_mono_equal = abs(n2["monospace:i"] - n2["monospace:m"]) < 0.01
-          n2_sans_equal = abs(n2["sans-serif:i"] - n2["sans-serif:m"]) < 0.01
-          if n2_sans_equal:
+          # The control is that the three named families are TELLABLE APART in
+          # this context. Without it "sans-serif did not resolve to Helvetica
+          # Neue" is unfalsifiable, and if the list collapsed onto one face
+          # every generic would "match" whichever family that is.
+          _n2_pairs = [(a, b) for i, a in enumerate(sorted(N2_OWN))
+                       for b in sorted(N2_OWN)[i + 1:]]
+          _n2_collide = [f"{N2_OWN[a][0]}=={N2_OWN[b][0]} at {n2[N2_OWN[a][1] + ':m']}"
+                         for a, b in _n2_pairs
+                         if abs(n2[N2_OWN[a][1] + ":m"] - n2[N2_OWN[b][1] + ":m"]) < 0.01]
+          # Which generics failed to land on their own kind's family.
+          _n2_wrong = [g for g in sorted(N2_OWN)
+                       if abs(n2[g + ":m"] - n2[N2_OWN[g][1] + ":m"]) >= 0.01]
+          if _n2_collide:
               n2_failures.append(
-                  f"control invalid: sans-serif measured 'iiiii' and 'mmmmm' at the "
-                  f"same width ({n2['sans-serif:i']}), so equal widths do not mean "
-                  f"monospaced here -- most likely nothing rendered at all")
+                  f"control invalid: the fixture families are not tellable apart in "
+                  f"this context ({_n2_collide}), so 'this generic resolved to that "
+                  f"family' is not a statement this arm can make. Named widths: "
+                  f"menlo={n2['menlo:m']} hn={n2['hn:m']} times={n2['times:m']}")
+          elif _n2_wrong:
+              # THE VERDICT. Each generic is compared to the ONE fixture family
+              # of its own kind, so this fires whichever direction #92 takes --
+              # a proportional monospace, or (run 34501017054's shape) a
+              # sans-serif and a serif that both landed on the monospace family.
+              n2_failures.append(
+                  f"GENERIC MISMAPPED: " + "; ".join(
+                      f"{g} measured {n2[g + ':m']}, not {N2_OWN[g][0]}'s "
+                      f"{n2[N2_OWN[g][1] + ':m']}"
+                      + (" (it matches " + ", ".join(
+                            N2_OWN[o][0] for o in sorted(N2_OWN)
+                            if abs(n2[g + ":m"] - n2[N2_OWN[o][1] + ":m"]) < 0.01) + ")"
+                         if any(abs(n2[g + ":m"] - n2[N2_OWN[o][1] + ":m"]) < 0.01
+                                for o in N2_OWN) else " (it matches no fixture family)")
+                      for g in _n2_wrong) +
+                  f". Every fixture family is distinct here, so each generic had a "
+                  f"right answer available in its own list. generic-map lines: "
+                  f"{n2_gm[-3:] or 'none'}")
           elif not n2_mono_equal:
               n2_failures.append(
                   f"GENERIC MISMAPPED: monospace measured 'iiiii'={n2['monospace:i']} "
                   f"and 'mmmmm'={n2['monospace:m']} -- a proportional face -- while "
-                  f"sans-serif correctly differs. generic-map lines: "
+                  f"matching Menlo on 'mmmmm'. generic-map lines: "
                   f"{n2_gm[-3:] or 'none'}")
           elif kind_total("generic-map") > 0:
               # The fix is in this binary, so the log must corroborate the width.
@@ -3622,20 +3699,23 @@ jobs:
                       f"generic-map named ONE family for every generic ({_named}), so "
                       f"monospace and sans-serif share a face and the equal-width "
                       f"reading above means nothing: {_flat}")
-              elif abs(n2["monospace:m"] - n2["menlo:m"]) >= 0.01:
-                  n2_failures.append(
-                      f"monospace's width ({n2['monospace:m']}) does not match Menlo "
-                      f"named directly in the same context ({n2['menlo:m']}), so the "
-                      f"equal-width reading is some other monospaced face")
+              # There is NO "monospace does not match Menlo" branch here any
+              # more: _n2_wrong above already compares every generic against
+              # its own kind's family and takes the verdict branch, so a check
+              # for the same thing down here could never fire. A dead branch
+              # reads like a check someone is relying on.
               elif n2_du:
                   n2_failures.append(
                       f"the unfiltered last-resort tail fired for this context "
                       f"({len(n2_du)} default-unfiltered lines) -- the gated walk "
                       f"found no resident family, which is a fixture bug: {n2_du[-2:]}")
           else:
-              print(f"  [arm n2 / #92] DIAGNOSTIC (binary emits no `generic-map` "
-                    f"kind): monospace is {'equal-width' if n2_mono_equal else 'PROPORTIONAL'} "
-                    f"and the log cannot say which family answered.")
+              print(f"  [arm n2 / #92] no mismap on width evidence (binary emits no "
+                    f"`generic-map` kind): every generic matched its own kind's "
+                    f"fixture family, and monospace is "
+                    f"{'equal-width' if n2_mono_equal else 'PROPORTIONAL'}. The log "
+                    f"cannot corroborate WHICH family answered on this binary, so "
+                    f"this GREEN rests on the width evidence alone.")
           if n2_failures:
               tripwires.append(f"(n2) generic -> family under a per-context list (#92): {n2_failures}")
               note_unmeasured("(n2)", n2_failures, "GENERIC MISMAPPED")
@@ -5552,7 +5632,7 @@ jobs:
           # which both lists contain, so the appended default generic (serif,
           # from all.js:2038 via GetDefaultGeneric(x-western)) also resolves to
           # Times and both groups read families=times,times. The only U+FFFD
-          # carrier the donor can reach is Menlo, through system fallback.
+          # carrier the donor can reach is N4_CARRIER, through system fallback.
           # U+FFFD is the FIRST character of its own text run so aPrevMatchedFont
           # (exit 8) is empty. Re-scanned against the shipped bundle before this
           # arm landed: 345 faces, U+FFFD carriers are Apple Symbols, Arimo,
@@ -5582,8 +5662,25 @@ jobs:
           #    its role is "allowed but not a U+FFFD carrier" -- so issue #95
           #    (Geneva never renders) cannot affect this arm's reading. Every
           #    measured stack is Times.
-          N4_DONOR = ["Times", "Menlo"]
-          N4_DONOR_ALT = ["Times", "Lucida Grande"]   # recovery fixture
+          # THE CARRIER IS LUCIDA GRANDE, NOT MENLO, and run 34501017054 is
+          # why. With Menlo the arm reported `control invalid`: Menlo's U+FFFD
+          # measured 43 and the victim's own tofu floor measured 43, so a leak
+          # and an empty render were one number. That collision is STRUCTURAL,
+          # not luck -- Menlo is monospaced, so its U+FFFD advance is its
+          # advance for every glyph including .notdef, and a 43-wide face is
+          # what serves U+E000 in every context this step measured. ANY
+          # monospace carrier collides with a tofu floor on this bundle.
+          # Lucida Grande advances U+FFFD at 1.0000 em, i.e. 72 at 72px
+          # (fontTools, off bundle/fonts/macos/LucidaGrande.ttc), against a
+          # floor of 43 -- so the control differs by construction rather than
+          # by hope. Menlo becomes the recovery fixture the two swap roles.
+          N4_CARRIER = "Lucida Grande"
+          # CAMOU-FL lowercases the family in its `key=` field ("key=segoe ui",
+          # "key=.sf compact"), so the log predicates match on this, not on the
+          # display name. `resolved=` carries the name as-is and uses N4_CARRIER.
+          _CAR_KEY = N4_CARRIER.casefold()
+          N4_DONOR = ["Times", N4_CARRIER]
+          N4_DONOR_ALT = ["Times", "Menlo"]   # recovery fixture
           N4_VICTIM = ["Times", "Geneva"]
           JS_N4 = """() => {
             const c = document.createElement('canvas').getContext('2d');
@@ -5595,10 +5692,10 @@ jobs:
             out.floor = c.measureText('\\uE000').width;
             return out;
           }"""
-          JS_N4_REF = """() => {
+          JS_N4_REF = """(fam) => {
             const c = document.createElement('canvas').getContext('2d');
-            c.font = '72px "Menlo"';
-            return {menlo: c.measureText('\\uFFFD').width};
+            c.font = '72px "' + fam + '"';
+            return {carrier: c.measureText('\\uFFFD').width};
           }"""
 
           n4_mark = log_mark()
@@ -5612,7 +5709,7 @@ jobs:
           n4_sys = camou_fl(n4_mark, "CAMOU-FL sys-fallback", "ch=U+FFFD", limit=None)
           n4_cache = camou_fl(n4_mark, "CAMOU-FL fffd-cache", limit=None)
           n4_pf = camou_fl(n4_mark, "CAMOU-FL pref-fallback", limit=None)
-          n4_ref = one_page_list_arg(None, JS_N4_REF, None)["menlo"]
+          n4_ref = one_page_list_arg(None, JS_N4_REF, N4_CARRIER)["carrier"]
           # Spec B4 wants FOUR preconditions, two of them per context: the
           # donor's `fontlist` line AND the victim's, each times=times with no
           # carrier. `any(...)` over the whole window satisfies both with one
@@ -5647,7 +5744,7 @@ jobs:
           # `python - <<'PY'` heredoc, so it is in scope here.
           print(f"  [arm n4 / #82] donor fffd={n4_a['fffd']} floor={n4_a['floor']}; "
                 f"victim fffd={n4_b['fffd']} floor={n4_b['floor']}; "
-                f"menlo_ref={n4_ref}; pids={n4_pids}; "
+                f"carrier({N4_CARRIER})_ref={n4_ref}; pids={n4_pids}; "
                 f"donor_ctx={n4_donor_ctx} victim_ctx={n4_victim_ctx}; "
                 f"fontlist={len(n4_fl)} sys-fallback(U+FFFD)={len(n4_sys)} "
                 f"fffd-cache={len(n4_cache)} pref-fallback={len(n4_pf)}")
@@ -5673,24 +5770,26 @@ jobs:
                   f"singleton, so nothing could have been shared: {n4_pids}")
           elif abs(n4_ref - n4_b["floor"]) < 0.01:
               n4_failures.append(
-                  f"control invalid: Menlo's U+FFFD width ({n4_ref}) equals the "
-                  f"victim's own tofu floor ({n4_b['floor']}), so a leak and an empty "
-                  f"render are the same number")
+                  f"control invalid: {N4_CARRIER}'s U+FFFD width ({n4_ref}) equals "
+                  f"the victim's own tofu floor ({n4_b['floor']}), so a leak and an "
+                  f"empty render are the same number. Re-run with the recovery "
+                  f"carrier from {N4_DONOR_ALT}")
           elif not n4_have_log:
               # Build 34236331658 @ 8990915: zero CAMOU-FL lines of any kind.
               _leak = abs(n4_b["fffd"] - n4_ref) < 0.01
               _tofu = abs(n4_b["fffd"] - n4_b["floor"]) < 0.01
-              _donor_menlo = abs(n4_a["fffd"] - n4_ref) < 0.01
+              _donor_carrier = abs(n4_a["fffd"] - n4_ref) < 0.01
               print(f"  [arm n4 / #82] DIAGNOSTIC (binary emits no CAMOU-FL kind): "
-                    f"donor {'reached Menlo' if _donor_menlo else 'did NOT reach Menlo'}; "
-                    f"victim read {'MENLO (leak)' if _leak else 'its tofu floor' if _tofu else 'neither'}. "
-                    f"B6 TRIGGER = donor did not reach Menlo, i.e. something answered "
+                    f"donor {'reached ' + N4_CARRIER if _donor_carrier else 'did NOT reach ' + N4_CARRIER}; "
+                    f"victim read {N4_CARRIER.upper() + ' (leak)' if _leak else 'its tofu floor' if _tofu else 'neither'}. "
+                    f"B6 TRIGGER = donor did not reach {N4_CARRIER}, i.e. something answered "
                     f"U+FFFD before SystemFindFontForChar; record which of the bundle's "
                     f"U+FFFD carriers the widths match.")
           else:
               _don = _n4_families(n4_donor_ctx)
               _vic = _n4_families(n4_victim_ctx)
-              _pf_menlo = [ln for ln in n4_pf if "key=menlo" in ln and "allowed=1" in ln]
+              _pf_carrier = [ln for ln in n4_pf
+                             if "key=" + _CAR_KEY in ln and "allowed=1" in ln]
 
               def _times_only(fams):
                   return bool(fams) and all(
@@ -5729,32 +5828,35 @@ jobs:
                       f"setup invalid: the VICTIM (ctx={n4_victim_ctx}) did not resolve "
                       f"to Times-only, so its own stack could cover U+FFFD and a GREEN "
                       f"would not be the gate's doing: {_vic}")
-              elif _pf_menlo:
+              elif _pf_carrier:
                   n4_failures.append(
-                      f"setup invalid: the donor's PREF path answered with Menlo "
-                      f"({_pf_menlo[-1]}), so the cache was never populated by system "
+                      f"setup invalid: the donor's PREF path answered with "
+                      f"{N4_CARRIER} "
+                      f"({_pf_carrier[-1]}), so the cache was never populated by system "
                       f"fallback. Re-run this arm with the recovery fixture "
                       f"{N4_DONOR_ALT}, a carrier fontconfig's serif/sans candidates "
                       f"do not reach")
-              elif not any("resolved=Menlo" in ln for ln in n4_sys):
+              elif not any("resolved=" + N4_CARRIER in ln for ln in n4_sys):
                   n4_failures.append(
-                      f"setup invalid: no `sys-fallback ctx=... ch=U+FFFD resolved=Menlo` "
+                      f"setup invalid: no `sys-fallback ctx=... ch=U+FFFD "
+                      f"resolved={N4_CARRIER}` "
                       f"line, so the donor never populated the cache: "
                       f"{n4_sys[-2:] or 'no sys-fallback lines at all'}")
-              elif not any("key=menlo" in ln and "allowed=0" in ln for ln in n4_cache):
+              elif not any("key=" + _CAR_KEY in ln and "allowed=0" in ln
+                           for ln in n4_cache):
                   n4_failures.append(
-                      f"setup invalid: no `fffd-cache ctx=... key=menlo allowed=0` line, "
+                      f"setup invalid: no `fffd-cache ctx=... key={_CAR_KEY} allowed=0` line, "
                       f"so the victim never reached the cached-family read: "
                       f"{n4_cache[-2:] or 'no fffd-cache lines at all'}")
               elif abs(n4_b["fffd"] - n4_ref) < 0.01:
                   n4_failures.append(
                       f"U+FFFD CACHE LEAK: the victim rendered U+FFFD at {n4_b['fffd']}, "
-                      f"which is Menlo's width ({n4_ref}) -- a family its own list "
-                      f"excludes -- despite `fffd-cache ... key=menlo allowed=0`")
+                      f"which is {N4_CARRIER}'s width ({n4_ref}) -- a family its own "
+                      f"list excludes -- despite `fffd-cache ... key={_CAR_KEY} allowed=0`")
               elif abs(n4_b["fffd"] - n4_b["floor"]) >= 0.01:
                   n4_failures.append(
                       f"the victim rendered U+FFFD at {n4_b['fffd']}, which is neither "
-                      f"Menlo ({n4_ref}) nor its own tofu floor ({n4_b['floor']}); some "
+                      f"{N4_CARRIER} ({n4_ref}) nor its own tofu floor ({n4_b['floor']}); some "
                       f"third face answered and this arm cannot say which")
           if n4_failures:
               tripwires.append(f"(n4) replacement-char cache, donor/victim (#82): {n4_failures}")
@@ -5788,8 +5890,47 @@ jobs:
           #    setSpeechVoices in every probed context -- so a `saw:false`
           #    data-sv here is a real finding about ordering, not a missing
           #    build.
-          N5_A = ["Alpha One", "Alpha Two"]
-          N5_B = ["Beta One", "Beta Two"]
+          # THE SETTER IS A FILTER OVER REAL VOICES, NOT AN INJECTOR, and
+          # that is why this fixture is not the plan's. Read off
+          # patches/speech-voices-spoofing.patch: SetSpeechVoices takes a
+          # DOMString and stores it, and SpeechSynthesis::GetVoices then walks
+          # nsSynthVoiceRegistry's REAL voices and `continue`s past any whose
+          # name IsVoiceAllowed() refuses. Installing ["Alpha One","Alpha Two"]
+          # therefore does not create two voices -- it filters the registry down
+          # to voices with those names, of which there are none, and getVoices()
+          # correctly returns []. The plan scored an empty read as `VOICES
+          # LEAK`, so on a runner with no speech backend at all this arm was
+          # going to report a leak on EVERY run whatever the code did, and Task
+          # 6 would have been sent to fix a defect nobody had measured. That is
+          # the CLAUDE.md lesson-4 shape exactly: a reference that cannot differ.
+          #
+          # So the fixture is derived from the registry at run time. A baseline
+          # context with NO filter installed reads whatever voices this runner
+          # actually has; that list is split in half and each half installed in
+          # one context. If the registry holds fewer than two voices the arm
+          # CANNOT distinguish a leak from an empty registry and says so --
+          # setup invalid, which the gate reads as NEITHER.
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * getVoices() is legitimately empty until `voiceschanged` fires, so
+          #    an empty read is not evidence of anything on its own. Read after
+          #    goto() AND after the event, and report both.
+          #  * An empty registry makes every context read [] whatever the
+          #    filter says. Measured first, and the arm refuses to score.
+          #  * The init script runs in juggler's ISOLATED world, so a window
+          #    global it sets is invisible to page.evaluate(). Every page-world
+          #    value comes back through a DOM attribute (the #83 shape).
+          #  * Playwright runs init scripts on EVERY navigation and new_page()
+          #    lands on about:blank first, so a one-shot setter registered
+          #    before new_page() is already spent. add_init_script comes AFTER
+          #    new_page(), exactly as probe_windows_fonts.py:640-646 does it.
+          #  * A context reading the wrong list while the pid set did not change
+          #    is not a cross-process finding. pids are sampled between
+          #    new_page() and goto() and reported with the verdict.
+          #  * The binding is present on this binary -- run 34496121342's "which
+          #    setter bindings reached the build" step lists setSpeechVoices in
+          #    every probed context -- so a `saw:false` here is an ordering bug
+          #    in this arm, not a missing build.
           N5_INIT = (
               '(() => {'
               ' const saw = (typeof window.setSpeechVoices === "function");'
@@ -5810,69 +5951,100 @@ jobs:
               setTimeout(r, 4000);
             });
             const after = read();
-            const n = document.createElement('script');
-            n.type = 'application/json'; n.id = 'n5';
-            n.textContent = JSON.stringify({first, after});
-            document.documentElement.appendChild(n);
             return {first, after,
                     dataSv: document.documentElement.getAttribute('data-sv')};
           }"""
 
-          def n5_two_contexts():
+          def n5_probe():
+              """Baseline (unfiltered) read first, then one context per half."""
               out = {}
               with sync_playwright() as pw:
                   b = pw.firefox.launch(
                       executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
                       firefox_user_prefs={"dom.ipc.processCount": 1},
                       env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
-                  for label, voices in (("a", N5_A), ("b", N5_B)):
-                      ctx = b.new_context()
-                      page = ctx.new_page()
-                      pids_before = tab_pids()
-                      ctx.add_init_script(N5_INIT % json.dumps(",".join(voices)))
-                      page.goto("data:text/html,<h1>n5-%s</h1>" % label)
-                      out[label] = {"res": page.evaluate(JS_N5),
-                                    "pids_before": pids_before,
-                                    "pids_after": tab_pids(),
-                                    "want": voices}
+                  # No init script at all: HasVoices(ctx) is false, so GetVoices
+                  # filters nothing and this is the registry as the runner has
+                  # it. It has to be read from a context of the same shape as
+                  # the two under test, not from a launch-level default.
+                  ctx0 = b.new_context()
+                  page0 = ctx0.new_page()
+                  page0.goto("data:text/html,<h1>n5-base</h1>")
+                  out["base"] = page0.evaluate(JS_N5)
+                  registry = list(out["base"]["after"])
+                  halves = {"a": registry[:len(registry) // 2],
+                            "b": registry[len(registry) // 2:]}
+                  if len(registry) >= 2:
+                      for label in ("a", "b"):
+                          ctx = b.new_context()
+                          page = ctx.new_page()
+                          pids_before = tab_pids()
+                          ctx.add_init_script(
+                              N5_INIT % json.dumps(",".join(halves[label])))
+                          page.goto("data:text/html,<h1>n5-%s</h1>" % label)
+                          out[label] = {"res": page.evaluate(JS_N5),
+                                        "pids_before": pids_before,
+                                        "pids_after": tab_pids(),
+                                        "want": halves[label]}
                   b.close()
+              out["registry"] = registry
+              out["halves"] = halves
               return out
 
-          n5 = n5_two_contexts()
+          n5 = n5_probe()
+          print(f"  [arm n5 / #90] registry (a context with NO filter installed): "
+                f"{n5['registry']} -- first={n5['base']['first']} "
+                f"data-sv={n5['base']['dataSv']!r}")
           for _lbl in ("a", "b"):
-              print(f"  [arm n5 / #90] ctx {_lbl}: want={n5[_lbl]['want']} "
-                    f"first={n5[_lbl]['res']['first']} after={n5[_lbl]['res']['after']} "
-                    f"data-sv={n5[_lbl]['res']['dataSv']} "
-                    f"pids {n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
+              if _lbl in n5:
+                  print(f"  [arm n5 / #90] ctx {_lbl}: want={n5[_lbl]['want']} "
+                        f"first={n5[_lbl]['res']['first']} "
+                        f"after={n5[_lbl]['res']['after']} "
+                        f"data-sv={n5[_lbl]['res']['dataSv']} "
+                        f"pids {n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
 
           n5_failures = []
-          for _lbl in ("a", "b"):
-              _sv = n5[_lbl]["res"]["dataSv"]
-              if not _sv or '"applied":true' not in _sv.replace(" ", ""):
-                  n5_failures.append(
-                      f"setup invalid: ctx {_lbl}'s init script did not apply "
-                      f"setSpeechVoices on the document that was measured "
-                      f"(data-sv={_sv!r}); with no list installed a context is allowed "
-                      f"everything and a wrong reading is indistinguishable from a leak")
-          if not n5_failures:
-              for _lbl, _other in (("a", "b"), ("b", "a")):
-                  _got = set(n5[_lbl]["res"]["after"])
-                  _want = set(n5[_lbl]["want"])
-                  _theirs = set(n5[_other]["want"])
-                  if _got & _theirs:
+          if len(n5["registry"]) < 2:
+              n5_failures.append(
+                  f"setup invalid: this runner's speech registry holds "
+                  f"{len(n5['registry'])} voice(s) ({n5['registry']}), and "
+                  f"setSpeechVoices FILTERS the registry rather than adding to it "
+                  f"(SpeechSynthesis::GetVoices skips names IsVoiceAllowed refuses). "
+                  f"With fewer than two real voices every context reads the same "
+                  f"list whatever its filter says, so a leak and a correct refusal "
+                  f"are one reading and this arm measures nothing. Needs a host with "
+                  f"speech-dispatcher voices installed")
+          else:
+              for _lbl in ("a", "b"):
+                  _sv = n5[_lbl]["res"]["dataSv"]
+                  if not _sv or '"applied":true' not in _sv.replace(" ", ""):
                       n5_failures.append(
-                          f"VOICES LEAK: ctx {_lbl} read {sorted(_got & _theirs)}, which "
-                          f"belongs to ctx {_other}; pids {n5[_lbl]['pids_before']} -> "
-                          f"{n5[_lbl]['pids_after']}")
-                  elif not _got:
-                      n5_failures.append(
-                          f"VOICES LEAK: ctx {_lbl} read an EMPTY voice list after "
-                          f"`voiceschanged` while its own list was installed; pids "
-                          f"{n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
-                  elif not _got.issubset(_want):
-                      n5_failures.append(
-                          f"VOICES LEAK: ctx {_lbl} read {sorted(_got - _want)}, which is "
-                          f"in neither context's configured list")
+                          f"setup invalid: ctx {_lbl}'s init script did not apply "
+                          f"setSpeechVoices on the document that was measured "
+                          f"(data-sv={_sv!r}); with no list installed a context is "
+                          f"allowed everything and a wrong reading is "
+                          f"indistinguishable from a leak")
+              if not n5_failures:
+                  for _lbl, _other in (("a", "b"), ("b", "a")):
+                      _got = set(n5[_lbl]["res"]["after"])
+                      _want = set(n5[_lbl]["want"])
+                      _theirs = set(n5[_other]["want"])
+                      if _got & _theirs:
+                          n5_failures.append(
+                              f"VOICES LEAK: ctx {_lbl} read {sorted(_got & _theirs)}, "
+                              f"which belongs to ctx {_other}; pids "
+                              f"{n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
+                      elif not _got:
+                          n5_failures.append(
+                              f"VOICES LEAK: ctx {_lbl} read an EMPTY voice list after "
+                              f"`voiceschanged` while its own list ({sorted(_want)}) was "
+                              f"installed and every name in it is a REAL registry voice; "
+                              f"pids {n5[_lbl]['pids_before']} -> "
+                              f"{n5[_lbl]['pids_after']}")
+                      elif not _got.issubset(_want):
+                          n5_failures.append(
+                              f"VOICES LEAK: ctx {_lbl} read {sorted(_got - _want)}, which "
+                              f"is in neither context's configured list")
           if n5_failures:
               tripwires.append(f"(n5) per-context speech voices (#90): {n5_failures}")
               note_unmeasured("(n5)", n5_failures, "VOICES LEAK")
@@ -5958,11 +6130,25 @@ jobs:
                 const score = async (name) => {
                   const f = faces[name];
                   if (!f) return 'NO_FACE_FOUND';
-                  try { await f.loaded; } catch (e) { /* rejected -> read status */ }
+                  // f.loaded is RACED, never awaited bare. page.evaluate() has
+                  // no timeout on the Python side, so a promise that never
+                  // settles hangs the whole guard step until GitHub kills it --
+                  // and on a fork that writes FontFaceLoadStatus from a
+                  // family-name gate rather than from the load, a url() face's
+                  // promise plausibly never settles at all. Racing it turns
+                  // that from a dead step into a reading: if the 5s timer wins
+                  // and the face is still `loading`, the status below says so.
+                  let settled = false;
+                  await Promise.race([
+                    f.loaded.then(() => { settled = true; },
+                                  () => { settled = true; }),
+                    new Promise(r => setTimeout(r, 5000)),
+                  ]);
                   for (let i = 0; i < 40 && f.status === 'loading'; i++) {
                     await new Promise(r => setTimeout(r, 100));
                   }
-                  return f.status;
+                  return f.status === 'loading' && !settled
+                      ? 'STUCK_LOADING' : f.status;
                 };
                 const c = document.createElement('canvas').getContext('2d');
                 const s = 'aaaaaaaaaaaaaaaaaaaa';   // 20 glyphs -> 1920 at 48px
@@ -6012,6 +6198,15 @@ jobs:
                       f"control invalid: the control face reports `loaded` but measured "
                       f"{n7['ctlWidth']} instead of 1920 (baseline {n7['baseline']}), so "
                       f"`loaded` is being reported for a face that did not render")
+              elif n7["badStatus"] == "STUCK_LOADING":
+                  n7_failures.append(
+                      f"INVENTED LOAD STATUS (stuck variant): the 404 face never left "
+                      f"`loading` -- its .loaded promise did not settle within 5s and "
+                      f"its status was still 'loading' 4s later -- while the control "
+                      f"face on the same page reached 'loaded' and rendered at 1920. A "
+                      f"face whose download failed must reject and report 'error'; one "
+                      f"that never resolves either way is the same defect seen from "
+                      f"the promise side")
               elif n7["badStatus"] != "error":
                   n7_failures.append(
                       f"INVENTED LOAD STATUS: a face whose src url() 404s reports "
@@ -6307,6 +6502,14 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           CAMOU_FONTS_DIR: ${{ steps.bin.outputs.fonts_dir }}
           CAMOU_FONTS_CONF: ${{ steps.bin.outputs.fonts_conf }}
+          # Python block-buffers stdout when it is a pipe, so a step that dies
+          # mid-way loses whatever is still in the buffer and the surviving
+          # timestamps are the FLUSH times, not the print times. Run
+          # 34501017054 timed out with three arms sharing one timestamp and its
+          # last arm's second line missing although that arm had finished --
+          # which made "where did the time go" unanswerable from the log. The
+          # only cost is more syscalls.
+          PYTHONUNBUFFERED: "1"
 
       # Bulk dump of what the step above captured. Separate from that step, and
       # `if: always()`, for two reasons: it must not spend the guard's
