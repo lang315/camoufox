@@ -632,12 +632,20 @@ jobs:
           #  * `timestamp` (Logging.cpp:416) prefixes each line with a UTC
           #    wall-clock time, which is what lets the dump step merge the
           #    per-process files into one time order.
-          # `textrun:5` is for the pre-existing eGfxLog_textrun
+          # Levels are 4 (Debug), not 5 (Verbose). Every CAMOU-FL site logs at
+          # LogLevel::Debug -- `CAMOU_LOG_FL` in dom/base/FontListManager.cpp
+          # and `CAMOU_LOG_FONTLIST` in gfx/thebes/gfxTextRun.cpp, both on the
+          # same `fontlist` module upstream's LOG_FONTLIST writes to -- so 5
+          # would add only upstream's Verbose font-list chatter, and volume is
+          # the one cost of this capture that is not yet measured.
+          # `textrun` is for the pre-existing eGfxLog_textrun
           # `(textrun-systemfallback-*)` line at gfxPlatformFontList.cpp:1475,
-          # which names the face system fallback actually returned.
+          # which names the face system fallback actually returned; it is
+          # guarded by MOZ_LOG_TEST at LogLevel::Warning (2), so 4 already
+          # carries it with room to spare.
           LOG_DIR = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "camou-fontlog")
           os.makedirs(LOG_DIR, exist_ok=True)
-          os.environ["MOZ_LOG"] = "fontlist:5,textrun:5,timestamp,sync,append"
+          os.environ["MOZ_LOG"] = "fontlist:4,textrun:4,timestamp,sync,append"
           os.environ["MOZ_LOG_FILE"] = os.path.join(LOG_DIR, "cfx%PID")
 
           def log_mark():
@@ -1144,8 +1152,29 @@ jobs:
           print(f"  [b2 / #83 log] set lines (per-context lists installed): "
                 f"{camou_fl(b2_mark, 'CAMOU-FL set ', limit=8) or 'none'}")
 
+          # M1 (from this task's review): until now `b2_leaked` was this arm's
+          # ONLY source of failure, so a launch that rendered nothing gave
+          # win2["measure"] all-False, the arm printed GREEN, and the triage
+          # table announced that #83 "may be fixed" while the step passed.
+          # These are arm (b2r)'s own two setup checks -- its check_signal
+          # try/except and its C2 donor assertion -- applied to this arm's
+          # contexts. Collected, never hard-asserted: an AssertionError here
+          # would kill the script before arms (e) through (k) ever run.
           b2_failures = []
-          b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
+          for _lab, _r in (("mac donor", mac2), ("win recipient", win2)):
+              try:
+                  check_signal(f"b2 / {_lab}", _r)
+              except AssertionError as exc:
+                  b2_failures.append(f"arm (b2) no signal: {exc}")
+          if not all(mac2["measure"][f] for f in MAC_ONLY):
+              b2_failures.append(
+                  f"arm (b2) setup invalid: the mac donor resolved {mac2['measure']} -- "
+                  f"it never resolved the macOS-only families, so there was nothing for "
+                  f"win to leak and win's clean result is vacuous. Same check arm (b2r) "
+                  f"makes for the same reason (CLAUDE.md lesson 4, donor side).")
+          # Scored only on a valid setup, as arm (b2r) does: a leak verdict read
+          # off a dead donor is not a verdict.
+          b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]] if not b2_failures else []
           if b2_leaked:
               b2_failures.append(
                   f"arm (b2)/#83: win resolved macOS-only families {b2_leaked} it was "
@@ -1156,6 +1185,11 @@ jobs:
                 f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
           if b2_failures:
               tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
+              # Needed only because M1 above gave this arm red paths that are
+              # NOT its verdict. Without it a `no signal` or `setup invalid`
+              # red prints in the triage table as "RED (expected) ... #83
+              # diagnosed", asserting a leak the arm never observed.
+              note_unmeasured("(b2)", b2_failures, "arm (b2)/#83:")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
@@ -1243,6 +1277,36 @@ jobs:
                       '() => document.documentElement.getAttribute("data-fl")')
                   b2r[label] = {"fl_blank": fl_blank, "fl_doc": fl_doc,
                                 "res": page.evaluate(JS, PROBES)}
+                  # I2 (from this task's review): the #83 log slice is taken
+                  # HERE, at the end of this context's iteration, not after the
+                  # launch. camou_fl() has a start offset and no end bound, so
+                  # a slice taken after the browser closed would read
+                  # mac-mark -> end of launch: the mac window would strictly
+                  # CONTAIN the win window, the two `gate` histograms could not
+                  # differ in the direction that means anything, and
+                  # `limit=4` -- the LAST four matches -- would print win's
+                  # `set` line under the mac label. Taken here, the next
+                  # context does not exist yet, so end-of-file IS this
+                  # context's end bound.
+                  #
+                  # Two honest caveats, in the shape arm (b2)'s labels use:
+                  #  * the browser is still running, so a line this context
+                  #    emits after this point is not in its slice. `sync`
+                  #    (fflush per line) makes that a tail of at most the
+                  #    in-flight line rather than a whole buffer.
+                  #  * for the win iteration the mac donor is deliberately
+                  #    still alive and can still emit `gate` lines, which carry
+                  #    no uri. So the win `gate` histogram is win's half of the
+                  #    launch, not win alone. The `group` lines are exact
+                  #    either way -- they attribute by uri=, not by offset.
+                  for _ln in camou_fl(b2r_marks[label], "CAMOU-FL group",
+                                      f"b2r-{label}", limit=6):
+                      print(f"  [b2r / #83 log / b2r-{label}] {_ln}")
+                  print(f"  [b2r / #83 log / {label}] gate ctx histogram, "
+                        f"{label} half only: "
+                        f"{ctx_histogram(b2r_marks[label], 'gate')}")
+                  print(f"  [b2r / #83 log / {label}] set lines, {label} half only: "
+                        f"{camou_fl(b2r_marks[label], 'CAMOU-FL set ', limit=4) or 'none'}")
                   # The donor (mac) is deliberately NOT closed -- that is the one
                   # variable arm (b2) isolates, and this arm must keep it.
               for ctx in b2r_ctxs:
@@ -1257,17 +1321,9 @@ jobs:
               print(f"  [b2r / {label}] measure {b2r[label]['res']['measure']}")
           print(f"  [b2r / pids] {b2r_pids}")
 
-          # #83 log slice, same three questions as arm (b2)'s above. This arm's
-          # URIs already carry a per-context marker (`b2r-mac` / `b2r-win`),
-          # which is where probe()'s marker parameter came from.
-          for label in ("mac", "win"):
-              for _ln in camou_fl(b2r_marks[label], "CAMOU-FL group",
-                                  f"b2r-{label}", limit=6):
-                  print(f"  [b2r / #83 log / b2r-{label}] {_ln}")
-              print(f"  [b2r / #83 log / {label}] gate ctx histogram: "
-                    f"{ctx_histogram(b2r_marks[label], 'gate')}")
-              print(f"  [b2r / #83 log / {label}] set lines: "
-                    f"{camou_fl(b2r_marks[label], 'CAMOU-FL set ', limit=4) or 'none'}")
+          # (The #83 log slice for this arm is printed inside the launch loop
+          # above, one context at a time -- see the I2 comment there for why it
+          # cannot be taken here.)
 
           b2r_failures = []
           for label in ("mac", "win"):
@@ -3948,6 +4004,28 @@ jobs:
               for ts, base, i, line in rows:
                   out.write(f"{base}:{i}\t{line}\n")
           print("full set written to camou-fl.txt (uploaded with smoke-results)")
+
+          # I1 (from this task's review): the (b2)/(b2r) slice attributed per
+          # context, printed HERE and not only inside the guard step. Arm (a)
+          # hard-asserts and arm (b)'s check_signal hard-asserts, both before
+          # arm (b2) runs, and a 10-minute timeout kills the step wherever it
+          # is -- any of which leaves the guard step's own slice unprinted. On
+          # a build whose purpose is to diagnose #83 that is the one output
+          # that has to survive, and this step is `if: always()`.
+          #
+          # This attributes by uri= alone, so it needs no byte mark and does
+          # not care which launch or process emitted the line. The
+          # `<h1>...</h1>` wrapper is part of the needle: it makes the marker
+          # unambiguous against a bare substring.
+          print("=== (b2)/(b2r) group lines by context (uri= attribution) ===")
+          for m in ("b2-mac", "b2-win", "b2r-mac", "b2r-win"):
+              sel = [ln for _ts, _b, _i, ln in rows
+                     if "CAMOU-FL group " in ln and f"<h1>{m}</h1>" in ln]
+              print(f"  [{m}] {len(sel)} group line(s)")
+              for ln in sel[-6:]:
+                  print(f"    {ln}")
+          print("  (a context with 0 group lines never built a font group under that "
+                "marker -- its arm did not run, or the render never resolved a family)")
 
           print("=== CAMOU-FL lines, merged time order ===")
           if len(rows) <= CAP:
