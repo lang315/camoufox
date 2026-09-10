@@ -6095,11 +6095,20 @@ jobs:
                   b"</style><body><h1>n7</h1>"
               )
 
+              # What the browser ACTUALLY asked for. Run 34503994177 had the
+              # control face reporting `loaded` while measuring the fallback
+              # baseline, and "the bytes never arrived" and "the bytes arrived
+              # and the face still did not render" are different findings that
+              # a width alone cannot tell apart. TCPServer.serve_forever
+              # handles one request at a time, so a plain list is enough.
+              n7_served = []
+
               class _N7Handler(_http_n7.SimpleHTTPRequestHandler):
                   def log_message(self, *a):
                       pass
 
                   def do_GET(self):
+                      n7_served.append(self.path)
                       if self.path.startswith("/ctl.ttf"):
                           body, code, ctype = n7_font_bytes, 200, "font/ttf"
                       elif self.path.startswith("/nope.ttf"):
@@ -6156,6 +6165,22 @@ jobs:
                 const baseline = c.measureText(s).width;
                 const ctlStatus = await score('N7Ctl');
                 const badStatus = await score('N7Bad');
+                // Arm (k) awaits document.fonts.ready and measures the SAME
+                // font at 1920; this arm did not, and in run 34503994177 it
+                // measured the fallback baseline. Awaiting it here removes
+                // "the face had not finished loading yet" as an explanation
+                // before anything is claimed. The text is also laid out once
+                // so the font is actually USED, not merely measured.
+                const probe = document.createElement('span');
+                probe.style.font = '48px "N7Ctl", monospace';
+                probe.textContent = s;
+                document.body.appendChild(probe);
+                await document.fonts.ready;
+                for (let i = 0; i < 30; i++) {
+                  c.font = '48px "N7Ctl", monospace';
+                  if (Math.abs(c.measureText(s).width - baseline) > 1) break;
+                  await new Promise(r => setTimeout(r, 100));
+                }
                 c.font = '48px "N7Ctl", monospace';
                 const ctlWidth = c.measureText(s).width;
                 return {ctlStatus, badStatus, ctlWidth, baseline};
@@ -6181,7 +6206,10 @@ jobs:
               _srv.shutdown()
               print(f"  [arm n7 / #91] control face status={n7['ctlStatus']} "
                     f"width={n7['ctlWidth']} baseline={n7['baseline']}; "
-                    f"404 face status={n7['badStatus']}")
+                    f"404 face status={n7['badStatus']}; "
+                    f"paths the browser actually fetched: {n7_served}")
+              _n7_got_ctl = any(x.startswith("/ctl.ttf") for x in n7_served)
+              _n7_rendered = abs(n7["ctlWidth"] - 1920.0) <= 1.0
 
               n7_failures = []
               if n7["ctlStatus"] == "NO_FACE_FOUND" or n7["badStatus"] == "NO_FACE_FOUND":
@@ -6193,11 +6221,33 @@ jobs:
                       f"control invalid: the REAL control font reported "
                       f"{n7['ctlStatus']!r}, so 'error' here says nothing about the 404 "
                       f"face -- the server, the origin or the face itself is at fault")
-              elif abs(n7["ctlWidth"] - 1920.0) > 1.0:
+              elif not _n7_rendered and _n7_got_ctl:
+                  # NOT control-invalid. The server was asked for the font and
+                  # served it, the face says `loaded`, and it still did not
+                  # render -- and the SAME bytes render at exactly 1920 in arm
+                  # (k) of this same run, from a data: URI, which is what rules
+                  # out a broken font file rather than an assumption about one.
+                  # document.fonts.ready has been awaited and the width polled
+                  # for 3s, which rules out "not finished yet". A status of
+                  # `loaded` for a face that never rendered is #91 read from the
+                  # control side, and calling it a broken control would file the
+                  # defect as a fixture problem.
                   n7_failures.append(
-                      f"control invalid: the control face reports `loaded` but measured "
-                      f"{n7['ctlWidth']} instead of 1920 (baseline {n7['baseline']}), so "
-                      f"`loaded` is being reported for a face that did not render")
+                      f"INVENTED LOAD STATUS (control variant): the control face "
+                      f"reports {n7['ctlStatus']!r} and the server DID serve its bytes "
+                      f"({n7_served}), yet after document.fonts.ready plus a 3s poll it "
+                      f"measured {n7['ctlWidth']}, the plain-monospace baseline "
+                      f"({n7['baseline']}), not 1920. Arm (k) renders these same bytes "
+                      f"at 1920.0 from a data: URI in this run, so the file is good and "
+                      f"the status is being reported without the load")
+              elif not _n7_rendered:
+                  n7_failures.append(
+                      f"INVENTED LOAD STATUS (never-fetched variant): the control face "
+                      f"reports {n7['ctlStatus']!r} but the browser never requested its "
+                      f"src url() at all -- the server was asked only for {n7_served} -- "
+                      f"and it measured {n7['ctlWidth']} against a baseline of "
+                      f"{n7['baseline']}. A load status reported for a resource that was "
+                      f"never fetched is the defect stated as plainly as it can be")
               elif n7["badStatus"] == "STUCK_LOADING":
                   n7_failures.append(
                       f"INVENTED LOAD STATUS (stuck variant): the 404 face never left "
@@ -6293,7 +6343,12 @@ jobs:
                        "unfixed until Task 4"),
               "(n4)": ("(n4) replacement-char cache, donor/victim (#82):",
                        "#82, the U+FFFD cache measurement; RED here means the #93 gate "
-                       "does not hold, GREEN means it does and the RED control is B6"),
+                       "does not hold. A GREEN ROW HERE IS VACUOUS ON A BINARY WITH NO "
+                       "`fontlist` KIND: the arm takes its width-only branch, whose "
+                       "evidence cannot stand alone, and appends nothing -- which this "
+                       "table then prints as 'was expected red, so the defect may be "
+                       "fixed'. It is not. Read the arm's own DIAGNOSTIC line for what "
+                       "it actually observed, and the B6 trigger with it"),
               "(n5)": ("(n5) per-context speech voices (#90):",
                        "#90, per-context speech voices -- MEASUREMENT, not a triaged "
                        "defect. A RED is the reading Task 6 branches on"),
