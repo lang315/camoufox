@@ -2630,6 +2630,9 @@ jobs:
                   b.close()
                   return result
 
+          # Arm (h3) reads the log window arms (e)-(h) produce, so the mark has
+          # to be taken before their launches, not after.
+          efgh_mark = log_mark()
           e = {"mac": one_page("mac", JS_E), "win": one_page("win", JS_E)}
           f = {"mac": one_page("mac", JS_F), "win": one_page("win", JS_F),
                "mac2": one_page("mac", JS_F)}
@@ -3051,6 +3054,185 @@ jobs:
                           f"baseline={h[label]['baseline']}), arm (b) says this context "
                           f"{'has' if ground['Segoe UI'] else 'does not have'} Segoe UI")
 
+          # -----------------------------------------------------------
+          # Arm (h3): #88. Arm (h) proved the face-name gate FIRES for the mac
+          # probes -- the diag build logged ctx with a list, allowed=0 -- and
+          # the text still rendered at 375.70001220703125. What serves that text
+          # is gfxFontGroup::GetDefaultFont (gfxTextRun.cpp:2201-2320), which
+          # opens NO AutoFontListContext and whose shared-list last-resort walk
+          # (:2237-2263) has no gate at all. The verdict here is the LOG
+          # PREDICATE: the `default ctx=N family=X` line that follows the mac
+          # context's `facename ... key=segoe ui allowed=0` must name a family
+          # the mac context's list contains.
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * The width half is NOT the verdict. #88's own comment records that
+          #    262 of 513 bundled mac families tie at the target width, so an
+          #    equality is not an identification. It is kept only as a
+          #    discriminator, and the arm says so out loud when it cannot
+          #    discriminate.
+          #  * ctx is NOT hardcoded. Run 34213805428 happened to use ctx=6; the
+          #    id depends on how many contexts preceded this arm. It is read off
+          #    the `facename` line and the following `default` line is matched
+          #    on the same id.
+          #  * MATCHING ON ctx ALONE IS NOT ENOUGH, and this is the reason the
+          #    reads below go through ONE camou_fl call. camou_fl iterates
+          #    `for p in sorted(glob(...))` and only then the lines of each file,
+          #    so its output is grouped by cfx<PID> in LEXICOGRAPHIC file order
+          #    -- `[-1]` is "last line of the last-sorting file", not "most
+          #    recent". This arm's window is efgh_mark, which spans arms (e),
+          #    (f), (f_control), (g) and (h): eight separate one_page()
+          #    launches, eight browser processes, eight log files. Playwright
+          #    allocates user-context ids per browser, so a later launch very
+          #    likely reuses the same numeric id, and a ctx-only match would tie
+          #    arm (h)'s `facename` line to some other arm's `default` line. The
+          #    spec says "the FOLLOWING default line", which means: same log
+          #    file, later in that file. Reading every CAMOU-FL line of the
+          #    window once and filtering the ordered list in Python expresses
+          #    both -- the file basename is each line's first token, and
+          #    position is the list index -- and needs no new helper.
+          def _ctx_of(ln):
+              tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
+              return tok[4:] if tok else None
+
+          #  * THE OBSERVABLE MOVES WHEN A2 LANDS, and scoring its absence as a
+          #    broken setup would fail the very build that fixes #88.
+          #    `CAMOU-FL default` is emitted only from
+          #    gfxFontGroup::GetDefaultFont (gfxTextRun.cpp:2316), which is
+          #    reached only when the group's own list resolved to NOTHING.
+          #    Arm (h)'s stack is '48px "ProbeH_full", monospace'. AFTER A2,
+          #    CamouGenericCandidate answers `monospace` from the table with
+          #    Menlo (mac-only, bundled), mFonts is non-empty, GetFirstValidFont
+          #    returns a real font, GetDefaultFont is never called, and NO
+          #    `default` line exists for that context. So there are two GREEN
+          #    shapes and the arm reports which one fired:
+          #      shape A  a `default ctx=N family=X` line with X in the mac list
+          #      shape B  no `default` line for that ctx, TOGETHER WITH a
+          #               `generic-map ctx=N ... key=<in-list family>` line
+          #               proving the group resolved through the table instead
+          #    Shape B is only available once the binary emits `generic-map`;
+          #    before that, a missing `default` line really is a broken setup.
+          #    kind_total("generic-map") is what tells the two apart.
+          #
+          #    PRE-RUN EXPECTATION ON 34432908522, written down before the run
+          #    and NOT the plan's: the plan predicted a `DEFAULT FONT OUTSIDE
+          #    THE LIST` red here, reasoning that monospace -> Cousine and the
+          #    appended serif -> Tinos are both refused, so mFonts is empty and
+          #    the `default` line fires. Run 34496121342, the SAME binary under
+          #    FONTCONFIG_FILE, counted `default` = 0 for the whole run, and arm
+          #    (h)'s own mac generics measured three DIFFERENT widths (baseline
+          #    377, sans 433, serif 409) -- so mFonts was not empty and
+          #    GetDefaultFont was never reached. Those generics resolved by the
+          #    very fontconfig-distance mechanism arm (n2) measures for #92.
+          #    This arm therefore lands in the `h3_family is None` +
+          #    no-generic-map branch: setup invalid, absorbed by EXPECTED_RED as
+          #    RED but UNMEASURED. That is the correct behaviour, and it means
+          #    Phase 0 gets no measured #88 verdict from (h3) on this binary.
+          def _file_of(ln):
+              """The cfx<PID> basename camou_fl prefixes to every line."""
+              parts = ln.split(None, 1)
+              return parts[0] if parts else ""
+
+          # ONE read of the whole window, in (file, line) order, then filtered
+          # in Python. This is what lets "the following default line" mean the
+          # same file and a later position, not merely the same ctx number.
+          h3_all = camou_fl(efgh_mark, "CAMOU-FL ", limit=None)
+          h3_face_idx = [i for i, ln in enumerate(h3_all)
+                         if "CAMOU-FL facename" in ln and "key=segoe ui" in ln
+                         and "allowed=0" in ln]
+          h3_face = [h3_all[i] for i in h3_face_idx]
+          h3_unfiltered = [ln for ln in h3_all if "CAMOU-FL default-unfiltered" in ln]
+          h3_ctx = _ctx_of(h3_face[-1]) if h3_face else None
+          h3_pos = h3_face_idx[-1] if h3_face_idx else -1
+          h3_file = _file_of(h3_face[-1]) if h3_face else None
+          # Same file, same ctx, and AFTER the refusal.
+          h3_after = ([ln for i, ln in enumerate(h3_all)
+                       if i > h3_pos and "CAMOU-FL default " in ln
+                       and _file_of(ln) == h3_file and _ctx_of(ln) == h3_ctx]
+                      if h3_ctx else [])
+          h3_family = (h3_after[-1].split("family=", 1)[1].strip()
+                       if h3_after and "family=" in h3_after[-1] else None)
+          h3_maclist = {f.casefold() for f in FONTS["mac"]}
+          # `key` is the last field of the generic-map line and may contain
+          # spaces, so it runs to end of line -- same rule as arm (n2). Shape B
+          # asserts that ARM (h)'s OWN group resolved through the table, so the
+          # same file/ctx pinning applies; the position bound is dropped because
+          # EnsureFontList runs BEFORE the face-name lookup, so a generic-map
+          # line for this group legitimately precedes the facename line.
+          h3_gm_mine = ([ln for ln in h3_all
+                         if "CAMOU-FL generic-map" in ln
+                         and _file_of(ln) == h3_file and _ctx_of(ln) == h3_ctx]
+                        if h3_ctx else [])
+          h3_gm = [ln for ln in h3_all if "CAMOU-FL generic-map" in ln]
+          h3_gm_keys = {ln.split("key=", 1)[1].strip().casefold()
+                        for ln in h3_gm_mine if "key=" in ln} - {"none", ""}
+          h3_gm_inlist = sorted(k for k in h3_gm_keys if k in h3_maclist)
+          print(f"  [arm h3 / #88] facename refusals for 'segoe ui': {len(h3_face)}; "
+                f"file={h3_file} ctx={h3_ctx}; `default` lines in that file after the "
+                f"refusal: {len(h3_after)}; family={h3_family!r}; "
+                f"default-unfiltered={len(h3_unfiltered)}; generic-map in that file for "
+                f"that ctx: {len(h3_gm_mine)} of {len(h3_gm)} in the window; "
+                f"keys={sorted(h3_gm_keys)} in-list={h3_gm_inlist}; "
+                f"kind_total(generic-map)={kind_total('generic-map')}")
+          for _ln in (h3_face[-2:] + h3_after[-2:] + h3_gm_mine[-2:]):
+              print(f"      {_ln}")
+
+          h3_failures = []
+          if kind_total("facename") == 0:
+              print("  [arm h3 / #88] DIAGNOSTIC: this binary emits no `facename` "
+                    "line, so the refusal this predicate follows cannot be seen.")
+          elif not h3_face:
+              h3_failures.append(
+                  f"setup invalid: the run emitted {kind_total('facename')} facename "
+                  f"lines but none with key=segoe ui allowed=0 in arm (h)'s window, so "
+                  f"the refusal this predicate follows never happened")
+          elif h3_family is None and kind_total("generic-map") > 0:
+              # SHAPE B. A2 is in this binary and the group never needed a
+              # default font. That is the fix working, not a broken fixture --
+              # but only if the table demonstrably answered with an in-list
+              # family for this same context.
+              if h3_gm_inlist:
+                  print(f"  [arm h3 / #88] GREEN, shape B: no `default` line for "
+                        f"ctx={h3_ctx} -- the group never fell to the default font -- "
+                        f"and generic-map resolved {h3_gm_inlist} from the context's "
+                        f"own list. GetDefaultFont was not reached, which is what A2 "
+                        f"is for.")
+              else:
+                  h3_failures.append(
+                      f"DEFAULT FONT OUTSIDE THE LIST: no `default` line for "
+                      f"ctx={h3_ctx} AND no generic-map line naming an in-list family "
+                      f"for it, so nothing shows how the group resolved. generic-map "
+                      f"keys seen: {sorted(h3_gm_keys) or 'none'}")
+          elif h3_family is None:
+              h3_failures.append(
+                  f"setup invalid: no `CAMOU-FL default` line for ctx={h3_ctx} after "
+                  f"the refusal, and this binary emits no `generic-map` kind, so the "
+                  f"face that served the text was never named")
+          elif h3_family.casefold() not in h3_maclist:
+              h3_failures.append(
+                  f"DEFAULT FONT OUTSIDE THE LIST: after refusing 'segoe ui' for "
+                  f"ctx={h3_ctx}, GetDefaultFont served {h3_family!r}, which is not in "
+                  f"the mac list. default-unfiltered lines: {len(h3_unfiltered)}")
+          else:
+              print(f"  [arm h3 / #88] GREEN, shape A: `default ctx={h3_ctx} "
+                    f"family={h3_family}` names a family in the mac list.")
+              # Discriminator only, and it says so when it discriminates nothing.
+              _target = h["mac"]["hFull"]
+              _others = [h["mac"]["baseline"], h["mac"]["sans"], h["mac"]["serif"]]
+              if all(abs(_target - o) < 0.01 for o in _others):
+                  print(f"  [arm h3 / #88] the width half asserts NOTHING this run: "
+                        f"{_target} equals every other in-context reference "
+                        f"{_others}, and 262 of 513 mac families tie at the #88 "
+                        f"target. The log predicate above is the verdict.")
+              else:
+                  print(f"  [arm h3 / #88] discriminator OK: refused-probe width "
+                        f"{_target} differs from at least one in-context reference "
+                        f"{_others}.")
+          if h3_failures:
+              tripwires.append(f"(h3) default font after a per-context refusal (#88): {h3_failures}")
+              note_unmeasured("(h3)", h3_failures, "DEFAULT FONT OUTSIDE THE LIST")
+          # -----------------------------------------------------------
+
           if e_failures:
               tripwires.append(
                   f"(e) CSS @font-face -- doc.fonts vs arm (b) measurement disagree: "
@@ -3084,6 +3266,366 @@ jobs:
           print(f"  (h) face-name lookup:       {'RED' if h_failures else 'GREEN'} -- {h_failures}")
           print(f"      mac: local('Segoe UI')={h['mac']['hFull']} local('SegoeUI')={h['mac']['hPs']} baseline={h['mac']['baseline']}")
           print(f"      win: local('Segoe UI')={h['win']['hFull']} local('SegoeUI')={h['win']['hPs']} baseline={h['win']['baseline']}")
+
+          # -----------------------------------------------------------
+          # Arm (n1): #94, the pref-font path. gfxFontGroup::FindFontForChar
+          # exit 7 (gfxTextRun.cpp:3576-3593) calls WhichPrefFontSupportsChar,
+          # which walks mLangGroupPrefFonts[lang][generic] with NO gate of any
+          # kind -- no CamouIsFontAllowed, no MaskedFontListBlocks, not even
+          # IsVisibleToCSS. The memo is process-global and its key carries
+          # neither a context id nor a FontVisibility, so the FIRST caller to
+          # miss fixes the cell for the whole process, at context 0, where the
+          # gate allows everything.
+          #
+          # Fixture. Context list ["Times"] (mac-only in fonts.json). Stack
+          # '72px "Times", serif' -- naming a generic makes mFallbackGeneric
+          # Serif (gfxTextRun.cpp:1998-2000), so the cell consulted is
+          # [x-cyrillic][Serif]. U+1C80 is UBLOCK_CYRILLIC_EXTENDED_C, which has
+          # a case in GetFontPrefLangFor, and the Unix block of all.js:2746 sets
+          # font.name-list.serif.x-cyrillic to the literal "serif" -- which
+          # fontconfig, under the bundle's own fonts.conf, answers with Tinos.
+          #
+          # WHY "Times" AND NOT "Geneva". The plan wrote this fixture as
+          # ["Geneva"], and Geneva is the one bundled mac family that never
+          # renders (issue #95): run 34477369394's pixel discriminator has
+          # Geneva rasterising byte-identical to a deliberately-absent family
+          # while the Helvetica Neue control differs, so the test was valid and
+          # Geneva did not resolve. A list of one unrenderable family leaves
+          # mFonts EMPTY, which routes U+1C80 through GetDefaultFont's
+          # last-resort walk (#88) instead of FindFontForChar exit 7 (#94) and
+          # would make a RED here attributable to the wrong issue -- and the
+          # tofu floor and the Tinos reference could then be the same face,
+          # which trips this arm's own control-invalid branch. Times is mac-only
+          # like Geneva, renders, and is A2's first serif-row family, so the
+          # appended `serif` generic resolves to Times as well: mFonts holds a
+          # real face, exit 7 is the path under test, and the substitution
+          # changes nothing about the attribution argument below, because that
+          # argument is about what covers U+1C80, not about what is in the list.
+          #
+          # WHY U+1C80. Scanned over every face and every cmap subtable of
+          # bundle/fonts/{macos,windows,linux}: among families whose name does
+          # not start with '.', ONLY Tinos and Arimo cover it. Both are
+          # lin-only in fonts.json, so both gates refuse them under ["Times"],
+          # and no mac family can answer instead -- which is what makes a RED
+          # here attributable to the ungated pref path rather than to an
+          # ordinary in-list fallback. Re-run against the shipped bundle before
+          # this arm landed: 345 faces scanned, U+1C80 -> ['Arimo', 'Tinos'].
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * The Tinos reference and the tofu floor could be equal, in which
+          #    case "matched Tinos" and "rendered nothing" are the same number.
+          #    Asserted below; if equal the arm scores nothing.
+          #  * The Tinos reference is measured by FAMILY NAME in a BARE context.
+          #    That is a SEPARATE browser process -- one_page_list_arg opens its
+          #    own sync_playwright() -- so this is not a same-process
+          #    comparison. What makes the two sides comparable is narrower and
+          #    has to be stated as what it is: the same font FILES (one
+          #    artifact, one FONTCONFIG_FILE), the same 72px size, the same
+          #    canvas measureText path, and an advance width that is a property
+          #    of the face rather than of the context. Arm (h) relies on the
+          #    same property and states it the same way.
+          #  * The reference launch's OWN font list contains Tinos -- its
+          #    appended serif generic resolves there because no per-context list
+          #    refuses it -- so its `fontlist` line would satisfy the "a carrier
+          #    reached mFonts" branch below if it were in the window. Every
+          #    camou_fl read is therefore taken BEFORE the reference launch, and
+          #    the lines are additionally filtered to the fixture context's own
+          #    ctx=. Either alone would do; both are cheap.
+          #  * On a binary with no `fontlist` kind at all the precondition
+          #    "the context's list resolved to no U+1C80 carrier" cannot be
+          #    read. That is the width-only branch. It still scores: a width
+          #    match against the bare reference IS #94's leak, and #94 needs a
+          #    Phase 0 RED.
+          N1_CP = 0x1C80          # CYRILLIC SMALL LETTER ROUNDED VE
+          N1_PUA = 0xE000         # tofu floor: nothing MAC-side covers it
+          N1_NAMED = "Times"      # mac-only, renders (unlike Geneva, #95)
+          N1_LIST = [N1_NAMED]
+          N1_OUTSIDE = "Tinos"    # the ctx-0 pref answer under the bundle conf
+
+          JS_N1 = """(a) => {
+            const c = document.createElement('canvas').getContext('2d');
+            const out = {};
+            c.font = '72px "' + a.named + '", serif';
+            out.probe = c.measureText(String.fromCodePoint(a.cp)).width;
+            out.floor = c.measureText(String.fromCodePoint(a.pua)).width;
+            c.font = '72px "' + a.outside + '"';
+            out.outsideDirect = c.measureText(String.fromCodePoint(a.cp)).width;
+            return out;
+          }"""
+
+          def one_page_list_arg(font_list, js, arg):
+              # one_page_arg() with an EXPLICIT list rather than a fonts.json
+              # key. Same launch ({}), same context, same single page.
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  ctx = b.new_context()
+                  if font_list is not None:
+                      ctx.add_init_script(
+                          'if (typeof window.setFontList === "function") '
+                          'window.setFontList(%s);' % json.dumps(",".join(font_list)))
+                  page = ctx.new_page()
+                  page.goto("data:text/html,<h1>n1</h1>")
+                  result = page.evaluate(js, arg)
+                  b.close()
+                  return result
+
+          def _ctx_tok(ln):
+              """The `ctx=<n>` value of a CAMOU-FL line, or None."""
+              tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
+              return tok[4:] if tok else None
+
+          n1_mark = log_mark()
+          n1 = one_page_list_arg(
+              N1_LIST, JS_N1,
+              {"named": N1_NAMED, "cp": N1_CP, "pua": N1_PUA,
+               "outside": N1_OUTSIDE})
+          # EVERY log read happens HERE, before the reference launch. The
+          # reference runs with no per-context list, so its own appended serif
+          # generic resolves to Tinos and its `fontlist` line names a U+1C80
+          # carrier -- which is exactly the string the "a carrier reached
+          # mFonts" branch below refuses on. camou_fl reads every file in
+          # LOG_DIR and treats a file absent from the mark as offset 0
+          # (see camou_fl above), so a launch made after the mark IS inside the
+          # window. Reading first is what keeps the fixture's window the
+          # fixture's.
+          n1_fl_all = camou_fl(n1_mark, "CAMOU-FL fontlist", limit=None)
+          n1_pf_all = camou_fl(n1_mark, "CAMOU-FL pref-fallback", limit=None)
+          # Second, independent narrowing: keep only the fixture context's own
+          # lines. The fixture is the single launch in this window, so its ctx
+          # is whichever non-zero id its `fontlist` lines carry.
+          n1_ctxs = {c for c in (_ctx_tok(ln) for ln in n1_fl_all)
+                     if c and c != "0"}
+          n1_ctx = sorted(n1_ctxs)[0] if len(n1_ctxs) == 1 else None
+          n1_fl = [ln for ln in n1_fl_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
+          n1_pf = [ln for ln in n1_pf_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
+
+          # The reference: Tinos's U+1C80 measured by family name in a BARE
+          # context, where no per-context list gates anything.
+          n1_ref = one_page_list_arg(
+              None, JS_N1,
+              {"named": N1_NAMED, "cp": N1_CP, "pua": N1_PUA,
+               "outside": N1_OUTSIDE})["outsideDirect"]
+          n1_have_fontlist = kind_total("fontlist") > 0
+          print(f"  [arm n1 / #94] probe(U+1C80 in {N1_LIST})={n1['probe']} "
+                f"floor(U+E000)={n1['floor']} tinos_ref={n1_ref} ctx={n1_ctx} "
+                f"fontlist_lines={len(n1_fl)}/{len(n1_fl_all)} "
+                f"pref_fallback_lines={len(n1_pf)}/{len(n1_pf_all)} "
+                f"kind_totals: fontlist={kind_total('fontlist')} "
+                f"pref-fallback={kind_total('pref-fallback')}")
+          for _ln in (n1_fl + n1_pf)[-6:]:
+              print(f"      {_ln}")
+
+          n1_failures = []
+          if abs(n1_ref - n1["floor"]) < 0.01:
+              n1_failures.append(
+                  f"control invalid: Tinos's U+1C80 width ({n1_ref}) equals the "
+                  f"stack's own tofu floor ({n1['floor']}), so 'the pref path "
+                  f"answered' and 'nothing rendered' are the same number and this "
+                  f"arm cannot tell them apart")
+          elif not n1_have_fontlist:
+              # Binary predates the `fontlist` kind, so the precondition cannot
+              # be READ -- but the width comparison stands on its own and is
+              # what gives #94 its Phase 0 RED. The reference is a family-name
+              # measurement of the very family the ctx-0 memo holds, so a match
+              # is the leak; the tofu floor rules out "nothing rendered".
+              if (abs(n1["probe"] - n1_ref) < 0.01
+                      and abs(n1["probe"] - n1["floor"]) >= 0.01):
+                  n1_failures.append(
+                      f"PREF PATH LEAK (width-only, no `fontlist` kind in this "
+                      f"binary): U+1C80 in a {N1_LIST} context measured "
+                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) measured by "
+                      f"name in a bare context, and differs from this stack's own "
+                      f"tofu floor ({n1['floor']}). Tinos is lin-only in fonts.json, "
+                      f"so both gates refuse it and no allowed family covers U+1C80.")
+              else:
+                  print(f"  [arm n1 / #94] DIAGNOSTIC (binary emits no `fontlist` "
+                        f"kind): U+1C80 measured {n1['probe']}, which is neither "
+                        f"Tinos ({n1_ref}) nor the tofu floor ({n1['floor']}). Some "
+                        f"third face answered; this arm cannot say which, and it "
+                        f"scores nothing on this binary.")
+          elif n1_ctx is None:
+              n1_failures.append(
+                  f"setup invalid: could not resolve a single non-zero ctx from this "
+                  f"arm's `fontlist` lines (saw {sorted(n1_ctxs)}), so no line can be "
+                  f"attributed to the fixture context")
+          else:
+              _mine = [ln for ln in n1_fl if "families=" in ln]
+              # `families` is the LAST field of the format string and a key can
+              # contain spaces, so the value runs to end of line.
+              _fams = [ln.split("families=", 1)[1].strip() for ln in _mine]
+              # Spec B1's GREEN is "width equals the tofu floor or a listed
+              # family AND the log carries pref-fallback ... allowed=0"; its RED
+              # is the width match AND no such line. Without this the GREEN also
+              # covers "the pref path was never consulted at all", which is the
+              # vacuous green lesson 4 is about.
+              _refused = [ln for ln in n1_pf
+                          if "key=tinos" in ln.lower() and "allowed=0" in ln]
+              if not _mine:
+                  n1_failures.append(
+                      f"setup invalid: the run emitted {kind_total('fontlist')} "
+                      f"`fontlist` lines but none for ctx={n1_ctx}, so the "
+                      f"context's resolved family list could not be read")
+              elif any(f == "" for f in _fams):
+                  n1_failures.append(
+                      "setup invalid: a `fontlist` line came back with an EMPTY "
+                      "families= field, which is a child-process AsString failure "
+                      "(SharedFontList.h:142-148), not an empty list")
+              elif any(t in f.lower() for f in _fams for t in ("tinos", "arimo")):
+                  n1_failures.append(
+                      f"setup invalid: a U+1C80 carrier reached mFonts, so exit 4 "
+                      f"answers before exit 7 and this arm tests nothing: {_mine[-1]}")
+              elif abs(n1["probe"] - n1_ref) < 0.01:
+                  n1_failures.append(
+                      f"PREF PATH LEAK: U+1C80 in a {N1_LIST} context measured "
+                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) -- a "
+                      f"lin-only family both gates refuse. pref-fallback lines for "
+                      f"ctx={n1_ctx}: {len(n1_pf)}, of which "
+                      f"{len(_refused)} refused tinos")
+              elif not _refused:
+                  n1_failures.append(
+                      f"PREF PATH NOT CONSULTED: the width is right ({n1['probe']} vs "
+                      f"tinos {n1_ref}, floor {n1['floor']}) but no "
+                      f"`pref-fallback ctx={n1_ctx} key=tinos allowed=0` line exists, "
+                      f"so this GREEN would also cover 'the read filter never ran'. "
+                      f"pref-fallback lines for this ctx: {n1_pf[-3:] or 'none'}")
+          if n1_failures:
+              tripwires.append(f"(n1) ungated pref-font path (#94): {n1_failures}")
+              # The marker is the common PREFIX of both verdict branches --
+              # "PREF PATH LEAK" and "PREF PATH NOT CONSULTED". Passing only the
+              # first would file a real NOT-CONSULTED verdict as unmeasured,
+              # which is the opposite of what note_unmeasured is for.
+              note_unmeasured("(n1)", n1_failures, "PREF PATH ")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (n2): #92, a generic under a per-context list must resolve to a
+          # family of the RIGHT KIND. gfxFcPlatformFontList::FindGenericFamilies
+          # calls FcFontSort with trim=FcFalse (gfxFcPlatformFontList.cpp:2760),
+          # so it returns the WHOLE config sorted by fontconfig's distance
+          # metric and the loop takes the first `limit` (default 3) families the
+          # gate accepts. Under a mac list the three fontconfig answers
+          # (Tinos/Arimo/Cousine) are all refused, so what comes back is three
+          # families chosen by distance from a pattern the gate already emptied
+          # of its real answer -- not by the generic. That is #92's mechanism.
+          #
+          # Fixture list ["Menlo", "Helvetica Neue", "Times"]: one family from
+          # each of A2's three rows, all mac-only. Menlo is REQUIRED -- without
+          # a monospace-row family the helper's fallback maps monospace and
+          # sans-serif onto the same family and the arm is RED for a reason it
+          # cannot show (spec-review I8).
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * `iiiii` == `mmmmm` is also true if NOTHING rendered. The
+          #    sans-serif control must DIFFER on the same two strings in the
+          #    same context and run; without it the arm is vacuous.
+          #  * A monospace answer that is simply the default font would still
+          #    show equal widths. The GREEN also requires generic-map to name a
+          #    family, that family to be in the fixture list, and monospace's
+          #    width to match Menlo named directly in the same context.
+          #  * A `default-unfiltered` line for this context means the gated walk
+          #    found nothing resident and the tail fired -- a fixture bug, not a
+          #    fix. Counted and reported.
+          N2_LIST = ["Menlo", "Helvetica Neue", "Times"]
+          JS_N2 = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const w = (font, s) => { c.font = font; return c.measureText(s).width; };
+            const out = {};
+            for (const g of ['monospace', 'sans-serif', 'serif']) {
+              out[g + ':i'] = w('72px ' + g, 'iiiii');
+              out[g + ':m'] = w('72px ' + g, 'mmmmm');
+            }
+            out['menlo:i'] = w('72px "Menlo"', 'iiiii');
+            out['menlo:m'] = w('72px "Menlo"', 'mmmmm');
+            return out;
+          }"""
+
+          n2_mark = log_mark()
+          n2 = one_page_list_arg(N2_LIST, JS_N2, None)
+          n2_gm = camou_fl(n2_mark, "CAMOU-FL generic-map", limit=None)
+          n2_fl = camou_fl(n2_mark, "CAMOU-FL fontlist", limit=None)
+          n2_du = camou_fl(n2_mark, "CAMOU-FL default-unfiltered", limit=None)
+          print(f"  [arm n2 / #92] mono i/m={n2['monospace:i']}/{n2['monospace:m']} "
+                f"sans i/m={n2['sans-serif:i']}/{n2['sans-serif:m']} "
+                f"serif i/m={n2['serif:i']}/{n2['serif:m']} "
+                f"menlo i/m={n2['menlo:i']}/{n2['menlo:m']} "
+                f"generic-map={len(n2_gm)} fontlist={len(n2_fl)} "
+                f"default-unfiltered={len(n2_du)}")
+          for _ln in (n2_gm + n2_fl + n2_du)[-8:]:
+              print(f"      {_ln}")
+
+          n2_failures = []
+          n2_mono_equal = abs(n2["monospace:i"] - n2["monospace:m"]) < 0.01
+          n2_sans_equal = abs(n2["sans-serif:i"] - n2["sans-serif:m"]) < 0.01
+          if n2_sans_equal:
+              n2_failures.append(
+                  f"control invalid: sans-serif measured 'iiiii' and 'mmmmm' at the "
+                  f"same width ({n2['sans-serif:i']}), so equal widths do not mean "
+                  f"monospaced here -- most likely nothing rendered at all")
+          elif not n2_mono_equal:
+              n2_failures.append(
+                  f"GENERIC MISMAPPED: monospace measured 'iiiii'={n2['monospace:i']} "
+                  f"and 'mmmmm'={n2['monospace:m']} -- a proportional face -- while "
+                  f"sans-serif correctly differs. generic-map lines: "
+                  f"{n2_gm[-3:] or 'none'}")
+          elif kind_total("generic-map") > 0:
+              # The fix is in this binary, so the log must corroborate the width.
+              # `key` is the LAST field of
+              # `generic-map ctx=%u generic=%d step=%s key=%s`, and a family key
+              # can contain spaces -- A2's sans-serif row starts with
+              # `Helvetica Neue`, which is in N2_LIST. Splitting on the first
+              # space would yield "helvetica", which is in no fixture list, and
+              # the arm would report the FIX as "named a family outside the
+              # list" and fail the step in Phase 1. So key runs to end of line;
+              # only `generic` and `step`, which are followed by another field,
+              # may be split on whitespace.
+              def _gm_last(ln, name):
+                  return (ln.split(name + "=", 1)[1].strip()
+                          if name + "=" in ln else "")
+
+              def _gm_field(ln, name):
+                  return (ln.split(name + "=", 1)[1].split(" ", 1)[0]
+                          if name + "=" in ln else "")
+              _keys = {}
+              for _ln in n2_gm:
+                  _keys.setdefault(_gm_field(_ln, "generic"), set()).add(
+                      _gm_last(_ln, "key"))
+              _flat = {k: sorted(v) for k, v in _keys.items()}
+              _allowed = {f.casefold() for f in N2_LIST}
+              _named = {k for vs in _keys.values() for k in vs} - {"none", ""}
+              if not _named:
+                  n2_failures.append(
+                      f"setup invalid: the run emitted {kind_total('generic-map')} "
+                      f"generic-map lines but every one in this arm's window says "
+                      f"key=none, so no generic was resolved by the table: {_flat}")
+              elif not _named.issubset(_allowed):
+                  n2_failures.append(
+                      f"generic-map named a family OUTSIDE the fixture list: "
+                      f"{sorted(_named - _allowed)} (list={N2_LIST})")
+              elif len(_named) < 2:
+                  n2_failures.append(
+                      f"generic-map named ONE family for every generic ({_named}), so "
+                      f"monospace and sans-serif share a face and the equal-width "
+                      f"reading above means nothing: {_flat}")
+              elif abs(n2["monospace:m"] - n2["menlo:m"]) >= 0.01:
+                  n2_failures.append(
+                      f"monospace's width ({n2['monospace:m']}) does not match Menlo "
+                      f"named directly in the same context ({n2['menlo:m']}), so the "
+                      f"equal-width reading is some other monospaced face")
+              elif n2_du:
+                  n2_failures.append(
+                      f"the unfiltered last-resort tail fired for this context "
+                      f"({len(n2_du)} default-unfiltered lines) -- the gated walk "
+                      f"found no resident family, which is a fixture bug: {n2_du[-2:]}")
+          else:
+              print(f"  [arm n2 / #92] DIAGNOSTIC (binary emits no `generic-map` "
+                    f"kind): monospace is {'equal-width' if n2_mono_equal else 'PROPORTIONAL'} "
+                    f"and the log cannot say which family answered.")
+          if n2_failures:
+              tripwires.append(f"(n2) generic -> family under a per-context list (#92): {n2_failures}")
+              note_unmeasured("(n2)", n2_failures, "GENERIC MISMAPPED")
+          # -----------------------------------------------------------
 
           # -----------------------------------------------------------
           # Arm (h'): identify the 375.70001220703125 face (#88). Arm (h) above
@@ -4984,6 +5526,488 @@ jobs:
               note_unmeasured("(j2)", j2_failures, "REPLACEMENT-CHAR CACHE LEAK")
           # -----------------------------------------------------------
 
+          # -----------------------------------------------------------
+          # Arm (n4): #82. mReplacementCharFallbackFamily is a per-process,
+          # per-FontVisibility-level cache of the family that answered U+FFFD.
+          # PR #93 gates the read (gfxPlatformFontList.cpp:1409-1427); this arm
+          # is the measurement that gate never had.
+          #
+          # Fixture, traced exit by exit in the spec review: donor ["Times",
+          # "Menlo"], victim ["Times", "Geneva"], both stacks "Times" only.
+          # Times is 4/4 faces WITHOUT U+FFFD; A2's serif row starts with Times,
+          # which both lists contain, so the appended default generic (serif,
+          # from all.js:2038 via GetDefaultGeneric(x-western)) also resolves to
+          # Times and both groups read families=times,times. The only U+FFFD
+          # carrier the donor can reach is Menlo, through system fallback.
+          # U+FFFD is the FIRST character of its own text run so aPrevMatchedFont
+          # (exit 8) is empty. Re-scanned against the shipped bundle before this
+          # arm landed: 345 faces, U+FFFD carriers are Apple Symbols, Arimo,
+          # Lucida Grande, Malgun Gothic, Menlo, Microsoft Sans Serif, STIX Two
+          # Math, Segoe UI (+Black/Light/Semibold/Semilight), System Font,
+          # Tahoma, Tinos, Verdana -- Times and Geneva are in neither, which is
+          # what the fixture needs, and Menlo and Lucida Grande are both there,
+          # which is what makes N4_DONOR_ALT a real recovery fixture.
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * Two contexts in different content processes share no cache at
+          #    all, so the arm would read GREEN for a leak it never exposed.
+          #    two_contexts_one_launch forces dom.ipc.processCount=1 and the
+          #    pids are ASSERTED equal, not assumed.
+          #  * mReplacementCharFallbackFamily is indexed by FontVisibility
+          #    LEVEL. Both pages are same-scheme (data:) content documents, so
+          #    both groups sit at the same level; a mismatch reads an empty slot
+          #    and looks exactly like the pre-#93 report B6 keys on.
+          #  * The victim's own tofu floor and Menlo's U+FFFD width could be
+          #    equal, in which case "leaked" and "rendered nothing" are the same
+          #    number. Asserted.
+          #  * On a binary with no CAMOU-FL kinds at all (build 34236331658 @
+          #    8990915 emits zero) none of the four log preconditions can be
+          #    read. That is the width-only diagnostic branch, and its reading
+          #    is what triggers B6.
+          #  * Geneva appears here as a LIST MEMBER ONLY -- nothing renders it,
+          #    its role is "allowed but not a U+FFFD carrier" -- so issue #95
+          #    (Geneva never renders) cannot affect this arm's reading. Every
+          #    measured stack is Times.
+          N4_DONOR = ["Times", "Menlo"]
+          N4_DONOR_ALT = ["Times", "Lucida Grande"]   # recovery fixture
+          N4_VICTIM = ["Times", "Geneva"]
+          JS_N4 = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            const out = {};
+            c.font = '72px "Times"';
+            // U+FFFD first in its own measureText call, so aPrevMatchedFont is
+            // empty when FindFontForChar runs for it.
+            out.fffd = c.measureText('\\uFFFD').width;
+            out.floor = c.measureText('\\uE000').width;
+            return out;
+          }"""
+          JS_N4_REF = """() => {
+            const c = document.createElement('canvas').getContext('2d');
+            c.font = '72px "Menlo"';
+            return {menlo: c.measureText('\\uFFFD').width};
+          }"""
+
+          n4_mark = log_mark()
+          n4_a, n4_b, n4_pids = two_contexts_one_launch(
+              N4_DONOR, N4_VICTIM, JS_N4,
+              extra_prefs={"gfx.font_rendering.fallback.async": False,
+                           "fission.autostart": False})
+          # Every log read BEFORE the reference launch, for the reason stated in
+          # arm (n1)'s log-window note above.
+          n4_fl = camou_fl(n4_mark, "CAMOU-FL fontlist", limit=None)
+          n4_sys = camou_fl(n4_mark, "CAMOU-FL sys-fallback", "ch=U+FFFD", limit=None)
+          n4_cache = camou_fl(n4_mark, "CAMOU-FL fffd-cache", limit=None)
+          n4_pf = camou_fl(n4_mark, "CAMOU-FL pref-fallback", limit=None)
+          n4_ref = one_page_list_arg(None, JS_N4_REF, None)["menlo"]
+          # Spec B4 wants FOUR preconditions, two of them per context: the
+          # donor's `fontlist` line AND the victim's, each times=times with no
+          # carrier. `any(...)` over the whole window satisfies both with one
+          # line and would pass a run in which the victim resolved something
+          # else entirely. Resolve each context id from the line that is unique
+          # to it -- the donor is the context that populated the cache
+          # (sys-fallback), the victim is the one that read it (fffd-cache) --
+          # and then assert each context's own fontlist line.
+          # The donor is the context whose sys-fallback line names a REAL
+          # family. `sys-fallback` is emitted UNCONDITIONALLY after the call,
+          # not inside `if (font)` (gfxTextRun.cpp:3623-3630), with
+          # `resolved=none` when nothing was found -- so the VICTIM emits one
+          # too: it reaches WhichSystemFontSupportsChar (that is where the
+          # fffd-cache read this arm needs lives) and comes back null once the
+          # gate refuses Menlo. Its line is written after the donor's, in the
+          # same content-process file under dom.ipc.processCount=1, so
+          # `n4_sys[-1]` is the victim's and both ids would come out equal --
+          # tripping this arm's own "one context cannot leak to itself" branch
+          # on the very build where #82's only GREEN has to come from.
+          # Filter on the same predicate the arm already asserts further down.
+          _n4_sys_ok = [ln for ln in n4_sys
+                        if "resolved=" in ln
+                        and not ln.rstrip().endswith("resolved=none")]
+          n4_donor_ctx = _ctx_tok(_n4_sys_ok[-1]) if _n4_sys_ok else None
+          n4_victim_ctx = _ctx_tok(n4_cache[-1]) if n4_cache else None
+
+          def _n4_families(ctx):
+              return [ln.split("families=", 1)[1].strip()
+                      for ln in n4_fl
+                      if "families=" in ln and _ctx_tok(ln) == ctx]
+          # _ctx_tok is defined in arm (n1) above. Both arms live in the same
+          # `python - <<'PY'` heredoc, so it is in scope here.
+          print(f"  [arm n4 / #82] donor fffd={n4_a['fffd']} floor={n4_a['floor']}; "
+                f"victim fffd={n4_b['fffd']} floor={n4_b['floor']}; "
+                f"menlo_ref={n4_ref}; pids={n4_pids}; "
+                f"donor_ctx={n4_donor_ctx} victim_ctx={n4_victim_ctx}; "
+                f"fontlist={len(n4_fl)} sys-fallback(U+FFFD)={len(n4_sys)} "
+                f"fffd-cache={len(n4_cache)} pref-fallback={len(n4_pf)}")
+          for _ln in (n4_fl + n4_sys + n4_cache + n4_pf)[-10:]:
+              print(f"      {_ln}")
+
+          n4_failures = []
+          # Keyed on `fontlist` ALONE, not on fffd-cache. 34432908522 @ 163ee25
+          # emits fffd-cache but not fontlist, so an `or` here would be flipped
+          # true by one fffd-cache line from arm (j) earlier in the run, take
+          # the log branch, find no fontlist lines and report SETUP-INVALID on a
+          # binary that was never going to have them. Every precondition in the
+          # log branch below reads `fontlist`; that is the kind to test.
+          n4_have_log = kind_total("fontlist") > 0
+          if isinstance(n4_pids["after_a"], str) or isinstance(n4_pids["after_b"], str):
+              n4_failures.append(
+                  f"setup invalid: pgrep failed, so 'same process' could not be "
+                  f"asserted: {n4_pids}")
+          elif not (n4_pids["after_a"] & n4_pids["after_b"]):
+              n4_failures.append(
+                  f"setup invalid: donor and victim rendered in different content "
+                  f"processes, and mReplacementCharFallbackFamily is a per-process "
+                  f"singleton, so nothing could have been shared: {n4_pids}")
+          elif abs(n4_ref - n4_b["floor"]) < 0.01:
+              n4_failures.append(
+                  f"control invalid: Menlo's U+FFFD width ({n4_ref}) equals the "
+                  f"victim's own tofu floor ({n4_b['floor']}), so a leak and an empty "
+                  f"render are the same number")
+          elif not n4_have_log:
+              # Build 34236331658 @ 8990915: zero CAMOU-FL lines of any kind.
+              _leak = abs(n4_b["fffd"] - n4_ref) < 0.01
+              _tofu = abs(n4_b["fffd"] - n4_b["floor"]) < 0.01
+              _donor_menlo = abs(n4_a["fffd"] - n4_ref) < 0.01
+              print(f"  [arm n4 / #82] DIAGNOSTIC (binary emits no CAMOU-FL kind): "
+                    f"donor {'reached Menlo' if _donor_menlo else 'did NOT reach Menlo'}; "
+                    f"victim read {'MENLO (leak)' if _leak else 'its tofu floor' if _tofu else 'neither'}. "
+                    f"B6 TRIGGER = donor did not reach Menlo, i.e. something answered "
+                    f"U+FFFD before SystemFindFontForChar; record which of the bundle's "
+                    f"U+FFFD carriers the widths match.")
+          else:
+              _don = _n4_families(n4_donor_ctx)
+              _vic = _n4_families(n4_victim_ctx)
+              _pf_menlo = [ln for ln in n4_pf if "key=menlo" in ln and "allowed=1" in ln]
+
+              def _times_only(fams):
+                  return bool(fams) and all(
+                      "times" in f.lower() and "menlo" not in f.lower()
+                      and "lucida" not in f.lower() for f in fams)
+
+              if n4_donor_ctx is None or n4_victim_ctx is None:
+                  n4_failures.append(
+                      f"setup invalid: could not resolve the donor's ctx from a "
+                      f"`sys-fallback ch=U+FFFD resolved=<family>` line "
+                      f"({n4_donor_ctx}; {len(n4_sys)} sys-fallback lines, "
+                      f"{len(_n4_sys_ok)} of them naming a family) or the victim's "
+                      f"from a `fffd-cache` line ({n4_victim_ctx}), so neither "
+                      f"context's fontlist line can be identified")
+              elif n4_donor_ctx == n4_victim_ctx:
+                  n4_failures.append(
+                      f"setup invalid: the donor and the victim resolved to the SAME "
+                      f"ctx ({n4_donor_ctx}); one context cannot leak to itself")
+              elif not _don or not _vic:
+                  n4_failures.append(
+                      f"setup invalid: {kind_total('fontlist')} `fontlist` lines in the "
+                      f"run, but {len(_don)} for the donor (ctx={n4_donor_ctx}) and "
+                      f"{len(_vic)} for the victim (ctx={n4_victim_ctx}); spec B4 wants "
+                      f"both, separately")
+              elif any(f == "" for f in _don + _vic):
+                  n4_failures.append(
+                      "setup invalid: a `fontlist` line has an EMPTY families= field, "
+                      "which is a child-process AsString failure, not an empty list")
+              elif not _times_only(_don):
+                  n4_failures.append(
+                      f"setup invalid: the DONOR (ctx={n4_donor_ctx}) did not resolve "
+                      f"to Times-only, so a carrier is in mFonts and exit 4 answers "
+                      f"before the cache: {_don}")
+              elif not _times_only(_vic):
+                  n4_failures.append(
+                      f"setup invalid: the VICTIM (ctx={n4_victim_ctx}) did not resolve "
+                      f"to Times-only, so its own stack could cover U+FFFD and a GREEN "
+                      f"would not be the gate's doing: {_vic}")
+              elif _pf_menlo:
+                  n4_failures.append(
+                      f"setup invalid: the donor's PREF path answered with Menlo "
+                      f"({_pf_menlo[-1]}), so the cache was never populated by system "
+                      f"fallback. Re-run this arm with the recovery fixture "
+                      f"{N4_DONOR_ALT}, a carrier fontconfig's serif/sans candidates "
+                      f"do not reach")
+              elif not any("resolved=Menlo" in ln for ln in n4_sys):
+                  n4_failures.append(
+                      f"setup invalid: no `sys-fallback ctx=... ch=U+FFFD resolved=Menlo` "
+                      f"line, so the donor never populated the cache: "
+                      f"{n4_sys[-2:] or 'no sys-fallback lines at all'}")
+              elif not any("key=menlo" in ln and "allowed=0" in ln for ln in n4_cache):
+                  n4_failures.append(
+                      f"setup invalid: no `fffd-cache ctx=... key=menlo allowed=0` line, "
+                      f"so the victim never reached the cached-family read: "
+                      f"{n4_cache[-2:] or 'no fffd-cache lines at all'}")
+              elif abs(n4_b["fffd"] - n4_ref) < 0.01:
+                  n4_failures.append(
+                      f"U+FFFD CACHE LEAK: the victim rendered U+FFFD at {n4_b['fffd']}, "
+                      f"which is Menlo's width ({n4_ref}) -- a family its own list "
+                      f"excludes -- despite `fffd-cache ... key=menlo allowed=0`")
+              elif abs(n4_b["fffd"] - n4_b["floor"]) >= 0.01:
+                  n4_failures.append(
+                      f"the victim rendered U+FFFD at {n4_b['fffd']}, which is neither "
+                      f"Menlo ({n4_ref}) nor its own tofu floor ({n4_b['floor']}); some "
+                      f"third face answered and this arm cannot say which")
+          if n4_failures:
+              tripwires.append(f"(n4) replacement-char cache, donor/victim (#82): {n4_failures}")
+              note_unmeasured("(n4)", n4_failures, "U+FFFD CACHE LEAK")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (n5): #90. SpeechVoicesManager keeps its per-context voice list
+          # in a process-local nsTHashMap (sVoicesMap,
+          # patches/speech-voices-spoofing.patch) while its one-shot disable
+          # flag goes through the cross-process RoverfoxStorageManager -- the
+          # same asymmetry #83 turned out to be. This arm MEASURES it; the fix
+          # (A4) lands only if this is RED.
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * getVoices() is legitimately empty until `voiceschanged` fires, so
+          #    an empty read is not evidence of anything on its own. Read after
+          #    goto() AND after the event, and report both.
+          #  * The init script runs in juggler's ISOLATED world, so a window
+          #    global it sets is invisible to page.evaluate(). Every page-world
+          #    value comes back through a DOM attribute (the #83 shape).
+          #  * Playwright runs init scripts on EVERY navigation and new_page()
+          #    lands on about:blank first, so a one-shot setter registered
+          #    before new_page() is already spent. add_init_script comes AFTER
+          #    new_page(), exactly as probe_windows_fonts.py:640-646 does it.
+          #  * A context reading an empty list while the pid set did not change
+          #    is not a cross-process finding. pids are sampled between
+          #    new_page() and goto() and reported with the verdict.
+          #  * The binding itself is present on this binary -- the "which setter
+          #    bindings reached the build" step of run 34496121342 lists
+          #    setSpeechVoices in every probed context -- so a `saw:false`
+          #    data-sv here is a real finding about ordering, not a missing
+          #    build.
+          N5_A = ["Alpha One", "Alpha Two"]
+          N5_B = ["Beta One", "Beta Two"]
+          N5_INIT = (
+              '(() => {'
+              ' const saw = (typeof window.setSpeechVoices === "function");'
+              ' let applied = false, err = null;'
+              ' if (saw) { try { window.setSpeechVoices(%s); applied = true; }'
+              '            catch (e) { err = String(e); } }'
+              ' const mark = () => { try { document.documentElement.setAttribute('
+              '   "data-sv", JSON.stringify({saw, applied, err})); } catch (e) {} };'
+              ' mark(); document.addEventListener("DOMContentLoaded", mark);'
+              '})()'
+          )
+          JS_N5 = """async () => {
+            const read = () => speechSynthesis.getVoices().map(v => v.name);
+            const first = read();
+            await new Promise(r => {
+              if (read().length) { r(); return; }
+              speechSynthesis.addEventListener('voiceschanged', r, {once: true});
+              setTimeout(r, 4000);
+            });
+            const after = read();
+            const n = document.createElement('script');
+            n.type = 'application/json'; n.id = 'n5';
+            n.textContent = JSON.stringify({first, after});
+            document.documentElement.appendChild(n);
+            return {first, after,
+                    dataSv: document.documentElement.getAttribute('data-sv')};
+          }"""
+
+          def n5_two_contexts():
+              out = {}
+              with sync_playwright() as pw:
+                  b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      firefox_user_prefs={"dom.ipc.processCount": 1},
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  for label, voices in (("a", N5_A), ("b", N5_B)):
+                      ctx = b.new_context()
+                      page = ctx.new_page()
+                      pids_before = tab_pids()
+                      ctx.add_init_script(N5_INIT % json.dumps(",".join(voices)))
+                      page.goto("data:text/html,<h1>n5-%s</h1>" % label)
+                      out[label] = {"res": page.evaluate(JS_N5),
+                                    "pids_before": pids_before,
+                                    "pids_after": tab_pids(),
+                                    "want": voices}
+                  b.close()
+              return out
+
+          n5 = n5_two_contexts()
+          for _lbl in ("a", "b"):
+              print(f"  [arm n5 / #90] ctx {_lbl}: want={n5[_lbl]['want']} "
+                    f"first={n5[_lbl]['res']['first']} after={n5[_lbl]['res']['after']} "
+                    f"data-sv={n5[_lbl]['res']['dataSv']} "
+                    f"pids {n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
+
+          n5_failures = []
+          for _lbl in ("a", "b"):
+              _sv = n5[_lbl]["res"]["dataSv"]
+              if not _sv or '"applied":true' not in _sv.replace(" ", ""):
+                  n5_failures.append(
+                      f"setup invalid: ctx {_lbl}'s init script did not apply "
+                      f"setSpeechVoices on the document that was measured "
+                      f"(data-sv={_sv!r}); with no list installed a context is allowed "
+                      f"everything and a wrong reading is indistinguishable from a leak")
+          if not n5_failures:
+              for _lbl, _other in (("a", "b"), ("b", "a")):
+                  _got = set(n5[_lbl]["res"]["after"])
+                  _want = set(n5[_lbl]["want"])
+                  _theirs = set(n5[_other]["want"])
+                  if _got & _theirs:
+                      n5_failures.append(
+                          f"VOICES LEAK: ctx {_lbl} read {sorted(_got & _theirs)}, which "
+                          f"belongs to ctx {_other}; pids {n5[_lbl]['pids_before']} -> "
+                          f"{n5[_lbl]['pids_after']}")
+                  elif not _got:
+                      n5_failures.append(
+                          f"VOICES LEAK: ctx {_lbl} read an EMPTY voice list after "
+                          f"`voiceschanged` while its own list was installed; pids "
+                          f"{n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
+                  elif not _got.issubset(_want):
+                      n5_failures.append(
+                          f"VOICES LEAK: ctx {_lbl} read {sorted(_got - _want)}, which is "
+                          f"in neither context's configured list")
+          if n5_failures:
+              tripwires.append(f"(n5) per-context speech voices (#90): {n5_failures}")
+              note_unmeasured("(n5)", n5_failures, "VOICES LEAK")
+          # -----------------------------------------------------------
+
+          # -----------------------------------------------------------
+          # Arm (n7): #91. FontFaceImpl::SetStatus discards aStatus entirely and
+          # writes Loaded/Error from a family-name gate, so a url() face whose
+          # download 404s still reports `loaded`. FontFace::Status() never reads
+          # mStatus at all (FontFace.cpp:285-289), and FontFace::Load() resolves
+          # its promise from the same gate rather than from the load.
+          #
+          # WHY AN HTTP SERVER. Every other navigation in this file is
+          # `data:text/html,...`, which is an OPAQUE origin. An absolute
+          # http:// font url() from an opaque origin is a cross-origin font
+          # fetch with no CORS and is blocked before the network result matters,
+          # so the 404 face AND the control face would both read `error` -- a
+          # RED that looks exactly like a real one (spec-review I6).
+          #
+          # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
+          #  * document.fonts.ready does not guarantee a face LEFT `loading`.
+          #    Each face is scored from its own .loaded promise, with a poll as
+          #    the backstop.
+          #  * The control face is the run-time fontTools probe from arm (k)
+          #    (build_probe_k): unitsPerEm 1000, glyph 'a' advancing 2000, so 20
+          #    glyphs at 48px measure exactly 1920 IF AND ONLY IF that face
+          #    rendered. It differs from any fallback by construction rather
+          #    than by assumption, which is the whole point.
+          import base64 as _b64_n7
+          import http.server as _http_n7
+          import socketserver as _sock_n7
+          import threading as _thr_n7
+
+          n7_font_bytes = None
+          try:
+              _uri = build_probe_k()
+              n7_font_bytes = _b64_n7.b64decode(_uri.split(",", 1)[1])
+          except Exception as _exc:
+              print(f"  [arm n7 / #91] SKIP: could not build the control font: "
+                    f"{type(_exc).__name__}: {_exc}")
+
+          if n7_font_bytes:
+              N7_PAGE = (
+                  b"<!doctype html><meta charset=utf-8><title>n7</title>"
+                  b"<style>"
+                  b"@font-face { font-family: N7Ctl; src: url('/ctl.ttf'); }"
+                  b"@font-face { font-family: N7Bad; src: url('/nope.ttf'); }"
+                  b"</style><body><h1>n7</h1>"
+              )
+
+              class _N7Handler(_http_n7.SimpleHTTPRequestHandler):
+                  def log_message(self, *a):
+                      pass
+
+                  def do_GET(self):
+                      if self.path.startswith("/ctl.ttf"):
+                          body, code, ctype = n7_font_bytes, 200, "font/ttf"
+                      elif self.path.startswith("/nope.ttf"):
+                          body, code, ctype = b"not found", 404, "text/plain"
+                      else:
+                          body, code, ctype = N7_PAGE, 200, "text/html; charset=utf-8"
+                      self.send_response(code)
+                      self.send_header("Content-Type", ctype)
+                      self.send_header("Content-Length", str(len(body)))
+                      self.end_headers()
+                      self.wfile.write(body)
+
+              # allow_reuse_address is a CLASS attribute read inside
+              # server_bind, so setting it on the instance after construction
+              # does nothing. Set it on the subclass instead -- though with port
+              # 0 the kernel picks a free port and it never mattered.
+              _sock_n7.TCPServer.allow_reuse_address = True
+              _srv = _sock_n7.TCPServer(("127.0.0.1", 0), _N7Handler)
+              n7_port = _srv.server_address[1]
+              _thr_n7.Thread(target=_srv.serve_forever, daemon=True).start()
+
+              JS_N7 = """async () => {
+                const faces = {};
+                for (const f of document.fonts) {
+                  const name = f.family.replace(/^["']|["']$/g, '');
+                  faces[name] = f;
+                }
+                const score = async (name) => {
+                  const f = faces[name];
+                  if (!f) return 'NO_FACE_FOUND';
+                  try { await f.loaded; } catch (e) { /* rejected -> read status */ }
+                  for (let i = 0; i < 40 && f.status === 'loading'; i++) {
+                    await new Promise(r => setTimeout(r, 100));
+                  }
+                  return f.status;
+                };
+                const c = document.createElement('canvas').getContext('2d');
+                const s = 'aaaaaaaaaaaaaaaaaaaa';   // 20 glyphs -> 1920 at 48px
+                c.font = '48px monospace';
+                const baseline = c.measureText(s).width;
+                const ctlStatus = await score('N7Ctl');
+                const badStatus = await score('N7Bad');
+                c.font = '48px "N7Ctl", monospace';
+                const ctlWidth = c.measureText(s).width;
+                return {ctlStatus, badStatus, ctlWidth, baseline};
+              }"""
+
+              def n7_run(font_list):
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      ctx = b.new_context()
+                      page = ctx.new_page()
+                      if font_list is not None:
+                          ctx.add_init_script(
+                              'if (typeof window.setFontList === "function") '
+                              'window.setFontList(%s);' % json.dumps(",".join(font_list)))
+                      page.goto("http://127.0.0.1:%d/" % n7_port)
+                      out = page.evaluate(JS_N7)
+                      b.close()
+                      return out
+
+              n7 = n7_run(FONTS["mac"])
+              _srv.shutdown()
+              print(f"  [arm n7 / #91] control face status={n7['ctlStatus']} "
+                    f"width={n7['ctlWidth']} baseline={n7['baseline']}; "
+                    f"404 face status={n7['badStatus']}")
+
+              n7_failures = []
+              if n7["ctlStatus"] == "NO_FACE_FOUND" or n7["badStatus"] == "NO_FACE_FOUND":
+                  n7_failures.append(
+                      f"setup invalid: document.fonts did not carry both @font-face "
+                      f"rules (ctl={n7['ctlStatus']} bad={n7['badStatus']})")
+              elif n7["ctlStatus"] != "loaded":
+                  n7_failures.append(
+                      f"control invalid: the REAL control font reported "
+                      f"{n7['ctlStatus']!r}, so 'error' here says nothing about the 404 "
+                      f"face -- the server, the origin or the face itself is at fault")
+              elif abs(n7["ctlWidth"] - 1920.0) > 1.0:
+                  n7_failures.append(
+                      f"control invalid: the control face reports `loaded` but measured "
+                      f"{n7['ctlWidth']} instead of 1920 (baseline {n7['baseline']}), so "
+                      f"`loaded` is being reported for a face that did not render")
+              elif n7["badStatus"] != "error":
+                  n7_failures.append(
+                      f"INVENTED LOAD STATUS: a face whose src url() 404s reports "
+                      f"{n7['badStatus']!r}, not 'error', while the control face on the "
+                      f"same page loaded and rendered at 1920")
+              if n7_failures:
+                  tripwires.append(f"(n7) FontFace load status for non-local faces (#91): {n7_failures}")
+                  note_unmeasured("(n7)", n7_failures, "INVENTED LOAD STATUS")
+          # -----------------------------------------------------------
+
           # Phase D triage. This branch closes #80, #81 and #83, and #82 is
           # unmeasurable on this bundle (see KNOWN_UNMEASURABLE below).
           #
@@ -5034,6 +6058,39 @@ jobs:
                       "this text, which must stay true across runs. Returns to EXPECTED_GREEN in "
                       "Task 7, once A1/A2 gate that path and A can miss again."),
               "(i2)": ("(i2) #94/#88 refused-list render:", "#94/#88 -- same, ordering case."),
+              # Phase 0 of fonts round 3. Every entry below is a defect this
+              # branch is about to fix or measure, so each is expected RED on
+              # the pre-fix binaries and each is REMOVED in Task 7 once its fix
+              # lands. Listed only so a RED does not fail the step and skip the
+              # four steps that follow it (record_video, Integration suite,
+              # Detector-site smoke, Upload results).
+              #
+              # Each prefix is the arm's WHOLE tripwire prefix, copied from its
+              # own `tripwires.append(...)` line. These arms emit ONE kind of
+              # tripwire each, unlike (i)/(i2), so the prefix necessarily
+              # absorbs every red the arm can produce -- including a
+              # setup-invalid. The table still annotates such a run "RED but
+              # UNMEASURED ... does NOT assert", and the arm's own recorded
+              # text is printed under it, so the cost is visible rather than
+              # silent. That is the same price already paid for (i)/(i2) above.
+              "(n1)": ("(n1) ungated pref-font path (#94):",
+                       "#94, the pref-font memo is process-global and ungated at read; "
+                       "unfixed until Task 3"),
+              "(n2)": ("(n2) generic -> family under a per-context list (#92):",
+                       "#92, a generic under a per-context list resolves by fontconfig "
+                       "distance, not by the generic; unfixed until Task 4"),
+              "(h3)": ("(h3) default font after a per-context refusal (#88):",
+                       "#88, GetDefaultFont's last-resort walk is ungated and unscoped; "
+                       "unfixed until Task 4"),
+              "(n4)": ("(n4) replacement-char cache, donor/victim (#82):",
+                       "#82, the U+FFFD cache measurement; RED here means the #93 gate "
+                       "does not hold, GREEN means it does and the RED control is B6"),
+              "(n5)": ("(n5) per-context speech voices (#90):",
+                       "#90, per-context speech voices -- MEASUREMENT, not a triaged "
+                       "defect. A RED is the reading Task 6 branches on"),
+              "(n7)": ("(n7) FontFace load status for non-local faces (#91):",
+                       "#91, FontFaceLoadStatus is invented rather than read for "
+                       "non-local faces; unfixed until Task 5"),
           }
           for _k, _v in EXPECTED_RED.items():
               assert isinstance(_v, tuple) and len(_v) == 2 and _v[0].startswith(_k), (
@@ -5041,6 +6098,17 @@ jobs:
                   f"the tag: {_v!r}. A prefix that does not match what the arm emits would "
                   f"absorb every red the arm can produce, including the one this table is "
                   f"deliberately not excusing.")
+              # A BARE TAG IS REFUSED. "(i)" alone starts with "(i)" and passes
+              # the assert above, but it matches every tripwire the arm can
+              # emit -- including "(i) #81 negative cache: ...", the one red
+              # this table exists to NOT excuse. So the prefix must carry the
+              # arm's own discriminating text and must name the issue it
+              # excuses, which is what makes "which red is absorbed" readable
+              # from the table rather than from the arm's source.
+              assert len(_v[0]) > len(_k) and "#" in _v[0], (
+                  f"EXPECTED_RED[{_k}]'s prefix {_v[0]!r} is a bare tag or names no issue. "
+                  f"Give the arm's full tripwire prefix, including its #issue, so this "
+                  f"entry absorbs one KIND of red rather than every red the arm emits.")
           # The arms that guard defects this branch DOES close, so each must be
           # GREEN here. Listed so the run prints a per-arm verdict line for
           # each even when every one passes -- Phase D's readback needs a line
@@ -5079,23 +6147,30 @@ jobs:
           # split, an unreadable pid table, an invalid control) falls through to
           # SETUP-INVALID and fails the step instead of absorbing silently.
           #
-          # signature is None until Phase 0 run 1 has been READ. It cannot be
+          # signature was None until Phase 0 run 1 had been READ. It could not be
           # written before then: note_unmeasured stores failures[0][:220], and
-          # which of arm (j)'s five branches fires under FONTCONFIG_FILE is not
-          # knowable from run 34428270062, which predates that launch. While it
-          # is None the absorb below behaves exactly as it does today, so this
-          # reshape alone cannot fail a run. Task 2 Step 1 fills both in from
-          # run 1's own text and turns the match on.
+          # which of arm (j)'s five branches fires under FONTCONFIG_FILE was not
+          # knowable from run 34428270062, which predates that launch. Task 2
+          # Step 1 filled them in from run 34496121342's own text and turned the
+          # match on; each string below is the first 40 characters of that run's
+          # `observed this run:` line, copied verbatim, not paraphrased.
+          #
+          # ARM (j) IS GONE FROM THIS TABLE, and its absence is the point. Under
+          # FONTCONFIG_FILE it became measurable and reached a real verdict
+          # (GREEN) in run 34496121342: `fffd-cache ctx=7 key=.sf compact
+          # allowed=0` is that run's first such line on this bundle, and (j)
+          # fired no tripwire at all, so it recorded no unmeasured text and
+          # there is no signature to take. Leaving a None-signatured entry here
+          # would absorb a FUTURE (j) red of any kind, which is exactly what
+          # this reshape exists to prevent -- a measurable arm reporting a real
+          # defect must reach `unexpected` and fail the step.
           KNOWN_UNMEASURABLE = {
-              "(j)": ("34428270062", None,
-                      "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
-                      "the default font covers it; fffd-cache lines = 0 in run "
-                      "34428270062. Re-check under FONTCONFIG_FILE: with the host's "
-                      "DejaVu gone and monospace aliased to Cousine (no U+FFFD), this "
-                      "may have become measurable."),
-              "(j2)": ("34428270062", None,
-                       "#82: same, bare-donor variant."),
-              "(f)": ("34491802439", None,
+              "(j2)": ("34428270062", "arm (j2)/#82 setup invalid: the bare don",
+                       "#82: bare-donor variant. The bare donor settles U+FFFD at the "
+                       "run's own bare-context tofu floor, so it resolved no real face "
+                       "and never populated the cache this arm reads. Signature from "
+                       "run 34496121342."),
+              "(f)": ("34491802439", "arm (f) width reference collides: naming",
                       "#44 codepoint fallback is unmeasurable BY ADVANCE WIDTH under "
                       "FONTCONFIG_FILE. LIVE CAUSE, the one the arm records on every run: "
                       "the tofu floor COLLIDES. Run 34491802439 prints `tofu floor -- named "
