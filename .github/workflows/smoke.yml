@@ -716,8 +716,12 @@ jobs:
           # direct-named family with no `CAMOU-FL gate` line at all. Keys look
           # like `0:segoe ui:3` -- a family name with spaces, so the key runs
           # from `key=` to ` hit=`, not to the next whitespace.
-          FC_PROBE_KEYS = ("geneva", "segoe ui", "calibri", "helvetica neue")
-
+          # FC_PROBE_KEYS is assigned just after PROBES below, DERIVED from it
+          # rather than written out: the hand-written tuple that used to live
+          # here held four of the six probe families, so `pingfang hk` and
+          # `ms gothic` silently never matched and run 34435628304's section
+          # printed 6 of the log's 7 lines. Same failure as an eyeballed marker
+          # family (CLAUDE.md, "Marker families are DERIVED").
           def fc_subst_hits(mark, limit=12):
               """`fc-subst ... hit=1` lines whose key names a probe family."""
               out = []
@@ -736,6 +740,11 @@ jobs:
           MAC_ONLY = ["Helvetica Neue", "PingFang HK", "Geneva"]
           WIN_ONLY = ["Segoe UI", "Calibri", "MS Gothic"]
           PROBES = MAC_ONLY + WIN_ONLY
+          # Derived, never written out -- see fc_subst_hits above. The fc memo
+          # lowercases its key, and so does the reader, so these are lowercase.
+          FC_PROBE_KEYS = tuple(f.lower() for f in PROBES)
+          print(f"  [setup] fc-subst probe keys, derived from PROBES: "
+                f"{list(FC_PROBE_KEYS)}")
           assert MAC_STRICT.issuperset(MAC_ONLY), (
               "these are no longer mac-only in fonts.json, the probe would invert: "
               f"{sorted(set(MAC_ONLY) - MAC_STRICT)}")
@@ -1681,9 +1690,10 @@ jobs:
                   # C2 (from this task's review): arm (b)'s own donor assertion
                   # -- its `if not all(mac["measure"][f] for f in MAC_ONLY)` --
                   # which this arm had dropped. A GREEN here reads "win
-                  # resolved none of MAC_ONLY", which is evidence for H1 only if
-                  # the mac donor resolved them in the first place. Without this
-                  # the gate would read a vacuous GREEN as H1 CONFIRMED -- the
+                  # resolved none of MAC_ONLY", which is evidence of anything
+                  # only if the mac donor resolved them in the first place.
+                  # Without this the Phase B gate would have read a vacuous
+                  # GREEN as H1 CONFIRMED -- the
                   # "a reference is only a control if it is guaranteed to differ"
                   # failure of CLAUDE.md lesson 4, on the donor side. Geneva in
                   # particular has been the subject of two regression bisects on
@@ -1703,18 +1713,27 @@ jobs:
                       f"REFUTED; the leak survives the reorder and the cause is not process "
                       f"placement.")
           # C3 (from this task's review): a (b2r) RED has three distinct causes
-          # and only one of them is a verdict on H1. `no signal` (the
-          # check_signal try/except above) and `setup invalid` (three variants,
-          # C2's donor check included) both mean the arm measured nothing;
-          # reading either as "the leak survives the reorder" would draw a
-          # conclusion from an arm that never ran. The kind is computed here and
-          # printed on its own `[b2r / kind]` line -- deliberately NOT a second
-          # line beginning "  (b2r) ", which the readback grep would then pick up
-          # twice -- so the gate rule reads one token instead of matching prose.
+          # and only one of them is a verdict. `no signal` (the check_signal
+          # try/except above) and `setup invalid` (three variants, C2's donor
+          # check included) both mean the arm measured nothing; reading either
+          # as "the leak survives the reorder" would draw a conclusion from an
+          # arm that never ran. The kind is computed here and printed on its
+          # own `[b2r / kind]` line -- deliberately NOT a second line beginning
+          # "  (b2r) ", which the readback grep would then pick up twice -- so
+          # a reader reads one token instead of matching prose.
+          #
+          # The H1 vocabulary was Phase B's, where this arm WAS the #83
+          # discriminator and its red was the measurement. H1 (the per-context
+          # list is process-local, so the leak is process placement) was
+          # REFUTED there and the real mechanism turned out to be the
+          # fontconfig substitute memo, which is now keyed on the context. A
+          # green here no longer confirms anything about process placement --
+          # run 34435628304 had both contexts in ONE process and no leak --
+          # so the strings say what the arm measures instead.
           if not b2r_failures:
-              b2r_kind = "GREEN -- H1 CONFIRMED"
+              b2r_kind = "GREEN -- no cross-context leak in this shape"
           elif any(f.startswith("arm (b2r)/#83:") for f in b2r_failures):
-              b2r_kind = "RED, leak -- H1 REFUTED"
+              b2r_kind = "RED, leak -- the recipient was served the donor's answers"
           else:
               b2r_kinds = sorted({"no signal" if f.startswith("arm (b2r) no signal:")
                                   else "setup invalid" for f in b2r_failures})
@@ -1723,7 +1742,7 @@ jobs:
           print(f"  [b2r / kind] {b2r_kind}")
           print(f"  (b2r) #83 discriminator (init script on the document under test):  "
                 f"{'RED' if b2r_failures else 'GREEN'} -- "
-                f"{b2r_failures or 'win saw none of the macOS-only families -- H1 CONFIRMED: the list is process-local and the leak is process placement, not a broken gate'}")
+                f"{b2r_failures or 'win saw none of the macOS-only families with the init script proven on the document under test; (b2r) measures the SetFontList flush, the per-context key is measured by (b2) donor re-probe'}")
           if b2r_failures:
               tripwires.append(f"(b2r) #83 discriminator: {b2r_failures}")
               # (b2r) had no unmeasured bookkeeping of its own, unlike (i2),
@@ -4491,7 +4510,12 @@ jobs:
           # install a list: that is the context-0 fail-open this fix does not
           # close (CLAUDE.md lesson 5). Keys look like `0:segoe ui:3:7` -- a
           # family name with spaces -- so the key runs from `key=` to ` hit=`.
-          FC_PROBE_KEYS = ("geneva", "segoe ui", "calibri", "helvetica neue")
+          # All SIX probe families, not a subset: MAC_ONLY + WIN_ONLY in the
+          # guard step above, lowercased. The guard step derives its own copy
+          # from PROBES; this step is a separate process and cannot, so if that
+          # list ever changes, change this one with it.
+          FC_PROBE_KEYS = ("helvetica neue", "pingfang hk", "geneva",
+                           "segoe ui", "calibri", "ms gothic")
           fc_hits = []
           for _ts, _b, _i, ln in rows:
               if "CAMOU-FL fc-subst " not in ln or " hit=1 " not in ln or "key=" not in ln:
