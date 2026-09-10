@@ -1044,12 +1044,12 @@ jobs:
           # and probed. Confirmed by a single-variable pair (this
           # task's own discriminator): reference ordering alone does
           # not reproduce the leak; donor liveness alone does, fully,
-          # every family. This arm was EXPECTED RED through Phase B,
-          # where it was not a broken test but the honest state of the
-          # feature in the shape it is actually used. #83's fix is on
-          # this branch, so on this binary it is expected GREEN and a
-          # red here is a regression -- see EXPECTED_GREEN at the end
-          # of this step.
+          # every family. This arm is EXPECTED RED on every build until
+          # #83 is fixed -- it is not a broken test, it is the honest
+          # state of the feature in the shape it is actually used. This
+          # PR diagnoses #83 and does not fix it (the Phase B gate went
+          # to branch B, H1 refuted), so it is still red here and still
+          # triaged -- see EXPECTED_RED at the end of this step.
           # Kept as its own arm rather than folded into arm (b), so a
           # regression in the CLOSED-donor case (arm (b) going red)
           # remains separately visible from this one.
@@ -1152,7 +1152,7 @@ jobs:
                   f"never allowed, with the donor (mac) context still open -- the "
                   f"production shape this feature exists for. See #83.")
           print(f"  (b2) donor-alive per-context leak (#83):  "
-                f"{'RED' if b2_failures else 'GREEN'} -- "
+                f"{'RED (expected -- #83 diagnosed, not fixed in this PR)' if b2_failures else 'GREEN'} -- "
                 f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
           if b2_failures:
               tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
@@ -1345,11 +1345,14 @@ jobs:
                 f"{b2r_failures or 'win saw none of the macOS-only families -- H1 CONFIRMED: the list is process-local and the leak is process placement, not a broken gate'}")
           if b2r_failures:
               tripwires.append(f"(b2r) #83 discriminator: {b2r_failures}")
-              # Phase D: (b2r) left EXPECTED_RED, so without this a `no signal`
-              # or `setup invalid` red -- the two b2r_kind values that measure
-              # NOTHING -- would be reported as an UNEXPECTED RED, i.e. as a
-              # regression in the fix. "arm (b2r)/#83:" is the prefix ONLY the
-              # leak branch emits, which is exactly note_unmeasured's contract.
+              # (b2r) had no unmeasured bookkeeping of its own, unlike (i2),
+              # (j), (j2) and (k). Without this, a `no signal` or `setup
+              # invalid` red -- the two b2r_kind values that measure NOTHING --
+              # prints in the triage table as "RED (expected) ... #83
+              # diagnosed", asserting a verdict the arm never reached. With it
+              # the table says "RED but UNMEASURED" and withholds the claim.
+              # "arm (b2r)/#83:" is the prefix ONLY the leak branch emits,
+              # which is exactly note_unmeasured's contract.
               note_unmeasured("(b2r)", b2r_failures, "arm (b2r)/#83:")
           # -----------------------------------------------------------
 
@@ -2756,6 +2759,12 @@ jobs:
                 f"{i_failures or i_ok_msg}")
           if i_failures:
               tripwires.append(f"(i) negative fallback cache (#81): {i_failures}")
+              # (i) is expected GREEN here, so an unmeasured red would be
+              # reported as a regression in #81's fix rather than as an arm
+              # whose own setup failed -- the same gap (i2), (j), (j2), (k) and
+              # (b2r) already close. "NEGATIVE FALLBACK CACHE BUG" is the
+              # marker only this arm's leak branch emits.
+              note_unmeasured("(i)", i_failures, "NEGATIVE FALLBACK CACHE BUG")
 
           # -----------------------------------------------------------
           # Arm (i2): #81 in the ordinary caller shape. Arm (i) above installs
@@ -3778,38 +3787,45 @@ jobs:
               note_unmeasured("(j2)", j2_failures, "REPLACEMENT-CHAR CACHE LEAK")
           # -----------------------------------------------------------
 
-          # Phase D triage. This branch closes #80, #81, #82 and #83, so on
-          # this binary NOTHING is expected red any more -- an entry left in
-          # EXPECTED_RED would hide a regression in the fix itself. The dict
-          # stays (empty) rather than being deleted: it is the machinery for
-          # triaging a future defect that is measured but not yet fixed, and
-          # the loop below prints nothing when it is empty.
+          # Phase D triage. This branch closes #80, #81 and #82, and it
+          # DIAGNOSES #83 without fixing it -- the Phase B gate went to branch
+          # B, H1 refuted, so the per-context leak is still open and arms (b2)
+          # and (b2r) are still red on this binary. Both stay triaged: taking
+          # them out would fail the #44 step and skip every step after it,
+          # which on a diagnostic build throws away the CAMOU-FL slice those
+          # arms exist to produce.
           #
-          # (b2r) is gone from BOTH tables. It was Phase B's #83 discriminator,
-          # where a RED *was* the measurement and the gate was read off its own
-          # `[b2r / kind]` line. On a binary carrying the fix it is an ordinary
-          # arm: a leak red there is a regression like any other, so it routes
-          # to UNEXPECTED, and a `no signal` / `setup invalid` red routes to
-          # UNMEASURED through the note_unmeasured() call at its tripwire.
-          EXPECTED_RED = {}
-          # The five arms that were triaged red in Phase B and must now be
-          # GREEN. Listed so the run prints a per-arm verdict line for each
-          # even when every one of them passes -- with EXPECTED_RED empty the
-          # loop below prints nothing, and Phase D's readback needs a line per
-          # arm to quote, not the absence of one.
+          # (b2r) is triaged for a second reason: it was Phase B's #83
+          # discriminator, where a RED *was* the measurement and the gate was
+          # read off its own `[b2r / kind]` line. That is still how it reads
+          # here.
+          EXPECTED_RED = {
+              "(b2)": "#83 diagnosed, not fixed in this PR -- read the CAMOU-FL slice",
+              "(b2r)": "#83 diagnosed, not fixed in this PR -- read the CAMOU-FL slice",
+          }
+          # The arms that guard defects this branch DOES close, so each must be
+          # GREEN here. Listed so the run prints a per-arm verdict line for
+          # each even when every one passes -- Phase D's readback needs a line
+          # per arm to quote, not the absence of one.
           EXPECTED_GREEN = {
-              "(b2)": "#83, cross-context font leak with the donor context still alive",
-              "(j)": "#82, U+FFFD replacement-char cache, narrow-list donor",
-              "(j2)": "#82, same, bare-context donor",
+              "(i)": "#81, negative fallback cache",
               "(i2)": "#81 ordering case -- both lists installed before either context "
                       "renders",
+              "(j)": "#82, U+FFFD replacement-char cache, narrow-list donor",
+              "(j2)": "#82, same, bare-context donor",
               "(k)": "#80, url() web fonts under a configured fonts list",
           }
           # Three buckets, not two. An arm in unmeasured_arms is red because its
           # OWN preconditions failed: it reached no verdict, so calling it a
-          # regression is as wrong as calling it a confirmed defect. It still
-          # fails the step -- an unmeasured arm is missing evidence and Phase D
-          # must not quote a green conclusion over it -- but under its own name.
+          # regression is as wrong as calling it a confirmed defect.
+          #
+          # ORDER MATTERS HERE. EXPECTED_RED is consulted first, so a triaged
+          # arm never fails the step whichever way it went red -- the table
+          # below still annotates it "RED but UNMEASURED" and withholds the
+          # "unfixed" claim, which is what C5 asked for. An arm that is
+          # expected GREEN and comes back unmeasured DOES fail, under its own
+          # name: there the missing measurement is missing evidence for a fix
+          # this PR claims, and a green conclusion must not be quoted over it.
           expected, unmeasured, unexpected = [], [], []
           for t in tripwires:
               tag = next((k for k in EXPECTED_RED if t.startswith(k)), None)
