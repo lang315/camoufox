@@ -1244,6 +1244,23 @@ Then, immediately after arm (h)'s `h_failures` loop ends and before
           #    id depends on how many contexts preceded this arm. It is read off
           #    the `facename` line and the following `default` line is matched
           #    on the same id.
+          #  * MATCHING ON ctx ALONE IS NOT ENOUGH, and this is the reason the
+          #    reads below go through ONE camou_fl call. camou_fl iterates
+          #    `for p in sorted(glob(...))` and only then the lines of each file
+          #    (smoke.yml:658-687), so its output is grouped by cfx<PID> in
+          #    LEXICOGRAPHIC file order -- `[-1]` is "last line of the
+          #    last-sorting file", not "most recent". This arm's window is
+          #    efgh_mark, which spans arms (e), (f), (f_control), (g) and (h):
+          #    eight separate one_page() launches, eight browser processes,
+          #    eight log files. Playwright allocates user-context ids per
+          #    browser, so a later launch very likely reuses the same numeric
+          #    id, and a ctx-only match would tie arm (h)'s `facename` line to
+          #    some other arm's `default` line. The spec says "the FOLLOWING
+          #    default line", which means: same log file, later in that file.
+          #    Reading every CAMOU-FL line of the window once and filtering the
+          #    ordered list in Python expresses both -- the file basename is
+          #    each line's first token, and position is the list index -- and
+          #    needs no new helper.
           def _ctx_of(ln):
               tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
               return tok[4:] if tok else None
@@ -1270,28 +1287,52 @@ Then, immediately after arm (h)'s `h_failures` loop ends and before
           #    Shape B is only available once the binary emits `generic-map`;
           #    before that, a missing `default` line really is a broken setup.
           #    kind_total("generic-map") is what tells the two apart.
-          h3_face = [ln for ln in camou_fl(efgh_mark, "CAMOU-FL facename",
-                                           "key=segoe ui", "allowed=0", limit=None)]
-          h3_defaults = camou_fl(efgh_mark, "CAMOU-FL default ", limit=None)
-          h3_unfiltered = camou_fl(efgh_mark, "CAMOU-FL default-unfiltered", limit=None)
-          h3_gm = camou_fl(efgh_mark, "CAMOU-FL generic-map", limit=None)
+          def _file_of(ln):
+              """The cfx<PID> basename camou_fl prefixes to every line."""
+              parts = ln.split(None, 1)
+              return parts[0] if parts else ""
+
+          # ONE read of the whole window, in (file, line) order, then filtered
+          # in Python. This is what lets "the following default line" mean the
+          # same file and a later position, not merely the same ctx number.
+          h3_all = camou_fl(efgh_mark, "CAMOU-FL ", limit=None)
+          h3_face_idx = [i for i, ln in enumerate(h3_all)
+                         if "CAMOU-FL facename" in ln and "key=segoe ui" in ln
+                         and "allowed=0" in ln]
+          h3_face = [h3_all[i] for i in h3_face_idx]
+          h3_unfiltered = [ln for ln in h3_all if "CAMOU-FL default-unfiltered" in ln]
           h3_ctx = _ctx_of(h3_face[-1]) if h3_face else None
-          h3_after = [ln for ln in h3_defaults if _ctx_of(ln) == h3_ctx] if h3_ctx else []
+          h3_pos = h3_face_idx[-1] if h3_face_idx else -1
+          h3_file = _file_of(h3_face[-1]) if h3_face else None
+          # Same file, same ctx, and AFTER the refusal.
+          h3_after = ([ln for i, ln in enumerate(h3_all)
+                       if i > h3_pos and "CAMOU-FL default " in ln
+                       and _file_of(ln) == h3_file and _ctx_of(ln) == h3_ctx]
+                      if h3_ctx else [])
           h3_family = (h3_after[-1].split("family=", 1)[1].strip()
                        if h3_after and "family=" in h3_after[-1] else None)
           h3_maclist = {f.casefold() for f in FONTS["mac"]}
           # `key` is the last field of the generic-map line and may contain
-          # spaces, so it runs to end of line -- same rule as arm (n2).
-          h3_gm_mine = [ln for ln in h3_gm if _ctx_of(ln) == h3_ctx] if h3_ctx else []
+          # spaces, so it runs to end of line -- same rule as arm (n2). Shape B
+          # asserts that ARM (h)'s OWN group resolved through the table, so the
+          # same file/ctx pinning applies; the position bound is dropped because
+          # EnsureFontList runs BEFORE the face-name lookup, so a generic-map
+          # line for this group legitimately precedes the facename line.
+          h3_gm_mine = ([ln for ln in h3_all
+                         if "CAMOU-FL generic-map" in ln
+                         and _file_of(ln) == h3_file and _ctx_of(ln) == h3_ctx]
+                        if h3_ctx else [])
+          h3_gm = [ln for ln in h3_all if "CAMOU-FL generic-map" in ln]
           h3_gm_keys = {ln.split("key=", 1)[1].strip().casefold()
                         for ln in h3_gm_mine if "key=" in ln} - {"none", ""}
           h3_gm_inlist = sorted(k for k in h3_gm_keys if k in h3_maclist)
           print(f"  [arm h3 / #88] facename refusals for 'segoe ui': {len(h3_face)}; "
-                f"ctx={h3_ctx}; `default` lines for that ctx: {len(h3_after)}; "
-                f"family={h3_family!r}; default-unfiltered={len(h3_unfiltered)}; "
-                f"generic-map for that ctx: {len(h3_gm_mine)} keys={sorted(h3_gm_keys)} "
-                f"in-list={h3_gm_inlist}; kind_total(generic-map)="
-                f"{kind_total('generic-map')}")
+                f"file={h3_file} ctx={h3_ctx}; `default` lines in that file after the "
+                f"refusal: {len(h3_after)}; family={h3_family!r}; "
+                f"default-unfiltered={len(h3_unfiltered)}; generic-map in that file for "
+                f"that ctx: {len(h3_gm_mine)} of {len(h3_gm)} in the window; "
+                f"keys={sorted(h3_gm_keys)} in-list={h3_gm_inlist}; "
+                f"kind_total(generic-map)={kind_total('generic-map')}")
           for _ln in (h3_face[-2:] + h3_after[-2:] + h3_gm_mine[-2:]):
               print(f"      {_ln}")
 
@@ -1430,7 +1471,22 @@ Insert immediately after arm (j2)'s tripwire block, i.e. after the
           # to it -- the donor is the context that populated the cache
           # (sys-fallback), the victim is the one that read it (fffd-cache) --
           # and then assert each context's own fontlist line.
-          n4_donor_ctx = _ctx_tok(n4_sys[-1]) if n4_sys else None
+          # The donor is the context whose sys-fallback line names a REAL
+          # family. `sys-fallback` is emitted UNCONDITIONALLY after the call,
+          # not inside `if (font)` (gfxTextRun.cpp:3623-3630), with
+          # `resolved=none` when nothing was found -- so the VICTIM emits one
+          # too: it reaches WhichSystemFontSupportsChar (that is where the
+          # fffd-cache read this arm needs lives) and comes back null once the
+          # gate refuses Menlo. Its line is written after the donor's, in the
+          # same content-process file under dom.ipc.processCount=1, so
+          # `n4_sys[-1]` is the victim's and both ids would come out equal --
+          # tripping this arm's own "one context cannot leak to itself" branch
+          # on the very build where #82's only GREEN has to come from.
+          # Filter on the same predicate the arm already asserts further down.
+          _n4_sys_ok = [ln for ln in n4_sys
+                        if "resolved=" in ln
+                        and not ln.rstrip().endswith("resolved=none")]
+          n4_donor_ctx = _ctx_tok(_n4_sys_ok[-1]) if _n4_sys_ok else None
           n4_victim_ctx = _ctx_tok(n4_cache[-1]) if n4_cache else None
 
           def _n4_families(ctx):
@@ -1495,7 +1551,9 @@ Insert immediately after arm (j2)'s tripwire block, i.e. after the
               if n4_donor_ctx is None or n4_victim_ctx is None:
                   n4_failures.append(
                       f"setup invalid: could not resolve the donor's ctx from a "
-                      f"`sys-fallback ch=U+FFFD` line ({n4_donor_ctx}) or the victim's "
+                      f"`sys-fallback ch=U+FFFD resolved=<family>` line "
+                      f"({n4_donor_ctx}; {len(n4_sys)} sys-fallback lines, "
+                      f"{len(_n4_sys_ok)} of them naming a family) or the victim's "
                       f"from a `fffd-cache` line ({n4_victim_ctx}), so neither "
                       f"context's fontlist line can be identified")
               elif n4_donor_ctx == n4_victim_ctx:
@@ -4675,67 +4733,181 @@ Add the two verdict rows in `judge`, immediately before the `overall` computatio
                     verdicts.append(_v(name, "codepoint", "pass",
                                        "U+%04X no longer resolves to its host carrier "
                                        "(%s bare vs %s here)." % (cp, bare_cp, v)))
+    else:
+        # choose_codepoint found no usable codepoint. Without this row the
+        # block above appends NOTHING, `overall` stays "pass", and Task 9 would
+        # close #87 on "both halves GREEN" while one half never ran -- a
+        # silently absent measurement reading exactly like a passing one
+        # (CLAUDE.md lesson 3). The risk is real: covered_elsewhere subtracts
+        # every bundled family's coverage, a Windows artifact bundles the macOS
+        # and Linux sets including Noto (Makefile:190), and the search window is
+        # only 0x0100..0x2FFF.
+        verdicts.append(_v("bare", "codepoint", "unscored",
+                           "NOT RUN: %s" % ((results.get("codepoint") or {})
+                                            .get("chosen_reason") or
+                                            "no codepoint block in the result object")))
 ```
 
-Extend `_canned` so every result object it builds carries the three new widths, and add
-four cases to `self_test()`. Give `_canned` three new keyword arguments, defaulting to a
-shape that PASSES, so every pre-existing self-test case keeps its current verdict:
+Then make an unscored codepoint half block a `pass`. Replace the `overall` computation:
+
+```python
+    if any(v["status"] == "invalid" for v in verdicts):
+        overall = "invalid"
+    elif any(v["status"] == "fail" for v in verdicts):
+        overall = "fail"
+    else:
+        overall = "pass"
+    return verdicts, overall
+```
+with:
+```python
+    # #87 closes on BOTH halves, so a codepoint half that produced no scored row
+    # must not read as a pass. This is deliberately NARROW -- it looks only at
+    # rows whose probe is "codepoint" -- because "unscored" elsewhere (the
+    # bundled-unlisted sharpener when the in-list control failed) always travels
+    # with an invalid or fail row that already decides the run.
+    cp_rows = [v for v in verdicts if v["probe"] == "codepoint"]
+    if any(v["status"] == "invalid" for v in verdicts):
+        overall = "invalid"
+    elif any(v["status"] == "fail" for v in verdicts):
+        overall = "fail"
+    elif not cp_rows or any(v["status"] == "unscored" for v in cp_rows):
+        overall = "unscored"
+    else:
+        overall = "pass"
+    return verdicts, overall
+```
+
+`main()` already does `return 0 if overall == "pass" else 1` and
+`results["passed"] = overall == "pass"`, so an `unscored` run exits non-zero without
+another edit. Add one line beside the existing `invalid` message, replacing:
+
+```python
+    if overall == "invalid":
+        print("This run measured nothing usable. Do not report a pass or a fail from it.")
+```
+with:
+```python
+    if overall == "invalid":
+        print("This run measured nothing usable. Do not report a pass or a fail from it.")
+    elif overall == "unscored":
+        print("The family-name half ran, but the codepoint half produced no scored "
+              "verdict. #87 asks for BOTH halves; do not close it on this run.")
+```
+
+`_canned` (`build-tester/scripts/probe_windows_fonts.py:669-686`) builds each launch
+through a **nested `run(host, extra=None)`** and returns a dict literal; `self_test`
+(`:691-745`) has one helper, `check(label, cond)`, a closure at `:695`. There is no
+`_check` and no `_judge_status`. The edits below are written against those.
+
+Replace `_canned`'s signature:
 
 ```python
 def _canned(host_w=120.0, list_w=None, ctx_w=None, absent=80.0,
-            cp_bare=200.0, cp_masked=80.0, cp_ctl=150.0, cp_ctl_masked=None,
-            cp_floor=80.0, cp=0x2C60,
-            ...):        # keep the existing parameters exactly as they are
+            data_fl='{"saw":true,"applied":true,"err":null}', absent2=None):
 ```
-and inside it, after the existing `widths` dicts are built, add the four keys to each
-launch's dict:
+with:
+```python
+def _canned(host_w=120.0, list_w=None, ctx_w=None, absent=80.0,
+            data_fl='{"saw":true,"applied":true,"err":null}', absent2=None,
+            cp=0x2C60, cp_bare=200.0, cp_masked=80.0, cp_floor=80.0,
+            cp_ctl=150.0, cp_ctl_masked=None):
+```
+
+The defaults describe a PASSING codepoint half — reachable bare (200 ≠ floor 80), refused
+under both masks (80), control stable at 150 — so every pre-existing self-test case keeps
+its current verdict. That matters more than usual now: with the `overall` change above, a
+result object carrying **no** codepoint rows scores `unscored`, and `check("clean run is
+pass", o == "pass")` at `:726` would start failing if `_canned` did not supply them.
+
+Then give `run()` the two extra widths and add the `codepoint` block to the returned dict.
+Replace the whole body:
 
 ```python
-    for _name, _w, _cpv, _ctlv in (
-            ("bare", bare_widths, cp_bare, cp_ctl),
-            ("launch_list", list_widths, cp_masked,
-             cp_ctl if cp_ctl_masked is None else cp_ctl_masked),
-            ("per_context", ctx_widths, cp_masked,
-             cp_ctl if cp_ctl_masked is None else cp_ctl_masked)):
-        _w["__cp__"] = _cpv
-        _w["__cpfloor__"] = cp_floor
-        _w["__cpctl__"] = _ctlv
-    result["codepoint"] = {"cp": cp, "carriers": ["Some Host Face"],
-                           "chosen_reason": "canned"}
+    def run(host, extra=None):
+        w = {"__absent1__": absent, "__absent2__": absent if absent2 is None else absent2,
+             "Host One": host, "Listed A": absent + 40, "Listed B": absent + 41,
+             "Unlisted X": absent, "__fffd__": 9.0, "__monospace__": absent}
+        w.update(extra or {})
+        return {"widths": w, "data_fl": None, "page_error": None}
+    return {
+        "host_family": "Host One",
+        "host_family_reason": "canned",
+        "candidates": ["Host One"],
+        "in_list_probes": ["Listed A", "Listed B"],
+        "bundled_unlisted_probes": ["Unlisted X"],
+        "bare": run(host_w),
+        "launch_list": run(absent if list_w is None else list_w),
+        "per_context": dict(run(absent if ctx_w is None else ctx_w), data_fl=data_fl),
+    }
 ```
-(the local names `bare_widths` / `list_widths` / `ctx_widths` / `result` are whatever
-`_canned` already calls them — read the function and use its own).
+with:
+```python
+    ctl_masked = cp_ctl if cp_ctl_masked is None else cp_ctl_masked
 
-Then add the four cases, in the same style as the existing ones:
+    def run(host, cp_w, ctl_w, extra=None):
+        w = {"__absent1__": absent, "__absent2__": absent if absent2 is None else absent2,
+             "Host One": host, "Listed A": absent + 40, "Listed B": absent + 41,
+             "Unlisted X": absent, "__fffd__": 9.0, "__monospace__": absent,
+             "__cp__": cp_w, "__cpfloor__": cp_floor, "__cpctl__": ctl_w}
+        w.update(extra or {})
+        return {"widths": w, "data_fl": None, "page_error": None}
+    return {
+        "host_family": "Host One",
+        "host_family_reason": "canned",
+        "candidates": ["Host One"],
+        "in_list_probes": ["Listed A", "Listed B"],
+        "bundled_unlisted_probes": ["Unlisted X"],
+        "codepoint": {"cp": cp, "carriers": ["Host One"],
+                      "chosen_reason": "canned"},
+        "bare": run(host_w, cp_bare, cp_ctl),
+        "launch_list": run(absent if list_w is None else list_w,
+                           cp_masked, ctl_masked),
+        "per_context": dict(run(absent if ctx_w is None else ctx_w,
+                                cp_masked, ctl_masked), data_fl=data_fl),
+    }
+```
+
+`run`'s two new parameters are positional and required, and its only three call sites are
+the ones shown, so a missed one is a `TypeError` at self-test time rather than a silently
+absent width.
+
+Then add the cases at the end of `self_test()`, after the `applied:false is invalid`
+check at `:744-745` and before whatever `self_test` does with `fails`. They use `check`
+and one local closure, in the same style as the rest of the function:
 
 ```python
-    # --- #87 codepoint arm ------------------------------------------------
-    # 1. PASS: reachable bare, refused under both masks, control stable.
-    _check("codepoint pass",
-           _judge_status(_canned(cp_bare=200.0, cp_masked=80.0), "codepoint"),
-           {"pass"})
-    # 2. FAIL: still resolves to the host carrier under a mask.
-    _check("codepoint fail",
-           _judge_status(_canned(cp_bare=200.0, cp_masked=200.0), "codepoint"),
-           {"fail"})
-    # 3. CONTROL FAILED, bare: the codepoint measures its own tofu floor where
-    #    no mask applies, so a refusal under a mask asserts nothing.
-    _check("codepoint control failed bare",
-           _judge_status(_canned(cp_bare=80.0, cp_floor=80.0), "codepoint"),
-           {"unscored"})
-    # 4. CONTROL FAILED, masked: the in-list control moved between launches, so
-    #    the masked launch has no working font stack and "refused" says nothing.
-    _check("codepoint control failed masked",
-           _judge_status(_canned(cp_bare=200.0, cp_masked=80.0,
-                                 cp_ctl=150.0, cp_ctl_masked=99.0), "codepoint"),
-           {"unscored"})
+    print("codepoint arm (#87):")
+
+    def cp_status(obj):
+        """The set of statuses on rows whose probe is 'codepoint'."""
+        return {x["status"] for x in judge(obj)[0] if x["probe"] == "codepoint"}
+
+    check("reachable bare, refused under both masks -> pass",
+          cp_status(_canned()) == {"pass"})
+    check("still resolves to the host carrier under a mask -> fail",
+          cp_status(_canned(cp_masked=200.0)) == {"fail"})
+    check("codepoint measures its own tofu floor in the BARE launch -> unscored",
+          cp_status(_canned(cp_bare=80.0)) == {"unscored"})
+    check("in-list codepoint control moved between launches -> unscored",
+          cp_status(_canned(cp_ctl_masked=99.0)) == {"unscored"})
+    no_cp = _canned()
+    no_cp["codepoint"]["cp"] = None
+    check("no codepoint selected -> an unscored row, not silence",
+          cp_status(no_cp) == {"unscored"})
+    check("and that alone stops the run reading as a pass",
+          judge(no_cp)[1] == "unscored")
+    check("a clean run still passes with the codepoint half present",
+          judge(_canned())[1] == "pass")
 ```
 
-`_check` and `_judge_status` are helpers `self_test()` already has for the family-name
-cases; if it inspects `judge()`'s return directly instead, use the same idiom it uses and
-assert on the set of `status` values whose `probe` is `"codepoint"`. Read the function
-before editing it — the four assertions above are the content, the calling convention is
-whatever is already there.
+Every expected status above follows from `judge`'s own branches on those widths: default
+`cp_bare=200.0` differs from `cp_floor=80.0` so the bare control holds; `cp_masked=80.0`
+differs from `cp_bare` so both masked launches pass; raising `cp_masked` to `200.0` makes
+`abs(v - bare_cp) <= EPS` true in both, giving two `fail` rows; `cp_bare=80.0` equals the
+floor, which short-circuits to the single bare `unscored` row; and `cp_ctl_masked=99.0`
+makes `abs(ctl_bare - ctl_mask) > EPS` true, which short-circuits to the masked `unscored`
+row.
 
 Run it before shipping anything:
 ```bash
@@ -4787,6 +4959,13 @@ was already closed on Windows and the PR says so rather than claiming a fix.
 
 If either run prints `overall: INVALID`, it measured nothing usable. Do not report a
 pass or a fail from it; read which control failed and re-select the codepoint.
+
+If either prints `overall: UNSCORED`, the family-name half ran and the codepoint half did
+not reach a verdict. The run carries a `[unscored] bare codepoint …` row saying why —
+either `NOT RUN:` followed by `choose_codepoint`'s own `chosen_reason` (no codepoint
+survived the filter), or one of the two control failures. **#87 does not close on such a
+run.** Widen the search window in `choose_codepoint`, or accept that this host cannot
+supply the arm and say so in the issue; do not read the missing half as a pass.
 
 - [ ] **Step 5: Commit the probe change**
 
@@ -4912,7 +5091,7 @@ the GREEN that close it:
 | #91 | arm (n7) RED on Phase 0, GREEN on `<SMOKE_P1>` |
 | #82 | arm (n4) GREEN on `<SMOKE_P1>` **plus** the B6 RED; if B6 could not go RED, #82 **stays open** with the reason |
 | #90 | the measurement, plus the fix only if arm (n5) was RED |
-| #87 | both halves GREEN on the round-3 Windows build, with macOS stated as unmeasured |
+| #87 | both halves GREEN on the round-3 Windows build — `overall: PASS`, which the probe now withholds unless a **scored** `codepoint` row exists, so an absent half cannot read as a passing one. An `overall: UNSCORED` run closes nothing; quote the `[unscored] … codepoint` row and its reason instead. macOS stated as unmeasured. |
 
 Two sections the PR must carry beyond the per-issue ones:
 
@@ -5068,12 +5247,26 @@ throughout (third parameter defaulted, so §A2's two-argument calls compile).
 StyleGenericFontFamily, nsACString&, nsACString&)` at all three call sites.
 `kind_total` and `LOG_START` are defined in Task 1 Step 4; `one_page_list_arg` and
 `_ctx_tok` in Task 2 Step 2, and both are used later in the same heredoc by Steps 3–7.
-`_ctx_of` is arm (h3)'s own local. Arm tags `(n1)`, `(n2)`, `(h3)`, `(n4)`, `(n5)`,
-`(n7)` are consistent across the arms, `EXPECTED_RED`, `EXPECTED_GREEN` and the readback
-tables. The four log format strings in the "Log line contract" table are the strings
-Tasks 3 and 4 emit and the strings Task 2's arms parse, and every parse of a
+`_ctx_of` and `_file_of` are arm (h3)'s own locals. Arm tags `(n1)`, `(n2)`, `(h3)`,
+`(n4)`, `(n5)`, `(n7)` are consistent across the arms, `EXPECTED_RED`, `EXPECTED_GREEN`
+and the readback tables. The four log format strings in the "Log line contract" table are
+the strings Tasks 3 and 4 emit and the strings Task 2's arms parse, and every parse of a
 last-position field (`key=`, `families=`, `family=`, `resolved=`) reads to end of line
 rather than to the next space, because family names contain spaces.
+
+Task 8's edits name only symbols that exist in
+`build-tester/scripts/probe_windows_fonts.py`: `check(label, cond)` (the closure at
+`:695`), `judge`, `_v`, `EPS`, `_names_from_file`, `Path`, and `_canned`'s nested
+`run(...)`, whose call sites are all rewritten together because its two new parameters are
+positional and required. `cp_status` is a new closure inside `self_test`, defined beside
+the cases that use it.
+
+**Log-window reads are pinned three ways.** Every arm that reads `camou_fl` output takes
+its reads before any reference launch, filters by the fixture context's `ctx=`, and —
+where the spec says "the following line" — by the log file basename and list position too.
+`camou_fl` sorts by file name, not by time, so `[-1]` means "last line of the
+last-sorting file"; arms (h3) and (n4) each state that in a comment beside the code that
+compensates for it.
 
 **Deviations from the spec, each stated where it applies rather than absorbed.** Three:
 
