@@ -288,3 +288,41 @@ Runs on the user's Windows build PC against the Phase C Windows artifact. Order 
 - Fixing `SpeechVoicesManager` (new issue, measurement first).
 - The dormant non-shared branches (`LookupInFaceNameLists`, `CommonFontFallback` `else`)
   and `LookupLocalFont` on the macOS/Windows platform font lists.
+
+---
+
+## Outcome
+
+Written after the work landed. Where this section and the spec above disagree, this section
+is what happened. The full record is in `docs/superpowers/plans/2026-09-09-fonts-round2.md`
+under "Outcome".
+
+**#83 was fixed, and not through the path this spec makes it conditional on.** The Phase B
+gate returned **H1 REFUTED** — the recipient context resolves the donor's families and is
+refused its own, which is not the allow-everything result H1 predicts. Branch B was taken, and
+the `MOZ_LOG` layer branch B installed then located the real mechanism:
+`gfxFcPlatformFontList::mFcSubstituteCache`, a process-global name→family memo consulted
+before the base `FindAndAddFamiliesLocked` where the per-context gate lives, keyed without a
+user context id. #83 was fixed in `163ee25` by appending the context id to that memo's key and
+to `mGenericMappings`', adding a virtual `ClearFontNameCaches()` and flushing it from
+`FontListManager::SetFontList`.
+
+So every line above that reads "only if H1 confirmed", "the PR reports #83 as
+measured-not-fixed", or that has arms `(b2)` / `(b2r)` staying red is superseded. In the
+shipped workflow `EXPECTED_RED` is empty and both arms are `EXPECTED_GREEN`.
+
+**#82 is fixed by reading and is not closed.** Its gate change landed, but the arms cannot
+measure it on this bundle: the default font is DejaVu Sans, which covers U+FFFD, so
+`SystemFindFontForChar` is never reached and `mReplacementCharFallbackFamily` is neither read
+nor written. Arms `(j)` and `(j2)` are `KNOWN_UNMEASURABLE` and assert nothing.
+
+**Two things landed that this spec does not contain.** The seed restore `4e868c5`, a one-line
+fix for `ClearCodepointsWithNoFonts()` wiping upstream's seeded ranges on every `setFontList`.
+And, as a consequence of keying `mGenericMappings`, generic families under a per-context list
+now fall to the ungated default face — filed as **#92**, disclosed in the PR body, measured on
+Linux CI only.
+
+**Builds.** Three at `a9376f1` (linux, windows, macos) plus two Linux rebuilds at `4e868c5`
+and `163ee25`. The Linux binary under final test is `163ee25`; the Windows and macOS artifacts
+are still `a9376f1`, so the native-Windows probe for #87 covers the lookup-time allowlist flip
+and nothing later, and both test suites are evidence about the branch minus those two commits.
