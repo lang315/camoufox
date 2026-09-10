@@ -851,7 +851,118 @@ jobs:
           FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
           MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
           WIN_STRICT = set(FONTS["win"]) - set(FONTS["mac"]) - set(FONTS["lin"])
-          MAC_ONLY = ["Helvetica Neue", "PingFang HK", "Geneva"]
+          # ---- #44 round 3: pick MAC_ONLY's third family from THIS RUN ------
+          # Geneva was the third MAC_ONLY probe and it has never rendered. The
+          # pixel discriminator further down read `geneva == absent` in run
+          # 34445606698, where arm (b)'s WIDTH said True, and again in run
+          # 34477369394, where the width said False -- two runs, one answer,
+          # with the discriminator's own positive control valid in both. So the
+          # width flip was the fallback face changing when the host fonts left
+          # the universe, not the gate changing its mind.
+          # bundle/fonts/macos/Geneva.ttf carries a single cmap subtable,
+          # (0,3) format 12, upem 2048, Latin covered, so whatever fails is
+          # downstream of the cmap. That is a bundle defect (issue drafted at
+          # .superpowers/sdd-fonts3/issue-geneva.md), not a verdict arm (b)
+          # should keep asserting about the fork.
+          #
+          # A probe family this guard cannot render is a reference that is
+          # never right (CLAUDE.md lesson 4), so the third slot is chosen BY
+          # THIS RUN from three mac-only candidates -- each checked against
+          # pythonlib/camoufox/fonts.json (in `mac`, absent from `win` and
+          # `lin`) and present in bundle/fonts/macos/. The choice happens in
+          # its OWN launch, before PROBES exists: picking it inside the bare
+          # launch would leave arm (a) measuring a different probe set from
+          # arm (b).
+          MAC_CANDIDATES = ["Optima", "Palatino", "Helvetica"]
+
+          # One checksum implementation, shared by this precheck and the
+          # Geneva discriminator below. Two different faces essentially never
+          # rasterize identically at 72px even when metrically similar, which
+          # is the reference the width probe does not have.
+          PIXEL_JS = """(families) => {
+            const S = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const draw = (f) => {
+              const c = document.createElement('canvas');
+              c.width = 300; c.height = 100;
+              const x = c.getContext('2d');
+              x.fillStyle = 'white'; x.fillRect(0, 0, 300, 100);
+              x.fillStyle = 'black';
+              x.font = '72px "' + f + '", monospace';
+              x.fillText(S, 0, 80);
+              const d = x.getImageData(0, 0, 300, 100).data;
+              let sum = 0;
+              for (let i = 0; i < d.length; i++) { sum = (Math.imul(sum, 31) + d[i]) >>> 0; }
+              return sum;
+            };
+            const width = (f) => {
+              const x = document.createElement('canvas').getContext('2d');
+              x.font = '72px "' + f + '", monospace';
+              return x.measureText(S).width;
+            };
+            const out = {};
+            for (const f of families) out[f] = {pixels: draw(f), width: width(f)};
+            return out;
+          }"""
+
+          def mac_list_probe(js, arg, marker):
+              """One launch, one context carrying FONTS["mac"], one page."""
+              with sync_playwright() as pw:
+                  _b = pw.firefox.launch(
+                      executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                      env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                  _c = _b.new_context()
+                  # A bare new_context() has NO mac list, so every mac-only
+                  # candidate would read refused and the precheck would reject
+                  # all three for the wrong reason. Same init script the Geneva
+                  # discriminator uses.
+                  _c.add_init_script(
+                      'if (typeof window.setFontList === "function") '
+                      'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                  _p = _c.new_page()
+                  _p.goto(f"data:text/html,<h1>{marker}</h1>")
+                  try:
+                      return _p.evaluate(js, arg)
+                  finally:
+                      _b.close()
+
+          _pre = mac_list_probe(
+              PIXEL_JS,
+              MAC_CANDIDATES + ["Helvetica Neue", "Geneva", "__CamouAbsentRef__0001"],
+              "mac-candidate-precheck")
+          _absent = _pre["__CamouAbsentRef__0001"]
+          _ctrl_ok = _pre["Helvetica Neue"]["pixels"] != _absent["pixels"]
+          print(f"  [MAC_ONLY precheck] absent reference: {_absent}")
+          print(f"  [MAC_ONLY precheck] positive control Helvetica Neue: "
+                f"{_pre['Helvetica Neue']} -> pixel test "
+                f"{'valid' if _ctrl_ok else 'INVALID'}")
+          print(f"  [MAC_ONLY precheck] Geneva (no longer a probe; kept as evidence for the "
+                f"bundle issue): {_pre['Geneva']} renders="
+                f"{_pre['Geneva']['pixels'] != _absent['pixels']}")
+          assert _ctrl_ok, (
+              "MAC_ONLY precheck SETUP-INVALID: Helvetica Neue, which arm (b) has resolved in "
+              f"every run, checksums identical to the absent reference ({_absent['pixels']}). "
+              "The pixel test cannot tell a hit from a miss here, so no candidate below can be "
+              "trusted and MAC_ONLY cannot be chosen at all.")
+          MAC_THIRD = None
+          for _c in MAC_CANDIDATES:
+              _w_ok = _pre[_c]["width"] != _absent["width"]
+              _p_ok = _pre[_c]["pixels"] != _absent["pixels"]
+              print(f"  [MAC_ONLY precheck] {_c}: width {_pre[_c]['width']} vs absent "
+                    f"{_absent['width']} ({'differs' if _w_ok else 'SAME'}); pixels "
+                    f"{'differ' if _p_ok else 'SAME'} -> "
+                    f"{'ACCEPT' if (_w_ok and _p_ok) else 'reject'}")
+              if _w_ok and _p_ok:
+                  MAC_THIRD = _c
+                  break
+          _pre_summary = {_c: _pre[_c] for _c in MAC_CANDIDATES}
+          assert MAC_THIRD, (
+              f"MAC_ONLY precheck SETUP-INVALID: not one of {MAC_CANDIDATES} renders in a mac "
+              f"context -- width AND pixels match the absent reference for all three: "
+              f"{_pre_summary}. MAC_ONLY has no third family this run can prove, and a probe "
+              "family that never renders is exactly what Geneva was.")
+          print(f"  [MAC_ONLY precheck] chosen third MAC_ONLY family: {MAC_THIRD}")
+
+          MAC_ONLY = ["Helvetica Neue", "PingFang HK", MAC_THIRD]
           WIN_ONLY = ["Segoe UI", "Calibri", "MS Gothic"]
           PROBES = MAC_ONLY + WIN_ONLY
           # Derived, never written out -- see fc_subst_hits above. The fc memo
@@ -1260,36 +1371,16 @@ jobs:
           # positive control -- known-resolved (measure=True), must
           # produce a DIFFERENT checksum from the absent-reference, or
           # this test itself proves nothing.
-          with sync_playwright() as pw:
-              bg = pw.firefox.launch(
-                  executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
-                  env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
-              ctxg = bg.new_context()
-              ctxg.add_init_script(
-                  'if (typeof window.setFontList === "function") '
-                  'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
-              pgg = ctxg.new_page()
-              pgg.goto("data:text/html,<h1>g</h1>")
-              PIXEL_JS = (
-                  "() => { "
-                  "const draw = (f) => { "
-                  "const c = document.createElement('canvas'); "
-                  "c.width = 300; c.height = 100; "
-                  "const ctx = c.getContext('2d'); "
-                  "ctx.fillStyle = 'white'; ctx.fillRect(0, 0, 300, 100); "
-                  "ctx.fillStyle = 'black'; "
-                  "ctx.font = '72px \"' + f + '\", monospace'; "
-                  "ctx.fillText('mmmmmmmmmmlliWWWWWWW@#$%^&*()_+', 0, 80); "
-                  "const data = ctx.getImageData(0, 0, 300, 100).data; "
-                  "let sum = 0; "
-                  "for (let i = 0; i < data.length; i++) { "
-                  "sum = (Math.imul(sum, 31) + data[i]) >>> 0; } "
-                  "return sum; }; "
-                  "return {geneva: draw('Geneva'), "
-                  "absent: draw('__CamouAbsentRef__0001'), "
-                  "helvetica_neue: draw('Helvetica Neue')}; }")
-              geneva_pixels = pgg.evaluate(PIXEL_JS)
-              bg.close()
+          # Same launch shape and the SAME shared PIXEL_JS the MAC_ONLY
+          # precheck uses, so the two readings are comparable. Geneva is no
+          # longer a probe family; this stays because it is the standing
+          # evidence for the bundle issue, and it is a diagnostic with no
+          # assert -- see issue-geneva.md.
+          _gp = mac_list_probe(
+              PIXEL_JS, ["Geneva", "__CamouAbsentRef__0001", "Helvetica Neue"], "g")
+          geneva_pixels = {"geneva": _gp["Geneva"]["pixels"],
+                           "absent": _gp["__CamouAbsentRef__0001"]["pixels"],
+                           "helvetica_neue": _gp["Helvetica Neue"]["pixels"]}
           control_differs = geneva_pixels["helvetica_neue"] != geneva_pixels["absent"]
           geneva_pixel_differs = geneva_pixels["geneva"] != geneva_pixels["absent"]
           print(f"  [Geneva pixel discriminator] checksums: {geneva_pixels}")
@@ -1540,7 +1631,7 @@ jobs:
           # the flush, is the only thing that can give the right answer.
           print(f"  [b2 / mac-after-win] gate lines for 'geneva', re-probe half "
                 f"(must be PRESENT -- the donor re-gates its own family): "
-                f"{camou_fl(b2_reprobe_mark, 'CAMOU-FL gate', 'key=geneva', limit=4)}")
+                f"{camou_fl(b2_reprobe_mark, 'CAMOU-FL gate', f'key={MAC_ONLY[2].lower()}', limit=4)}")
           print(f"  [b2 / mac-after-win] fc-subst hits on probe families, re-probe half "
                 f"(informational; a key ending `:0` here is the context-0 fail-open): "
                 f"{fc_subst_hits(b2_reprobe_mark)}")
@@ -2170,13 +2261,13 @@ jobs:
 
           JS_F = """() => {
             // (f) codepoint fallback: neither context's non-CJK
-            // families cover U+6F22, so this forces
+            // families cover U+FF71, so this forces
             // SystemFindFontForChar / GlobalFontFallback, which
             // nothing gates. Own browser launch, own context, one
             // page -- see the design note above.
             const c = document.createElement('canvas').getContext('2d');
             c.font = '48px "NoSuchFamilyAtAll"';
-            return c.measureText('\u6f22').width;
+            return c.measureText('\uff71').width;
           }"""
 
           # Positive control for arm (f), added after a review finding: JS_F's
@@ -2192,13 +2283,13 @@ jobs:
           JS_F_CONTROL_MAC = """() => {
             const c = document.createElement('canvas').getContext('2d');
             c.font = '48px "PingFang HK"';
-            return c.measureText('\u6f22').width;
+            return c.measureText('\uff71').width;
           }"""
 
           JS_F_CONTROL_WIN = """() => {
             const c = document.createElement('canvas').getContext('2d');
             c.font = '48px "MS Gothic"';
-            return c.measureText('\u6f22').width;
+            return c.measureText('\uff71').width;
           }"""
 
           # Diagnostic (not scored, no assert): does JS_F's own measurement
@@ -2217,9 +2308,9 @@ jobs:
           JS_F_RACE = """async () => {
             const c = document.createElement('canvas').getContext('2d');
             c.font = '48px "NoSuchFamilyAtAll"';
-            const immediate = c.measureText('\u6f22').width;
+            const immediate = c.measureText('\uff71').width;
             await new Promise(r => setTimeout(r, 3000));
-            const delayed = c.measureText('\u6f22').width;
+            const delayed = c.measureText('\uff71').width;
             return {immediate: immediate, delayed: delayed};
           }"""
 
@@ -2247,13 +2338,13 @@ jobs:
             c.font = '48px "NoSuchFamilyAtAll"';
             const samples = [];
             for (let i = 0; i < 20; i++) {
-              samples.push(c.measureText('漢').width);
+              samples.push(c.measureText('\uff71').width);
               await new Promise(r => setTimeout(r, 500));
             }
             const refs = {};
             for (const fam of ['monospace', 'sans-serif', 'serif']) {
               c.font = '48px ' + fam;
-              refs[fam] = c.measureText('漢').width;
+              refs[fam] = c.measureText('\uff71').width;
             }
             return {final: samples[samples.length - 1], samples: samples, refs: refs};
           }"""
@@ -2271,19 +2362,25 @@ jobs:
           # the bundle at all (a runner font).
           JS_F_BISECT = """() => {
             const c = document.createElement('canvas').getContext('2d');
+            // ONLY families whose own cmap covers the probe codepoint.
+            // Naming a family that does NOT cover it measures whatever
+            // codepoint fallback finds, not that family's advance, so such a
+            // name is a fallback reading mislabelled as a family reference
+            // (CLAUDE.md lesson 4). U+FF71 coverage read locally with
+            // fontTools off bundle/fonts/: these cover it; Hiragino Sans GB,
+            // Heiti SC, Heiti TC, Apple SD Gothic Neo, SimSun, NSimSun and
+            // Malgun Gothic do NOT and were dropped from this list when the
+            // codepoint changed from U+6F22.
             const candidates = [
               'PingFang HK', 'PingFang SC', 'PingFang TC',
-              'Hiragino Sans GB', 'Heiti SC', 'Heiti TC',
-              'Apple SD Gothic Neo',
-              'MS Gothic', 'MS PGothic', 'SimSun', 'NSimSun',
-              'Malgun Gothic', 'Microsoft YaHei', 'Microsoft JhengHei',
-              'Yu Gothic',
+              'MS Gothic', 'MS PGothic', 'MS UI Gothic', 'Yu Gothic',
+              'Microsoft YaHei', 'Microsoft JhengHei',
               'Noto Sans SC', 'Noto Sans TC', 'Noto Sans JP', 'Noto Sans KR',
             ];
             const widths = {};
             for (const fam of candidates) {
               c.font = '48px "' + fam + '"';
-              widths[fam] = c.measureText('漢').width;
+              widths[fam] = c.measureText('\uff71').width;
             }
             return widths;
           }"""
@@ -2542,7 +2639,7 @@ jobs:
           assert f["mac"] > 0 and f["win"] > 0 and f["mac2"] > 0, (
               f"arm (f): CJK fallback measured 0 somewhere -- nothing rendered, no signal. "
               f"mac={f['mac']} mac2={f['mac2']} win={f['win']}")
-          # Positive control: prove U+6F22 can render as a real, non-tofu
+          # Positive control: prove U+FF71 can render as a real, non-tofu
           # glyph at all before trusting anything about arm (f)'s fallback
           # measurement. If naming the context's own CJK family produces the
           # SAME width as JS_F's impossible-family fallback, the probe has
@@ -2563,12 +2660,30 @@ jobs:
           # square, and 48 == 48 says nothing about WHICH face served it. A hard
           # assert here would also erase arms (g)-(k) and the whole triage block
           # for a probe-design limit that asserts nothing about #44.
+          # Restored by the codepoint change. U+6F22 is a full em in every
+          # bundled CJK face AND `.notdef` is a full em in most of them, so
+          # glyph and tofu were the same number. U+FF71 (HALFWIDTH KATAKANA
+          # LETTER A) is 0.5 em in MS Gothic, PingFang HK and Yu Gothic while
+          # their `.notdef` stays 1.0 em -- read locally with fontTools off
+          # bundle/fonts/. Both of this arm's named controls cover it.
+          # The tolerance is a float comparison, not decoration.
           f_floor_valid = {}
           for label, fam in (("mac", "PingFang HK"), ("win", "MS Gothic")):
-              f_floor_valid[label] = f_control[label] != f[label]
+              f_floor_valid[label] = abs(f_control[label] - f[label]) > 0.01
               print(f"  [{label} / arm f] tofu floor -- named {fam!r} width "
                     f"{f_control[label]} vs impossible-family fallback {f[label]}: "
                     f"{'floor is a real reference' if f_floor_valid[label] else 'COLLIDES, no floor'}")
+          # Whether mac and win can be told apart AT ALL by advance: if each
+          # context's own named CJK family measures the same, then two
+          # different faces produce the same number and `mac_final ==
+          # win_final` cannot mean "the same face served both". Verified
+          # locally and expected to be EQUAL here -- PingFang HK and MS Gothic
+          # are both 0.5 em at U+FF71 -- which is why no codepoint choice
+          # rescues this comparison; only a pixel discriminator would.
+          f_ctx_separable = abs(f_control["mac"] - f_control["win"]) > 0.01
+          print(f"  [arm f] can advance width separate the two contexts? "
+                f"mac control {f_control['mac']} vs win control {f_control['win']} -> "
+                f"{'yes' if f_ctx_separable else 'NO -- equality is not a verdict'}")
 
           # Well-formedness floor for arm (e): document.fonts has
           # exactly the 3 rules this page declared, non-empty, real
@@ -2701,19 +2816,23 @@ jobs:
               bisect_disallowed[label] = [fam for fam in bisect_matches[label] if fam not in FONTS[label]]
 
           f_failures = []
+          f_collision = None   # set by either no-verdict branch below
           if not all(f_floor_valid.values()):
               # FIRST, and alone: everything below this point is scored against
               # `f[label]` as a tofu floor, and the floor collided. This string
               # is what note_unmeasured/`unmeasured_arms` records as the arm's
               # signature, so it must be the only entry.
-              f_failures.append(
+              f_collision = (
                   f"arm (f) width reference collides: naming a context's own CJK family "
                   f"measures the SAME width as the impossible-family fallback (mac "
                   f"{f_control['mac']} vs {f['mac']}, win {f_control['win']} vs "
-                  f"{f['win']}). Every bundled CJK family draws U+6F22 on the full em "
-                  f"square and no host face is left to draw a .notdef box, so no advance "
-                  f"width here can say WHICH face served the codepoint: no tofu floor, no "
-                  f"discriminator, NO VERDICT about the gate either way")
+                  f"{f['win']}) for U+FF71. The named family and the fallback are one "
+                  f"number, so there is no tofu floor and no advance here can say WHICH "
+                  f"face served the codepoint: NO VERDICT about the gate either way. "
+                  f"U+FF71 was chosen precisely because it is 0.5 em in MS Gothic and "
+                  f"PingFang HK against a 1.0 em .notdef, so a collision here means "
+                  f"something other than the U+6F22 full-em problem this replaced")
+              f_failures.append(f_collision)
           elif not f_repeatable:
               f_failures.append(
                   f"mac settled value not repeatable across separate launches on the same "
@@ -2729,9 +2848,22 @@ jobs:
                       f"win settled value ({win_final}) never left the tofu/no-render floor "
                       f"({f['win']}) inside the 10s window -- fallback found nothing")
               if f_not_tofu_mac and f_not_tofu_win and mac_final == win_final:
-                  f_failures.append(
-                      f"mac and win settled to the SAME value ({mac_final}) -- fallback "
-                      f"ignores context")
+                  if f_ctx_separable:
+                      f_failures.append(
+                          f"mac and win settled to the SAME value ({mac_final}) -- fallback "
+                          f"ignores context")
+                  else:
+                      # Equal advance is not the same face. The two contexts'
+                      # own named families measure the same, so this equality
+                      # is exactly as consistent with a correct per-context
+                      # resolution as with a leak. No verdict.
+                      f_collision = (
+                          f"arm (f) width reference collides: mac and win both settled at "
+                          f"{mac_final}, but their own named CJK families also measure the "
+                          f"same (mac {f_control['mac']}, win {f_control['win']}), so equal "
+                          f"advance cannot mean the same face served both. NO VERDICT about "
+                          f"the gate either way")
+                      f_failures.append(f_collision)
               for label, not_tofu in (("mac", f_not_tofu_mac), ("win", f_not_tofu_win)):
                   if not not_tofu:
                       continue
@@ -2741,11 +2873,17 @@ jobs:
                           f"correspond to any ALLOWED family in FONTS['{label}'] -- bisection "
                           f"matches: {bisect_matches[label] or 'none'}")
                   elif bisect_disallowed[label]:
-                      f_failures.append(
-                          f"{label} settled value ({f_final[label]['final']}) is AMBIGUOUS -- "
-                          f"matches both allowed ({bisect_allowed[label]}) and disallowed "
-                          f"({bisect_disallowed[label]}) candidates; cannot confirm which "
-                          f"family actually served it")
+                      # NOT a failure any more. Under FONTCONFIG_FILE the font
+                      # universe is the bundle alone, so naming a family this
+                      # context REFUSES measures the fallback face, which is by
+                      # definition the settled value. Every refused candidate
+                      # therefore "matches" by construction and this branch was
+                      # true whatever the gate did -- a reference that cannot
+                      # differ (CLAUDE.md lesson 4). Printed, not scored.
+                      print(f"  [{label} / arm f] disallowed candidates also read the settled "
+                            f"value ({f_final[label]['final']}): {bisect_disallowed[label]} -- "
+                            f"expected, a refused name measures the fallback, not itself; "
+                            f"carries no information about a leak")
           print(f"  [arm f] repeatable (mac == mac2 settled, separate launches)? {f_repeatable}")
           print(f"  [arm f] mac settled family match (in FONTS['mac']): {bisect_allowed['mac'] or bisect_matches['mac'] or 'none'}")
           print(f"  [arm f] win settled family match (in FONTS['win']): {bisect_allowed['win'] or bisect_matches['win'] or 'none'}")
@@ -2866,8 +3004,12 @@ jobs:
               # when the floor collides, the branch above is the ONLY entry in
               # f_failures and no verdict was reached, so nothing real can be
               # swallowed by recording it.
-              if not all(f_floor_valid.values()):
-                  unmeasured_arms["(f)"] = f_failures[0][:220]
+              # Only when the collision is the ONLY entry. A tofu branch or a
+              # "no allowed family matched" branch IS a verdict about the gate,
+              # and routing the arm to `unmeasured` alongside one would let
+              # KNOWN_UNMEASURABLE swallow a real defect claim.
+              if f_collision and f_failures == [f_collision]:
+                  unmeasured_arms["(f)"] = f_collision[:220]
           if g_failures:
               tripwires.append(f"(g) worker vs arm (b) per-context ground truth disagree: {g_failures}")
           if h_failures:
@@ -3310,7 +3452,7 @@ jobs:
           # gives each measurement its own fresh launch specifically
           # for isolation -- which is exactly why none of them can see
           # this bug (the cache always starts empty). Context A gets a
-          # list covering NOTHING for U+6F22 (a genuine, correct miss
+          # list covering NOTHING for U+FF71 (a genuine, correct miss
           # that poisons the process-wide cache); context B, same
           # launch, opened AFTER A, gets a list that DOES cover it. B
           # rendering tofu is the bug -- B's own gate never ran because
@@ -3395,15 +3537,27 @@ jobs:
             c.font = '48px "NoSuchFamilyAtAll"';
             const samples = [];
             for (let i = 0; i < 20; i++) {
-              samples.push(c.measureText('漢').width);
+              samples.push(c.measureText('\uff71').width);
               await new Promise(r => setTimeout(r, 500));
             }
             const refs = {};
             for (const fam of ['monospace', 'sans-serif', 'serif']) {
               c.font = '48px ' + fam;
-              refs[fam] = c.measureText('漢').width;
+              refs[fam] = c.measureText('\uff71').width;
             }
-            return {final: samples[samples.length - 1], samples: samples, refs: refs};
+            // The control these arms never had: a CJK family named DIRECTLY.
+            // In context B (FONTS['win']) MS Gothic is allowed and its own
+            // cmap covers U+FF71 at 0.5 em = 24.00px at 48px, so this is B's
+            // real glyph width. In context A (no-CJK list) the name is refused
+            // and this reads A's fallback instead -- informative, not a
+            // control. Compared against A's FLOOR, never against B's own refs:
+            // the linux conf's generic aliases are all refused under a win
+            // list, so B's monospace/sans-serif/serif can legitimately land on
+            // the very same MS Gothic and would make a working fix look broken.
+            c.font = '48px "MS Gothic"';
+            const named = c.measureText('\uff71').width;
+            return {final: samples[samples.length - 1], samples: samples,
+                    refs: refs, named: named};
           }"""
 
           i_a, i_b, i_pids = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
@@ -3421,6 +3575,17 @@ jobs:
           # above, so i_a["final"] is a reliable "genuinely nothing
           # rendered" baseline to compare B against instead.
           i_b_tofu = i_b["final"] == i_a["final"]
+          # The control this arm was missing (CLAUDE.md lesson 4). B's verdict
+          # is "did B settle at A's floor", which is a verdict only while a
+          # correctly-resolving B would land somewhere ELSE. Read that from the
+          # run: B names MS Gothic directly, and that width must differ from
+          # A's floor. The tolerance is load-bearing, not decoration -- at 48px
+          # MS Gothic's U+FF71 is 0.5 em = 24.00 and Calibri's .notdef, one of
+          # A's floor candidates, is 0.5068 em = 24.33. Do not loosen it.
+          i_named_ok = abs(i_b["named"] - i_a["final"]) > 0.01
+          print(f"  [arm i / 4b] control: B's directly-named MS Gothic U+FF71 width "
+                f"{i_b['named']} vs A's floor {i_a['final']} -> "
+                f"{'separable' if i_named_ok else 'COLLIDES, arm cannot discriminate'}")
           print(f"  [arm i / 4b] context A (no-CJK list, first in launch) settled={i_a['final']} "
                 f"refs={i_a['refs']} samples={i_a['samples']}")
           print(f"  [arm i / 4b] context B (FONTS['win'], same launch, AFTER A) settled={i_b['final']} "
@@ -3440,14 +3605,21 @@ jobs:
           if not i_a_tofu:
               i_failures.append(
                   f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
-                  f"U+6F22 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
+                  f"U+FF71 to {i_a['final']}, which is NOT its own tofu floor ({i_a['refs']}) -- "
                   f"either the probe list accidentally covers this codepoint, or something else "
                   f"is wrong with the setup. This arm cannot test the cache-poisoning bug until "
                   f"A's own miss is genuine.")
+          elif not i_named_ok:
+              i_failures.append(
+                  f"arm (i)/4b setup invalid: context B's DIRECTLY-NAMED MS Gothic measures "
+                  f"{i_b['named']} for U+FF71 and context A's tofu floor is {i_a['final']} -- "
+                  f"the two are within 0.01, so a correctly-resolving B would settle at the "
+                  f"same number as a poisoned one and this arm cannot tell them apart. No "
+                  f"verdict about #81 either way.")
           elif i_b_tofu:
               i_failures.append(
                   f"arm (i)/4b: NEGATIVE FALLBACK CACHE BUG (#81) -- context B (FONTS['win'], "
-                  f"same launch, measured AFTER context A's genuine miss) settled U+6F22 to "
+                  f"same launch, measured AFTER context A's genuine miss) settled U+FF71 to "
                   f"{i_b['final']}, matching context A's confirmed tofu floor "
                   f"({i_a['final']}, no-CJK list) -- context A's "
                   f"correct, context-specific miss poisoned gfxPlatformFontList's process-wide "
@@ -3553,6 +3725,11 @@ jobs:
           # `i2_a_tofu` line above keeps arm (i)'s exact form deliberately: it
           # was not flagged and is not part of this repair.
           i2_b_tofu = abs(i2_b["final"] - i2_a["final"]) < 0.01
+          # Same control, same reason and same numbers as arm (i) above.
+          i2_named_ok = abs(i2_b["named"] - i2_a["final"]) > 0.01
+          print(f"  [arm i2 / #81] control: B's directly-named MS Gothic U+FF71 width "
+                f"{i2_b['named']} vs A's floor {i2_a['final']} -> "
+                f"{'separable' if i2_named_ok else 'COLLIDES, arm cannot discriminate'}")
           print(f"  [arm i2 / #81] context A (no-CJK list, installed first, rendered first) "
                 f"settled={i2_a['final']} refs={i2_a['refs']} samples={i2_a['samples']}")
           print(f"  [arm i2 / #81] context B (FONTS['win'], installed BEFORE A rendered) "
@@ -3579,16 +3756,22 @@ jobs:
           elif not i2_a_tofu:
               i2_failures.append(
                   f"arm (i2)/#81 setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) "
-                  f"settled U+6F22 at {i2_a['final']}, which is not one of its own generic "
+                  f"settled U+FF71 at {i2_a['final']}, which is not one of its own generic "
                   f"refs ({i2_a['refs']}) -- A resolved something, wrote no miss, and there is "
                   f"nothing for B to inherit.")
+          elif not i2_named_ok:
+              i2_failures.append(
+                  f"arm (i2)/#81 setup invalid: context B's DIRECTLY-NAMED MS Gothic measures "
+                  f"{i2_b['named']} for U+FF71 and context A's tofu floor is {i2_a['final']} -- "
+                  f"within 0.01, so a correctly-resolving B is indistinguishable from a "
+                  f"poisoned one. No verdict about #81 either way.")
           elif i2_b_tofu:
               i2_failures.append(
                   f"arm (i2)/#81: NEGATIVE FALLBACK CACHE BUG, ordering case -- both contexts "
                   f"installed their lists before either rendered, so both "
                   f"ClearCodepointsWithNoFonts() calls were spent before context A's gated "
                   f"miss was written at gfxPlatformFontList.cpp:1403. Context B "
-                  f"(FONTS['win'], which covers U+6F22) settled at {i2_b['final']}, the same "
+                  f"(FONTS['win'], which covers U+FF71) settled at {i2_b['final']}, the same "
                   f"width A's zero-CJK list produced -- B rendered tofu for a codepoint its "
                   f"own list covers, and B's gate never ran because "
                   f"SkipFontFallbackForChar answered first. The clear-on-install fix cannot "
@@ -4617,15 +4800,18 @@ jobs:
                        "#82: same, bare-donor variant."),
               "(f)": ("34475502454", None,
                       "#44 codepoint fallback is unmeasurable BY ADVANCE WIDTH under "
-                      "FONTCONFIG_FILE. Every bundled CJK family draws U+6F22 on the full "
-                      "em square (48 at 48px) and the host face that used to draw a "
-                      ".notdef box is gone, so run 34475502454's bisection reads 48 for "
-                      "EVERY candidate in BOTH contexts, refused ones included -- run "
-                      "34445606698, on the host fontconfig, read 23 for the same refused "
-                      "families. The gate is not what changed; the reference is. Needs a "
-                      "shape that is not an advance -- the pixel-checksum discriminator "
-                      "this step already uses for Geneva. Falls through to a step failure "
-                      "the moment this arm reaches a real verdict again."),
+                      "FONTCONFIG_FILE. The first cause is fixed: U+6F22 drew a full em in "
+                      "every bundled CJK face AND in most of their .notdef glyphs, so run "
+                      "34475502454's bisection read 48 for every candidate in both "
+                      "contexts; the probe codepoint is now U+FF71, 0.5 em in MS Gothic / "
+                      "PingFang HK / Yu Gothic against a 1.0 em .notdef, which restores "
+                      "the tofu floor. What survives is that the two contexts' own named "
+                      "CJK families measure the SAME 0.5 em, so `mac == win` is as "
+                      "consistent with a correct per-context resolution as with a leak and "
+                      "no codepoint choice fixes it -- only a discriminator that is not an "
+                      "advance, i.e. the pixel checksum this step already uses for the "
+                      "MAC_ONLY precheck. The arm records which cause fired. Falls through "
+                      "to a step failure the moment it reaches a real verdict again."),
           }
           for _k, _v in KNOWN_UNMEASURABLE.items():
               assert isinstance(_v, tuple) and len(_v) == 3 and _v[0].isdigit(), (
@@ -4861,7 +5047,13 @@ jobs:
           # guard step above, lowercased. The guard step derives its own copy
           # from PROBES; this step is a separate process and cannot, so if that
           # list ever changes, change this one with it.
-          FC_PROBE_KEYS = ("helvetica neue", "pingfang hk", "geneva",
+          # MAC_ONLY's third slot is chosen at runtime by the guard step's
+          # precheck (Optima, else Palatino, else Helvetica), so this separate
+          # process cannot know which one won. Carry the SUPERSET -- every
+          # family MAC_ONLY can hold -- rather than a stale literal. This is an
+          # informational filter, so matching one name too many costs nothing.
+          FC_PROBE_KEYS = ("helvetica neue", "pingfang hk",
+                           "optima", "palatino", "helvetica",
                            "segoe ui", "calibri", "ms gothic")
           fc_hits = []
           for _ts, _b, _i, ln in rows:
