@@ -3439,6 +3439,20 @@ jobs:
                       f"name in a bare context, and differs from this stack's own "
                       f"tofu floor ({n1['floor']}). Tinos is lin-only in fonts.json, "
                       f"so both gates refuse it and no allowed family covers U+1C80.")
+              elif abs(n1["probe"] - n1["floor"]) < 0.01:
+                  # The probe IS the floor, so nothing rendered and no ungated
+                  # path answered. This branch is split out because the message
+                  # below would otherwise print "neither Tinos nor the tofu
+                  # floor" for a probe that is exactly the tofu floor -- a false
+                  # statement in the one case where the gate did its job, and
+                  # the case a Phase 1 re-run of this arm is trying to reach.
+                  print(f"  [arm n1 / #94] no leak on width evidence (binary emits "
+                        f"no `fontlist` kind): U+1C80 measured {n1['probe']}, which "
+                        f"is this stack's own tofu floor ({n1['floor']}) and not "
+                        f"Tinos ({n1_ref}) -- nothing rendered the codepoint. The "
+                        f"width half cannot go further without the `fontlist` and "
+                        f"`pref-fallback` kinds, so this arm scores nothing here "
+                        f"and its GREEN is NOT evidence the pref path is gated.")
               else:
                   print(f"  [arm n1 / #94] DIAGNOSTIC (binary emits no `fontlist` "
                         f"kind): U+1C80 measured {n1['probe']}, which is neither "
