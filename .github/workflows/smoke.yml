@@ -4962,16 +4962,15 @@ jobs:
           # #81 measurement path below is left intact for the case where A
           # does settle at its own floor.
           EXPECTED_RED = {
-              "(i)": ("#81 is not measurable on this binary: context A's list refuses every CJK "
-                      "family, yet A settles U+FF71 at 24 -- the same advance a directly-named "
-                      "CJK family gets in context B -- so a correctly-resolving B and a poisoned "
-                      "one produce one number. Run 34486317657's identity check says A's face is "
-                      "NOT B's MS Gothic (checksums 70891568 vs 175460272, cross-context control "
-                      "valid), so what serves A is an unidentified face at a CJK advance, not a "
-                      "named CJK family. Whether that is #94's ungated pref-font memo, #88's last "
-                      "resort or a hexbox is open. Returns to EXPECTED_GREEN in Task 7, once "
-                      "A1/A2 gate that path and A can miss again."),
-              "(i2)": ("Same, ordering case."),
+              "(i)": ("#94/#88 -- context A's list refuses every CJK family and A is served one "
+                      "anyway, so A never misses and #81's precondition does not hold on this "
+                      "binary. A's floor and a directly-named CJK family's width in context B are "
+                      "then one number, and a correctly-resolving B is indistinguishable from a "
+                      "poisoned one. The arm names the serving face by RASTERISATION rather than "
+                      "advance -- read its `A's face is` line for this run rather than trusting "
+                      "this text, which must stay true across runs. Returns to EXPECTED_GREEN in "
+                      "Task 7, once A1/A2 gate that path and A can miss again."),
+              "(i2)": ("#94/#88 -- same, ordering case."),
           }
           # The arms that guard defects this branch DOES close, so each must be
           # GREEN here. Listed so the run prints a per-arm verdict line for
