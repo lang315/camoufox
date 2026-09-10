@@ -6087,7 +6087,16 @@ jobs:
                   page0 = ctx0.new_page()
                   page0.goto("data:text/html,<h1>n5-base</h1>")
                   out["base"] = page0.evaluate(JS_N5)
-                  registry = list(out["base"]["after"])
+                  # N2: DEDUPE BEFORE SPLITTING. The halves are `r[:n]` and
+                  # `r[n:]`, so a name appearing twice with its copies
+                  # straddling the midpoint would sit in BOTH `want` sets and
+                  # `_got & _theirs` would fire a FALSE `VOICES LEAK` -- which,
+                  # now that (n5) is in EXPECTED_GREEN, fails the step. Not live
+                  # on run 34513429414 (13362 entries, 13362 distinct), and
+                  # deduping makes disjointness a property of the construction
+                  # rather than of the runner's voice table.
+                  out["raw"] = list(out["base"]["after"])
+                  registry = list(dict.fromkeys(out["base"]["after"]))
                   halves = {"a": registry[:len(registry) // 2],
                             "b": registry[len(registry) // 2:]}
                   if len(registry) >= 2:
@@ -6108,15 +6117,36 @@ jobs:
               return out
 
           n5 = n5_probe()
+          # N4: this printed ~1.2 MB across three lines -- 13362 voice names,
+          # twice more as the two halves. `gh run view --log` truncates this
+          # workflow's output without a marker, and an arm that prints a
+          # megabyte is a self-inflicted readback hazard. Counts, the numbers
+          # the verdict actually rests on, and a three-name sample; the full
+          # lists appear only in a failure string, and those are capped too.
+          _n5_raw, _n5_reg = n5.get("raw", []), n5["registry"]
           print(f"  [arm n5 / #90] registry (a context with NO filter installed): "
-                f"{n5['registry']} -- first={n5['base']['first']} "
+                f"{len(_n5_raw)} entries, {len(_n5_reg)} distinct "
+                f"({len(_n5_raw) - len(_n5_reg)} duplicates dropped before "
+                f"splitting); sample {_n5_reg[:3]}; "
+                f"baseline first-read={len(n5['base']['first'])} "
                 f"data-sv={n5['base']['dataSv']!r}")
           for _lbl in ("a", "b"):
+              _oth = "b" if _lbl == "a" else "a"
               if _lbl in n5:
-                  print(f"  [arm n5 / #90] ctx {_lbl}: want={n5[_lbl]['want']} "
-                        f"first={n5[_lbl]['res']['first']} "
-                        f"after={n5[_lbl]['res']['after']} "
-                        f"data-sv={n5[_lbl]['res']['dataSv']} "
+                  _w = set(n5[_lbl]["want"])
+                  _a = n5[_lbl]["res"]["after"]
+                  _t = set(n5[_oth]["want"]) if _oth in n5 else set()
+                  # N3: the shortfall is REPORTED, not left for a reader to
+                  # notice. `issubset` passes on a subset, so a context reading
+                  # fewer names than were installed cannot produce a false
+                  # verdict -- but it is an unexplained gap in the measurement
+                  # that closes #90, and an unexplained gap should be visible.
+                  print(f"  [arm n5 / #90] ctx {_lbl}: installed {len(_w)}, read "
+                        f"{len(_a)} of them ({len(_w) - len(set(_a))} of its own "
+                        f"list not returned); cross-reads from ctx {_oth}: "
+                        f"{len(set(_a) & _t)}; names outside its own list: "
+                        f"{len(set(_a) - _w)}; first-read={len(n5[_lbl]['res']['first'])}; "
+                        f"sample {_a[:3]}; data-sv={n5[_lbl]['res']['dataSv']} "
                         f"pids {n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
 
           n5_failures = []
@@ -6147,8 +6177,9 @@ jobs:
                       _theirs = set(n5[_other]["want"])
                       if _got & _theirs:
                           n5_failures.append(
-                              f"VOICES LEAK: ctx {_lbl} read {sorted(_got & _theirs)}, "
-                              f"which belongs to ctx {_other}; pids "
+                              f"VOICES LEAK: ctx {_lbl} read "
+                              f"{len(_got & _theirs)} name(s) belonging to ctx "
+                              f"{_other}, e.g. {sorted(_got & _theirs)[:10]}; pids "
                               f"{n5[_lbl]['pids_before']} -> {n5[_lbl]['pids_after']}")
                       elif not _got:
                           n5_failures.append(
@@ -6159,8 +6190,9 @@ jobs:
                               f"{n5[_lbl]['pids_after']}")
                       elif not _got.issubset(_want):
                           n5_failures.append(
-                              f"VOICES LEAK: ctx {_lbl} read {sorted(_got - _want)}, which "
-                              f"is in neither context's configured list")
+                              f"VOICES LEAK: ctx {_lbl} read "
+                              f"{len(_got - _want)} name(s) in neither context's "
+                              f"configured list, e.g. {sorted(_got - _want)[:10]}")
           if n5_failures:
               tripwires.append(f"(n5) per-context speech voices (#90): {n5_failures}")
               note_unmeasured("(n5)", n5_failures, "VOICES LEAK")
@@ -6258,31 +6290,39 @@ jobs:
                 const score = async (name) => {
                   const f = faces[name];
                   if (!f) return 'NO_FACE_FOUND';
-                  // I1: INITIATE THE LOAD. An @font-face rule whose family is
-                  // never used is never fetched -- that is ordinary CSS lazy
-                  // loading, not a defect -- and awaiting f.loaded does not
-                  // start a fetch either. Without this the 404 face is never
-                  // requested, and a CORRECT binary would report `unloaded`,
-                  // which the verdict branch below would have scored as
-                  // INVENTED LOAD STATUS: a false RED on the very build Task 5
-                  // is meant to prove. f.load() does start the fetch, so a
-                  // fixed binary 404s and reports `error`. On THIS binary
-                  // FontFace::Load() resolves from the family-name gate rather
-                  // than from the network (the arm's header comment above), so
-                  // the Phase 0 reading is unchanged -- which is the point: the
-                  // call is safe to add before the fix and necessary after it.
-                  try { await f.load(); } catch (e) { /* rejected -> read status */ }
-                  // f.loaded is RACED, never awaited bare. page.evaluate() has
-                  // no timeout on the Python side, so a promise that never
-                  // settles hangs the whole guard step until GitHub kills it --
-                  // and on a fork that writes FontFaceLoadStatus from a
-                  // family-name gate rather than from the load, a url() face's
-                  // promise plausibly never settles at all. Racing it turns
-                  // that from a dead step into a reading: if the 5s timer wins
-                  // and the face is still `loading`, the status below says so.
+                  // INITIATE THE LOAD, INSIDE THE RACE. Two requirements meet
+                  // here and only one arrangement satisfies both.
+                  //
+                  // The load must be initiated: an @font-face rule whose family
+                  // is never used is never fetched -- ordinary CSS lazy loading,
+                  // not a defect -- and awaiting f.loaded does not start a fetch
+                  // either. Without an explicit load the 404 face is never
+                  // requested, a CORRECT binary reports `unloaded`, and the
+                  // verdict branch below would score that as INVENTED LOAD
+                  // STATUS: a false RED on the very build Task 5 is meant to
+                  // prove.
+                  //
+                  // And nothing may be awaited bare: page.evaluate() has no
+                  // timeout on the Python side, so a promise that never settles
+                  // hangs the whole guard step until GitHub kills it -- and on a
+                  // fork that writes FontFaceLoadStatus from a family-name gate
+                  // rather than from the load, a url() face's promise plausibly
+                  // never settles at all.
+                  //
+                  // A previous version satisfied the first with a bare
+                  // `await f.load()` ABOVE this race, which quietly defeated the
+                  // second: per the CSS Font Loading spec load() and loaded
+                  // return the SAME [[FontStatusPromise]], so if f.loaded can
+                  // hang then await f.load() hangs on the identical promise --
+                  // with no timer beside it -- and STUCK_LOADING became
+                  // unreachable in exactly the case it was written for. Racing
+                  // load() itself gives the same initiation, the same 5s bound,
+                  // and keeps that branch alive. dryrun.py asserts the shape,
+                  // because it drives the Python branches from a supplied status
+                  // and never executes this JS.
                   let settled = false;
                   await Promise.race([
-                    f.loaded.then(() => { settled = true; },
+                    f.load().then(() => { settled = true; },
                                   () => { settled = true; }),
                     new Promise(r => setTimeout(r, 5000)),
                   ]);
