@@ -912,13 +912,84 @@ jobs:
               assert any(r["measure"][f] for f in PROBES), (
                   f"{label}: not one bundled family resolved -- the guard measured nothing")
 
+          # ---- #44 round 3: is the width reference guaranteed to differ? ----
+          # CLAUDE.md lesson 4. `measure[f]` is `w(f) != absentWidth`, and
+          # absentWidth is the advance of whatever face serves
+          # `72px "<absent family>", monospace`. That is a verdict only while the
+          # reference is GUARANTEED to differ from the family under test, and
+          # since B0 put every launch under FONTCONFIG_FILE it is not: the font
+          # universe is the bundle alone, the linux conf aliases monospace to
+          # Cousine, Cousine is lin-only and refused under a win or mac `fonts`
+          # list, and the generic lands on some other bundled face. Run
+          # 34471565975 read `MS Gothic: False` out of that comparison while the
+          # SAME launch reported document.fonts.check True, FontFace.status
+          # 'loaded', and (CAMOU-FL, ctx=6) `gate ... key=ms gothic allowed=1`.
+          #
+          # This probe decides presence WITHOUT the absent reference, so it can
+          # tell "refused" from "is itself the fallback face". For family f it
+          # compares two stacks measured on the same canvas:
+          #     wf(f) = 72px "f", monospace        wb(f) = 72px "f"
+          # If f resolved, both stacks render with f, so the widths are EQUAL.
+          # If f was refused, the first falls to the monospace generic and the
+          # second to the canvas default font, so the widths DIFFER -- provided
+          # those two fallback faces differ, which is exactly
+          # `absentBare != absentMono` and is read back at runtime below. The
+          # test is therefore guaranteed under a condition this run measures,
+          # not under an assumption about which face the fallback picked.
+          #
+          # WHAT IT CANNOT SEE (lesson 3, stated next to what it proves):
+          #  * A family that does not cover every codepoint in the probe string
+          #    renders it by per-character fallback in BOTH stacks and reads
+          #    "present" either way. No family in PROBES is like that; the
+          #    `named` sweep below may list one, so `named` is a candidate set.
+          #  * Equal advance is not identity. `named` is the set of families
+          #    indistinguishable from the fallback face at this size and string.
+          #    It does not prove the fallback IS any one of them.
+          # The sweep covers all three fonts.json lists, not just this launch's:
+          # if an ungated read path (#88's last-resort walk) served the generic,
+          # the face can be a mac or lin family and a win-only sweep would name
+          # nothing.
+          FALLBACK_CANDS = sorted(set(FONTS["win"]) | set(FONTS["mac"]) | set(FONTS["lin"]))
+          NAMING_JS = """([cands, probes]) => {
+            const c = document.createElement('canvas').getContext('2d');
+            const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
+            const wf = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
+            const wb = (f) => { c.font = '72px "' + f + '"'; return c.measureText(s).width; };
+            const absentMono = wf('__CamouAbsentRef__0002');
+            const absentBare = wb('__CamouAbsentRef__0002');
+            const present = {};
+            for (const f of probes) present[f] = (wf(f) === wb(f));
+            const named = [];
+            for (const f of cands) {
+              if (wf(f) !== absentMono) continue;   // not at the fallback advance
+              if (wb(f) === absentBare) continue;   // refused, not the fallback face
+              named.push(f);
+            }
+            return {absentMono: absentMono, absentBare: absentBare,
+                    present: present, named: named};
+          }"""
+
           # config launch -- `fonts` is this profile's own Windows subset, and
           # no context installs a per-context list. Covers arms (a), (c), (d).
           with sync_playwright() as pw:
               b = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})})
-              default = probe(b.new_page(), "a-default")
+              _pg_default = b.new_page()
+              default = probe(_pg_default, "a-default")
+              # Same BrowserContext as `default` -- `.context.new_page()`, not
+              # `b.new_page()`, which would make a FRESH context and so a
+              # reference nothing establishes as comparable. A fresh DOCUMENT
+              # though: probe() leaves six `local()` FontFace objects in
+              # document.fonts, and a document web font resolves through
+              # LookupLocalFont, a different (and per CLAUDE.md partly ungated)
+              # read path from the family lookup this arm is about. Measuring
+              # in that document would let the wrong path answer. The
+              # `absentMono == absentWidth` assert below is what establishes
+              # the two documents are comparable.
+              _pg_name = _pg_default.context.new_page()
+              _pg_name.goto("data:text/html,<h1>a-fallback</h1>")
+              naming = _pg_name.evaluate(NAMING_JS, [FALLBACK_CANDS, PROBES])
               b.close()
 
           print(f"  [config launch / default] measure        {default['measure']}")
@@ -926,24 +997,90 @@ jobs:
           print(f"  [config launch / default] FontFace.status {default['status']}")
           check_signal("config launch / default", default)
 
+          # Two absent sentinels, two scripts, one page: if they disagree the
+          # width apparatus is not reproducible and nothing below means anything.
+          assert naming["absentMono"] == default["absentWidth"], (
+              f"config launch / default: the naming probe's absent reference "
+              f"{naming['absentMono']} differs from probe()'s {default['absentWidth']} in "
+              "the same page -- the width apparatus is not reproducible")
+          REF_VALID = naming["absentBare"] != naming["absentMono"]
+          print(f"  [config launch / default] absentWidth={naming['absentMono']} "
+                f"absentBare={naming['absentBare']} presence-discriminator="
+                f"{'valid' if REF_VALID else 'INVALID'} "
+                f"present={naming['present']}")
+          print(f"  [config launch / default] families rendering the probe string at "
+                f"absentWidth and present in this context: {naming['named']}")
+          if REF_VALID:
+              collided = [f for f in PROBES
+                          if naming["present"][f] and not default["measure"][f]]
+          else:
+              # The absent-reference-free test cannot run. Fall back to the two
+              # reads that at least do not use the canvas at all; they are
+              # independent of it and of each other, but not of the context.
+              print("  [config launch / default] SETUP-INVALID for the presence probe: the "
+                    "monospace generic and the canvas default font render the probe string "
+                    "at the same advance, so presence cannot be decided without the absent "
+                    "reference. Collisions are taken from document.fonts.check + "
+                    "FontFace.status instead.")
+              collided = [f for f in PROBES
+                          if not default["measure"][f]
+                          and bool(default["fontfaces"][f])
+                          and default["status"][f] == "loaded"]
+          for f in collided:
+              print(f"  [config launch / default] width reference collides for {f}: it "
+                    f"renders the probe string at absentWidth ({naming['absentMono']}), so "
+                    f"the width comparison cannot decide it; fallback face = one of "
+                    f"{naming['named']}")
+          if collided and not naming["named"]:
+              print("  [config launch / default] the fallback face matches no family in any "
+                    "fonts.json list -- an ungated read path chose it and it cannot be "
+                    "named from here")
+
           # (a) the default context answers from the launch `fonts` subset,
           # not from every bundled family (the Linux package bundles
-          # win+mac+linux together).
-          assert all(default["measure"][f] for f in WIN_ONLY), (
-              "the default context lost the launch config's own Windows families: "
-              f"{default['measure']}")
-          assert not any(default["measure"][f] for f in MAC_ONLY), (
-              "the default context resolved macOS families under a Windows launch -- a "
-              f"read path answered 'allow everything' instead of `fonts`: {default['measure']}")
+          # win+mac+linux together). A family whose width reference collides is
+          # decided by the two reads that remain, which must BOTH say present.
+          for f in WIN_ONLY:
+              if f in collided:
+                  assert bool(default["fontfaces"][f]) and default["status"][f] == "loaded", (
+                      f"the default context lost {f!r}: its width equals the fallback "
+                      f"face's, so width cannot decide it, and the two reads that remain "
+                      f"do not both say present -- document.fonts.check="
+                      f"{default['fontfaces'][f]} FontFace.status={default['status'][f]!r}")
+                  continue
+              assert default["measure"][f], (
+                  "the default context lost the launch config's own Windows families: "
+                  f"{default['measure']} (absentWidth {default['absentWidth']}, "
+                  f"present {naming['present']})")
+          for f in MAC_ONLY:
+              assert not default["measure"][f], (
+                  "the default context resolved macOS families under a Windows launch -- a "
+                  f"read path answered 'allow everything' instead of `fonts`: {default['measure']}")
+              # Strengthening, not a weakening: a mac family that leaked AND
+              # happened to render at the fallback advance would be invisible to
+              # `measure` alone, exactly the way MS Gothic was.
+              if REF_VALID:
+                  assert not naming["present"][f], (
+                      f"the default context resolved {f!r} under a Windows launch -- the "
+                      "width comparison missed it because it renders at the fallback "
+                      "face's advance, but the absent-reference-free presence test says "
+                      f"it is there: {naming['present']}")
 
-          # (c) document.fonts and text measurement are the same context
+          # (c) document.fonts and text measurement are the same context.
+          # Skipped for a colliding family: there `measure` is False by
+          # construction, so this assertion could only restate the collision.
+          # The part that still carries information -- that the two non-canvas
+          # reads agree with each other -- is asserted in arm (a) above.
           for f in PROBES:
+              if f in collided:
+                  continue
               assert bool(default["fontfaces"][f]) == default["measure"][f], (
                   f"document.fonts says {default['fontfaces'][f]} for {f!r} but text "
                   f"measurement says {default['measure'][f]} -- the two font read paths "
                   "disagree, so the context is not coherent")
 
           # (d) a bare FontFace answers for the same context as measurement.
+          # Same collision skip, same reason.
           assert default["status"]["__impossible__"] == "error", (
               "config launch / default: a bare FontFace for an impossible family reports "
               f"{default['status']['__impossible__']!r} -- .status can no longer tell a hit "
@@ -952,6 +1089,8 @@ jobs:
               "config launch / default: not one bundled family is 'loaded' on a bare "
               "FontFace -- the .status arm measured nothing")
           for f in PROBES:
+              if f in collided:
+                  continue
               assert (default["status"][f] == "loaded") == default["measure"][f], (
                   f"new FontFace({f!r}, 'local(...)').status is {default['status'][f]!r} but "
                   f"text measurement says {default['measure'][f]} -- FontFace::Status() is "
