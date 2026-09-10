@@ -1151,12 +1151,57 @@ jobs:
               # invocation has it, second does not. So saw=false here does NOT
               # mean the list was never installed -- it was. Kept as a record of
               # a wrong reading, not as a signal.
+              #
+              # THE KEYING DISCRIMINATOR (fix wave 6, review I2). Everything
+              # above this point measures the FLUSH, not the key: win's
+              # setFontList runs before win renders and clears the whole
+              # process memo, so ClearFontNameCaches() alone turns this arm
+              # green with the per-context key removed. The shape that needs
+              # the key is the reverse one -- the DONOR rendering after the
+              # recipient has stored its own entries. Without a `:<ctx>`
+              # suffix mac's next lookup hits win's entries and is served
+              # win's answers, including win's stored DENIAL of mac's own
+              # families (an empty array, which reads as "refused"). The donor
+              # context is still open, so this costs no launch and no context.
+              #
+              # WHAT WOULD MAKE THIS GREEN WRONGLY (CLAUDE.md lesson 4):
+              #  * A CACHED FONT GROUP. If the re-probe reused mac's first
+              #    render's font groups it would never consult the memo again
+              #    and would reprint mac's original answers whatever the memo
+              #    now holds -- a guaranteed green that measures nothing.
+              #    probe()'s JS does build a fresh <canvas> per call, but
+              #    whether that forces a new gfxFontGroup is a Gecko detail I
+              #    have NOT read, so this runs in a NEW PAGE: a new document
+              #    has its own presentation context and cannot reuse another
+              #    document's font groups.
+              #  * A DIFFERENT PROCESS. mFcSubstituteCache is a per-process
+              #    singleton, so a re-probe page in another content process
+              #    could not see win's entries and would print "unchanged"
+              #    vacuously. The tab pids are recorded and asserted below,
+              #    the way arms (j)/(j2) do, not assumed.
+              #  * A DEAD RENDER. Scored through check_signal with the rest of
+              #    the arm, so nothing-resolved is setup invalid, not a pass.
+              # The init script is on the CONTEXT, so it runs again here;
+              # setFontList is one-shot per user context, so it finds the
+              # binding gone and installs nothing. That is what this needs --
+              # a reinstall would flush the memo and erase what is being
+              # probed.
+              b2_reprobe_mark = log_mark()
+              b2_pids_before = tab_pids()
+              pg_mac2 = ctx2_mac.new_page()
+              mac_after = probe(pg_mac2, "b2-reprobe")
+              b2_pids_after = tab_pids()
               ctx2_mac.close()
               ctx2_win.close()
               b2.close()
 
           print(f"  [donor-alive / mac context] measure {mac2['measure']}")
           print(f"  [donor-alive / win context, donor still open] measure {win2['measure']}")
+          print(f"  [b2 / mac-after-win] measure {mac_after['measure']}")
+          print(f"  [b2 / mac-after-win] tab pids before / after the re-probe page: "
+                f"{sorted(b2_pids_before) if not isinstance(b2_pids_before, str) else b2_pids_before}"
+                f" / "
+                f"{sorted(b2_pids_after) if not isinstance(b2_pids_after, str) else b2_pids_after}")
 
           # #83 log slice. The question this answers is the one arm (b2)'s
           # measurement cannot: when the win context rendered, which ctx= did
@@ -1167,7 +1212,7 @@ jobs:
           # CamouIsFontAllowed was actually asked about. ctx=0 in either is the
           # fail-open case: CamouIsFontAllowed treats 0 as "no per-context
           # list" and allows every family (CLAUDE.md lesson 5).
-          for _m in ("b2-mac", "b2-win"):
+          for _m in ("b2-mac", "b2-win", "b2-reprobe"):
               for _ln in camou_fl(b2_mark, "CAMOU-FL group", _m, limit=6):
                   print(f"  [b2 / #83 log / {_m}] {_ln}")
           print(f"  [b2 / #83 log] gate ctx histogram, whole launch: "
@@ -1178,23 +1223,47 @@ jobs:
                 f"{camou_fl(b2_mark, 'CAMOU-FL scope-switch', limit=8) or 'none'}")
           print(f"  [b2 / #83 log] set lines (per-context lists installed): "
                 f"{camou_fl(b2_mark, 'CAMOU-FL set ', limit=8) or 'none'}")
-          # The two shapes that decide whether #83's fix took, both read from
-          # the win half. BEFORE the fix, run 34428270062 showed the memo
-          # answering B's direct-named families under the donor's entries with
-          # no gate line between them. AFTER it, the memo must miss and the
-          # gate must be asked:
-          #  * fc-subst hit=1 on a probe family under the WIN context -- must
-          #    be NONE;
-          #  * `gate ... key=segoe ui` in the win half -- must be PRESENT, and
-          #    `allowed=1`, since Segoe UI is on win's own list.
-          # NEITHER shape appearing means the arm never exercised the
-          # direct-naming path, so it is unmeasured, not green.
-          print(f"  [b2 / #83 log] fc-subst hits on probe families, win half "
-                f"(must be NONE after the fix): "
+          # What the log can and cannot show about #83's fix.
+          #
+          # BEFORE the fix, run 34428270062's win half resolved the donor's
+          # families with ZERO `CAMOU-FL gate` lines: the memo answered every
+          # direct-named lookup before the gate was reached. The positive
+          # signal a working fix leaves is therefore the gate being ASKED
+          # again -- `gate ctx=<win> ... key=<probe family>` lines present in
+          # the win half, `allowed=1` for win's own Segoe UI.
+          #
+          # `fc-subst hit=1` lines are PRINT-ONLY and are NOT a failure
+          # criterion. Nothing scores off them (fc_subst_hits appears only
+          # inside print()). Once a context looks a family up twice it hits
+          # its OWN `:<ctx>`-suffixed entry, which is the memo working as
+          # scoped, so "no hits" is not what a correct fix looks like. Nor is
+          # "the key's trailing ctx matches the line's ctx=" a leak detector:
+          # both are read from the same thread-local with nothing in between,
+          # so they agree by construction, and their absence is a REGRESSION
+          # TRIPWIRE for someone later removing the keying, not a measurement.
+          # The one reading that does carry information: a `hit=1` line whose
+          # key ends in `:0` for a context that DID install a list is the
+          # inherited context-0 fail-open (CLAUDE.md lesson 5), which this fix
+          # does not close.
+          #
+          # The slice below is a TIME WINDOW, not a context filter: the donor
+          # is deliberately still alive, so a line it emits inside the win
+          # window prints under the win label. Each line carries its own
+          # ctx=, which is what to read.
+          print(f"  [b2 / #83 log] fc-subst hits on probe families, win half of the "
+                f"launch (informational, scores nothing; read each line's ctx=): "
                 f"{fc_subst_hits(b2_win_mark) if b2_win_mark is not None else 'mark never taken'}")
           print(f"  [b2 / #83 log] gate lines for 'segoe ui', win half "
-                f"(must be PRESENT after the fix): "
+                f"(must be PRESENT after the fix -- the gate is asked again): "
                 f"{camou_fl(b2_win_mark, 'CAMOU-FL gate', 'key=segoe ui', limit=4) if b2_win_mark is not None else 'mark never taken'}")
+          # The re-probe half: this is where the per-context KEY, as opposed to
+          # the flush, is the only thing that can give the right answer.
+          print(f"  [b2 / mac-after-win] gate lines for 'geneva', re-probe half "
+                f"(must be PRESENT -- the donor re-gates its own family): "
+                f"{camou_fl(b2_reprobe_mark, 'CAMOU-FL gate', 'key=geneva', limit=4)}")
+          print(f"  [b2 / mac-after-win] fc-subst hits on probe families, re-probe half "
+                f"(informational; a key ending `:0` here is the context-0 fail-open): "
+                f"{fc_subst_hits(b2_reprobe_mark)}")
 
           # M1 (from this task's review): until now `b2_leaked` was this arm's
           # ONLY source of failure, so a launch that rendered nothing gave
@@ -1205,11 +1274,28 @@ jobs:
           # contexts. Collected, never hard-asserted: an AssertionError here
           # would kill the script before arms (e) through (k) ever run.
           b2_failures = []
-          for _lab, _r in (("mac donor", mac2), ("win recipient", win2)):
+          for _lab, _r in (("mac donor", mac2), ("win recipient", win2),
+                           ("mac after win", mac_after)):
               try:
                   check_signal(f"b2 / {_lab}", _r)
               except AssertionError as exc:
                   b2_failures.append(f"arm (b2) no signal: {exc}")
+          # The re-probe is only a measurement if it shared the donor's content
+          # process: mFcSubstituteCache is a per-process singleton, so a page in
+          # a different process cannot see win's entries and would report the
+          # donor "unchanged" no matter what the memo holds.
+          if isinstance(b2_pids_before, str) or isinstance(b2_pids_after, str):
+              b2_failures.append(
+                  f"arm (b2) setup invalid: could not read the content-process table "
+                  f"({b2_pids_before} / {b2_pids_after}), so the re-probe cannot be shown "
+                  f"to have run where win's memo entries live.")
+          elif b2_pids_after - b2_pids_before:
+              b2_failures.append(
+                  f"arm (b2) setup invalid: a new content process appeared for the donor "
+                  f"re-probe. Tab pids were {sorted(b2_pids_before)} before and "
+                  f"{sorted(b2_pids_after)} after, so the re-probe did not share the "
+                  f"gfxPlatformFontList singleton that holds mFcSubstituteCache and its "
+                  f"'unchanged' result is vacuous.")
           if not all(mac2["measure"][f] for f in MAC_ONLY):
               b2_failures.append(
                   f"arm (b2) setup invalid: the mac donor resolved {mac2['measure']} -- "
@@ -1218,15 +1304,33 @@ jobs:
                   f"makes for the same reason (CLAUDE.md lesson 4, donor side).")
           # Scored only on a valid setup, as arm (b2r) does: a leak verdict read
           # off a dead donor is not a verdict.
-          b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]] if not b2_failures else []
+          b2_leaked, b2_reverse = [], []
+          if not b2_failures:
+              b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
+              # The keying half: the donor's pattern after win rendered must be
+              # the pattern it had before. Both directions are a leak -- a
+              # MAC_ONLY family gone means the donor was served win's stored
+              # DENIAL of it, a WIN_ONLY family appearing means it was served
+              # win's allowance.
+              b2_reverse = ([f"{f} (lost)" for f in MAC_ONLY if not mac_after["measure"][f]] +
+                            [f"{f} (gained)" for f in WIN_ONLY if mac_after["measure"][f]])
           if b2_leaked:
               b2_failures.append(
                   f"arm (b2)/#83: win resolved macOS-only families {b2_leaked} it was "
                   f"never allowed, with the donor (mac) context still open -- the "
                   f"production shape this feature exists for. See #83.")
+          if b2_reverse:
+              b2_failures.append(
+                  f"arm (b2)/#83: the donor's SECOND render, in a new page of the still-open "
+                  f"mac context after win had rendered, changed answers: {b2_reverse}. It "
+                  f"read {mac_after['measure']} where its first render read "
+                  f"{mac2['measure']}. Both renders ran in tab process(es) "
+                  f"{sorted(b2_pids_after)}, so the donor was served the RECIPIENT's memo "
+                  f"entries -- the reverse leak that the per-context mFcSubstituteCache key, "
+                  f"not the SetFontList flush, is what closes.")
           print(f"  (b2) donor-alive per-context leak (#83):  "
                 f"{'RED' if b2_failures else 'GREEN'} -- "
-                f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
+                f"{b2_failures or 'win correctly saw none of macOS-only families with the donor still open, and the donor re-probed after win with its own pattern unchanged'}")
           if b2_failures:
               tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
               # Needed only because M1 above gave this arm red paths that are
@@ -1351,15 +1455,21 @@ jobs:
                         f"{ctx_histogram(b2r_marks[label], 'gate')}")
                   print(f"  [b2r / #83 log / {label}] set lines, {label} half only: "
                         f"{camou_fl(b2r_marks[label], 'CAMOU-FL set ', limit=4) or 'none'}")
-                  # #83's fc-subst pair, same two shapes as arm (b2)'s -- see
-                  # the comment there. On the win iteration the hits must be
-                  # NONE and the gate line PRESENT; neither appearing means
-                  # the direct-naming path was not exercised, so unmeasured.
+                  # #83's fc-subst pair, read the same way as arm (b2)'s --
+                  # see the long comment there. The gate line is the positive
+                  # signal that the fix took: on the win iteration the gate
+                  # must be ASKED again for win's own family. The fc-subst
+                  # hits are print-only and score nothing -- a context that
+                  # looks a family up twice hits its own `:<ctx>` entry, which
+                  # is the memo working as scoped. Each half is a time window,
+                  # not a context filter (the donor stays alive by design), so
+                  # read each line's own ctx=.
                   print(f"  [b2r / #83 log / {label}] fc-subst hits on probe families, "
-                        f"{label} half (win must be NONE after the fix): "
-                        f"{fc_subst_hits(b2r_marks[label])}")
+                        f"{label} half of the launch (informational, scores nothing; "
+                        f"read each line's ctx=): {fc_subst_hits(b2r_marks[label])}")
                   print(f"  [b2r / #83 log / {label}] gate lines for 'segoe ui', "
-                        f"{label} half (win must be PRESENT after the fix): "
+                        f"{label} half (win must be PRESENT after the fix -- the gate "
+                        f"is asked again): "
                         f"{camou_fl(b2r_marks[label], 'CAMOU-FL gate', 'key=segoe ui', limit=4)}")
                   # The donor (mac) is deliberately NOT closed -- that is the one
                   # variable arm (b2) isolates, and this arm must keep it.
@@ -3980,9 +4090,12 @@ jobs:
           # each even when every one passes -- Phase D's readback needs a line
           # per arm to quote, not the absence of one.
           EXPECTED_GREEN = {
-              "(b2)": "#83, cross-context leak with the donor alive -- closed by keying "
-                      "mFcSubstituteCache on the user context",
-              "(b2r)": "#83, same, with the init script on the document under test",
+              "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
+                      "in SetFontList and the per-context mFcSubstituteCache key together; "
+                      "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
+                      "re-probe tests",
+              "(b2r)": "#83, same, with the init script on the document under test; "
+                       "measures the flush, not the key -- see (b2)'s re-probe",
               "(i)": "#81, negative fallback cache",
               "(i2)": "#81 ordering case -- both lists installed before either context "
                       "renders",
@@ -4190,7 +4303,7 @@ jobs:
           # `<h1>...</h1>` wrapper is part of the needle: it makes the marker
           # unambiguous against a bare substring.
           print("=== (b2)/(b2r) group lines by context (uri= attribution) ===")
-          for m in ("b2-mac", "b2-win", "b2r-mac", "b2r-win"):
+          for m in ("b2-mac", "b2-win", "b2-reprobe", "b2r-mac", "b2r-win"):
               sel = [ln for _ts, _b, _i, ln in rows
                      if "CAMOU-FL group " in ln and f"<h1>{m}</h1>" in ln]
               print(f"  [{m}] {len(sel)} group line(s)")
@@ -4199,16 +4312,24 @@ jobs:
           print("  (a context with 0 group lines never built a font group under that "
                 "marker -- its arm did not run, or the render never resolved a family)")
 
-          # #83's decisive pair, printed here for the same reason as the slice
+          # #83's memo lines, printed here for the same reason as the slice
           # above: the guard step may never reach arm (b2). fc-subst lines
           # carry ctx= but no uri=, so they cannot be attributed to a marker --
-          # the ctx value is what identifies the context, and a hit on a probe
-          # family under a NON-ZERO ctx that did not install that family is the
-          # leak. After the fix there should be none of these at all; before
-          # it, run 34428270062's shape was `fc-subst ctx=7 key=0:geneva:<vis>
-          # hit=1` with no gate line beside it. Keys look like
-          # `0:segoe ui:3` -- a family name with spaces -- so the key runs from
-          # `key=` to ` hit=`.
+          # the ctx value on each line is what identifies the context.
+          #
+          # This section is INFORMATIONAL and is not a pass/fail criterion.
+          # Once a context looks a family up twice it hits its own
+          # `:<ctx>`-suffixed entry, so hits are what a correctly scoped memo
+          # produces, and "none" is not what a working fix looks like. What
+          # run 34428270062 showed BEFORE the fix was
+          # `fc-subst ctx=7 key=0:geneva:<vis> hit=1` -- no ctx suffix on the
+          # key, and no `CAMOU-FL gate` line beside it. The positive signal a
+          # working fix leaves is gate lines REAPPEARING for the recipient,
+          # which the merged dump below carries. The one reading here that
+          # carries information is a key ending `:0` for a context that did
+          # install a list: that is the context-0 fail-open this fix does not
+          # close (CLAUDE.md lesson 5). Keys look like `0:segoe ui:3:7` -- a
+          # family name with spaces -- so the key runs from `key=` to ` hit=`.
           FC_PROBE_KEYS = ("geneva", "segoe ui", "calibri", "helvetica neue")
           fc_hits = []
           for _ts, _b, _i, ln in rows:
@@ -4217,13 +4338,14 @@ jobs:
               if any(k in ln.split("key=", 1)[1].split(" hit=", 1)[0].lower()
                      for k in FC_PROBE_KEYS):
                   fc_hits.append(ln)
-          print(f"=== fc-subst hit=1 on probe families ({len(fc_hits)} line(s)) ===")
+          print(f"=== fc-subst hit=1 on probe families, informational "
+                f"({len(fc_hits)} line(s)) ===")
           for ln in fc_hits[-40:]:
               print(f"    {ln}")
           if not fc_hits:
-              print("    none -- the substitute memo answered no probe family, so every "
-                    "such lookup reached the gate (or the build predates the fc-subst "
-                    "log line, in which case the count above is 0 as well: check it)")
+              print("    none -- either every such lookup reached the gate, or this build "
+                    "predates the fc-subst log line, in which case the fc-subst count "
+                    "above is 0 as well: check it before reading anything into this")
 
           print("=== CAMOU-FL lines, merged time order ===")
           if len(rows) <= CAP:
