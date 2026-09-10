@@ -97,7 +97,7 @@ Two suites, **both required for PRs** (they cover different layers):
 
 ## Verifying spoofing claims (learned the hard way)
 
-Six failures from the #44 fonts work, each of which produced green CI and a
+Seven failures from the #44 fonts work, each of which produced green CI and a
 wrong conclusion. They generalise; read them before asserting that a spoof is
 safe, complete, or unreachable.
 
@@ -198,6 +198,21 @@ goes into a commit message, an issue, or a PR body is a claim someone will act
 on later — check it against the actual state rather than against what you
 remember doing.
 
+**7. A platform subclass can answer above the base-class gate.**
+The #83 leak (one context rendering another context's allow/deny pattern) was
+`gfxFcPlatformFontList::mFcSubstituteCache`: a process-global memo of family
+name → resolved family, consulted in its `FindAndAddFamiliesLocked` override
+(pristine `gfxFcPlatformFontList.cpp:2437`) *before*
+the call reaches the base `gfxPlatformFontList::FindAndAddFamiliesLocked` where
+`CamouIsFontAllowed` sits. The recon had declared "no cache above the gate"
+after reading only the base class. Whichever context populated the memo first
+answered for every context after it, negatives included. Fixed on
+`fix/fonts-round2` (PR #93) by keying the memo and `mGenericMappings` on the
+context id and flushing both from `FontListManager::SetFontList`. When a gate
+lives in a base class, grep every platform subclass (`gfxFcPlatformFontList`,
+`gfxDWriteFontList`, `gfxMacPlatformFontList`) for an early return on the same
+lookup before calling the gate complete.
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
@@ -223,11 +238,18 @@ run named the defect a quoted family key rather than a missing context scope.
 Treat any different shape as unmeasured.
 
 Still ungated after it:
-`gfxFontGroup::GetDefaultFont()`'s shared-list branch, the last-resort walk;
-the non-shared `LookupInFaceNameLists` and `CommonFontFallback` `else`
-branches, dormant while `gfx.e10s.font-list.shared` is true; and
-`LookupLocalFont` on the macOS and Windows platform font lists, which a Linux
-guard cannot see.
+`gfxFontGroup::GetDefaultFont()`'s shared-list branch, the last-resort walk —
+this is the face that serves text after a per-context refusal (#88, DejaVu
+Sans on the Linux bundle) and the face the generic families `serif` /
+`monospace` land on under a per-context list (#92); the non-shared
+`LookupInFaceNameLists` and `CommonFontFallback` `else` branches, dormant while
+`gfx.e10s.font-list.shared` is true; and `LookupLocalFont` on the macOS and
+Windows platform font lists, which a Linux guard cannot see. PR #93 additionally
+gated the two fallback caches (`mCodepointsWithNoFonts` per context, the U+FFFD
+`mReplacementCharFallbackFamily` hit) by reading — the U+FFFD one is unmeasurable
+on this bundle because the default font covers U+FFFD (#82 stays open) — and
+removed the `@font-face` gate for faces that carry a `url()` source (#80; the
+real `FontFace.status` is #91).
 
 ## Constraints when editing this repo
 
