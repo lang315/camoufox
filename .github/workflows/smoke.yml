@@ -3170,6 +3170,21 @@ jobs:
           # ONE read of the whole window, in (file, line) order, then filtered
           # in Python. This is what lets "the following default line" mean the
           # same file and a later position, not merely the same ctx number.
+          #  * `h3_face[-1]` PICKS THE LAST-SORTING FILE, NOT THE MOST RECENT
+          #    EVENT, and the pinning argument above only makes the `default`
+          #    line follow whichever `facename` line that picks. Two things make
+          #    it the right one, and both are written down here rather than
+          #    assumed. STRUCTURAL: `local("Segoe UI")` occurs exactly once in
+          #    this whole file, in arm (h)'s `ProbeH_full` rule; arms (e), (f)
+          #    and (g) name `Segoe UI` only as a FAMILY, and a family-name
+          #    lookup can in principle fall through to LookupInFaceNameLists and
+          #    emit the same line, so this is a strong prior and not a proof.
+          #    OBSERVED: run 34508157395 emitted 3 `CAMOU-FL facename` lines in
+          #    total and both `key=segoe ui allowed=0` refusals sat in ONE file
+          #    (cfx-child.9501.child-1.moz_log, ctx=6, 143 us apart) -- arm (h)'s
+          #    single mac launch looking the rule up twice. If a future run
+          #    splits them across files, narrow this window to arm (h)'s own
+          #    mark instead of efgh_mark and the question goes away.
           h3_all = camou_fl(efgh_mark, "CAMOU-FL ", limit=None)
           h3_face_idx = [i for i, ln in enumerate(h3_all)
                          if "CAMOU-FL facename" in ln and "key=segoe ui" in ln
@@ -3408,10 +3423,10 @@ jobs:
                   b.close()
                   return result
 
-          def _ctx_tok(ln):
-              """The `ctx=<n>` value of a CAMOU-FL line, or None."""
-              tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
-              return tok[4:] if tok else None
+          # M2: this was a byte-identical second copy of `_ctx_of`, which arm
+          # (h3) defines earlier in this same heredoc. One function, two names,
+          # is a thing to grep twice and change once.
+          _ctx_tok = _ctx_of
 
           n1_mark = log_mark()
           n1 = one_page_list_arg(
@@ -3434,7 +3449,7 @@ jobs:
           # is whichever non-zero id its `fontlist` lines carry.
           n1_ctxs = {c for c in (_ctx_tok(ln) for ln in n1_fl_all)
                      if c and c != "0"}
-          n1_ctx = sorted(n1_ctxs)[0] if len(n1_ctxs) == 1 else None
+          n1_ctx = next(iter(n1_ctxs)) if len(n1_ctxs) == 1 else None
           n1_fl = [ln for ln in n1_fl_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
           n1_pf = [ln for ln in n1_pf_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
 
@@ -3628,21 +3643,46 @@ jobs:
               out[key + ':i'] = w('72px "' + fam + '"', 'iiiii');
               out[key + ':m'] = w('72px "' + fam + '"', 'mmmmm');
             }
+            // The tofu floor, in THIS context, at the same size and glyph
+            // count. U+E000 is covered by Gabriola, STIX Two Math and Segoe UI
+            // Symbol only -- all win/lin, all refused under a mac list -- so
+            // five of them are five tofu boxes. Needed because Menlo is
+            // monospaced: its advance is the same for every glyph, and on this
+            // bundle it equals the tofu advance, so "this generic resolved to
+            // Menlo" and "this generic's group was empty" are ONE number.
+            out['floor'] = w('72px sans-serif',
+                             '\uE000\uE000\uE000\uE000\uE000');
             return out;
           }"""
 
           n2_mark = log_mark()
           n2 = one_page_list_arg(N2_LIST, JS_N2, None)
-          n2_gm = camou_fl(n2_mark, "CAMOU-FL generic-map", limit=None)
-          n2_fl = camou_fl(n2_mark, "CAMOU-FL fontlist", limit=None)
-          n2_du = camou_fl(n2_mark, "CAMOU-FL default-unfiltered", limit=None)
+          n2_gm_all = camou_fl(n2_mark, "CAMOU-FL generic-map", limit=None)
+          n2_fl_all = camou_fl(n2_mark, "CAMOU-FL fontlist", limit=None)
+          n2_du_all = camou_fl(n2_mark, "CAMOU-FL default-unfiltered", limit=None)
+          # I3: narrow to the fixture context, the way (n1) and (n4) do. The
+          # window holds only this arm's launch today, so nothing is wrong yet
+          # -- but the browser is HEADFUL, and once Task 4 emits `generic-map` a
+          # chrome-UI resolution at ctx=0 lands in the same window with a key
+          # like `tinos` or `cousine`. That trips the "named a family OUTSIDE
+          # the fixture list" branch and reports THE FIX as a defect. Prefer the
+          # `fontlist` lines for the id, as (n1) does; fall back to
+          # `generic-map` in case that kind lands first.
+          n2_ctxs = ({c for c in (_ctx_tok(ln) for ln in n2_fl_all) if c and c != "0"}
+                     or {c for c in (_ctx_tok(ln) for ln in n2_gm_all) if c and c != "0"})
+          n2_ctx = next(iter(n2_ctxs)) if len(n2_ctxs) == 1 else None
+          n2_gm = [ln for ln in n2_gm_all if _ctx_tok(ln) == n2_ctx] if n2_ctx else []
+          n2_fl = [ln for ln in n2_fl_all if _ctx_tok(ln) == n2_ctx] if n2_ctx else []
+          n2_du = [ln for ln in n2_du_all if _ctx_tok(ln) == n2_ctx] if n2_ctx else []
           print(f"  [arm n2 / #92] mono i/m={n2['monospace:i']}/{n2['monospace:m']} "
                 f"sans i/m={n2['sans-serif:i']}/{n2['sans-serif:m']} "
                 f"serif i/m={n2['serif:i']}/{n2['serif:m']} "
                 f"| named directly: menlo={n2['menlo:m']} hn={n2['hn:m']} "
                 f"times={n2['times:m']} "
-                f"generic-map={len(n2_gm)} fontlist={len(n2_fl)} "
-                f"default-unfiltered={len(n2_du)}")
+                f"floor(5x U+E000)={n2['floor']} ctx={n2_ctx} "
+                f"generic-map={len(n2_gm)}/{len(n2_gm_all)} "
+                f"fontlist={len(n2_fl)}/{len(n2_fl_all)} "
+                f"default-unfiltered={len(n2_du)}/{len(n2_du_all)}")
           for _g, (_fam, _key) in sorted(N2_OWN.items()):
               print(f"      {_g:11} 'mmmmm'={n2[_g + ':m']} vs its own-kind list "
                     f"member {_fam}={n2[_key + ':m']} -> "
@@ -3675,15 +3715,36 @@ jobs:
               # of its own kind, so this fires whichever direction #92 takes --
               # a proportional monospace, or (run 34501017054's shape) a
               # sans-serif and a serif that both landed on the monospace family.
+              #
+              # I4: the verdict names ONLY what the evidence identifies. Menlo
+              # is monospaced, so its advance is the same for every glyph, and
+              # on this bundle that advance EQUALS the tofu-box advance (43,
+              # which arms (n1) and (n4) read as their U+E000 floor). So
+              # "sans-serif resolved to Menlo" and "sans-serif's group was empty
+              # and rendered tofu" are one number, and a bare "it matches Menlo"
+              # would be an identification the width cannot support. When the
+              # two collide the string says both, the way (h3) says "the width
+              # half asserts NOTHING this run". The headline claim is untouched
+              # either way: the generic did not resolve to the in-list family of
+              # its own kind, which is #92 whichever face answered.
+              def _n2_what(g):
+                  fams = [N2_OWN[o][0] for o in sorted(N2_OWN)
+                          if abs(n2[g + ":m"] - n2[N2_OWN[o][1] + ":m"]) < 0.01]
+                  tofu = abs(n2[g + ":m"] - n2["floor"]) < 0.01
+                  if fams and tofu:
+                      return (" (it matches " + ", ".join(fams) + " -- OR this "
+                              f"context's own tofu box, {n2['floor']}; those are the "
+                              f"same advance on this bundle, so the width cannot "
+                              f"tell them apart and this arm does not claim which)")
+                  if fams:
+                      return " (it matches " + ", ".join(fams) + ")"
+                  if tofu:
+                      return f" (it matches this context's own tofu box, {n2['floor']})"
+                  return " (it matches no fixture family and no tofu box -- unidentified)"
               n2_failures.append(
                   f"GENERIC MISMAPPED: " + "; ".join(
                       f"{g} measured {n2[g + ':m']}, not {N2_OWN[g][0]}'s "
-                      f"{n2[N2_OWN[g][1] + ':m']}"
-                      + (" (it matches " + ", ".join(
-                            N2_OWN[o][0] for o in sorted(N2_OWN)
-                            if abs(n2[g + ":m"] - n2[N2_OWN[o][1] + ":m"]) < 0.01) + ")"
-                         if any(abs(n2[g + ":m"] - n2[N2_OWN[o][1] + ":m"]) < 0.01
-                                for o in N2_OWN) else " (it matches no fixture family)")
+                      f"{n2[N2_OWN[g][1] + ':m']}" + _n2_what(g)
                       for g in _n2_wrong) +
                   f". Every fixture family is distinct here, so each generic had a "
                   f"right answer available in its own list. generic-map lines: "
@@ -3694,6 +3755,14 @@ jobs:
                   f"and 'mmmmm'={n2['monospace:m']} -- a proportional face -- while "
                   f"matching Menlo on 'mmmmm'. generic-map lines: "
                   f"{n2_gm[-3:] or 'none'}")
+          elif kind_total("generic-map") > 0 and n2_ctx is None:
+              n2_failures.append(
+                  f"setup invalid: the run emitted {kind_total('generic-map')} "
+                  f"generic-map lines but this arm could not resolve a single "
+                  f"non-zero ctx for its own launch (fontlist lines "
+                  f"{len(n2_fl_all)}, generic-map lines {len(n2_gm_all)}), so no "
+                  f"line can be attributed to the fixture context and an unrelated "
+                  f"ctx=0 resolution would be scored as this arm's")
           elif kind_total("generic-map") > 0:
               # The fix is in this binary, so the log must corroborate the width.
               # `key` is the LAST field of
@@ -5828,10 +5897,17 @@ jobs:
               _pf_carrier = [ln for ln in n4_pf
                              if "key=" + _CAR_KEY in ln and "allowed=1" in ln]
 
+              # M5: derived from the fixture constants, not hardcoded, so a
+              # third carrier cannot silently stop being excluded.
+              _n4_excl = {fam.split()[0].casefold()
+                          for fam in (N4_DONOR + N4_DONOR_ALT)
+                          if fam.casefold() != "times"}
+
               def _times_only(fams):
                   return bool(fams) and all(
-                      "times" in f.lower() and "menlo" not in f.lower()
-                      and "lucida" not in f.lower() for f in fams)
+                      "times" in f.lower()
+                      and not any(t in f.lower() for t in _n4_excl)
+                      for f in fams)
 
               if n4_donor_ctx is None or n4_victim_ctx is None:
                   n4_failures.append(
@@ -6182,6 +6258,20 @@ jobs:
                 const score = async (name) => {
                   const f = faces[name];
                   if (!f) return 'NO_FACE_FOUND';
+                  // I1: INITIATE THE LOAD. An @font-face rule whose family is
+                  // never used is never fetched -- that is ordinary CSS lazy
+                  // loading, not a defect -- and awaiting f.loaded does not
+                  // start a fetch either. Without this the 404 face is never
+                  // requested, and a CORRECT binary would report `unloaded`,
+                  // which the verdict branch below would have scored as
+                  // INVENTED LOAD STATUS: a false RED on the very build Task 5
+                  // is meant to prove. f.load() does start the fetch, so a
+                  // fixed binary 404s and reports `error`. On THIS binary
+                  // FontFace::Load() resolves from the family-name gate rather
+                  // than from the network (the arm's header comment above), so
+                  // the Phase 0 reading is unchanged -- which is the point: the
+                  // call is safe to add before the fix and necessary after it.
+                  try { await f.load(); } catch (e) { /* rejected -> read status */ }
                   // f.loaded is RACED, never awaited bare. page.evaluate() has
                   // no timeout on the Python side, so a promise that never
                   // settles hangs the whole guard step until GitHub kills it --
@@ -6245,8 +6335,14 @@ jobs:
                       b.close()
                       return out
 
-              n7 = n7_run(FONTS["mac"])
-              _srv.shutdown()
+              # M3: shutdown() stops the loop but leaves the listening socket
+              # open until process exit, and if n7_run raises it was skipped
+              # entirely. try/finally costs two lines.
+              try:
+                  n7 = n7_run(FONTS["mac"])
+              finally:
+                  _srv.shutdown()
+                  _srv.server_close()
               print(f"  [arm n7 / #91] control face status={n7['ctlStatus']} "
                     f"width={n7['ctlWidth']} baseline={n7['baseline']}; "
                     f"404 face status={n7['badStatus']}; "
@@ -6300,11 +6396,29 @@ jobs:
                       f"face whose download failed must reject and report 'error'; one "
                       f"that never resolves either way is the same defect seen from "
                       f"the promise side")
+              elif n7["badStatus"] == "unloaded":
+                  # NOT the #91 verdict. `unloaded` means no load was ever
+                  # initiated for this face, so the arm never asked the question
+                  # it scores. Since f.load() is called above, reaching this
+                  # means the call itself did nothing -- a fixture failure, not
+                  # a fork defect, and it must not be published as one.
+                  n7_failures.append(
+                      f"setup invalid: the 404 face is still 'unloaded' after "
+                      f"f.load(), so its load was never initiated and this arm cannot "
+                      f"say what status a real load would report. Paths the server was "
+                      f"asked for: {n7_served}")
               elif n7["badStatus"] != "error":
+                  # THE EXPECTED PHASE 1 TRANSITION, stated so Task 5 can check
+                  # it rather than infer it: after the fix the 404 face must
+                  # read 'error' and the control face must still read 'loaded'.
+                  # A run where BOTH go 'error' is the control-invalid branch
+                  # above, not a pass; a run where the 404 face reads 'unloaded'
+                  # is the setup-invalid branch above, not a pass.
                   n7_failures.append(
                       f"INVENTED LOAD STATUS: a face whose src url() 404s reports "
                       f"{n7['badStatus']!r}, not 'error', while the control face on the "
-                      f"same page loaded and rendered at 1920")
+                      f"same page loaded and rendered at 1920. After Task 5 this face "
+                      f"must read 'error' and the control must still read 'loaded'")
               if n7_failures:
                   tripwires.append(f"(n7) FontFace load status for non-local faces (#91): {n7_failures}")
                   note_unmeasured("(n7)", n7_failures, "INVENTED LOAD STATUS")
@@ -6398,9 +6512,16 @@ jobs:
                        "table then prints as 'was expected red, so the defect may be "
                        "fixed'. It is not. Read the arm's own DIAGNOSTIC line for what "
                        "it actually observed, and the B6 trigger with it"),
-              "(n5)": ("(n5) per-context speech voices (#90):",
-                       "#90, per-context speech voices -- MEASUREMENT, not a triaged "
-                       "defect. A RED is the reading Task 6 branches on"),
+              # (n5) is NOT here either, and for a different reason from (h3):
+              # it became MEASURABLE and came back GREEN. Run 34513429414, the
+              # first with espeak-ng installed, read a 13362-voice registry,
+              # split it into two disjoint halves of 6681, and each context read
+              # ~6480 names ALL from its own half and NONE from the other's. It
+              # is in EXPECTED_GREEN below, so a real VOICES LEAK now reaches
+              # `unexpected` and FAILS the step, and a registry that shrinks
+              # back under two voices reaches `unmeasured` and fails too. While
+              # it sat here, both were absorbed -- the defect the reviewer
+              # blocked on, and the same one (h3) had.
               "(n7)": ("(n7) FontFace load status for non-local faces (#91):",
                        "#91, FontFaceLoadStatus is invented rather than read for "
                        "non-local faces; unfixed until Task 5"),
@@ -6440,6 +6561,20 @@ jobs:
               #   "(i2)": "#81 ordering case -- both lists installed before "
               #           "either context renders",
               "(k)": "#80, url() web fonts under a configured fonts list",
+              # #90 is a MEASUREMENT that came back negative, not a defect this
+              # branch closes -- but the routing it needs is EXPECTED_GREEN's,
+              # not EXPECTED_RED's. This table drives the printed row only; the
+              # bucketing below consults EXPECTED_RED, KNOWN_UNMEASURABLE and
+              # unmeasured_arms, so an arm listed ONLY here falls through to
+              # `unexpected` (a verdict) or `unmeasured` (a broken precondition)
+              # and fails the step either way. That is exactly what a leak or a
+              # lost registry should do.
+              "(n5)": "#90, per-context speech voices -- a MEASUREMENT that came back "
+                      "negative on run 34513429414: a 13362-voice espeak-ng registry, "
+                      "split into two disjoint halves of 6681, and each context read "
+                      "~6480 names all from its OWN half and none from the other's. A "
+                      "RED here is either a real cross-context leak or a runner whose "
+                      "speech registry went away; both must fail the step",
           }
           assert not (set(EXPECTED_RED) & set(EXPECTED_GREEN)), (
               "an arm is in both EXPECTED_RED and EXPECTED_GREEN: "
