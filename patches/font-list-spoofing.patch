@@ -265,7 +265,7 @@ index c8fd9dee58..4174a62bd0 100644
  // finding on a page.
  partial interface Window {
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 71ada3b01e..017ee3022d 100644
+index 71ada3b01e..f68e414c39 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -32,6 +32,7 @@
@@ -535,7 +535,7 @@ index 71ada3b01e..017ee3022d 100644
        fallback->FindFontForChar(&data);
        if (data.mBestMatch) {
          RefPtr<gfxFont> font = check(data.mBestMatch, FontFamily(fallback));
-@@ -1452,11 +1622,35 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1452,11 +1622,39 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
    FontVisibility level = aFontVisibilityProvider
                               ? aFontVisibilityProvider->GetFontVisibility()
                               : FontVisibility::User;
@@ -550,8 +550,12 @@ index 71ada3b01e..017ee3022d 100644
 +  // many the three filters refused, how many the async-cmap branch skipped,
 +  // and which family finally answered. Logged from a scope guard so every
 +  // return, including the platform-fallback ones, is covered.
++  //
++  // camouResolved is a RefPtr and not a raw pointer on purpose: the guard is
++  // declared BEFORE GlobalFontMatch data, so data is destroyed first and drops
++  // its own reference to the match before the guard reads the name.
 +  uint32_t camouExamined = 0, camouRefused = 0, camouCmapSkipped = 0;
-+  const gfxFontEntry* camouResolved = nullptr;
++  RefPtr<gfxFontEntry> camouResolved;
 +  auto camouLogOnExit = mozilla::MakeScopeExit([&] {
 +    LOG_FONTLIST(
 +        ("CAMOU-FL global-fallback ch=U+%04X level=%d ctx=%u examined=%u "
@@ -571,7 +575,7 @@ index 71ada3b01e..017ee3022d 100644
        if (aMatchedFamily.mShared) {
          if (IsVisibleToCSS(*aMatchedFamily.mShared, level)) {
            RefPtr<gfxFont> font = fe->FindOrMakeFont(aMatchStyle);
-@@ -1487,6 +1681,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1487,6 +1685,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      }
    }
  
@@ -583,7 +587,7 @@ index 71ada3b01e..017ee3022d 100644
    // otherwise, try to find it among local fonts
    GlobalFontMatch data(aCh, aNextCh, *aMatchStyle, aPresentation);
    if (SharedFontList()) {
-@@ -1495,11 +1694,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1495,11 +1698,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        for (uint32_t i = 0; i < SharedFontList()->NumFamilies(); i++) {
          fontlist::Family& family = families[i];
          if (!IsVisibleToCSS(family, level)) {
@@ -605,7 +609,7 @@ index 71ada3b01e..017ee3022d 100644
            continue;
          }
          if (!family.IsFullyInitialized() &&
-@@ -1507,8 +1716,10 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1507,8 +1720,10 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
              !XRE_IsParentProcess()) {
            // Start loading all the missing charmaps; but this is async,
            // so for now we just continue, ignoring this family.
@@ -616,15 +620,15 @@ index 71ada3b01e..017ee3022d 100644
            family.SearchAllFontsForChar(SharedFontList(), &data);
            if (data.mMatchDistance == 0.0) {
              // no better style match is possible, so stop searching
-@@ -1518,6 +1729,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1518,6 +1733,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        }
        if (data.mBestMatch) {
          aMatchedFamily = FontFamily(data.mMatchedSharedFamily);
-+        camouResolved = data.mBestMatch.get();
++        camouResolved = data.mBestMatch;
          return data.mBestMatch->FindOrMakeFont(aMatchStyle);
        }
      }
-@@ -1526,16 +1738,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1526,16 +1742,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      // character
      for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
        if (!IsVisibleToCSS(*family, level)) {
@@ -651,15 +655,15 @@ index 71ada3b01e..017ee3022d 100644
        family->FindFontForChar(&data);
        if (data.mMatchDistance == 0.0) {
          // no better style match is possible, so stop searching
-@@ -1546,6 +1768,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1546,6 +1772,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      aCmapCount = data.mCmapsTested;
      if (data.mBestMatch) {
        aMatchedFamily = FontFamily(data.mMatchedFamily);
-+      camouResolved = data.mBestMatch.get();
++      camouResolved = data.mBestMatch;
        return data.mBestMatch->FindOrMakeFont(aMatchStyle);
      }
    }
-@@ -1800,6 +2023,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -1800,6 +2027,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      return false;
    }
  
