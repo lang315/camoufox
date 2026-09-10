@@ -8,7 +8,7 @@
 
 **Tech Stack:** GNU patch (`/opt/homebrew/bin/gpatch`), `make revert` / `make dir` over the Firefox 152.0.4 tree in `camoufox-152.0.4-beta.31/`, `.superpowers/sdd-44/apply_upto.py` for the workspace flow, a fonts3 splice script for the two header-carrying patches, GitHub Actions (`build.yml`, `smoke.yml`, both `workflow_dispatch`), Playwright 1.55.0, fontTools, `gh`, and an SSH session to the Windows build PC.
 
-**Design spec:** `docs/superpowers/specs/2026-09-10-fonts-round3-design.md` at commit `1dcc7e7`.
+**Design spec:** `docs/superpowers/specs/2026-09-10-fonts-round3-design.md` at commit `919096e`.
 **Recon and spec review (untracked):** `.superpowers/sdd-fonts3/recon.md`, `.superpowers/sdd-fonts3/spec-review.md`.
 
 ---
@@ -246,7 +246,10 @@ cat >> .superpowers/sdd-fonts3/progress.md <<'EOF'
 # fonts round 3 ledger
 EOF
 ```
-Expected: `fix/fonts-round3` and `1dcc7e7…`. If the branch differs, stop.
+Expected: `fix/fonts-round3` and `919096e…`. If the branch differs, stop. A later head is
+fine as long as `git log --oneline 919096e..HEAD` shows only docs commits; anything
+touching `patches/` or `.github/` means someone else has started, and this plan assumes
+one implementer at a time.
 
 - [ ] **Step 2: Find where the extracted artifact puts its fonts and its `fonts.conf`**
 
@@ -4362,11 +4365,16 @@ Step 1 and used by name afterwards. Arm tags `(n1)`, `(n2)`, `(h3)`, `(n4)`, `(n
 tables. The four log format strings in the "Log line contract" table are the strings
 Tasks 3 and 4 emit and the strings Task 2's arms parse.
 
-**Gaps found and fixed inline.** Two: §A2's `CamouIsFamilyAllowed` two-argument signature
+**Gaps found and fixed inline.** One: §A2's `CamouIsFamilyAllowed` two-argument signature
 could not lowercase a key from `gfxTextRun.cpp` because `GenerateFontListKey` is
-protected — resolved with a defaulted third parameter and the deviation stated in Task 3's
-Interfaces block; and §A2's last bullet gives `generic-map` without the `step=` field its
-own helper bullet requires — the "Log line contract" fixes the format at
-`ctx=%u generic=%d step=%s key=%s`, which the spec review flagged as the one format to
-reconcile at patch-writing time.
+protected — resolved with a defaulted third parameter, and the deviation stated in Task 3's
+Interfaces block rather than absorbed.
+
+**Resolved in the spec while this plan was being written.** §A2's last bullet gave
+`generic-map` without the `step=` field its own helper bullet requires — the one format
+the spec review flagged to reconcile at patch-writing time. Spec commit `919096e` fixes
+it to `CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s`, which is the string this
+plan's "Log line contract" already carried, so all six emit sites in Task 4 and the
+parser in Task 2 Step 2 agree with the spec as written. No plan change was needed beyond
+the pin.
 
