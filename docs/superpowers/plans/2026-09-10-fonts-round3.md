@@ -8,7 +8,7 @@
 
 **Tech Stack:** GNU patch (`/opt/homebrew/bin/gpatch`), `make revert` / `make dir` over the Firefox 152.0.4 tree in `camoufox-152.0.4-beta.31/`, `.superpowers/sdd-44/apply_upto.py` for the workspace flow, a fonts3 splice script for the two header-carrying patches, GitHub Actions (`build.yml`, `smoke.yml`, both `workflow_dispatch`), Playwright 1.55.0, fontTools, `gh`, and an SSH session to the Windows build PC.
 
-**Design spec:** `docs/superpowers/specs/2026-09-10-fonts-round3-design.md` at commit `919096e`.
+**Design spec:** `docs/superpowers/specs/2026-09-10-fonts-round3-design.md` at commit `3798c59`.
 **Recon and spec review (untracked):** `.superpowers/sdd-fonts3/recon.md`, `.superpowers/sdd-fonts3/spec-review.md`.
 
 ---
@@ -249,8 +249,8 @@ cat >> .superpowers/sdd-fonts3/progress.md <<'EOF'
 # fonts round 3 ledger
 EOF
 ```
-Expected: `fix/fonts-round3` and `919096e…`. If the branch differs, stop. A later head is
-fine as long as `git log --oneline 919096e..HEAD` shows only docs commits; anything
+Expected: `fix/fonts-round3` and `3798c59…`. If the branch differs, stop. A later head is
+fine as long as `git log --oneline 3798c59..HEAD` shows only docs commits; anything
 touching `patches/` or `.github/` means someone else has started, and this plan assumes
 one implementer at a time.
 
@@ -313,6 +313,23 @@ If `find` prints nothing for either path, run 1 will say so in Step 3's guard an
 step fails loudly rather than launching without the substitution.
 
 - [ ] **Step 3: Generate the runtime fontconfig and put it in `os.environ`**
+
+Spec §B0, verbatim, because this step implements it clause for clause:
+
+> The smoke pins the **Linux** conf (`bundle/fontconfig/linux/fonts.conf`; the artifact
+> carries all three OS confs and `find | head -1` is not a choice) and asserts its text
+> names `Tinos`, `Arimo` and `Cousine`. Consequence stated up front: that file aliases
+> `serif`/`sans-serif`/`monospace` to `Tinos`/`Arimo`/`Cousine`, all refused under a mac
+> or win per-context list, so every generic under such a list is decided by A2, not by
+> fontconfig. What the guard cannot see (lesson 3): `pythonlib/camoufox/utils.py:215-238`
+> selects the conf by the **spoofed** OS, so a shipped mac-fingerprinted session runs with
+> the macOS conf (`Helvetica`/`Times`/`Menlo` — all allowed under a mac list) and
+> fontconfig answers its generics itself; B2's RED is partly an artifact of the Linux
+> conf, and A2 is what answers when the conf's aliases are refused. Written into the PR's
+> NOT-verified list.
+
+The pin is in Step 2's `find`; the assertion and the blind-spot comment are below; the
+NOT-verified entry is Task 9 Step 4.
 
 `pythonlib/camoufox/utils.py:58-92` (`_generate_fontconfig`) replaces
 `<dir prefix="cwd">fonts</dir>` with an **absolute** `<dir>…</dir>` and writes the
@@ -1177,10 +1194,21 @@ before the `=== arms (e)-(h) summary ===` print. Arm (h)'s launches happen insid
 `e`/`f`/`g`/`h` assignment block; take the mark immediately before that block and pass
 it in.
 
-**Deviation from spec §B3, stated rather than absorbed.** The spec makes the `default`
-line the whole verdict. That observable disappears the moment A2 lands, because the group
-stops falling to the default font at all — see the second GREEN shape in the code below.
-The controller is amending §B3 to match; this plan carries the amended form.
+Spec §B3, verbatim, because the two GREEN shapes below are it:
+
+> Extend arm (h): after `facename ... key=segoe ui allowed=0`, GREEN has two shapes and
+> the arm says which fired: (i) the following `default ctx=6 family=X` names a family in
+> the mac list; or (ii) no `default` line exists for that context at all **and** a
+> `generic-map ctx=6 … key=<in-list family>` line shows the group resolved through A2's
+> table instead (after A2, `monospace` maps to `Menlo`, `mFonts` is non-empty and
+> `GetDefaultFont` is never reached — the fix removes the symptom the `default` line
+> reported). Shape (ii) is only accepted when `generic-map` lines exist in the run; on a
+> binary without that kind, a missing `default` line is SETUP-INVALID. That log predicate
+> is the verdict. The width half is a discriminator only […]
+
+`ctx=6` in that text is illustrative — it is run 34213805428's id. The arm reads the
+context off the `facename` line and matches both following lines on it, as the code below
+does; do not hardcode `6`.
 
 First, immediately before the `e = {"mac": one_page("mac", JS_E), ...}` line
 (`.github/workflows/smoke.yml:2205`), insert:
@@ -5016,7 +5044,7 @@ pushed branch, and dispatched a duplicate 90-minute build from a misread notific
 | B0, `FONTCONFIG_FILE`, triage routing, counters, run 1's named outputs | 1, Steps 2–8; the signature half of the routing lands in 2, Step 1 |
 | B1 | 2, Step 2 |
 | B2 | 2, Step 3 |
-| B3 | 2, Step 4 — with an amended verdict; see the deviations below |
+| B3 | 2, Step 4 — both GREEN shapes, quoted from §B3 at `3798c59` |
 | B4 | 2, Step 5 |
 | B5 | 2, Step 6 |
 | B6 | 7, Step 5 |
@@ -5047,32 +5075,40 @@ Tasks 3 and 4 emit and the strings Task 2's arms parse, and every parse of a
 last-position field (`key=`, `families=`, `family=`, `resolved=`) reads to end of line
 rather than to the next space, because family names contain spaces.
 
-**Deviations from the spec, each stated where it applies rather than absorbed.** Four:
+**Deviations from the spec, each stated where it applies rather than absorbed.** Three:
 
 1. §A2 gives `CamouIsFamilyAllowed` two arguments. `GenerateFontListKey` is **protected**
    (`gfxPlatformFontList.h:1002`, under the `protected:` at `:777`), so `gfxTextRun.cpp`
    cannot lowercase a key the way in-class callers do. The accessor takes a defaulted
    third parameter that hands the lowercased key back, so §A2's two-argument calls compile
    unchanged. Stated in Task 3's Interfaces block.
-2. §B3 makes the `CAMOU-FL default` line the whole verdict for #88. That observable
-   disappears once A2 lands: `default` is emitted only from `gfxFontGroup::GetDefaultFont`,
-   which is reached only when the group's own list resolved to nothing, and A2 stops that
-   happening. Arm (h3) therefore has two GREEN shapes and reports which fired. The
-   controller is amending §B3 to match. Stated in Task 2 Step 4.
-3. §A2's `generic-map` bullet asks for the line on **every** context-scoped generic
+2. §A2's `generic-map` bullet asks for the line on **every** context-scoped generic
    resolution. `GetDefaultFontLocked` originally logged only when the helper answered;
    it now logs the decline too, which is why Task 4's readback expects four `generic-map`
    emit lines in `gfxPlatformFontList.cpp` rather than three.
-4. The candidate rows are `nullptr`-terminated rather than sized with `std::size`, which
+3. The candidate rows are `nullptr`-terminated rather than sized with `std::size`, which
    lives in `<iterator>` and is not included by `gfxPlatformFontList.cpp` (its only
    standard include is `<numeric>`). No new include, same semantics. Stated in Task 4
    Step 3.
 
-**Resolved in the spec while this plan was being written.** §A2's last bullet gave
-`generic-map` without the `step=` field its own helper bullet requires — the one format
-the spec review flagged to reconcile at patch-writing time. Spec commit `919096e` fixes
-it to `CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s`, which is the string this
-plan's "Log line contract" already carried, so all six emit sites in Task 4 and the
-parser in Task 2 Step 3 agree with the spec as written. No plan change was needed beyond
-the pin.
+**No longer a deviation.** Arm (h3)'s two GREEN shapes were written here first, as a
+consequence of A2 removing the `CAMOU-FL default` observable that §B3 originally made the
+whole verdict. Spec commit `3798c59` adopts them, including the "shape (ii) only when
+`generic-map` lines exist in the run" condition that `kind_total("generic-map")`
+implements, so Task 2 Step 4 now quotes §B3 rather than departing from it. The same commit
+pins the Linux `fonts.conf`, adds the `Tinos`/`Arimo`/`Cousine` assertion and writes the
+guard's blind spot into §B0; Task 1 Steps 2–3 and Task 9 Step 4 already carried all three.
+
+**Resolved in the spec while this plan was being written.** Two, neither requiring a plan
+change beyond the pin:
+
+- `919096e` — §A2's last bullet gave `generic-map` without the `step=` field its own
+  helper bullet requires, the one format the spec review flagged to reconcile at
+  patch-writing time. It is now `CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s`,
+  the string this plan's "Log line contract" already carried, so all six emit sites in
+  Task 4 and the parser in Task 2 Step 3 agree with the spec as written.
+- `3798c59` — §B3's two GREEN shapes and §B0's pinned Linux conf, `Tinos`/`Arimo`/
+  `Cousine` assertion and stated blind spot, all of which this plan had already
+  implemented in response to the plan review. Both passages are now quoted verbatim at
+  their implementation sites (Task 1 Step 3, Task 2 Step 4).
 
