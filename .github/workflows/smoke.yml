@@ -709,6 +709,25 @@ jobs:
                   res = ln.split("resolved=", 1)[1] if "resolved=" in ln else "?"
                   out.append(f"{ctx} resolved={res}")
               return out
+
+          # #83's mechanism: gfxFcPlatformFontList::mFcSubstituteCache, a
+          # process-global name->family memo consulted BEFORE the base
+          # FindAndAddFamiliesLocked where the gate lives, so a hit answers a
+          # direct-named family with no `CAMOU-FL gate` line at all. Keys look
+          # like `0:segoe ui:3` -- a family name with spaces, so the key runs
+          # from `key=` to ` hit=`, not to the next whitespace.
+          FC_PROBE_KEYS = ("geneva", "segoe ui", "calibri", "helvetica neue")
+
+          def fc_subst_hits(mark, limit=12):
+              """`fc-subst ... hit=1` lines whose key names a probe family."""
+              out = []
+              for ln in camou_fl(mark, "CAMOU-FL fc-subst", "hit=1", limit=None):
+                  if "key=" not in ln:
+                      continue
+                  key = ln.split("key=", 1)[1].split(" hit=", 1)[0].lower()
+                  if any(k in key for k in FC_PROBE_KEYS):
+                      out.append(ln)
+              return out[-limit:]
           # -------------------------------------------------------------------
 
           FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
@@ -1052,12 +1071,20 @@ jobs:
           # and probed. Confirmed by a single-variable pair (this
           # task's own discriminator): reference ordering alone does
           # not reproduce the leak; donor liveness alone does, fully,
-          # every family. This arm is EXPECTED RED on every build until
-          # #83 is fixed -- it is not a broken test, it is the honest
-          # state of the feature in the shape it is actually used. This
-          # PR diagnoses #83 and does not fix it (the Phase B gate went
-          # to branch B, H1 refuted), so it is still red here and still
-          # triaged -- see EXPECTED_RED at the end of this step.
+          # every family. This arm was EXPECTED RED on every build until
+          # #83 was fixed -- it was never a broken test, it was the
+          # honest state of the feature in the shape it is actually
+          # used. This PR diagnosed #83 and then closed it: the leak ran
+          # through gfxFcPlatformFontList::mFcSubstituteCache, a
+          # process-global name->family memo keyed without the user
+          # context and consulted BEFORE the base
+          # FindAndAddFamiliesLocked, so the gate was never asked at all
+          # -- which is why the win half of run 34428270062 emitted zero
+          # `CAMOU-FL gate` lines while still resolving the donor's
+          # families. With the memo keyed on the context and flushed in
+          # SetFontList, this arm is EXPECTED GREEN and a leak red here
+          # is a regression in that fix -- see EXPECTED_GREEN at the end
+          # of this step.
           # Kept as its own arm rather than folded into arm (b), so a
           # regression in the CLOSED-donor case (arm (b) going red)
           # remains separately visible from this one.
@@ -1151,6 +1178,23 @@ jobs:
                 f"{camou_fl(b2_mark, 'CAMOU-FL scope-switch', limit=8) or 'none'}")
           print(f"  [b2 / #83 log] set lines (per-context lists installed): "
                 f"{camou_fl(b2_mark, 'CAMOU-FL set ', limit=8) or 'none'}")
+          # The two shapes that decide whether #83's fix took, both read from
+          # the win half. BEFORE the fix, run 34428270062 showed the memo
+          # answering B's direct-named families under the donor's entries with
+          # no gate line between them. AFTER it, the memo must miss and the
+          # gate must be asked:
+          #  * fc-subst hit=1 on a probe family under the WIN context -- must
+          #    be NONE;
+          #  * `gate ... key=segoe ui` in the win half -- must be PRESENT, and
+          #    `allowed=1`, since Segoe UI is on win's own list.
+          # NEITHER shape appearing means the arm never exercised the
+          # direct-naming path, so it is unmeasured, not green.
+          print(f"  [b2 / #83 log] fc-subst hits on probe families, win half "
+                f"(must be NONE after the fix): "
+                f"{fc_subst_hits(b2_win_mark) if b2_win_mark is not None else 'mark never taken'}")
+          print(f"  [b2 / #83 log] gate lines for 'segoe ui', win half "
+                f"(must be PRESENT after the fix): "
+                f"{camou_fl(b2_win_mark, 'CAMOU-FL gate', 'key=segoe ui', limit=4) if b2_win_mark is not None else 'mark never taken'}")
 
           # M1 (from this task's review): until now `b2_leaked` was this arm's
           # ONLY source of failure, so a launch that rendered nothing gave
@@ -1181,7 +1225,7 @@ jobs:
                   f"never allowed, with the donor (mac) context still open -- the "
                   f"production shape this feature exists for. See #83.")
           print(f"  (b2) donor-alive per-context leak (#83):  "
-                f"{'RED (expected -- #83 diagnosed, not fixed in this PR)' if b2_failures else 'GREEN'} -- "
+                f"{'RED' if b2_failures else 'GREEN'} -- "
                 f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
           if b2_failures:
               tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
@@ -1307,6 +1351,16 @@ jobs:
                         f"{ctx_histogram(b2r_marks[label], 'gate')}")
                   print(f"  [b2r / #83 log / {label}] set lines, {label} half only: "
                         f"{camou_fl(b2r_marks[label], 'CAMOU-FL set ', limit=4) or 'none'}")
+                  # #83's fc-subst pair, same two shapes as arm (b2)'s -- see
+                  # the comment there. On the win iteration the hits must be
+                  # NONE and the gate line PRESENT; neither appearing means
+                  # the direct-naming path was not exercised, so unmeasured.
+                  print(f"  [b2r / #83 log / {label}] fc-subst hits on probe families, "
+                        f"{label} half (win must be NONE after the fix): "
+                        f"{fc_subst_hits(b2r_marks[label])}")
+                  print(f"  [b2r / #83 log / {label}] gate lines for 'segoe ui', "
+                        f"{label} half (win must be PRESENT after the fix): "
+                        f"{camou_fl(b2r_marks[label], 'CAMOU-FL gate', 'key=segoe ui', limit=4)}")
                   # The donor (mac) is deliberately NOT closed -- that is the one
                   # variable arm (b2) isolates, and this arm must keep it.
               for ctx in b2r_ctxs:
@@ -3904,27 +3958,31 @@ jobs:
               note_unmeasured("(j2)", j2_failures, "REPLACEMENT-CHAR CACHE LEAK")
           # -----------------------------------------------------------
 
-          # Phase D triage. This branch closes #80, #81 and #82, and it
-          # DIAGNOSES #83 without fixing it -- the Phase B gate went to branch
-          # B, H1 refuted, so the per-context leak is still open and arms (b2)
-          # and (b2r) are still red on this binary. Both stay triaged: taking
-          # them out would fail the #44 step and skip every step after it,
-          # which on a diagnostic build throws away the CAMOU-FL slice those
-          # arms exist to produce.
+          # Phase D triage. This branch closes #80, #81 and #83, and #82 is
+          # unmeasurable on this bundle (see KNOWN_UNMEASURABLE below).
           #
-          # (b2r) is triaged for a second reason: it was Phase B's #83
-          # discriminator, where a RED *was* the measurement and the gate was
-          # read off its own `[b2r / kind]` line. That is still how it reads
-          # here.
-          EXPECTED_RED = {
-              "(b2)": "#83 diagnosed, not fixed in this PR -- read the CAMOU-FL slice",
-              "(b2r)": "#83 diagnosed, not fixed in this PR -- read the CAMOU-FL slice",
-          }
+          # #83 was diagnosed and then fixed within this PR: the leak ran
+          # through gfxFcPlatformFontList::mFcSubstituteCache, a process-global
+          # name->family memo keyed WITHOUT the user context and consulted
+          # before the base FindAndAddFamiliesLocked where the gate lives, so
+          # the gate was never asked (recon-83-gate-bypass.md). With the memo
+          # keys carrying the context and the memos flushed in SetFontList,
+          # arms (b2) and (b2r) are expected GREEN and a leak red in either is
+          # a regression in that fix.
+          #
+          # Nothing is triaged red any more, so EXPECTED_RED is empty. The
+          # dict stays rather than being deleted: it is the machinery for
+          # triaging a future measured-but-unfixed defect, and the loop below
+          # prints nothing when it is empty.
+          EXPECTED_RED = {}
           # The arms that guard defects this branch DOES close, so each must be
           # GREEN here. Listed so the run prints a per-arm verdict line for
           # each even when every one passes -- Phase D's readback needs a line
           # per arm to quote, not the absence of one.
           EXPECTED_GREEN = {
+              "(b2)": "#83, cross-context leak with the donor alive -- closed by keying "
+                      "mFcSubstituteCache on the user context",
+              "(b2r)": "#83, same, with the init script on the document under test",
               "(i)": "#81, negative fallback cache",
               "(i2)": "#81 ordering case -- both lists installed before either context "
                       "renders",
@@ -4059,7 +4117,11 @@ jobs:
           # The nine CAMOU-FL kinds Task 5 added (task-5-report.md section 2a),
           # in the order they appear there.
           KINDS = ["gate", "set", "group", "scope-switch", "fffd-cache",
-                   "global-fallback", "sys-fallback", "default", "facename"]
+                   "global-fallback", "sys-fallback", "default", "facename",
+                   # #83's mechanism site, added with the mFcSubstituteCache
+                   # fix: a hit here answers a direct-named family before the
+                   # gate is ever asked.
+                   "fc-subst"]
           OTHER = "textrun-systemfallback"   # pre-existing eGfxLog_textrun line
           CAP = 3000                        # printed lines, head + tail
 
@@ -4136,6 +4198,32 @@ jobs:
                   print(f"    {ln}")
           print("  (a context with 0 group lines never built a font group under that "
                 "marker -- its arm did not run, or the render never resolved a family)")
+
+          # #83's decisive pair, printed here for the same reason as the slice
+          # above: the guard step may never reach arm (b2). fc-subst lines
+          # carry ctx= but no uri=, so they cannot be attributed to a marker --
+          # the ctx value is what identifies the context, and a hit on a probe
+          # family under a NON-ZERO ctx that did not install that family is the
+          # leak. After the fix there should be none of these at all; before
+          # it, run 34428270062's shape was `fc-subst ctx=7 key=0:geneva:<vis>
+          # hit=1` with no gate line beside it. Keys look like
+          # `0:segoe ui:3` -- a family name with spaces -- so the key runs from
+          # `key=` to ` hit=`.
+          FC_PROBE_KEYS = ("geneva", "segoe ui", "calibri", "helvetica neue")
+          fc_hits = []
+          for _ts, _b, _i, ln in rows:
+              if "CAMOU-FL fc-subst " not in ln or " hit=1 " not in ln or "key=" not in ln:
+                  continue
+              if any(k in ln.split("key=", 1)[1].split(" hit=", 1)[0].lower()
+                     for k in FC_PROBE_KEYS):
+                  fc_hits.append(ln)
+          print(f"=== fc-subst hit=1 on probe families ({len(fc_hits)} line(s)) ===")
+          for ln in fc_hits[-40:]:
+              print(f"    {ln}")
+          if not fc_hits:
+              print("    none -- the substitute memo answered no probe family, so every "
+                    "such lookup reached the gate (or the build predates the fc-subst "
+                    "log line, in which case the count above is 0 as well: check it)")
 
           print("=== CAMOU-FL lines, merged time order ===")
           if len(rows) <= CAP:
