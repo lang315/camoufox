@@ -6483,89 +6483,28 @@ jobs:
           # dict stays rather than being deleted: it is the machinery for
           # triaging a future measured-but-unfixed defect, and the loop below
           # prints nothing when it is empty.
-          # Phase 0 only. Arms (i)/(i2) ask whether a poisoned negative cache
-          # makes context B render context A's miss -- and on this bundle A
-          # does not miss: a list refusing every CJK family still renders
-          # U+FF71 as a real glyph, served by a read path nothing gates
-          # (#94's pref-font memo built at ctx 0, or #88's last resort). That
-          # is the defect this round fixes, it is a verdict rather than a
-          # broken fixture, and #81 is unmeasurable underneath it.
           #
-          # CONSEQUENCE, stated because it is a real cost: EXPECTED_RED is
-          # consulted FIRST in the triage below, so while these two sit here
-          # they cannot fail the step whichever way they go red -- including
-          # for the #81 leak itself. That is the price of a Phase 0 baseline
-          # on a binary where the precondition does not hold. Task 7 moves
-          # them back to EXPECTED_GREEN once A1/A2 are in the binary, and the
-          # #81 measurement path below is left intact for the case where A
-          # does settle at its own floor.
-          # (tag, (tripwire_prefix, why)). The prefix is what the triage matches
-          # on, the way KNOWN_UNMEASURABLE carries a signature: these arms emit
-          # TWO kinds of red and only one of them is expected here.
-          #   "(i) #94/#88 refused-list render: [...]"  -> absorbed, this table
-          #   "(i) #81 negative cache: [...]"           -> UNEXPECTED, fails the step
-          # A setup-invalid also carries the #81 prefix, so it misses this table
-          # and lands in the unmeasured bucket, which fails the step too.
-          EXPECTED_RED = {
-              "(i)": ("(i) #94/#88 refused-list render:",
-                      "#94/#88 -- context A's list refuses every CJK family and A is served one "
-                      "anyway, so A never misses and #81's precondition does not hold on this "
-                      "binary. A's floor and a directly-named CJK family's width in context B are "
-                      "then one number, and a correctly-resolving B is indistinguishable from a "
-                      "poisoned one. The arm names the serving face by RASTERISATION rather than "
-                      "advance -- read its `A's face is` line for this run rather than trusting "
-                      "this text, which must stay true across runs. Returns to EXPECTED_GREEN in "
-                      "Task 7, once A1/A2 gate that path and A can miss again."),
-              "(i2)": ("(i2) #94/#88 refused-list render:", "#94/#88 -- same, ordering case."),
-              # Phase 0 of fonts round 3. Every entry below is a defect this
-              # branch is about to fix or measure, so each is expected RED on
-              # the pre-fix binaries and each is REMOVED in Task 7 once its fix
-              # lands. Listed only so a RED does not fail the step and skip the
-              # four steps that follow it (record_video, Integration suite,
-              # Detector-site smoke, Upload results).
-              #
-              # Each prefix is the arm's WHOLE tripwire prefix, copied from its
-              # own `tripwires.append(...)` line. These arms emit ONE kind of
-              # tripwire each, unlike (i)/(i2), so the prefix necessarily
-              # absorbs every red the arm can produce -- including a
-              # setup-invalid. The table still annotates such a run "RED but
-              # UNMEASURED ... does NOT assert", and the arm's own recorded
-              # text is printed under it, so the cost is visible rather than
-              # silent. That is the same price already paid for (i)/(i2) above.
-              "(n1)": ("(n1) ungated pref-font path (#94):",
-                       "#94, the pref-font memo is process-global and ungated at read; "
-                       "unfixed until Task 3"),
-              "(n2)": ("(n2) generic -> family under a per-context list (#92):",
-                       "#92, a generic under a per-context list resolves by fontconfig "
-                       "distance, not by the generic; unfixed until Task 4"),
-              # (h3) is NOT here. It is KNOWN_UNMEASURABLE on this binary --
-              # see that table below. EXPECTED_RED is consulted FIRST and
-              # absorbs whatever red an arm emits, which would have swallowed
-              # (h3)'s setup-invalid and broken Task 1's rule that a
-              # SETUP-INVALID fails the step. #88's Phase 0 RED is carried by
-              # (i)/(i2)'s refused-list render, not by (h3).
-              "(n4)": ("(n4) replacement-char cache, donor/victim (#82):",
-                       "#82, the U+FFFD cache measurement; RED here means the #93 gate "
-                       "does not hold. A GREEN ROW HERE IS VACUOUS ON A BINARY WITH NO "
-                       "`fontlist` KIND: the arm takes its width-only branch, whose "
-                       "evidence cannot stand alone, and appends nothing -- which this "
-                       "table then prints as 'was expected red, so the defect may be "
-                       "fixed'. It is not. Read the arm's own DIAGNOSTIC line for what "
-                       "it actually observed, and the B6 trigger with it"),
-              # (n5) is NOT here either, and for a different reason from (h3):
-              # it became MEASURABLE and came back GREEN. Run 34513429414, the
-              # first with espeak-ng installed, read a 13362-voice registry,
-              # split it into two disjoint halves of 6681, and each context read
-              # ~6480 names ALL from its own half and NONE from the other's. It
-              # is in EXPECTED_GREEN below, so a real VOICES LEAK now reaches
-              # `unexpected` and FAILS the step, and a registry that shrinks
-              # back under two voices reaches `unmeasured` and fails too. While
-              # it sat here, both were absorbed -- the defect the reviewer
-              # blocked on, and the same one (h3) had.
-              "(n7)": ("(n7) FontFace load status for non-local faces (#91):",
-                       "#91, FontFaceLoadStatus is invented rather than read for "
-                       "non-local faces; unfixed until Task 5"),
-          }
+          # Round 3's C++ has landed, so every arm it fixes is expected GREEN
+          # and moves to EXPECTED_GREEN below. What stays red here is only what
+          # this branch does NOT close.
+          #
+          # WHAT EMPTYING IT BUYS, stated because the cost of filling it was
+          # stated when Phase 0 filled it. EXPECTED_RED is consulted FIRST in
+          # the bucketing below, so while an arm sat here it could not fail the
+          # step whichever way it went red -- including for the very defect it
+          # exists to catch, and including a setup-invalid. With the table
+          # empty, (n1) #94, (n2) #92, (h3) #88, (n4) #82, (n7) #91 and
+          # (i)/(i2) #81 each fail the step if they go RED and fail it again,
+          # under their own names, if they come back UNMEASURED. That is what
+          # makes this branch's evidence mandatory rather than optional.
+          #
+          # (tag, (tripwire_prefix, why)) whenever this is next non-empty. The
+          # prefix is what the triage matches on, the way KNOWN_UNMEASURABLE
+          # carries a signature: an arm that emits two KINDS of red -- (i) and
+          # (i2) emit "#94/#88 refused-list render:" and "#81 negative cache:"
+          # -- must be absorbed by one of them and never by a bare tag. The two
+          # asserts below enforce that on whatever is put here next.
+          EXPECTED_RED = {}
           for _k, _v in EXPECTED_RED.items():
               assert isinstance(_v, tuple) and len(_v) == 2 and _v[0].startswith(_k), (
                   f"EXPECTED_RED[{_k}] must be (tripwire_prefix, why) whose prefix starts with "
@@ -6594,12 +6533,22 @@ jobs:
                       "re-probe tests",
               "(b2r)": "#83, same, with the init script on the document under test; "
                        "measures the flush, not the key -- see (b2)'s re-probe",
-              # (i) and (i2) moved to EXPECTED_RED above for Phase 0 -- an arm
-              # in both tables prints two contradictory rows. Task 7 moves them
-              # back here, unchanged:
-              #   "(i)":  "#81, negative fallback cache",
-              #   "(i2)": "#81 ordering case -- both lists installed before "
-              #           "either context renders",
+              # Back here, as Phase 0 said they would be. These two emit TWO
+              # kinds of red and this table takes no prefix, so BOTH now fail
+              # the step: the "#94/#88 refused-list render:" red that Phase 0
+              # absorbed (context A was served a CJK family its list refuses,
+              # by an ungated read path -- the path A1/A2 gate) and the "#81
+              # negative cache:" red this table never excused. Bucketing does
+              # not consult EXPECTED_GREEN at all, so either lands in
+              # `unexpected`; a setup-invalid lands in `unmeasured`. All three
+              # fail, which is the point of moving them.
+              "(i)": "#81, negative fallback cache -- and, since Task 3/4, #94/#88: "
+                     "context A's list refuses every CJK family, so with the pref-font "
+                     "memo gated at read and the generic resolved through the ordered "
+                     "table intersected with the list, A must settle at its OWN floor. "
+                     "A refused-list render here is a regression in A1/A2",
+              "(i2)": "#81 ordering case -- both lists installed before either context "
+                      "renders; same two reds as (i)",
               "(k)": "#80, url() web fonts under a configured fonts list",
               # #90 is a MEASUREMENT that came back negative, not a defect this
               # branch closes -- but the routing it needs is EXPECTED_GREEN's,
@@ -6615,6 +6564,28 @@ jobs:
                       "~6480 names all from its OWN half and none from the other's. A "
                       "RED here is either a real cross-context leak or a runner whose "
                       "speech registry went away; both must fail the step",
+              # Round 3's own arms. Each was EXPECTED_RED through Phase 0 and
+              # each guards a defect this branch's C++ closes, so each must be
+              # GREEN on a binary built from this head -- and an arm that comes
+              # back UNMEASURED fails under its own name, because there the
+              # missing measurement is missing evidence for a fix this PR
+              # claims.
+              "(n1)": "#94, the pref-font memo is populated unfiltered at context 0 and "
+                      "both gates are asked at read",
+              "(n2)": "#92, a generic under a per-context list resolves through the "
+                      "ordered table intersected with that list",
+              "(h3)": "#88, GetDefaultFont opens its own scope and both last-resort "
+                      "walks are gate-approved with an unfiltered tail. Retired from "
+                      "KNOWN_UNMEASURABLE in the same edit: its excuse was `generic-map` "
+                      "not existing, and A2 emits that kind, so this arm must now reach "
+                      "shape B -- no `default` line for the context AND a generic-map "
+                      "line naming an in-list family for it",
+              "(n4)": "#82, the U+FFFD cache read is gated (PR #93) and this arm is the "
+                      "measurement that gate never had. Its RED control is a separate "
+                      "build: commit c7b1ff1 drops only the refusal on the fffd-cache "
+                      "hit branch and keeps the log line, and is reverted on this branch "
+                      "(see .superpowers/sdd-fonts3/gate-b4.md)",
+              "(n7)": "#91, a non-local face reports the status its load produced",
           }
           assert not (set(EXPECTED_RED) & set(EXPECTED_GREEN)), (
               "an arm is in both EXPECTED_RED and EXPECTED_GREEN: "
@@ -6658,19 +6629,18 @@ jobs:
                        "run's own bare-context tofu floor, so it resolved no real face "
                        "and never populated the cache this arm reads. Signature from "
                        "run 34496121342."),
-              "(h3)": ("34496121342", "setup invalid: no `CAMOU-FL default` lin",
-                       "#88: generic loop returns arbitrary allowed families; `default` "
-                       "never fires on a binary without A2, so #88 shape A is "
-                       "unobservable; shape B needs `generic-map`. Measured, not "
-                       "assumed: run 34496121342 counted `default` = 0 for the whole "
-                       "run while arm (h)'s mac generics measured three DIFFERENT "
-                       "widths (baseline 377, sans 433, serif 409), so mFonts was NOT "
-                       "empty and GetDefaultFont was never reached -- by the same "
-                       "fontconfig-distance path arm (n2) measures for #92. Task 7 "
-                       "retires this entry once `generic-map` exists and shape B "
-                       "becomes readable. An (h3) that reaches a real verdict is NOT "
-                       "absorbed here: it falls through to `unexpected` and fails the "
-                       "step, which is the point."),
+              # ARM (h3) IS GONE FROM THIS TABLE, and, like arm (j) above, its
+              # absence is the point. Its excuse was the `generic-map` kind not
+              # existing: without it the arm could only take the
+              # `h3_family is None` + no-generic-map branch, a setup-invalid
+              # that observed nothing. A2 (commit 9d0f3b8) adds that kind, so
+              # the branch this signature named is unreachable and the arm must
+              # now reach shape B -- no `default` line for the refusing context
+              # AND a generic-map line naming an in-list family for it -- or
+              # emit `DEFAULT FONT OUTSIDE THE LIST`, which note_unmeasured
+              # treats as a VERDICT rather than an unmeasured. Either way it no
+              # longer lands here. It is in EXPECTED_GREEN above, so a red of
+              # any kind now falls through to `unexpected` and fails the step.
               "(f)": ("34491802439", "arm (f) width reference collides: naming",
                       "#44 codepoint fallback is unmeasurable BY ADVANCE WIDTH under "
                       "FONTCONFIG_FILE. LIVE CAUSE, the one the arm records on every run: "
