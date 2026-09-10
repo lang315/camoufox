@@ -3141,15 +3141,24 @@ jobs:
           # BEFORE that call on every U+FFFD run in all 76 log files: the
           # cache was neither read nor written, by anyone.
           #
-          # The cause is the trailing default font. Every one of the run's 355
-          # `CAMOU-FL default` lines names DejaVu Sans, which COVERS U+FFFD --
-          # its directly-named U+FFFD width, 49.21666717529297, is exactly the
-          # value this arm and arm (j2) take as their "tofu floor". The floor
-          # is therefore not tofu at all but a real face rendering a real
-          # glyph, which is CLAUDE.md lesson 4 again: the reference is not
-          # guaranteed to differ from a successful resolution, because it IS
-          # one. No choice of donor list changes that; the default font is
-          # appended to every font group.
+          # For THIS arm the trailing default font is the cause, and the
+          # argument is the donor list, not a width match. FFFD_DONOR is
+          # ["Tahoma"] -- a SINGLE family -- and Tahoma's directly-named
+          # U+FFFD width is 46.61666488647461, while the donor settled at
+          # 49.21666717529297. The glyph therefore cannot have come from the
+          # one family this donor was allowed, and the trailing default is
+          # what remains. Every one of the run's 355 `CAMOU-FL default` lines
+          # names DejaVu Sans, whose own directly-named U+FFFD width is that
+          # same 49.21666717529297.
+          #
+          # The width match ALONE would not identify the face: the run's
+          # bare-context table shows MS Gothic, Noto Sans, SimSun and DejaVu
+          # Sans all measuring 49.21666717529297. What the width does
+          # establish is that the "tofu floor" is not tofu -- it is a real
+          # face rendering a real glyph -- which is CLAUDE.md lesson 4 again,
+          # a reference not guaranteed to differ from a successful
+          # resolution because it IS one. No choice of donor list changes
+          # that; the default font is appended to every font group.
           #
           # FOLLOW-UP, NOT THIS PR. Measuring #82 needs a different
           # observation point: a donor whose mFonts INCLUDING its trailing
@@ -3651,20 +3660,27 @@ jobs:
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
-          # Arm (j2): UNMEASURABLE ON THIS BUNDLE for exactly the reason
-          # arm (j) is -- see the long note above that arm's launch. The
-          # bare donor here settled U+FFFD at 49.21666717529297 in run
-          # 34428270062, which is both this arm's "tofu floor" AND the
-          # directly-named U+FFFD width of DejaVu Sans, the family every
-          # one of the run's 355 `default` lines names. The donor did not
-          # fail to resolve; it resolved the default font, whose glyph
-          # the floor was measuring all along. With zero fffd-cache and
-          # zero U+FFFD sys-fallback lines in the run, the cache this arm
-          # exists to observe was never touched. Kept, and listed in
-          # KNOWN_UNMEASURABLE at the end of this step, so the arm still
-          # prints its numbers for the follow-up rather than being
-          # deleted -- but its GREEN would be vacuous and its RED
-          # observes nothing.
+          # Arm (j2): UNMEASURABLE ON THIS BUNDLE -- see the long note
+          # above arm (j)'s launch. The bare donor here settled U+FFFD at
+          # 49.21666717529297 in run 34428270062, which is both this
+          # arm's "tofu floor" AND the directly-named U+FFFD width of
+          # DejaVu Sans, the family every one of the run's 355 `default`
+          # lines names. WHICH face rendered it is NOT established here:
+          # this donor is bare under a bare launch, so it is allowed
+          # every family, and MS Gothic, Noto Sans and SimSun measure
+          # that same width -- the four-way tie arm (j)'s single-family
+          # ["Tahoma"] donor breaks by construction is not broken on this
+          # arm. What IS measured, and is what puts the arm in
+          # KNOWN_UNMEASURABLE, needs no such identification: zero
+          # fffd-cache lines and zero U+FFFD sys-fallback lines across
+          # all 76 files, so the cache this arm exists to observe was
+          # never read and never written, whatever supplied the glyph.
+          # The donor did not fail to resolve -- it resolved something
+          # real, which is what the floor was measuring all along. Kept,
+          # and listed in KNOWN_UNMEASURABLE at the end of this step, so
+          # the arm still prints its numbers for the follow-up rather
+          # than being deleted -- but its GREEN would be vacuous and its
+          # RED observes nothing.
           #
           # Arm (j) above asked a NARROW per-context list to populate
           # mReplacementCharFallbackFamily; none of ten strong
@@ -3992,6 +4008,17 @@ jobs:
                   state = ("GREEN, but VACUOUS on this bundle -- NOT evidence the defect "
                            "is fixed:")
               print(f"  {k:5} {state}  {why}")
+              if hit and k in unmeasured_arms:
+                  # F1 (from this task's re-review): `why` above is a FIXED
+                  # string describing the branch that fired in run
+                  # 34428270062. These arms have five and four absorbed
+                  # branches respectively -- a process split, an unreadable
+                  # process table, a control-invalid signature -- and the
+                  # standing reason does not describe those. Printing the
+                  # arm's own recorded text under the row is what stops a row
+                  # someone quotes from asserting a cause nobody read back
+                  # (CLAUDE.md lesson 6).
+                  print(f"        observed this run: {unmeasured_arms[k]}")
           if unmeasurable:
               print("=== KNOWN UNMEASURABLE (a property of this bundle, not of this run) ===")
               for t in unmeasurable:
