@@ -3127,6 +3127,37 @@ jobs:
           #     family, leaving nothing to inherit. Turned off with
           #     gfx.font_rendering.fallback.async=false, and asserted: A's own
           #     automatic `final` must equal A's directly-named Tahoma width.
+          #
+          # WHY THIS ARM IS UNMEASURABLE ON THIS BUNDLE -- measured, not
+          # inferred, in run 34428270062, and the reason arm (j) is in
+          # KNOWN_UNMEASURABLE at the end of this step rather than in
+          # EXPECTED_GREEN. The whole run produced ZERO `CAMOU-FL fffd-cache`
+          # lines and ZERO `global-fallback` / `sys-fallback` lines for
+          # U+FFFD; all 111 of each were for U+6F22, arm (f)'s codepoint. The
+          # only route to mReplacementCharFallbackFamily from a text run is
+          # gfxFontGroup::WhichSystemFontSupportsChar -> SystemFindFontForChar
+          # (gfxTextRun.cpp:3623, logged immediately after at :3629), so zero
+          # sys-fallback lines for U+FFFD means FindFontForChar returned
+          # BEFORE that call on every U+FFFD run in all 76 log files: the
+          # cache was neither read nor written, by anyone.
+          #
+          # The cause is the trailing default font. Every one of the run's 355
+          # `CAMOU-FL default` lines names DejaVu Sans, which COVERS U+FFFD --
+          # its directly-named U+FFFD width, 49.21666717529297, is exactly the
+          # value this arm and arm (j2) take as their "tofu floor". The floor
+          # is therefore not tofu at all but a real face rendering a real
+          # glyph, which is CLAUDE.md lesson 4 again: the reference is not
+          # guaranteed to differ from a successful resolution, because it IS
+          # one. No choice of donor list changes that; the default font is
+          # appended to every font group.
+          #
+          # FOLLOW-UP, NOT THIS PR. Measuring #82 needs a different
+          # observation point: a donor whose mFonts INCLUDING its trailing
+          # default has no U+FFFD coverage, or a direct probe of
+          # mReplacementCharFallbackFamily rather than an inference from a
+          # rendered width. gfx.font_rendering.fallback.async is not the lever
+          # the setup-invalid text above suggests, and re-running changes
+          # nothing.
           j_mark = log_mark()
           j_a, j_b, j_pids = two_contexts_one_launch(
               FFFD_DONOR, FFFD_NO_PROBE, JS_4C,
@@ -3620,8 +3651,22 @@ jobs:
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
-          # Arm (j2): last attempt at #82, per team-lead direction. Arm
-          # (j) above asked a NARROW per-context list to populate
+          # Arm (j2): UNMEASURABLE ON THIS BUNDLE for exactly the reason
+          # arm (j) is -- see the long note above that arm's launch. The
+          # bare donor here settled U+FFFD at 49.21666717529297 in run
+          # 34428270062, which is both this arm's "tofu floor" AND the
+          # directly-named U+FFFD width of DejaVu Sans, the family every
+          # one of the run's 355 `default` lines names. The donor did not
+          # fail to resolve; it resolved the default font, whose glyph
+          # the floor was measuring all along. With zero fffd-cache and
+          # zero U+FFFD sys-fallback lines in the run, the cache this arm
+          # exists to observe was never touched. Kept, and listed in
+          # KNOWN_UNMEASURABLE at the end of this step, so the arm still
+          # prints its numbers for the follow-up rather than being
+          # deleted -- but its GREEN would be vacuous and its RED
+          # observes nothing.
+          #
+          # Arm (j) above asked a NARROW per-context list to populate
           # mReplacementCharFallbackFamily; none of ten strong
           # candidates did, so that context's OWN gated fallback never
           # reaches the population site and there is nothing for a
@@ -3867,26 +3912,48 @@ jobs:
               "(i)": "#81, negative fallback cache",
               "(i2)": "#81 ordering case -- both lists installed before either context "
                       "renders",
-              "(j)": "#82, U+FFFD replacement-char cache, narrow-list donor",
-              "(j2)": "#82, same, bare-context donor",
               "(k)": "#80, url() web fonts under a configured fonts list",
           }
-          # Three buckets, not two. An arm in unmeasured_arms is red because its
-          # OWN preconditions failed: it reached no verdict, so calling it a
-          # regression is as wrong as calling it a confirmed defect.
+          # Arms this binary cannot measure AT ALL, for a reason in the build
+          # rather than in the arm. Distinct from unmeasured_arms, which is a
+          # per-run accident: this is a standing property of the bundle, read
+          # off run 34428270062's own log. Such an arm must never print GREEN
+          # (its green is vacuous) and must never be reported as "unfixed"
+          # (it observed nothing), and its setup-invalid red must not fail the
+          # step -- there is nothing a re-run could do about it.
+          KNOWN_UNMEASURABLE = {
+              "(j)": "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
+                     "the default font (DejaVu Sans) covers it; fffd-cache lines = 0 in "
+                     "run 34428270062",
+              "(j2)": "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
+                      "the default font (DejaVu Sans) covers it; fffd-cache lines = 0 in "
+                      "run 34428270062",
+          }
+          # Four buckets. An arm in unmeasured_arms is red because its OWN
+          # preconditions failed on this run: it reached no verdict, so calling
+          # it a regression is as wrong as calling it a confirmed defect.
           #
           # ORDER MATTERS HERE. EXPECTED_RED is consulted first, so a triaged
           # arm never fails the step whichever way it went red -- the table
           # below still annotates it "RED but UNMEASURED" and withholds the
-          # "unfixed" claim, which is what C5 asked for. An arm that is
-          # expected GREEN and comes back unmeasured DOES fail, under its own
-          # name: there the missing measurement is missing evidence for a fix
-          # this PR claims, and a green conclusion must not be quoted over it.
-          expected, unmeasured, unexpected = [], [], []
+          # "unfixed" claim, which is what C5 asked for. KNOWN_UNMEASURABLE is
+          # consulted second, and ONLY absorbs an arm that also reached no
+          # verdict. An arm listed there that DOES reach its verdict has become
+          # measurable -- the structural blocker no longer applies and it is
+          # reporting a real defect -- so it falls through to `unexpected` and
+          # fails the step rather than being swallowed by its own excuse. An
+          # arm that is expected GREEN and comes back unmeasured also fails,
+          # under its own name: there the missing measurement is missing
+          # evidence for a fix this PR claims.
+          expected, unmeasurable, unmeasured, unexpected = [], [], [], []
           for t in tripwires:
               tag = next((k for k in EXPECTED_RED if t.startswith(k)), None)
               if tag:
                   expected.append(f"{t[:120]}...")
+                  continue
+              tag = next((k for k in KNOWN_UNMEASURABLE if t.startswith(k)), None)
+              if tag and tag in unmeasured_arms:
+                  unmeasurable.append(t)
                   continue
               tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
               (unmeasured if tag else unexpected).append(t)
@@ -3913,6 +3980,22 @@ jobs:
               else:
                   state = "GREEN"
               print(f"  {k:5} {state}  {why}")
+          for k, why in KNOWN_UNMEASURABLE.items():
+              hit = any(t.startswith(k) for t in tripwires)
+              if hit and k in unmeasured_arms:
+                  state = "UNMEASURABLE (known) -- observed nothing; asserts NOTHING:"
+              elif hit:
+                  state = ("RED WITH A VERDICT -- this arm has become measurable, the "
+                           "blocker below no longer applies, and it is reporting a real "
+                           "defect. READ IT:")
+              else:
+                  state = ("GREEN, but VACUOUS on this bundle -- NOT evidence the defect "
+                           "is fixed:")
+              print(f"  {k:5} {state}  {why}")
+          if unmeasurable:
+              print("=== KNOWN UNMEASURABLE (a property of this bundle, not of this run) ===")
+              for t in unmeasurable:
+                  print(f"  KNOWN UNMEASURABLE: {t}")
           if unmeasured_arms:
               print("=== UNMEASURED (red, but the arm measured nothing -- not a verdict) ===")
               for tag, first in unmeasured_arms.items():
