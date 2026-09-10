@@ -1265,6 +1265,44 @@ jobs:
                 f"(informational; a key ending `:0` here is the context-0 fail-open): "
                 f"{fc_subst_hits(b2_reprobe_mark)}")
 
+          # ---- readings the re-probe SCORES on, derived from the same slices --
+          # (fix wave 7; each is printed as well, so a reader can check the
+          # derivation rather than take the verdict's word for it)
+
+          def ctx_token(line):
+              """The `ctx=<n>` token of a CAMOU-FL line, or None."""
+              return next((t for t in line.split() if t.startswith("ctx=")), None)
+
+          # The two contexts' ids, read from their own `set` lines. Each half's
+          # FIRST set line is that half's context: mac's is the first in the
+          # launch, win's the first after the win mark.
+          _mac_sets = camou_fl(b2_mark, "CAMOU-FL set ", limit=None)
+          _win_sets = (camou_fl(b2_win_mark, "CAMOU-FL set ", limit=None)
+                       if b2_win_mark is not None else [])
+          b2_mac_ctx = ctx_token(_mac_sets[0]) if _mac_sets else None
+          b2_win_ctx = ctx_token(_win_sets[0]) if _win_sets else None
+          # R2: any re-install of the DONOR's list after the re-probe mark.
+          b2_reinstall = next(
+              (ln for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL set ", limit=None)
+               if b2_mac_ctx and b2_mac_ctx in ln.split()), None)
+          # R4: did the recipient actually populate the memo for these families?
+          # A `gate` line under WIN's context for a probe family means the memo
+          # missed and the base lookup ran -- which is what writes the entry the
+          # re-probe would hit. With none of these there is nothing for mac to
+          # hit and an unchanged donor is vacuous.
+          b2_win_pop = [ln for ln in camou_fl(b2_win_mark, "CAMOU-FL gate", limit=None)
+                        if b2_win_ctx and b2_win_ctx in ln.split()
+                        and any(f"key={k}" in ln.lower() for k in FC_PROBE_KEYS)]
+          # R3: hop= / ctx= of the re-probe's own font groups, which is what
+          # separates a memo leak from a context-0 fail-open on that page.
+          b2_reprobe_hops = sorted({
+              f"{ctx_token(ln)} {next((t for t in ln.split() if t.startswith('hop=')), 'hop=?')}"
+              for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL group", "b2-reprobe", limit=None)})
+          print(f"  [b2 / mac-after-win] derived: mac {b2_mac_ctx}, win {b2_win_ctx}, "
+                f"donor list re-installed after the mark: {b2_reinstall or 'no'}, "
+                f"win gate lines on probe families: {len(b2_win_pop)}, "
+                f"re-probe font groups: {b2_reprobe_hops or 'none captured'}")
+
           # M1 (from this task's review): until now `b2_leaked` was this arm's
           # ONLY source of failure, so a launch that rendered nothing gave
           # win2["measure"] all-False, the arm printed GREEN, and the triage
@@ -1289,13 +1327,62 @@ jobs:
                   f"arm (b2) setup invalid: could not read the content-process table "
                   f"({b2_pids_before} / {b2_pids_after}), so the re-probe cannot be shown "
                   f"to have run where win's memo entries live.")
-          elif b2_pids_after - b2_pids_before:
+          elif (b2_pids_after - b2_pids_before) or not b2_pids_before:
+              # R1 (re-review of 1202d8c): `or not b2_pids_before` is the clause
+              # arms (i2)/(j)/(j2) all carry and this one had dropped.
+              # tab_pids() returns an empty SET -- not the "ERR:" string --
+              # whenever pgrep succeeds but no line's last field is "tab", and
+              # set() - set() is falsy, so without this the arm would assert
+              # co-residency on zero evidence.
               b2_failures.append(
-                  f"arm (b2) setup invalid: a new content process appeared for the donor "
-                  f"re-probe. Tab pids were {sorted(b2_pids_before)} before and "
-                  f"{sorted(b2_pids_after)} after, so the re-probe did not share the "
-                  f"gfxPlatformFontList singleton that holds mFcSubstituteCache and its "
-                  f"'unchanged' result is vacuous.")
+                  f"arm (b2) setup invalid: the donor re-probe cannot be shown to have "
+                  f"shared the donor's content process. Tab pids were "
+                  f"{sorted(b2_pids_before)} before and {sorted(b2_pids_after)} after -- "
+                  f"either a new process appeared, or no tab process was visible at all. "
+                  f"mFcSubstituteCache is a per-process singleton, so an 'unchanged' "
+                  f"result from another process is vacuous.")
+          # R2 (re-review): the whole re-probe rests on NOTHING having flushed
+          # the memo between win's render and it. setFontList is one-shot per
+          # user context, so the init script on the re-probe page should find
+          # no binding and install nothing -- but that is prose, and if it ever
+          # failed, SetFontList would clear both memos, mac would re-resolve
+          # through its own gate, the pattern would be unchanged and this arm
+          # would print GREEN having measured nothing. The decisive line is
+          # already emitted: a `CAMOU-FL set` line for the MAC context after
+          # the re-probe mark. Qualified by context id, not by the mark alone,
+          # because camou_fl slices by byte offset and the donor is alive by
+          # design.
+          #
+          # R5, residual: "no new pid appeared" does not rule out two
+          # pre-existing tab processes with mac and win split between them and
+          # the re-probe landing in mac's. Under dom.ipc.processCount=1 there
+          # should be exactly one; the pids are printed, so a reader can see it.
+          if b2_mac_ctx is None:
+              b2_failures.append(
+                  f"arm (b2) setup invalid: no `CAMOU-FL set` line was captured for the "
+                  f"donor's own list, so this arm cannot show that nothing flushed the "
+                  f"memo between win's render and the re-probe -- and a flush would make "
+                  f"the re-probe's 'unchanged' result vacuous. Either the fontlist log "
+                  f"module did not capture, or this build predates the `CAMOU-FL set` "
+                  f"line: check the dump step's `set` count.")
+          elif b2_reinstall:
+              b2_failures.append(
+                  f"arm (b2) setup invalid: the donor's list was RE-INSTALLED after the "
+                  f"re-probe mark ({b2_reinstall!r}). SetFontList flushes both font-name "
+                  f"memos, so mac re-resolved through its own gate and its unchanged "
+                  f"pattern says nothing about the per-context key.")
+          # R4 (re-review): with no win entries in the memo there is nothing for
+          # mac's second lookup to hit, so an unchanged donor is guaranteed
+          # under a broken key as well as a working one. A `gate` line under
+          # win's context for a probe family is the evidence that the memo
+          # missed and the base lookup ran, which is what writes the entry.
+          if not b2_win_pop:
+              b2_failures.append(
+                  f"arm (b2) setup invalid: no `CAMOU-FL gate` line under the recipient's "
+                  f"context ({b2_win_ctx}) names any probe family, so nothing shows the "
+                  f"recipient populated mFcSubstituteCache for the families the re-probe "
+                  f"then looks up. With no entries to hit, the donor's unchanged pattern "
+                  f"is guaranteed whatever the key does.")
           if not all(mac2["measure"][f] for f in MAC_ONLY):
               b2_failures.append(
                   f"arm (b2) setup invalid: the mac donor resolved {mac2['measure']} -- "
@@ -1304,30 +1391,53 @@ jobs:
                   f"makes for the same reason (CLAUDE.md lesson 4, donor side).")
           # Scored only on a valid setup, as arm (b2r) does: a leak verdict read
           # off a dead donor is not a verdict.
-          b2_leaked, b2_reverse = [], []
+          b2_leaked, b2_reverse, b2_lost, b2_gained = [], [], [], []
           if not b2_failures:
               b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
               # The keying half: the donor's pattern after win rendered must be
-              # the pattern it had before. Both directions are a leak -- a
-              # MAC_ONLY family gone means the donor was served win's stored
-              # DENIAL of it, a WIN_ONLY family appearing means it was served
-              # win's allowance.
-              b2_reverse = ([f"{f} (lost)" for f in MAC_ONLY if not mac_after["measure"][f]] +
-                            [f"{f} (gained)" for f in WIN_ONLY if mac_after["measure"][f]])
+              # the pattern it had before. The two directions do NOT mean the
+              # same thing, which is why they are collected separately -- see
+              # the failure message below.
+              b2_lost = [f for f in MAC_ONLY if not mac_after["measure"][f]]
+              b2_gained = [f for f in WIN_ONLY if mac_after["measure"][f]]
+              b2_reverse = ([f"{f} (lost)" for f in b2_lost] +
+                            [f"{f} (gained)" for f in b2_gained])
           if b2_leaked:
               b2_failures.append(
                   f"arm (b2)/#83: win resolved macOS-only families {b2_leaked} it was "
                   f"never allowed, with the donor (mac) context still open -- the "
                   f"production shape this feature exists for. See #83.")
           if b2_reverse:
+              # R3 (re-review): a gained-only result does NOT establish a memo
+              # leak. Two mechanisms fit this arm's data and it does not
+              # discriminate between them by itself:
+              #   * a MEMO LEAK serves mac win's stored entries, which include
+              #     win's DENIAL of each MAC_ONLY family (an empty array) as
+              #     well as win's allowance of WIN_ONLY -- so it produces BOTH
+              #     directions;
+              #   * a CONTEXT-0 FAIL-OPEN on the re-probe page (CLAUDE.md
+              #     lesson 5) allows every family, so it produces GAINED-ONLY
+              #     with MAC_ONLY intact, and would otherwise print this same
+              #     message.
+              # The discriminator is already captured: the re-probe's own
+              # `group` lines. hop=bc with a non-zero ctx means the context id
+              # chain resolved and the fail-open did not happen.
+              _shape = ("BOTH directions" if b2_lost and b2_gained
+                        else "GAINED-ONLY" if b2_gained else "LOST-ONLY")
               b2_failures.append(
                   f"arm (b2)/#83: the donor's SECOND render, in a new page of the still-open "
                   f"mac context after win had rendered, changed answers: {b2_reverse}. It "
                   f"read {mac_after['measure']} where its first render read "
                   f"{mac2['measure']}. Both renders ran in tab process(es) "
-                  f"{sorted(b2_pids_after)}, so the donor was served the RECIPIENT's memo "
-                  f"entries -- the reverse leak that the per-context mFcSubstituteCache key, "
-                  f"not the SetFontList flush, is what closes.")
+                  f"{sorted(b2_pids_after)}. Shape: {_shape}. TWO readings fit: a MEMO LEAK "
+                  f"(mac served the recipient's entries -- the reverse leak the per-context "
+                  f"mFcSubstituteCache key, not the SetFontList flush, is what closes), "
+                  f"which produces BOTH directions; or a CONTEXT-0 FAIL-OPEN on the "
+                  f"re-probe page (CLAUDE.md lesson 5), which produces GAINED-ONLY with the "
+                  f"macOS families intact. Decide it on the re-probe's own font groups: "
+                  f"{b2_reprobe_hops or 'NONE CAPTURED -- neither reading is supported'} "
+                  f"(hop=bc with a non-zero ctx rules out the fail-open; ctx=0 or a "
+                  f"hop=*-null is the fail-open).")
           print(f"  (b2) donor-alive per-context leak (#83):  "
                 f"{'RED' if b2_failures else 'GREEN'} -- "
                 f"{b2_failures or 'win correctly saw none of macOS-only families with the donor still open, and the donor re-probed after win with its own pattern unchanged'}")
