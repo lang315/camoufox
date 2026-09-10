@@ -679,10 +679,10 @@ index 71ada3b01e..f68e414c39 100644
    // font-family request by the page), and RFP settings allow generics to be
    // unrestricted, bump the effective visibility level applied here so as to
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index 7e98560f36..ce8053876b 100644
+index 7e98560f36..39d3b5331e 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
-@@ -674,11 +674,59 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -674,11 +674,63 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
    static const char* GetGenericName(
        mozilla::StyleGenericFontFamily aGenericType);
  
@@ -729,11 +729,15 @@ index 7e98560f36..ce8053876b 100644
 +  // must not let one context's genuine miss silently answer for every
 +  // later context sharing the same FontVisibility level. Called from
 +  // FontListManager::SetFontList() whenever a context installs its own
-+  // font list.
++  // font list. Each bitset is restored to the seeded C0/PUA/noncharacter
++  // ranges rather than emptied (#82): those ranges are upstream policy, not
++  // a learned miss, and context 0 answers out of this array, so emptying it
++  // would make every later ctx-0 lookup rescan codepoints upstream already
++  // knows nothing can render.
 +  void ClearCodepointsWithNoFonts() {
 +    AutoLock lock(mLock);
 +    for (auto& bitset : mCodepointsWithNoFonts) {
-+      bitset.reset();
++      bitset = mCodepointsWithNoFontsInitial;
 +    }
 +    // Camoufox (#81): the per-context bitsets are the same cache keyed
 +    // (level, context), so an install invalidates them for the same reason.
@@ -743,7 +747,7 @@ index 7e98560f36..ce8053876b 100644
    // Return whether the given font-family record should be visible to CSS,
    // in a context with the given FontVisibility setting.
    bool IsVisibleToCSS(const gfxFontFamily& aFamily,
-@@ -1087,6 +1135,31 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -1087,6 +1139,31 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                             size_t(FontVisibility::Count)>
        mCodepointsWithNoFonts MOZ_GUARDED_BY(mLock);
  
