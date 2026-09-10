@@ -231,9 +231,12 @@ universe (recon open question 4).
     An arm calls it to tell "this binary predates the kind" from "the kind exists but
     not for my context".
   - `LOG_START`, the `log_mark()` taken immediately after `MOZ_LOG_FILE` is set.
-  - `KNOWN_UNMEASURABLE` re-shaped to `{tag: (run_id, signature, why)}`.
+  - `KNOWN_UNMEASURABLE` re-shaped to `{tag: (run_id, signature, why)}` with `signature`
+    left `None`, so absorption behaves exactly as it does today. Task 2 Step 1 fills the
+    signatures in from run 1's own text and turns the match on; nothing before that point
+    may depend on a signature matching.
   - `.superpowers/sdd-fonts3/phase0-run1.md`, whose named outputs Task 2's fixtures
-    depend on.
+    depend on — in particular Q4's `J_SIG` and `J2_SIG`.
 
 - [ ] **Step 1: Start the ledger**
 
@@ -266,8 +269,28 @@ plan must not guess them. Add a read-back to the "Unpack + locate firefox binary
           # runner's host fontconfig. Export both paths from here rather than
           # deriving them in Python: the package layout is a property of
           # scripts/package.py, not of the guard.
+          # The path is PINNED to the linux directory, never `-name fonts.conf
+          # | head -1`. scripts/package.py copytrees the whole
+          # bundle/fontconfig directory, so the artifact carries THREE
+          # fonts.conf files and `head -1` would pick one by directory order:
+          #   linux/   sans-serif=Arimo  serif=Tinos            monospace=Cousine
+          #   macos/   sans-serif=Helvetica serif=Times         monospace=Menlo
+          #   windows/ sans-serif=Arial  serif=Times New Roman  monospace=Consolas
+          # All three contain the `<dir prefix="cwd">fonts</dir>` needle, so the
+          # substitution guard below cannot catch a wrong pick. Picking the
+          # macOS file would silently make three arms mean something else: (n1)
+          # would resolve serif to Times, which does not cover U+1C80, so the
+          # ungated pref path produces no leak and the arm reads GREEN for the
+          # wrong reason; (n2)'s monospace would resolve to Menlo, which is IN
+          # its fixture list, so #92 would look fixed with no A2 at all; and
+          # (n4)'s donor would get Menlo into the ctx-0 memo, which is its own
+          # SETUP-INVALID branch.
           fdir=$(find cf -maxdepth 4 -type d -name fonts | head -1)
-          fconf=$(find cf -maxdepth 5 -type f -name fonts.conf | head -1)
+          fconf=$(find cf -maxdepth 6 -type f -path '*/fontconfig/linux/fonts.conf' | head -1)
+          if [ -z "$fconf" ]; then
+            echo "::error::no fontconfig/linux/fonts.conf in the package"
+            find cf -maxdepth 6 -type f -name fonts.conf; exit 1
+          fi
           echo "fonts_dir=$GITHUB_WORKSPACE/dist/$fdir" >> "$GITHUB_OUTPUT"
           echo "fonts_conf=$GITHUB_WORKSPACE/dist/$fconf" >> "$GITHUB_OUTPUT"
           echo "--- fonts ---"; echo "dir=$fdir conf=$fconf"
@@ -275,7 +298,7 @@ plan must not guess them. Add a read-back to the "Unpack + locate firefox binary
 ```
 
 Then add the two outputs to the guard step's `env:` block, which today ends at
-`.github/workflows/smoke.yml:4396-4398` with `CAMOUFOX_BIN` and
+`.github/workflows/smoke.yml:4392-4394` with `CAMOUFOX_BIN` and
 `LIBGL_ALWAYS_SOFTWARE`:
 
 ```yaml
@@ -320,6 +343,20 @@ already uses. Insert immediately after the
           # fontconfig. The file also carries ZERO <include> elements, so the
           # host's /etc/fonts/conf.d/30-metric-aliases.conf is absent and
           # `Times` is not silently aliased to `Tinos`.
+          #
+          # WHAT THIS GUARD CANNOT SEE (CLAUDE.md lesson 3). It measures the
+          # LINUX conf. A shipped Camoufox picks the conf by the SPOOFED os:
+          # pythonlib/camoufox/utils.py:213-231 maps user_agent_os through
+          # {'lin':'linux','mac':'macos','win':'windows'} and reads
+          # fontconfig/<os_dir>/fonts.conf. So a real mac-fingerprinted session
+          # runs with sans-serif/serif/monospace aliased to
+          # Helvetica/Times/Menlo -- all mac families, all ALLOWED under a mac
+          # list -- and fontconfig answers its generics correctly there without
+          # A2 ever being consulted. #92 is still real (the refusal case is
+          # reachable whenever the per-context list and the spoofed OS disagree,
+          # which is the whole point of a per-context list), but arm (n2)'s RED
+          # is partly an artifact of the conf this guard chose. Stated here and
+          # in the PR's NOT-verified section rather than discovered later.
           FONTS_DIR = os.environ.get("CAMOU_FONTS_DIR", "")
           FONTS_CONF_SRC = os.environ.get("CAMOU_FONTS_CONF", "")
           assert FONTS_DIR and os.path.isdir(FONTS_DIR), (
@@ -337,6 +374,15 @@ already uses. Insert immediately after the
           assert _needle in _conf, (
               f"{FONTS_CONF_SRC} does not contain {_needle!r}; the bundle's fonts.conf "
               f"has changed shape and this substitution would silently do nothing.")
+          # Identity check, not a path check: all three bundled fonts.conf files
+          # carry the needle above, so only their alias targets tell them apart.
+          # Arimo/Tinos/Cousine appear ONLY in the linux file (verified: grep -c
+          # over the macos and windows files returns 0 for all three).
+          _missing = [f for f in ("Arimo", "Tinos", "Cousine") if f not in _conf]
+          assert not _missing, (
+              f"{FONTS_CONF_SRC} does not alias to {_missing}: this is not the LINUX "
+              f"fonts.conf, and arms (n1), (n2) and (n4) all rest on the Linux aliases. "
+              f"See the unpack step's -path '*/fontconfig/linux/fonts.conf' pin.")
           _conf = _conf.replace(_needle, "<dir>%s</dir>" % FONTS_DIR)
           FONTCONFIG_FILE = os.path.join(FC_DIR, "fonts.conf")
           with open(FONTCONFIG_FILE, "w", encoding="utf-8") as _fh:
@@ -344,7 +390,8 @@ already uses. Insert immediately after the
           os.environ["FONTCONFIG_FILE"] = FONTCONFIG_FILE
           os.environ["XDG_CACHE_HOME"] = os.path.join(FC_DIR, "cache")
           print(f"  [setup] FONTCONFIG_FILE={FONTCONFIG_FILE} "
-                f"fonts_dir={FONTS_DIR} xdg_cache={os.environ['XDG_CACHE_HOME']}")
+                f"src={FONTS_CONF_SRC} fonts_dir={FONTS_DIR} "
+                f"xdg_cache={os.environ['XDG_CACHE_HOME']}")
           # -------------------------------------------------------------------
 ```
 
@@ -370,11 +417,13 @@ Insert immediately after the `ctx_histogram` definition
 ```
 
 `LOG_START` must sit after the `MOZ_LOG_FILE` assignment (so the dir exists) and before
-the first `sync_playwright()` block, which is arm (b)'s bare launch at
-`.github/workflows/smoke.yml:907`. The `ctx_histogram` definition is inside that window.
+the first `sync_playwright()` block in the step, which is the config launch at
+`.github/workflows/smoke.yml:803-806` — **not** arm (b)'s bare launch at `:907`, which is
+the second. The `ctx_histogram` definition ends at `:696`, well before either, so placing
+`LOG_START` directly after it satisfies both constraints.
 
 Then register the four new kinds in the dump step's list. Replace
-`.github/workflows/smoke.yml:4412-4419`:
+`.github/workflows/smoke.yml:4412-4417`:
 
 ```python
           KINDS = ["gate", "set", "group", "scope-switch", "fffd-cache",
@@ -416,6 +465,16 @@ absorbed branches — a process split, an unreadable process table, a control-in
 signature — and none of those is the standing bundle limitation the entry describes.
 A broken fixture is therefore indistinguishable from the structural reason.
 
+**This step lands the SHAPE, not the signature match.** The signature has to be the
+first ~40 characters of each arm's own `unmeasured_arms` text, which is
+`failures[0][:220]` (`smoke.yml:864-869`) — and no such string can be written before it
+has been read. Worse, run `34428270062`, which established the standing reason, predates
+`FONTCONFIG_FILE`: under the new launch the host's DejaVu is gone and `monospace` aliases
+to `Cousine`, which carries no U+FFFD, so these arms may take a **different** branch and a
+signature copied from the old run would be right for that run and wrong for run 1. Step 8
+reads run 1's actual text; Task 2 Step 1 turns the match on. Until then the absorb
+condition stays exactly as it is today, so this step cannot fail a run.
+
 Replace the `KNOWN_UNMEASURABLE` dict:
 
 ```python
@@ -431,21 +490,28 @@ Replace the `KNOWN_UNMEASURABLE` dict:
 with:
 ```python
           # (run_id, signature, why). `run_id` is the run that ESTABLISHED the
-          # structural reason -- an entry without one is a guess, and the
-          # assert below refuses it. `signature` is a substring that appears in
-          # the arm's OWN recorded unmeasured text when it failed for THAT
-          # reason; an arm that goes unmeasured for any other reason (a process
-          # split, an unreadable pid table, an invalid control) no longer
-          # matches and falls through to SETUP-INVALID, which fails the step.
-          # Before this change every one of those absorbed silently.
+          # structural reason -- an entry without one is a guess, and the assert
+          # below refuses it. `signature` is a substring that must appear in the
+          # arm's OWN recorded unmeasured text when it failed for THAT reason,
+          # so that an arm going unmeasured for any other reason (a process
+          # split, an unreadable pid table, an invalid control) falls through to
+          # SETUP-INVALID and fails the step instead of absorbing silently.
+          #
+          # signature is None until Phase 0 run 1 has been READ. It cannot be
+          # written before then: note_unmeasured stores failures[0][:220], and
+          # which of arm (j)'s five branches fires under FONTCONFIG_FILE is not
+          # knowable from run 34428270062, which predates that launch. While it
+          # is None the absorb below behaves exactly as it does today, so this
+          # reshape alone cannot fail a run. Task 2 Step 1 fills both in from
+          # run 1's own text and turns the match on.
           KNOWN_UNMEASURABLE = {
-              "(j)": ("34428270062", "no fffd-cache line",
+              "(j)": ("34428270062", None,
                       "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
                       "the default font covers it; fffd-cache lines = 0 in run "
                       "34428270062. Re-check under FONTCONFIG_FILE: with the host's "
                       "DejaVu gone and monospace aliased to Cousine (no U+FFFD), this "
                       "may have become measurable."),
-              "(j2)": ("34428270062", "no fffd-cache line",
+              "(j2)": ("34428270062", None,
                        "#82: same, bare-donor variant."),
           }
           for _k, _v in KNOWN_UNMEASURABLE.items():
@@ -465,18 +531,26 @@ Then replace the absorb condition (`.github/workflows/smoke.yml:4321-4325`):
 with:
 ```python
               tag = next((k for k in KNOWN_UNMEASURABLE if t.startswith(k)), None)
+              _sig = KNOWN_UNMEASURABLE[tag][1] if tag else None
               if (tag and tag in unmeasured_arms
-                      and KNOWN_UNMEASURABLE[tag][1] in unmeasured_arms[tag]):
+                      and (_sig is None or _sig in unmeasured_arms[tag])):
                   unmeasurable.append(t)
                   continue
 ```
 
-And the three print loops that index the dict by value. Replace
+And **one** print loop — the only one that indexes `KNOWN_UNMEASURABLE`, at
+`.github/workflows/smoke.yml:4350`. The loops at `:4328` and `:4341` index `EXPECTED_RED`
+and `EXPECTED_GREEN` and must not change. Replace
 `for k, why in KNOWN_UNMEASURABLE.items():` with
-`for k, (_run, _sig, why) in KNOWN_UNMEASURABLE.items():`, and inside that loop change
-the `hit and k in unmeasured_arms` branch's condition to
-`hit and k in unmeasured_arms and _sig in unmeasured_arms[k]` so a signature mismatch
-prints the "RED WITH A VERDICT" branch instead of the excuse.
+`for k, (_run, _sig, why) in KNOWN_UNMEASURABLE.items():`, then change the condition on
+**line `:4352` only** — the one that picks the `state` string — from
+`if hit and k in unmeasured_arms:` to
+`if hit and k in unmeasured_arms and (_sig is None or _sig in unmeasured_arms[k]):`,
+so a signature mismatch prints the "RED WITH A VERDICT" branch instead of the excuse.
+
+**Leave `:4362` alone.** That is the second `if hit and k in unmeasured_arms:`, the one
+guarding `print(f"        observed this run: …")`. Narrowing it would suppress the arm's
+own recorded text in exactly the mismatch case where a reader most needs it.
 
 Finally, rename the unmeasured bucket's label so the spec's `SETUP-INVALID` string
 appears in the log. Replace:
@@ -604,10 +678,24 @@ log.>
 NOT carry U+FFFD. Confirm from the run rather than from the scan: paste arm
 (j)/(j2)'s donor lines.>
 
-## Q4. Did (j)/(j2) become measurable?
+## Q4. Did (j)/(j2) become measurable, and what is each one's signature?
 <If either now reaches its verdict, its KNOWN_UNMEASURABLE entry no longer
-applies and Task 7 Step 1 must retire it. If both are still absorbed with the
-signature `no fffd-cache line`, leave the table alone.>
+applies and Task 7 Step 1 must retire it.
+
+If either is still absorbed, copy its `observed this run: …` line VERBATIM from
+the triage block -- that line is `unmeasured_arms[tag]`, i.e. the arm's first
+failure string truncated to 220 characters. Record the first 40 characters of
+each, exactly as printed, as J_SIG and J2_SIG. They will differ: arm (j)'s
+branches read "could not read the content-process table", "a new content process
+appeared for B", "Tahoma is not among the families that demonstrably resolve
+U+FFFD in this build", "the donor's AUTOMATIC U+FFFD fallback settled at", "the
+leak signature ... equals the run's U+FFFD tofu floor"; arm (j2) adds
+"bare-context setup ALSO invalid: none of the bisected candidates". Do NOT
+paraphrase and do NOT shorten to a phrase you think is stable -- Task 2 Step 1
+greps for these strings literally.
+
+J_SIG  = <verbatim, 40 chars>
+J2_SIG = <verbatim, 40 chars>>
 
 ## Re-baselined numbers
 <Every width and count the existing arms print, copied verbatim. These are the
@@ -633,11 +721,30 @@ currently-green arm red: `(n1)` for B1, `(n2)` for B2, `(h3)` for B3, `(n4)` for
 run" as a failed precondition reports SETUP-INVALID and, under Task 1's routing, fails
 the step for a reason no re-run can change. So:
 
-- `kind_total(kind) == 0` → **the binary predates the kind.** Score width-only, print
-  the reading, append **nothing** to `tripwires`. Diagnostic.
+- `kind_total(kind) == 0` → **the binary predates the kind.** Fall back to whatever this
+  arm can still establish from widths alone, and say in the printed line that the log
+  half was unavailable. Append a tripwire **only** when the width evidence is a verdict
+  on its own — for `(n1)` a match against the bare Tinos reference that also differs from
+  the tofu floor, for `(n2)` a proportional `monospace` whose `sans-serif` control
+  differs. Otherwise print and append nothing.
 - `kind_total(kind) > 0` but no line for this arm's context → **SETUP-INVALID.** The
   arm records itself through `note_unmeasured` and fails the step.
 - lines present for this context → score normally.
+
+The first bullet is what gives #94 and #92 a Phase 0 RED at all: both are listed in
+`EXPECTED_RED` for Phase 0 (Step 8), and a `Closes #94` in Task 9 has to cite a RED some
+run actually produced. An arm whose width evidence cannot stand alone — `(n4)`, whose
+whole verdict is about which cached family answered — appends nothing in this state and
+its Phase 0 reading is a diagnostic line, not a tripwire.
+
+**Log-window discipline (applies to every arm below).** `camou_fl` reads every file in
+`LOG_DIR` and treats a file absent from the mark as offset `0` (`smoke.yml:658-687`), so
+a browser process started *after* the mark still lands inside the window. Two consequences
+each arm honours: take every `camou_fl` read **before** any reference launch, and filter
+the result by the fixture context's own `ctx=`. A bare reference launch has no
+per-context list, so its own generics resolve to the very families the fixtures forbid —
+its `fontlist` line names `tinos` — and an unfiltered window would refuse the fixture as
+invalid on the fixed build, where the arm is expected GREEN.
 
 **Files:**
 - Modify: `.github/workflows/smoke.yml`
@@ -647,17 +754,68 @@ the step for a reason no re-run can change. So:
 **Interfaces:**
 - Consumes: `kind_total`, `LOG_START`, `log_mark`, `camou_fl`, `note_unmeasured`,
   `tab_pids`, `one_page_arg`, `two_contexts_one_launch`, `build_probe_k`, `FONTS`,
-  `tripwires` — all defined in `smoke.yml` before the insertion points below.
+  `tripwires` — all defined in `smoke.yml` before the insertion points below. Also
+  `.superpowers/sdd-fonts3/phase0-run1.md` from Task 1 Step 8, whose Q4 supplies `J_SIG`
+  and `J2_SIG` for Step 1 below.
 - Produces: `.superpowers/sdd-fonts3/gate-b5.md`, containing exactly one of
   `GATE: B5 RED` / `GATE: B5 GREEN`, which Task 6 branches on; and the B4-on-`34236331658`
   reading that Task 7's B6 branch keys on.
 
-- [ ] **Step 1: Add arm (n1), the #94 pref-path arm**
+- [ ] **Step 1: Turn on `KNOWN_UNMEASURABLE` signature matching, from run 1's own text**
 
-Insert immediately after the arm (h) summary block — after the line printing
-`      win: local('Segoe UI')=...` and before the
-`# Web-font measurement (out of scope for this task ...` comment
-(`.github/workflows/smoke.yml`, around `:2580`).
+Task 1 Step 5 landed the `(run_id, signature, why)` shape with `signature` set to `None`,
+which makes the absorb behave exactly as it did before. Now that Phase 0 run 1 has been
+read, fill both signatures in from `.superpowers/sdd-fonts3/phase0-run1.md`'s Q4 —
+`J_SIG` and `J2_SIG`, copied verbatim from that run's `observed this run: …` lines, which
+are `unmeasured_arms[tag]` (i.e. `failures[0][:220]`, `smoke.yml:864-869`).
+
+**If Q4 says either arm became measurable**, do not give it a signature — remove its entry
+from `KNOWN_UNMEASURABLE` entirely, because a measurable arm is reporting a real defect and
+must reach `unexpected`.
+
+Replace the two `None` values with the recorded strings:
+
+```python
+          KNOWN_UNMEASURABLE = {
+              "(j)": ("34428270062", "<J_SIG, the first 40 chars, verbatim>",
+                      "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
+                      "the default font covers it; fffd-cache lines = 0 in run "
+                      "34428270062. Re-check under FONTCONFIG_FILE: with the host's "
+                      "DejaVu gone and monospace aliased to Cousine (no U+FFFD), this "
+                      "may have become measurable."),
+              "(j2)": ("34428270062", "<J2_SIG, the first 40 chars, verbatim>",
+                       "#82: same, bare-donor variant."),
+          }
+```
+
+The two strings **will differ** — arm (j) and arm (j2) take different branches — so a
+single shared signature is a sign the readback was paraphrased rather than copied.
+
+**Then assert each signature actually occurs in the file, before any dispatch.** This is
+the check whose absence made the first draft of this plan fail every run: the signature it
+guessed, `no fffd-cache line`, appears nowhere in `smoke.yml`, so both arms would have
+fallen through to `unmeasured` and tripped `assert not (unexpected or unmeasured)` at
+`smoke.yml:4385` on every run including Task 7's final one.
+
+```bash
+cd /Users/lang/GolandProjects/github.com/lang315/camoufox
+for sig in "<J_SIG>" "<J2_SIG>"; do
+  printf '%-44s ' "$sig"
+  grep -cF -- "$sig" .github/workflows/smoke.yml
+done
+```
+Expected: a non-zero count for each. A `0` means the signature was not copied from the
+arm's own source text — go back to `phase0-run1.md` and read it again. Costs a second;
+being wrong costs a 15-minute run.
+
+- [ ] **Step 2: Add arm (n1), the #94 pref-path arm**
+
+Insert immediately after the arm (h) summary block, i.e. after the line printing
+`      win: local('Segoe UI')=...` at `.github/workflows/smoke.yml:2581`. That is the
+anchor; **do not** use "before the `# Web-font measurement` comment", which is 113 lines
+further on at `:2694` with arm (h') in between. Arms (n2), (h3), (n4), (n5) and (n7) are
+then each inserted directly after the previous one, so the six land as one contiguous
+block starting at `:2582`.
 
 ```python
           # -----------------------------------------------------------
@@ -692,13 +850,27 @@ Insert immediately after the arm (h) summary block — after the line printing
           #  * The Tinos reference and the tofu floor could be equal, in which
           #    case "matched Tinos" and "rendered nothing" are the same number.
           #    Asserted below; if equal the arm scores nothing.
-          #  * The Tinos reference is measured by FAMILY NAME in a BARE context
-          #    of this same run -- same process, same thread, same launch shape
-          #    as every other one_page_arg arm -- so the two sides are
-          #    comparable by construction. It is not a cross-context reference.
+          #  * The Tinos reference is measured by FAMILY NAME in a BARE context.
+          #    That is a SEPARATE browser process -- one_page_list_arg opens its
+          #    own sync_playwright() -- so this is not a same-process
+          #    comparison. What makes the two sides comparable is narrower and
+          #    has to be stated as what it is: the same font FILES (one
+          #    artifact, one FONTCONFIG_FILE), the same 72px size, the same
+          #    canvas measureText path, and an advance width that is a property
+          #    of the face rather than of the context. Arm (h) relies on the
+          #    same property and states it the same way.
+          #  * The reference launch's OWN font list contains Tinos -- its
+          #    appended serif generic resolves there because no per-context list
+          #    refuses it -- so its `fontlist` line would satisfy the "a carrier
+          #    reached mFonts" branch below if it were in the window. Every
+          #    camou_fl read is therefore taken BEFORE the reference launch, and
+          #    the lines are additionally filtered to the fixture context's own
+          #    ctx=. Either alone would do; both are cheap.
           #  * On a binary with no `fontlist` kind at all the precondition
           #    "the context's list resolved to no U+1C80 carrier" cannot be
-          #    read. That is the width-only diagnostic branch, not a failure.
+          #    read. That is the width-only branch. It still scores: a width
+          #    match against the bare reference IS #94's leak, and #94 needs a
+          #    Phase 0 RED.
           N1_CP = 0x1C80          # CYRILLIC SMALL LETTER ROUNDED VE
           N1_PUA = 0xE000         # tofu floor: nothing bundled covers it
           N1_LIST = ["Geneva"]
@@ -733,23 +905,47 @@ Insert immediately after the arm (h) summary block — after the line printing
                   b.close()
                   return result
 
+          def _ctx_tok(ln):
+              """The `ctx=<n>` value of a CAMOU-FL line, or None."""
+              tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
+              return tok[4:] if tok else None
+
           n1_mark = log_mark()
           n1 = one_page_list_arg(
               N1_LIST, JS_N1,
               {"named": "Geneva", "cp": N1_CP, "pua": N1_PUA,
                "outside": N1_OUTSIDE})
+          # EVERY log read happens HERE, before the reference launch. The
+          # reference runs with no per-context list, so its own appended serif
+          # generic resolves to Tinos and its `fontlist` line names a U+1C80
+          # carrier -- which is exactly the string the "a carrier reached
+          # mFonts" branch below refuses on. camou_fl reads every file in
+          # LOG_DIR and treats a file absent from the mark as offset 0
+          # (smoke.yml:658-687), so a launch made after the mark IS inside the
+          # window. Reading first is what keeps the fixture's window the
+          # fixture's.
+          n1_fl_all = camou_fl(n1_mark, "CAMOU-FL fontlist", limit=None)
+          n1_pf_all = camou_fl(n1_mark, "CAMOU-FL pref-fallback", limit=None)
+          # Second, independent narrowing: keep only the fixture context's own
+          # lines. The fixture is the single launch in this window, so its ctx
+          # is whichever non-zero id its `fontlist` lines carry.
+          n1_ctxs = {c for c in (_ctx_tok(ln) for ln in n1_fl_all)
+                     if c and c != "0"}
+          n1_ctx = sorted(n1_ctxs)[0] if len(n1_ctxs) == 1 else None
+          n1_fl = [ln for ln in n1_fl_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
+          n1_pf = [ln for ln in n1_pf_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
+
           # The reference: Tinos's U+1C80 measured by family name in a BARE
           # context, where no per-context list gates anything.
           n1_ref = one_page_list_arg(
               None, JS_N1,
               {"named": "Geneva", "cp": N1_CP, "pua": N1_PUA,
                "outside": N1_OUTSIDE})["outsideDirect"]
-          n1_fl = [ln for ln in camou_fl(n1_mark, "CAMOU-FL fontlist", limit=None)]
-          n1_pf = [ln for ln in camou_fl(n1_mark, "CAMOU-FL pref-fallback", limit=None)]
           n1_have_fontlist = kind_total("fontlist") > 0
           print(f"  [arm n1 / #94] probe(U+1C80 in ['Geneva'])={n1['probe']} "
-                f"floor(U+E000)={n1['floor']} tinos_ref={n1_ref} "
-                f"fontlist_lines={len(n1_fl)} pref_fallback_lines={len(n1_pf)} "
+                f"floor(U+E000)={n1['floor']} tinos_ref={n1_ref} ctx={n1_ctx} "
+                f"fontlist_lines={len(n1_fl)}/{len(n1_fl_all)} "
+                f"pref_fallback_lines={len(n1_pf)}/{len(n1_pf_all)} "
                 f"kind_totals: fontlist={kind_total('fontlist')} "
                 f"pref-fallback={kind_total('pref-fallback')}")
           for _ln in (n1_fl + n1_pf)[-6:]:
@@ -763,26 +959,54 @@ Insert immediately after the arm (h) summary block — after the line printing
                   f"answered' and 'nothing rendered' are the same number and this "
                   f"arm cannot tell them apart")
           elif not n1_have_fontlist:
-              # Binary predates the `fontlist` kind. Width-only, diagnostic.
-              _leaked = abs(n1["probe"] - n1_ref) < 0.01
-              print(f"  [arm n1 / #94] DIAGNOSTIC (binary emits no `fontlist` kind): "
-                    f"U+1C80 in a ['Geneva'] context measured "
-                    f"{'the Tinos width -- the ungated pref path answered' if _leaked else 'neither Tinos nor the floor'}"
-                    f"; scores nothing on this binary.")
+              # Binary predates the `fontlist` kind, so the precondition cannot
+              # be READ -- but the width comparison stands on its own and is
+              # what gives #94 its Phase 0 RED. The reference is a family-name
+              # measurement of the very family the ctx-0 memo holds, so a match
+              # is the leak; the tofu floor rules out "nothing rendered".
+              if (abs(n1["probe"] - n1_ref) < 0.01
+                      and abs(n1["probe"] - n1["floor"]) >= 0.01):
+                  n1_failures.append(
+                      f"PREF PATH LEAK (width-only, no `fontlist` kind in this "
+                      f"binary): U+1C80 in a ['Geneva'] context measured "
+                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) measured by "
+                      f"name in a bare context, and differs from this stack's own "
+                      f"tofu floor ({n1['floor']}). Tinos is lin-only in fonts.json, "
+                      f"so both gates refuse it and no allowed family covers U+1C80.")
+              else:
+                  print(f"  [arm n1 / #94] DIAGNOSTIC (binary emits no `fontlist` "
+                        f"kind): U+1C80 measured {n1['probe']}, which is neither "
+                        f"Tinos ({n1_ref}) nor the tofu floor ({n1['floor']}). Some "
+                        f"third face answered; this arm cannot say which, and it "
+                        f"scores nothing on this binary.")
+          elif n1_ctx is None:
+              n1_failures.append(
+                  f"setup invalid: could not resolve a single non-zero ctx from this "
+                  f"arm's `fontlist` lines (saw {sorted(n1_ctxs)}), so no line can be "
+                  f"attributed to the fixture context")
           else:
               _mine = [ln for ln in n1_fl if "families=" in ln]
+              # `families` is the LAST field of the format string and a key can
+              # contain spaces, so the value runs to end of line.
+              _fams = [ln.split("families=", 1)[1].strip() for ln in _mine]
+              # Spec B1's GREEN is "width equals the tofu floor or a listed
+              # family AND the log carries pref-fallback ... allowed=0"; its RED
+              # is the width match AND no such line. Without this the GREEN also
+              # covers "the pref path was never consulted at all", which is the
+              # vacuous green lesson 4 is about.
+              _refused = [ln for ln in n1_pf
+                          if "key=tinos" in ln.lower() and "allowed=0" in ln]
               if not _mine:
                   n1_failures.append(
                       f"setup invalid: the run emitted {kind_total('fontlist')} "
-                      f"`fontlist` lines but none in this arm's window, so the "
+                      f"`fontlist` lines but none for ctx={n1_ctx}, so the "
                       f"context's resolved family list could not be read")
-              elif any(ln.split("families=", 1)[1].strip() == "" for ln in _mine):
+              elif any(f == "" for f in _fams):
                   n1_failures.append(
                       "setup invalid: a `fontlist` line came back with an EMPTY "
                       "families= field, which is a child-process AsString failure "
                       "(SharedFontList.h:142-148), not an empty list")
-              elif any(t in ln.split("families=", 1)[1].lower()
-                       for ln in _mine for t in ("tinos", "arimo")):
+              elif any(t in f.lower() for f in _fams for t in ("tinos", "arimo")):
                   n1_failures.append(
                       f"setup invalid: a U+1C80 carrier reached mFonts, so exit 4 "
                       f"answers before exit 7 and this arm tests nothing: {_mine[-1]}")
@@ -790,15 +1014,27 @@ Insert immediately after the arm (h) summary block — after the line printing
                   n1_failures.append(
                       f"PREF PATH LEAK: U+1C80 in a ['Geneva'] context measured "
                       f"{n1['probe']}, which is Tinos's width ({n1_ref}) -- a "
-                      f"lin-only family both gates refuse. pref-fallback lines "
-                      f"seen: {len(n1_pf)}")
+                      f"lin-only family both gates refuse. pref-fallback lines for "
+                      f"ctx={n1_ctx}: {len(n1_pf)}, of which "
+                      f"{len(_refused)} refused tinos")
+              elif not _refused:
+                  n1_failures.append(
+                      f"PREF PATH NOT CONSULTED: the width is right ({n1['probe']} vs "
+                      f"tinos {n1_ref}, floor {n1['floor']}) but no "
+                      f"`pref-fallback ctx={n1_ctx} key=tinos allowed=0` line exists, "
+                      f"so this GREEN would also cover 'the read filter never ran'. "
+                      f"pref-fallback lines for this ctx: {n1_pf[-3:] or 'none'}")
           if n1_failures:
               tripwires.append(f"(n1) ungated pref-font path (#94): {n1_failures}")
-              note_unmeasured("(n1)", n1_failures, "PREF PATH LEAK")
+              # The marker is the common PREFIX of both verdict branches --
+              # "PREF PATH LEAK" and "PREF PATH NOT CONSULTED". Passing only the
+              # first would file a real NOT-CONSULTED verdict as unmeasured,
+              # which is the opposite of what note_unmeasured is for.
+              note_unmeasured("(n1)", n1_failures, "PREF PATH ")
           # -----------------------------------------------------------
 ```
 
-- [ ] **Step 2: Add arm (n2), the #92 equal-width arm**
+- [ ] **Step 3: Add arm (n2), the #92 equal-width arm**
 
 Insert immediately after arm (n1)'s closing `# ---` line.
 
@@ -875,13 +1111,26 @@ Insert immediately after arm (n1)'s closing `# ---` line.
                   f"{n2_gm[-3:] or 'none'}")
           elif kind_total("generic-map") > 0:
               # The fix is in this binary, so the log must corroborate the width.
+              # `key` is the LAST field of
+              # `generic-map ctx=%u generic=%d step=%s key=%s`, and a family key
+              # can contain spaces -- A2's sans-serif row starts with
+              # `Helvetica Neue`, which is in N2_LIST. Splitting on the first
+              # space would yield "helvetica", which is in no fixture list, and
+              # the arm would report the FIX as "named a family outside the
+              # list" and fail the step in Phase 1. So key runs to end of line;
+              # only `generic` and `step`, which are followed by another field,
+              # may be split on whitespace.
+              def _gm_last(ln, name):
+                  return (ln.split(name + "=", 1)[1].strip()
+                          if name + "=" in ln else "")
+
               def _gm_field(ln, name):
                   return (ln.split(name + "=", 1)[1].split(" ", 1)[0]
                           if name + "=" in ln else "")
               _keys = {}
               for _ln in n2_gm:
                   _keys.setdefault(_gm_field(_ln, "generic"), set()).add(
-                      _gm_field(_ln, "key"))
+                      _gm_last(_ln, "key"))
               _flat = {k: sorted(v) for k, v in _keys.items()}
               _allowed = {f.casefold() for f in N2_LIST}
               _named = {k for vs in _keys.values() for k in vs} - {"none", ""}
@@ -919,7 +1168,7 @@ Insert immediately after arm (n1)'s closing `# ---` line.
           # -----------------------------------------------------------
 ```
 
-- [ ] **Step 3: Add arm (h3), the #88 default-font predicate**
+- [ ] **Step 4: Add arm (h3), the #88 default-font predicate**
 
 B3 joins arm (h)'s launch, which is `one_page`'s bare `{}`
 (`.github/workflows/smoke.yml:2175-2177`). It reads arm (h)'s **own** log window, so it
@@ -928,8 +1177,13 @@ before the `=== arms (e)-(h) summary ===` print. Arm (h)'s launches happen insid
 `e`/`f`/`g`/`h` assignment block; take the mark immediately before that block and pass
 it in.
 
+**Deviation from spec §B3, stated rather than absorbed.** The spec makes the `default`
+line the whole verdict. That observable disappears the moment A2 lands, because the group
+stops falling to the default font at all — see the second GREEN shape in the code below.
+The controller is amending §B3 to match; this plan carries the amended form.
+
 First, immediately before the `e = {"mac": one_page("mac", JS_E), ...}` line
-(`.github/workflows/smoke.yml:2203`), insert:
+(`.github/workflows/smoke.yml:2205`), insert:
 
 ```python
           # Arm (h3) reads the log window arms (e)-(h) produce, so the mark has
@@ -938,7 +1192,7 @@ First, immediately before the `e = {"mac": one_page("mac", JS_E), ...}` line
 ```
 
 Then, immediately after arm (h)'s `h_failures` loop ends and before
-`if e_failures:` (`.github/workflows/smoke.yml:2563`), insert:
+`if e_failures:` (`.github/workflows/smoke.yml:2562`), insert:
 
 ```python
           # -----------------------------------------------------------
@@ -966,40 +1220,92 @@ Then, immediately after arm (h)'s `h_failures` loop ends and before
               tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
               return tok[4:] if tok else None
 
+          #  * THE OBSERVABLE MOVES WHEN A2 LANDS, and scoring its absence as a
+          #    broken setup would fail the very build that fixes #88.
+          #    `CAMOU-FL default` is emitted only from
+          #    gfxFontGroup::GetDefaultFont (gfxTextRun.cpp:2316), which is
+          #    reached only when the group's own list resolved to NOTHING.
+          #    Arm (h)'s stack is '48px "ProbeH_full", monospace'
+          #    (smoke.yml:2120-2123). Today, under FONTCONFIG_FILE and a mac
+          #    list, `monospace` -> Cousine and the appended `serif` -> Tinos,
+          #    both lin-only and both refused, so mFonts is empty and the line
+          #    fires -- that is the Phase 0 RED. AFTER A2, CamouGenericCandidate
+          #    answers `monospace` from the table with Menlo (mac-only,
+          #    bundled), mFonts is non-empty, GetFirstValidFont returns a real
+          #    font, GetDefaultFont is never called, and NO `default` line
+          #    exists for that context. So there are two GREEN shapes and the
+          #    arm reports which one fired:
+          #      shape A  a `default ctx=N family=X` line with X in the mac list
+          #      shape B  no `default` line for that ctx, TOGETHER WITH a
+          #               `generic-map ctx=N ... key=<in-list family>` line
+          #               proving the group resolved through the table instead
+          #    Shape B is only available once the binary emits `generic-map`;
+          #    before that, a missing `default` line really is a broken setup.
+          #    kind_total("generic-map") is what tells the two apart.
           h3_face = [ln for ln in camou_fl(efgh_mark, "CAMOU-FL facename",
                                            "key=segoe ui", "allowed=0", limit=None)]
           h3_defaults = camou_fl(efgh_mark, "CAMOU-FL default ", limit=None)
           h3_unfiltered = camou_fl(efgh_mark, "CAMOU-FL default-unfiltered", limit=None)
+          h3_gm = camou_fl(efgh_mark, "CAMOU-FL generic-map", limit=None)
           h3_ctx = _ctx_of(h3_face[-1]) if h3_face else None
           h3_after = [ln for ln in h3_defaults if _ctx_of(ln) == h3_ctx] if h3_ctx else []
           h3_family = (h3_after[-1].split("family=", 1)[1].strip()
                        if h3_after and "family=" in h3_after[-1] else None)
           h3_maclist = {f.casefold() for f in FONTS["mac"]}
+          # `key` is the last field of the generic-map line and may contain
+          # spaces, so it runs to end of line -- same rule as arm (n2).
+          h3_gm_mine = [ln for ln in h3_gm if _ctx_of(ln) == h3_ctx] if h3_ctx else []
+          h3_gm_keys = {ln.split("key=", 1)[1].strip().casefold()
+                        for ln in h3_gm_mine if "key=" in ln} - {"none", ""}
+          h3_gm_inlist = sorted(k for k in h3_gm_keys if k in h3_maclist)
           print(f"  [arm h3 / #88] facename refusals for 'segoe ui': {len(h3_face)}; "
                 f"ctx={h3_ctx}; `default` lines for that ctx: {len(h3_after)}; "
-                f"family={h3_family!r}; default-unfiltered={len(h3_unfiltered)}")
-          for _ln in (h3_face[-2:] + h3_after[-2:]):
+                f"family={h3_family!r}; default-unfiltered={len(h3_unfiltered)}; "
+                f"generic-map for that ctx: {len(h3_gm_mine)} keys={sorted(h3_gm_keys)} "
+                f"in-list={h3_gm_inlist}; kind_total(generic-map)="
+                f"{kind_total('generic-map')}")
+          for _ln in (h3_face[-2:] + h3_after[-2:] + h3_gm_mine[-2:]):
               print(f"      {_ln}")
 
           h3_failures = []
-          if kind_total("facename") == 0 or kind_total("default") == 0:
-              print("  [arm h3 / #88] DIAGNOSTIC: this binary emits no `facename` or "
-                    "no `default` line, so the predicate cannot be read at all.")
+          if kind_total("facename") == 0:
+              print("  [arm h3 / #88] DIAGNOSTIC: this binary emits no `facename` "
+                    "line, so the refusal this predicate follows cannot be seen.")
           elif not h3_face:
               h3_failures.append(
                   f"setup invalid: the run emitted {kind_total('facename')} facename "
                   f"lines but none with key=segoe ui allowed=0 in arm (h)'s window, so "
                   f"the refusal this predicate follows never happened")
+          elif h3_family is None and kind_total("generic-map") > 0:
+              # SHAPE B. A2 is in this binary and the group never needed a
+              # default font. That is the fix working, not a broken fixture --
+              # but only if the table demonstrably answered with an in-list
+              # family for this same context.
+              if h3_gm_inlist:
+                  print(f"  [arm h3 / #88] GREEN, shape B: no `default` line for "
+                        f"ctx={h3_ctx} -- the group never fell to the default font -- "
+                        f"and generic-map resolved {h3_gm_inlist} from the context's "
+                        f"own list. GetDefaultFont was not reached, which is what A2 "
+                        f"is for.")
+              else:
+                  h3_failures.append(
+                      f"DEFAULT FONT OUTSIDE THE LIST: no `default` line for "
+                      f"ctx={h3_ctx} AND no generic-map line naming an in-list family "
+                      f"for it, so nothing shows how the group resolved. generic-map "
+                      f"keys seen: {sorted(h3_gm_keys) or 'none'}")
           elif h3_family is None:
               h3_failures.append(
                   f"setup invalid: no `CAMOU-FL default` line for ctx={h3_ctx} after "
-                  f"the refusal, so the face that served the text was never named")
+                  f"the refusal, and this binary emits no `generic-map` kind, so the "
+                  f"face that served the text was never named")
           elif h3_family.casefold() not in h3_maclist:
               h3_failures.append(
                   f"DEFAULT FONT OUTSIDE THE LIST: after refusing 'segoe ui' for "
                   f"ctx={h3_ctx}, GetDefaultFont served {h3_family!r}, which is not in "
                   f"the mac list. default-unfiltered lines: {len(h3_unfiltered)}")
           else:
+              print(f"  [arm h3 / #88] GREEN, shape A: `default ctx={h3_ctx} "
+                    f"family={h3_family}` names a family in the mac list.")
               # Discriminator only, and it says so when it discriminates nothing.
               _target = h["mac"]["hFull"]
               _others = [h["mac"]["baseline"], h["mac"]["sans"], h["mac"]["serif"]]
@@ -1018,11 +1324,11 @@ Then, immediately after arm (h)'s `h_failures` loop ends and before
           # -----------------------------------------------------------
 ```
 
-- [ ] **Step 4: Add arm (n4), the #82 donor/victim fixture**
+- [ ] **Step 5: Add arm (n4), the #82 donor/victim fixture**
 
 Insert immediately after arm (j2)'s tripwire block, i.e. after the
-`note_unmeasured("(j2)", ...)` line near `.github/workflows/smoke.yml:4180`, and before
-the `EXPECTED_RED` assignment.
+`note_unmeasured("(j2)", j2_failures, "REPLACEMENT-CHAR CACHE LEAK")` line at
+`.github/workflows/smoke.yml:4248`, and before the `EXPECTED_RED` assignment.
 
 ```python
           # -----------------------------------------------------------
@@ -1081,21 +1387,48 @@ the `EXPECTED_RED` assignment.
               N4_DONOR, N4_VICTIM, JS_N4,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
-          n4_ref = one_page_list_arg(None, JS_N4_REF, None)["menlo"]
+          # Every log read BEFORE the reference launch, for the reason stated in
+          # the log-window discipline note at the head of this task.
           n4_fl = camou_fl(n4_mark, "CAMOU-FL fontlist", limit=None)
           n4_sys = camou_fl(n4_mark, "CAMOU-FL sys-fallback", "ch=U+FFFD", limit=None)
           n4_cache = camou_fl(n4_mark, "CAMOU-FL fffd-cache", limit=None)
           n4_pf = camou_fl(n4_mark, "CAMOU-FL pref-fallback", limit=None)
+          n4_ref = one_page_list_arg(None, JS_N4_REF, None)["menlo"]
+          # Spec B4 wants FOUR preconditions, two of them per context: the
+          # donor's `fontlist` line AND the victim's, each times=times with no
+          # carrier. `any(...)` over the whole window satisfies both with one
+          # line and would pass a run in which the victim resolved something
+          # else entirely. Resolve each context id from the line that is unique
+          # to it -- the donor is the context that populated the cache
+          # (sys-fallback), the victim is the one that read it (fffd-cache) --
+          # and then assert each context's own fontlist line.
+          n4_donor_ctx = _ctx_tok(n4_sys[-1]) if n4_sys else None
+          n4_victim_ctx = _ctx_tok(n4_cache[-1]) if n4_cache else None
+
+          def _n4_families(ctx):
+              return [ln.split("families=", 1)[1].strip()
+                      for ln in n4_fl
+                      if "families=" in ln and _ctx_tok(ln) == ctx]
+          # _ctx_tok is defined in arm (n1) above. Both arms live in the same
+          # `python - <<'PY'` heredoc -- (n1) is inserted around smoke.yml:2582
+          # and this arm around :4248 -- so it is in scope here.
           print(f"  [arm n4 / #82] donor fffd={n4_a['fffd']} floor={n4_a['floor']}; "
                 f"victim fffd={n4_b['fffd']} floor={n4_b['floor']}; "
                 f"menlo_ref={n4_ref}; pids={n4_pids}; "
+                f"donor_ctx={n4_donor_ctx} victim_ctx={n4_victim_ctx}; "
                 f"fontlist={len(n4_fl)} sys-fallback(U+FFFD)={len(n4_sys)} "
                 f"fffd-cache={len(n4_cache)} pref-fallback={len(n4_pf)}")
           for _ln in (n4_fl + n4_sys + n4_cache + n4_pf)[-10:]:
               print(f"      {_ln}")
 
           n4_failures = []
-          n4_have_log = kind_total("fffd-cache") > 0 or kind_total("fontlist") > 0
+          # Keyed on `fontlist` ALONE, not on fffd-cache. 34432908522 @ 163ee25
+          # emits fffd-cache but not fontlist, so an `or` here would be flipped
+          # true by one fffd-cache line from arm (j) earlier in the run, take
+          # the log branch, find no fontlist lines and report SETUP-INVALID on a
+          # binary that was never going to have them. Every precondition in the
+          # log branch below reads `fontlist`; that is the kind to test.
+          n4_have_log = kind_total("fontlist") > 0
           if isinstance(n4_pids["after_a"], str) or isinstance(n4_pids["after_b"], str):
               n4_failures.append(
                   f"setup invalid: pgrep failed, so 'same process' could not be "
@@ -1122,24 +1455,45 @@ the `EXPECTED_RED` assignment.
                     f"U+FFFD before SystemFindFontForChar; record which of the bundle's "
                     f"U+FFFD carriers the widths match.")
           else:
-              _don = [ln for ln in n4_fl if "families=" in ln]
-              _don_ok = any("times" in ln.split("families=", 1)[1].lower()
-                            and "menlo" not in ln.split("families=", 1)[1].lower()
-                            for ln in _don)
+              _don = _n4_families(n4_donor_ctx)
+              _vic = _n4_families(n4_victim_ctx)
               _pf_menlo = [ln for ln in n4_pf if "key=menlo" in ln and "allowed=1" in ln]
-              if not _don:
+
+              def _times_only(fams):
+                  return bool(fams) and all(
+                      "times" in f.lower() and "menlo" not in f.lower()
+                      and "lucida" not in f.lower() for f in fams)
+
+              if n4_donor_ctx is None or n4_victim_ctx is None:
+                  n4_failures.append(
+                      f"setup invalid: could not resolve the donor's ctx from a "
+                      f"`sys-fallback ch=U+FFFD` line ({n4_donor_ctx}) or the victim's "
+                      f"from a `fffd-cache` line ({n4_victim_ctx}), so neither "
+                      f"context's fontlist line can be identified")
+              elif n4_donor_ctx == n4_victim_ctx:
+                  n4_failures.append(
+                      f"setup invalid: the donor and the victim resolved to the SAME "
+                      f"ctx ({n4_donor_ctx}); one context cannot leak to itself")
+              elif not _don or not _vic:
                   n4_failures.append(
                       f"setup invalid: {kind_total('fontlist')} `fontlist` lines in the "
-                      f"run, none in this arm's window")
-              elif any(ln.split("families=", 1)[1].strip() == "" for ln in _don):
+                      f"run, but {len(_don)} for the donor (ctx={n4_donor_ctx}) and "
+                      f"{len(_vic)} for the victim (ctx={n4_victim_ctx}); spec B4 wants "
+                      f"both, separately")
+              elif any(f == "" for f in _don + _vic):
                   n4_failures.append(
                       "setup invalid: a `fontlist` line has an EMPTY families= field, "
                       "which is a child-process AsString failure, not an empty list")
-              elif not _don_ok:
+              elif not _times_only(_don):
                   n4_failures.append(
-                      f"setup invalid: neither group resolved to Times-only, so a "
-                      f"carrier is in mFonts and exit 4 answers before the cache: "
-                      f"{_don[-2:]}")
+                      f"setup invalid: the DONOR (ctx={n4_donor_ctx}) did not resolve "
+                      f"to Times-only, so a carrier is in mFonts and exit 4 answers "
+                      f"before the cache: {_don}")
+              elif not _times_only(_vic):
+                  n4_failures.append(
+                      f"setup invalid: the VICTIM (ctx={n4_victim_ctx}) did not resolve "
+                      f"to Times-only, so its own stack could cover U+FFFD and a GREEN "
+                      f"would not be the gate's doing: {_vic}")
               elif _pf_menlo:
                   n4_failures.append(
                       f"setup invalid: the donor's PREF path answered with Menlo "
@@ -1173,7 +1527,7 @@ the `EXPECTED_RED` assignment.
           # -----------------------------------------------------------
 ```
 
-- [ ] **Step 5: Add arm (n5), the #90 speech-voices measurement**
+- [ ] **Step 6: Add arm (n5), the #90 speech-voices measurement**
 
 Insert immediately after arm (n4). This is the gate Task 6 branches on.
 
@@ -1291,7 +1645,7 @@ Insert immediately after arm (n4). This is the gate Task 6 branches on.
           # -----------------------------------------------------------
 ```
 
-- [ ] **Step 6: Add arm (n7), the #91 real-load-status arm**
+- [ ] **Step 7: Add arm (n7), the #91 real-load-status arm**
 
 Insert immediately after arm (n5). This arm needs an HTTP origin: the smoke's
 navigations are all `data:`, an opaque origin from which an absolute `http://` font
@@ -1361,8 +1715,12 @@ a reason that has nothing to do with #91.
                       self.end_headers()
                       self.wfile.write(body)
 
+              # allow_reuse_address is a CLASS attribute read inside
+              # server_bind, so setting it on the instance after construction
+              # does nothing. Set it on the subclass instead -- though with port
+              # 0 the kernel picks a free port and it never mattered.
+              _sock_n7.TCPServer.allow_reuse_address = True
               _srv = _sock_n7.TCPServer(("127.0.0.1", 0), _N7Handler)
-              _srv.allow_reuse_address = True
               n7_port = _srv.server_address[1]
               _thr_n7.Thread(target=_srv.serve_forever, daemon=True).start()
 
@@ -1440,7 +1798,7 @@ a reason that has nothing to do with #91.
           # -----------------------------------------------------------
 ```
 
-- [ ] **Step 7: Write the Phase 0 `EXPECTED_RED` entries**
+- [ ] **Step 8: Write the Phase 0 `EXPECTED_RED` entries**
 
 The six new arms are all expected RED on `34432908522`. Replace `EXPECTED_RED = {}`
 (`.github/workflows/smoke.yml:4267`) with:
@@ -1472,7 +1830,7 @@ The key match uses `t.startswith(k)`, and no existing tag is a prefix of any of 
 so none collide. `(h3)` and `(h)` do not collide either: `"(h3) …".startswith("(h)")` is
 false.
 
-- [ ] **Step 8: Syntax-check, count, commit**
+- [ ] **Step 9: Syntax-check, count, commit**
 
 ```bash
 cd /Users/lang/GolandProjects/github.com/lang315/camoufox
@@ -1543,7 +1901,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 git push origin fix/fonts-round3
 ```
 
-- [ ] **Step 9: Dispatch Phase 0 run 2 on `34432908522`, and a second run on `34236331658`**
+- [ ] **Step 10: Dispatch Phase 0 run 2 on `34432908522`, and a second run on `34236331658`**
 
 ```bash
 gh workflow run smoke.yml -R lang315/camoufox --ref fix/fonts-round3 -f run_id=34432908522
@@ -1569,7 +1927,7 @@ pre-#93 PR #84 artifact, and `EXPECTED_GREEN` on this branch lists `(b2)`, `(b2r
 The only reason it is dispatched is B1's and B4's width-only reading on a binary with
 zero `CAMOU-FL` lines.
 
-- [ ] **Step 10: Read the arms and write the B5 gate**
+- [ ] **Step 11: Read the arms and write the B5 gate**
 
 ```bash
 cd /Users/lang/GolandProjects/github.com/lang315/camoufox
@@ -1586,15 +1944,20 @@ Expected on `<P0R2>` (build `34432908522`, patches identical to `main`):
 
 | Arm | Expected | What a different reading means |
 |---|---|---|
-| `(n1)` | **DIAGNOSTIC**, no tripwire — this binary has no `fontlist` kind | a tripwire here means the control failed; read it |
-| `(n2)` | RED, `GENERIC MISMAPPED` — no `generic-map` kind, so the diagnostic branch prints and the width check still runs the control | GREEN means #92 does not reproduce under `FONTCONFIG_FILE`; stop and report |
-| `(h3)` | RED, `DEFAULT FONT OUTSIDE THE LIST` | `DIAGNOSTIC` means the `facename`/`default` kinds are missing, which contradicts `163ee25`; re-read the counter table |
+| `(n1)` | RED, `PREF PATH LEAK (width-only, no \`fontlist\` kind in this binary)` — this **is** #94's Phase 0 RED, and Task 9 quotes this line | a `DIAGNOSTIC` line instead means the probe matched neither Tinos nor the tofu floor: some third face answered, and #94 has no RED until the fixture is re-derived |
+| `(n2)` | RED, `GENERIC MISMAPPED` — no `generic-map` kind, so the log half is unavailable and the width check plus its `sans-serif` control carry the verdict | GREEN means #92 does not reproduce under `FONTCONFIG_FILE`; stop and report |
+| `(h3)` | RED, `DEFAULT FONT OUTSIDE THE LIST` (shape A cannot be GREEN here: `monospace` → Cousine and `serif` → Tinos are both refused, so `mFonts` is empty and the `default` line fires) | `DIAGNOSTIC` means the `facename` kind is missing, which contradicts `163ee25`; re-read the counter table |
 | `(n4)` | GREEN or `DIAGNOSTIC` — #93's gate is in this binary | RED means #93's gate does not hold and that is a finding of its own |
 | `(n5)` | either; **this is the gate** | `setup invalid` means the binding name or the init-script ordering is wrong — fix the arm, re-dispatch |
 | `(n7)` | RED, `INVENTED LOAD STATUS` | `control invalid` means the HTTP server or the control font is at fault, not #91 |
 
-Expected on `<P0R2_84>` (build `34236331658`, zero `CAMOU-FL` lines): `(n1)` and `(n4)`
-both print their `DIAGNOSTIC` lines. `(n4)`'s line is the B6 trigger — record verbatim
+Every RED in that table is in `EXPECTED_RED` (Step 8), so the run's own triage prints
+`RED (expected)` for each and the step does not fail on them.
+
+Expected on `<P0R2_84>` (build `34236331658`, zero `CAMOU-FL` lines): `(n1)` scores
+width-only exactly as above, and `(n4)` prints its `DIAGNOSTIC` line — `(n4)`'s width
+evidence cannot stand alone, since its whole verdict is about which cached family
+answered, so it appends nothing here. That `(n4)` line is the B6 trigger; record verbatim
 whether the donor reached Menlo.
 
 Write the gate file. It must contain exactly one of the two verdict lines, because
@@ -1693,7 +2056,7 @@ git -C camoufox-152.0.4-beta.31 clean -fdq
 python3 .superpowers/sdd-44/apply_upto.py 2>&1 | tail -25
 ```
 `.superpowers/sdd-44/apply_upto.py` already hardcodes `TARGET = "font-list-spoofing.patch"`
-(line 12) — use it unchanged. Expected: `OK: all N pre-target patches applied clean`,
+(line 19) — use it unchanged. Expected: `OK: all N pre-target patches applied clean`,
 then the target's own apply output, then `=== .rej files left: []`. A clean
 `git status --short` at the repo root before starting; if `patches/` is dirty, stop.
 
@@ -1863,7 +2226,7 @@ uses it.
 
 - [ ] **Step 5: Read-filter the memo in `AddGenericFonts`**
 
-In the same file, replace the tail of `gfxPlatformFontList::AddGenericFonts` (`:2694-2699`):
+In the same file, replace the tail of `gfxPlatformFontList::AddGenericFonts` (`:2691-2697`):
 
 ```cpp
   if (!prefFonts->IsEmpty()) {
@@ -2261,18 +2624,26 @@ In `camoufox-152.0.4-beta.31/gfx/thebes/gfxPlatformFontList.cpp`, immediately af
 // spanning all three bundles plus the common host families -- the intersection
 // with a context's own list is what makes the answer OS-correct, so a row that
 // only named macOS families would answer nothing for a Windows context.
+//
+// nullptr-TERMINATED, so no array-size facility is needed. `std::size` lives in
+// <iterator>, which this file does not include (its only standard include is
+// <numeric> at :53), and mozilla::ArrayLength would need <mozilla/ArrayUtils.h>.
+// A sentinel costs one pointer per row and adds no include.
 static const char* const kCamouMonospaceRow[] = {
-    "Menlo",           "Monaco",          "Consolas",
-    "Courier New",     "Courier",         "Cousine",
-    "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono"};
+    "Menlo",           "Monaco",           "Consolas",
+    "Courier New",     "Courier",          "Cousine",
+    "Liberation Mono", "DejaVu Sans Mono", "Noto Sans Mono",
+    nullptr};
 static const char* const kCamouSansSerifRow[] = {
-    "Helvetica Neue",  "Helvetica",       "Segoe UI",
-    "Arial",           "Arimo",           "Liberation Sans",
-    "DejaVu Sans",     "Noto Sans"};
+    "Helvetica Neue",  "Helvetica",        "Segoe UI",
+    "Arial",           "Arimo",            "Liberation Sans",
+    "DejaVu Sans",     "Noto Sans",
+    nullptr};
 static const char* const kCamouSerifRow[] = {
-    "Times",           "Times New Roman", "Georgia",
+    "Times",           "Times New Roman",  "Georgia",
     "Tinos",           "Liberation Serif", "DejaVu Serif",
-    "Noto Serif"};
+    "Noto Serif",
+    nullptr};
 
 bool gfxPlatformFontList::CamouGenericCandidate(
     FontVisibilityProvider* aFontVisibilityProvider,
@@ -2290,17 +2661,16 @@ bool gfxPlatformFontList::CamouGenericCandidate(
   }
 
   const char* const* rows[3];
-  size_t lens[3];
   switch (aGeneric) {
     case StyleGenericFontFamily::Monospace:
-      rows[0] = kCamouMonospaceRow; lens[0] = std::size(kCamouMonospaceRow);
-      rows[1] = kCamouSansSerifRow; lens[1] = std::size(kCamouSansSerifRow);
-      rows[2] = kCamouSerifRow;     lens[2] = std::size(kCamouSerifRow);
+      rows[0] = kCamouMonospaceRow;
+      rows[1] = kCamouSansSerifRow;
+      rows[2] = kCamouSerifRow;
       break;
     case StyleGenericFontFamily::Serif:
-      rows[0] = kCamouSerifRow;     lens[0] = std::size(kCamouSerifRow);
-      rows[1] = kCamouSansSerifRow; lens[1] = std::size(kCamouSansSerifRow);
-      rows[2] = kCamouMonospaceRow; lens[2] = std::size(kCamouMonospaceRow);
+      rows[0] = kCamouSerifRow;
+      rows[1] = kCamouSansSerifRow;
+      rows[2] = kCamouMonospaceRow;
       break;
     default:
       // SansSerif, Cursive, Fantasy, SystemUi, MozEmoji, Math and None all
@@ -2309,17 +2679,17 @@ bool gfxPlatformFontList::CamouGenericCandidate(
       // (gfxFcPlatformFontList.cpp:2295-2297), is a literal string and not a
       // StyleGenericFontFamily value at all; its caller maps it to
       // StyleGenericFontFamily::SansSerif before reaching here.
-      rows[0] = kCamouSansSerifRow; lens[0] = std::size(kCamouSansSerifRow);
-      rows[1] = kCamouSerifRow;     lens[1] = std::size(kCamouSerifRow);
-      rows[2] = kCamouMonospaceRow; lens[2] = std::size(kCamouMonospaceRow);
+      rows[0] = kCamouSansSerifRow;
+      rows[1] = kCamouSerifRow;
+      rows[2] = kCamouMonospaceRow;
       break;
   }
 
   for (size_t r = 0; r < 3; ++r) {
-    for (size_t i = 0; i < lens[r]; ++i) {
+    for (const char* const* p = rows[r]; *p; ++p) {
       nsAutoCString key;
       if (CamouIsFamilyAllowed(aFontVisibilityProvider,
-                               nsDependentCString(rows[r][i]), &key)) {
+                               nsDependentCString(*p), &key)) {
         aKeyOut = key;
         if (r == 0) {
           aStepOut.AssignLiteral("row");
@@ -2358,8 +2728,7 @@ bool gfxPlatformFontList::CamouGenericCandidate(
 
 `nsDependentCString` is available through `nsString.h`, which this file already pulls in
 via `gfxPlatformFontList.h`. If the build reports it undeclared, replace
-`nsDependentCString(rows[r][i])` with `nsAutoCString(rows[r][i])` — same semantics, one
-copy.
+`nsDependentCString(*p)` with `nsAutoCString(*p)` — same semantics, one copy.
 
 - [ ] **Step 4: Take the table step first in `gfxFcPlatformFontList::FindGenericFamilies`**
 
@@ -2405,6 +2774,15 @@ with:
               mozilla::dom::FontListManager::GetCurrentContext();
           if (camouCtx != 0 &&
               mozilla::dom::FontListManager::HasFontList(camouCtx)) {
+            // FIRST statement in this block, before CamouGenericCandidate is
+            // called. That helper is MOZ_REQUIRES(mLock), and clang's
+            // thread-safety analysis does not carry an enclosing function's
+            // held capabilities into a lambda body -- which is exactly why
+            // upstream repeats this assertion before its own
+            // FindAndAddFamiliesLocked call at :2778. FindGenericFamilies is
+            // itself MOZ_REQUIRES(mLock) (gfxFcPlatformFontList.h:359-361), so
+            // the lock IS held; this is what makes the analysis see it.
+            mLock.AssertCurrentThreadIn();
             StyleGenericFontFamily camouGeneric =
                 StyleGenericFontFamily::SansSerif;
             if (aGeneric.EqualsLiteral("serif")) {
@@ -2416,7 +2794,6 @@ with:
             bool camouAnswered = false;
             if (CamouGenericCandidate(aFontVisibilityProvider, camouGeneric,
                                       camouKey, camouStep)) {
-              mLock.AssertCurrentThreadIn();
               AutoTArray<FamilyAndGeneric, 1> camouFamilies;
               if (gfxPlatformFontList::FindAndAddFamiliesLocked(
                       aFontVisibilityProvider, StyleGenericFontFamily::None,
@@ -2553,20 +2930,33 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
   // GetDefaultFontForPlatform asks fontconfig for, and it is a literal string,
   // not a StyleGenericFontFamily -- it takes the sans-serif row.
   {
-    nsAutoCString camouKey, camouStep;
-    if (CamouGenericCandidate(aFontVisibilityProvider,
-                              StyleGenericFontFamily::SansSerif, camouKey,
-                              camouStep)) {
-      AutoTArray<FamilyAndGeneric, 1> camouFamilies;
-      if (FindAndAddFamiliesLocked(aFontVisibilityProvider,
-                                   StyleGenericFontFamily::None, camouKey,
-                                   &camouFamilies, FindFamiliesFlags(0)) &&
-          !camouFamilies.IsEmpty()) {
-        LOG_FONTLIST(("CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s",
-                      mozilla::dom::FontListManager::GetCurrentContext(),
-                      int(StyleGenericFontFamily::SansSerif), camouStep.get(),
-                      camouKey.get()));
-        return camouFamilies[0].mFamily;
+    const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
+    if (camouCtx != 0 &&
+        mozilla::dom::FontListManager::HasFontList(camouCtx)) {
+      nsAutoCString camouKey, camouStep;
+      bool camouAnswered = false;
+      if (CamouGenericCandidate(aFontVisibilityProvider,
+                                StyleGenericFontFamily::SansSerif, camouKey,
+                                camouStep)) {
+        AutoTArray<FamilyAndGeneric, 1> camouFamilies;
+        if (FindAndAddFamiliesLocked(aFontVisibilityProvider,
+                                     StyleGenericFontFamily::None, camouKey,
+                                     &camouFamilies, FindFamiliesFlags(0)) &&
+            !camouFamilies.IsEmpty()) {
+          camouAnswered = true;
+          LOG_FONTLIST(("CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s",
+                        camouCtx, int(StyleGenericFontFamily::SansSerif),
+                        camouStep.get(), camouKey.get()));
+          return camouFamilies[0].mFamily;
+        }
+      }
+      // Spec A2 asks for generic-map on EVERY context-scoped generic
+      // resolution, `key=none` when the helper declined. Without this line the
+      // one site that can silently fall through to an unfiltered last resort
+      // would be the one site with nothing in the log explaining it.
+      if (!camouAnswered) {
+        LOG_FONTLIST(("CAMOU-FL generic-map ctx=%u generic=%d step=none key=none",
+                      camouCtx, int(StyleGenericFontFamily::SansSerif)));
       }
     }
   }
@@ -2752,10 +3142,10 @@ Expected: `0` FAILED; fuzz/offset only on `window-setter-seal.patch` and
 `system-ui-font-spoofing.patch`; one declaration and one definition of
 `CamouGenericCandidate` plus three call sites (`gfxPlatformFontList.cpp` twice —
 `AddGenericFonts` and `GetDefaultFontLocked` — and `gfxFcPlatformFontList.cpp` once);
-`generic-map` counts `3` and `2` (`AddGenericFonts` emits the answered and the declined
-line, `GetDefaultFontLocked` only the answered one, `FindGenericFamilies` both); and
-`default-unfiltered` counts `2` and `1` (`GetDefaultFontLocked`'s shared and unshared
-tails, `gfxFontGroup::GetDefaultFont`'s single pass-1 line).
+`generic-map` counts `4` and `2` — `AddGenericFonts` and `GetDefaultFontLocked` each emit
+an answered and a declined line, `FindGenericFamilies` both — and `default-unfiltered`
+counts `2` and `1` (`GetDefaultFontLocked`'s shared and unshared tails,
+`gfxFontGroup::GetDefaultFont`'s single pass-1 line).
 
 `grep -c 'mozilla::dom::AutoFontListContext autoFontListCtx(mUserContextId);'
 gfx/thebes/gfxTextRun.cpp` must print **5**: the three that were already there
@@ -2817,8 +3207,10 @@ gfxPlatformFontList::CamouIsFamilyAllowed; the file-static stays private.
 
 Verified: CAMOU_PATCH=gpatch make dir, 0 FAILED, no fuzz or offset on any
 gfx/thebes file; <N> hunks; the applied tree shows the table block above
-FcPatternCreate, three CamouGenericCandidate call sites, and four
-AutoFontListContext(mUserContextId) scopes in gfxTextRun.cpp.
+FcPatternCreate, three CamouGenericCandidate call sites, and five
+AutoFontListContext(mUserContextId) scopes in gfxTextRun.cpp -- the three that
+were already there (EnsureFontList, GetFirstValidFont,
+WhichSystemFontSupportsChar) plus WhichPrefFontSupportsChar and GetDefaultFont.
 Measured by smoke arms (n2) and (h3).
 
 Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
@@ -2943,7 +3335,7 @@ sed 's/^TARGET = .*/TARGET = "font-hijacker.patch"/' .superpowers/sdd-44/apply_u
 grep -n '^TARGET' .superpowers/sdd-fonts3/apply_upto_fh.py
 python3 .superpowers/sdd-fonts3/apply_upto_fh.py 2>&1 | tail -25
 ```
-Expected: `12:TARGET = "font-hijacker.patch"`; then
+Expected: `19:TARGET = "font-hijacker.patch"`; then
 `OK: all N pre-target patches applied clean` and `=== .rej files left: []`.
 
 Confirm the anchors:
@@ -3073,7 +3465,8 @@ void FontFaceImpl::SetStatus(FontFaceLoadStatus aStatus) {
 - [ ] **Step 4: `FontFace::Status()` — read `mStatus` for a non-local face**
 
 In `camoufox-152.0.4-beta.31/layout/style/FontFace.cpp`, replace `Status()`'s tail
-(`:277-290`):
+(`:272-290`, starting at the `// GetFamily() returns the CSS-escaped family name` comment
+directly below the `AutoFontListContext` declaration):
 
 ```cpp
   // GetFamily() returns the CSS-escaped family name (quoted when it
@@ -3220,6 +3613,11 @@ Expected: `spliced layout/style/FontFace.cpp: …` and
 original prose header's; the section-list diff prints **nothing**; the 38-line header
 diff prints **nothing**.
 
+The OLD-vs-SPLICED section-list diff is identical **by construction** — `splice.py`
+copies OLD's non-target sections verbatim — so it can never fail and is not the guard.
+The guard is the OLD-vs-`fh-new.patch` comparison above it, which is the one that can
+detect a workspace edit outside the two target files.
+
 ```bash
 make revert
 git -C camoufox-152.0.4-beta.31 clean -fdq
@@ -3306,7 +3704,7 @@ grep -E '^GATE: B5 (RED|GREEN)$' .superpowers/sdd-fonts3/gate-b5.md
 - `GATE: B5 RED` → run every step below.
 - `GATE: B5 GREEN` → **skip this task entirely.** #90 closes on the measurement alone
   (spec §C); record the skip in the ledger and move to Task 7.
-- Neither, or no file → Task 2 Step 10 did not finish. Stop.
+- Neither, or no file → Task 2 Step 11 did not finish. Stop.
 
 **Files:**
 - Modify: `patches/speech-voices-spoofing.patch`
@@ -3335,7 +3733,7 @@ python3 .superpowers/sdd-fonts3/apply_upto_sv.py 2>&1 | tail -25
 grep -n 'sVoicesMap\|RoverfoxStorageManager' camoufox-152.0.4-beta.31/dom/base/SpeechVoicesManager.cpp
 grep -n 'RoverfoxStorageManager' camoufox-152.0.4-beta.31/dom/base/SpeechVoicesManager.h
 ```
-Expected: `12:TARGET = "speech-voices-spoofing.patch"`;
+Expected: `19:TARGET = "speech-voices-spoofing.patch"`;
 `OK: all N pre-target patches applied clean`; `=== .rej files left: []`; four
 `sVoicesMap` hits and two `RoverfoxStorageManager` hits in the `.cpp`; and one
 `#include "RoverfoxStorageManager.h"` already present in the `.h`, so **no include
@@ -3483,12 +3881,13 @@ bool SpeechVoicesManager::IsVoiceAllowed(uint32_t aUserContextId,
 }
 ```
 
-Then delete the two now-unused includes at the top of the same file — `MutexAutoLock`
-and the hash map are gone with `sVoicesMap`:
+Then delete the **one** now-unused include at the top of the same file. `sVoicesMap` and
+its `MutexAutoLock` are gone, so nothing in the `.cpp` needs `Mutex.h` any more:
 ```cpp
 #include "mozilla/Mutex.h"
 ```
-Remove that line. Leave every other include.
+Remove that line and leave every other include. `nsTHashMap` and `nsTHashSet` come from
+`SpeechVoicesManager.h`, which this change does not prune.
 
 - [ ] **Step 3: Declare the new key helper**
 
@@ -3523,6 +3922,15 @@ git add -A
 git reset -q _READY || true
 git diff --cached first-checkpoint > ../.superpowers/sdd-fonts3/sv-new.patch
 cd ..
+# PRE-splice check, and it is the only one that can fail. splice.py copies
+# OLD's non-target sections verbatim, so OLD-vs-SPLICED is identical by
+# construction; comparing them proves nothing. What has to be checked is
+# OLD vs the REGENERATED diff: the two section lists must contain the same
+# entries, differing only in order (git diff sorts by path, this patch does
+# not). A gained or lost entry means the workspace edit touched a file outside
+# the two targets, and splicing would silently drop it.
+diff <(grep '^diff --git' patches/speech-voices-spoofing.patch | sort) \
+     <(grep '^diff --git' .superpowers/sdd-fonts3/sv-new.patch | sort)
 python3 .superpowers/sdd-fonts3/splice.py \
   patches/speech-voices-spoofing.patch \
   .superpowers/sdd-fonts3/sv-new.patch \
@@ -3545,9 +3953,9 @@ grep -n 'setSpeechVoices' dom/webidl/Window.webidl
 cd ..
 ```
 Expected: the section-list diff prints nothing (order preserved); `0` FAILED; no fuzz or
-offset on any `gfx/thebes/` or `layout/style/` file; `sVoicesMap` count `0`; four
-`VoicesKeyForUserContext` hits (one declaration, one definition, two uses in
-`HasVoices`/`IsVoiceAllowed` plus one in `SetVoices` — read the number back); and
+offset on any `gfx/thebes/` or `layout/style/` file; `sVoicesMap` count `0`; **five**
+`VoicesKeyForUserContext` hits — one declaration in the `.h`, one definition in the
+`.cpp`, and one use each in `SetVoices`, `HasVoices` and `IsVoiceAllowed` — and
 `setSpeechVoices` still present in the WebIDL, unchanged.
 
 - [ ] **Step 5: Commit**
@@ -3607,7 +4015,7 @@ Append to the ledger: the sha and the grep counts.
 
 Every arm this branch fixes must now be GREEN, and an arm that is expected GREEN and
 comes back unmeasured fails under its own name — which is what makes the fix's evidence
-mandatory rather than optional. Replace the `EXPECTED_RED` dict Task 2 Step 7 wrote
+mandatory rather than optional. Replace the `EXPECTED_RED` dict Task 2 Step 8 wrote
 with:
 
 ```python
@@ -3853,7 +4261,8 @@ beside them.
 - Consumes: `BUILD_WINDOWS` and `FIX_SHA` from Task 7; the Windows baseline build
   `34450188525` @ `c8c42ef`.
 - Produces: two JSON result objects, each with the existing keys plus
-  `codepoint` (`{"cp", "carriers", "chosen_reason"}`) and two new `verdicts` rows whose
+  `codepoint` (`{"cp", "carriers", "chosen_reason", "control_cp", "control_carriers",
+  "host_cmap_families", "bundle_cmap_families"}`) and two new `verdicts` rows whose
   `probe` field is `"codepoint"`. Task 9's PR body and the #87 comment quote them.
 
 - [ ] **Step 1: Precondition — the SSH master must already be open**
@@ -3935,14 +4344,40 @@ and extend `build_url` to pass the two new values:
         "cpctl": codepoint_control,
     }
 ```
-with `build_url(families, codepoint, codepoint_control)` and `measure(...)` threading
-both through. `PAGE_JS` already uses `%%` for its literal percent (`'@#$%%^&*()_+'`), so
-the new `%(cp)d` placeholders interpolate correctly.
+`PAGE_JS` already uses `%%` for its literal percent (`'@#$%%^&*()_+'`), so the new
+`%(cp)d` placeholders interpolate correctly.
+
+Thread both values through `build_url` and `measure`. Replace their signatures:
+
+```python
+def build_url(families):
+```
+with:
+```python
+def build_url(families, codepoint, codepoint_control):
+```
+and:
+```python
+def measure(exe, families, camou_config, per_context_list, headful, timeout=60000):
+```
+with:
+```python
+def measure(exe, families, camou_config, per_context_list, headful, timeout=60000,
+            codepoint=0, codepoint_control=0):
+```
+then, inside `measure`, replace:
+```python
+    url = build_url(families)
+```
+with:
+```python
+    url = build_url(families, codepoint, codepoint_control)
+```
 
 Add the selection function beside `choose_host_family`:
 
 ```python
-def choose_codepoint(host_cmaps, bundled_keys, launch_keys):
+def choose_codepoint(host_cmaps, bundle_cmaps, bundled_keys, launch_keys):
     """Pick the codepoint the masked launch must not be able to render.
 
     Returns (cp, carriers, reason) or (None, [], reason).
@@ -3951,8 +4386,16 @@ def choose_codepoint(host_cmaps, bundled_keys, launch_keys):
     the value under test must be reachable in the BARE launch, or its refusal
     under a mask is indistinguishable from "nothing covers it here". So the
     codepoint must be covered by at least one host family, by NO bundled
-    family (a bundled carrier would answer for the masked launch legitimately),
-    and by NO family on the launch list.
+    family, and by NO family on the launch list.
+
+    `bundle_cmaps` is separate from `host_cmaps` and load-bearing. Filtering
+    only on `key in bundled_keys` while iterating host_cmaps excludes bundled
+    families that are ALSO installed on the host -- and Makefile:190 packages a
+    Windows artifact with `--fonts macos linux`, so the normal case is a bundled
+    family the host does NOT have. Such a family contributes no cmap to
+    host_cmaps, is invisible to a name-only filter, and would answer the
+    codepoint under the masked launch legitimately -- which this arm would then
+    score as a leak.
     """
     from collections import defaultdict
     by_cp = defaultdict(list)
@@ -3961,10 +4404,15 @@ def choose_codepoint(host_cmaps, bundled_keys, launch_keys):
             continue
         for cp in cps:
             by_cp[cp].append(orig)
+    # Everything reachable under the masked launch: host families that are on
+    # the list, plus EVERY family the artifact bundles, whether or not the host
+    # also has it.
     covered_elsewhere = set()
     for key, (orig, cps) in host_cmaps.items():
         if key in bundled_keys or key in launch_keys:
             covered_elsewhere |= cps
+    for key, (orig, cps) in bundle_cmaps.items():
+        covered_elsewhere |= cps
     usable = sorted(cp for cp, fams in by_cp.items()
                     if cp not in covered_elsewhere and 0x0100 <= cp < 0x2FFF)
     if not usable:
@@ -3974,7 +4422,8 @@ def choose_codepoint(host_cmaps, bundled_keys, launch_keys):
     cp = usable[0]
     return cp, sorted(by_cp[cp]), (
         "lowest of %d codepoints covered only by host families that are "
-        "neither bundled nor on the launch list" % len(usable))
+        "neither bundled nor on the launch list; bundle coverage of %d "
+        "families was subtracted" % (len(usable), len(bundle_cmaps)))
 
 
 def choose_codepoint_control(host_cmaps, launch_keys):
@@ -3996,10 +4445,165 @@ def choose_codepoint_control(host_cmaps, launch_keys):
     return (usable[0], sorted(in_list[usable[0]])) if usable else (0, [])
 ```
 
-`host_families()` currently returns `{key: (orig, path)}`. Add a sibling
-`host_cmaps()` that returns `{key: (orig, set_of_codepoints)}` using the same
-`_names_from_file` walk plus each face's `cmap` tables, and call it once in `main()`
-beside `host_families()`. Guard it with the same "empty means run under WSL" fatal.
+Add the cmap reader beside `_names_from_file`, and the two walks beside
+`bundle_families` / `host_families`:
+
+```python
+def _cmap_from_file(path):
+    """(family names, covered codepoints) out of one font file.
+
+    Same tolerance as _names_from_file: C:\\Windows\\Fonts holds .fon and other
+    formats fontTools cannot open, and a single unreadable face must not cost
+    the whole walk. Every cmap subtable of every face is unioned -- a font can
+    put its Unicode coverage in a format-4 BMP table, a format-12 full table,
+    or both, and reading only the first would under-report coverage, which for
+    this arm means picking a codepoint some family CAN render.
+    """
+    from fontTools.ttLib import TTCollection, TTFont  # lazy: --self-test needs neither
+
+    ext = path.suffix.lower()
+    if ext not in (".ttf", ".otf", ".ttc", ".otc"):
+        return set(), set()
+    try:
+        faces = (
+            list(TTCollection(str(path)).fonts)
+            if ext in (".ttc", ".otc")
+            else [TTFont(str(path), fontNumber=0, lazy=True)]
+        )
+    except Exception:
+        return set(), set()
+    names, cps = _names_from_file(path), set()
+    for face in faces:
+        try:
+            tables = list(face["cmap"].tables)
+        except Exception:
+            continue
+        for t in tables:
+            try:
+                cps |= set(t.cmap.keys())
+            except Exception:
+                continue
+    return names, cps
+
+
+def host_cmaps(root=r"C:\Windows\Fonts"):
+    """{casefolded name: (original spelling, set of codepoints)} for the host.
+
+    Sibling of host_families(); same directory, same machine-wide-only scope.
+    A family with several files (regular, bold, ...) accumulates the union of
+    their coverage, which is the right question here: "can this family render
+    the codepoint at all".
+    """
+    out = {}
+    base = Path(root)
+    if not base.is_dir():
+        return out
+    for p in sorted(base.iterdir()):
+        if not p.is_file():
+            continue
+        names, cps = _cmap_from_file(p)
+        for name in names:
+            key = name.casefold()
+            orig, seen = out.get(key, (name, set()))
+            out[key] = (orig, seen | cps)
+    return out
+
+
+def bundle_cmaps(dirs):
+    """{casefolded name: (original spelling, set of codepoints)} for the ARTIFACT.
+
+    Not derivable from host_cmaps: Makefile:190 packages Windows with
+    `--fonts macos linux`, so the normal case is a bundled family the host does
+    not have, which contributes no cmap to host_cmaps at all. choose_codepoint
+    subtracts this coverage because such a family answers the codepoint under
+    the masked launch legitimately.
+    """
+    out = {}
+    for d in dirs:
+        for p in sorted(Path(d).rglob("*")):
+            if not p.is_file():
+                continue
+            names, cps = _cmap_from_file(p)
+            for name in names:
+                key = name.casefold()
+                orig, seen = out.get(key, (name, set()))
+                out[key] = (orig, seen | cps)
+    return out
+```
+
+Wire it into `main()`. Immediately after the existing
+`in_list_probes` / `bundled_unlisted_probes` / `families` assignments and **before** the
+`results = {` literal, insert:
+
+```python
+    # #87's codepoint half. Both cmap walks run here, once, because both are
+    # slow (every face of every file) and both feed one selection.
+    host_cps = host_cmaps()
+    bundle_cps = bundle_cmaps(bundle_dirs)
+    cp_value, cp_carriers, cp_reason = choose_codepoint(
+        host_cps, bundle_cps, set(bundled), launch_keys)
+    cp_ctl, cp_ctl_carriers = choose_codepoint_control(host_cps, launch_keys)
+    if not host_cps:
+        print(r"FATAL: no cmaps read from C:\Windows\Fonts. This script must run on "
+              "the native Windows interpreter, not under WSL.")
+        return 1
+```
+
+Then add the block to the `results = {` literal, beside `"candidates"`:
+
+```python
+        "codepoint": {
+            "cp": cp_value,
+            "carriers": cp_carriers,
+            "chosen_reason": cp_reason,
+            "control_cp": cp_ctl,
+            "control_carriers": cp_ctl_carriers,
+            "host_cmap_families": len(host_cps),
+            "bundle_cmap_families": len(bundle_cps),
+        },
+```
+
+Pass both codepoints to all three launches. Replace:
+
+```python
+    results["bare"] = measure(args.executable_path, families, {}, None, args.headful)
+    results["launch_list"] = measure(args.executable_path, families,
+                                     {"fonts": launch_list}, None, args.headful)
+    results["per_context"] = measure(args.executable_path, families, {},
+                                     launch_list, args.headful)
+```
+with:
+```python
+    results["bare"] = measure(args.executable_path, families, {}, None, args.headful,
+                              codepoint=cp_value or 0, codepoint_control=cp_ctl)
+    results["launch_list"] = measure(args.executable_path, families,
+                                     {"fonts": launch_list}, None, args.headful,
+                                     codepoint=cp_value or 0, codepoint_control=cp_ctl)
+    results["per_context"] = measure(args.executable_path, families, {},
+                                     launch_list, args.headful,
+                                     codepoint=cp_value or 0, codepoint_control=cp_ctl)
+```
+
+And print it beside the existing U+FFFD line, replacing:
+
+```python
+    print("\n[U+FFFD, informational only] bare=%s launch_list=%s per_context=%s"
+          % tuple(results[n]["widths"].get("__fffd__") for n in
+                  ("bare", "launch_list", "per_context")))
+```
+with:
+```python
+    print("\n[U+FFFD, informational only] bare=%s launch_list=%s per_context=%s"
+          % tuple(results[n]["widths"].get("__fffd__") for n in
+                  ("bare", "launch_list", "per_context")))
+    print("\n[codepoint arm] U+%04X carriers=%s\n  chosen: %s"
+          % (cp_value or 0, cp_carriers, cp_reason))
+    print("  control U+%04X carriers=%s" % (cp_ctl, cp_ctl_carriers))
+    for name in ("bare", "launch_list", "per_context"):
+        w = results[name]["widths"]
+        print("    %-12s cp=%s floor=%s control=%s"
+              % (name, w.get("__cp__"), w.get("__cpfloor__"), w.get("__cpctl__")))
+```
 
 Add the two verdict rows in `judge`, immediately before the `overall` computation:
 
@@ -4045,9 +4649,67 @@ Add the two verdict rows in `judge`, immediately before the `overall` computatio
                                        "(%s bare vs %s here)." % (cp, bare_cp, v)))
 ```
 
-Extend `self_test()`'s `_canned` with `__cp__`, `__cpfloor__` and `__cpctl__` values and
-add cases for: control-failed-bare, control-failed-masked, fail, pass. Run it before
-shipping anything:
+Extend `_canned` so every result object it builds carries the three new widths, and add
+four cases to `self_test()`. Give `_canned` three new keyword arguments, defaulting to a
+shape that PASSES, so every pre-existing self-test case keeps its current verdict:
+
+```python
+def _canned(host_w=120.0, list_w=None, ctx_w=None, absent=80.0,
+            cp_bare=200.0, cp_masked=80.0, cp_ctl=150.0, cp_ctl_masked=None,
+            cp_floor=80.0, cp=0x2C60,
+            ...):        # keep the existing parameters exactly as they are
+```
+and inside it, after the existing `widths` dicts are built, add the four keys to each
+launch's dict:
+
+```python
+    for _name, _w, _cpv, _ctlv in (
+            ("bare", bare_widths, cp_bare, cp_ctl),
+            ("launch_list", list_widths, cp_masked,
+             cp_ctl if cp_ctl_masked is None else cp_ctl_masked),
+            ("per_context", ctx_widths, cp_masked,
+             cp_ctl if cp_ctl_masked is None else cp_ctl_masked)):
+        _w["__cp__"] = _cpv
+        _w["__cpfloor__"] = cp_floor
+        _w["__cpctl__"] = _ctlv
+    result["codepoint"] = {"cp": cp, "carriers": ["Some Host Face"],
+                           "chosen_reason": "canned"}
+```
+(the local names `bare_widths` / `list_widths` / `ctx_widths` / `result` are whatever
+`_canned` already calls them — read the function and use its own).
+
+Then add the four cases, in the same style as the existing ones:
+
+```python
+    # --- #87 codepoint arm ------------------------------------------------
+    # 1. PASS: reachable bare, refused under both masks, control stable.
+    _check("codepoint pass",
+           _judge_status(_canned(cp_bare=200.0, cp_masked=80.0), "codepoint"),
+           {"pass"})
+    # 2. FAIL: still resolves to the host carrier under a mask.
+    _check("codepoint fail",
+           _judge_status(_canned(cp_bare=200.0, cp_masked=200.0), "codepoint"),
+           {"fail"})
+    # 3. CONTROL FAILED, bare: the codepoint measures its own tofu floor where
+    #    no mask applies, so a refusal under a mask asserts nothing.
+    _check("codepoint control failed bare",
+           _judge_status(_canned(cp_bare=80.0, cp_floor=80.0), "codepoint"),
+           {"unscored"})
+    # 4. CONTROL FAILED, masked: the in-list control moved between launches, so
+    #    the masked launch has no working font stack and "refused" says nothing.
+    _check("codepoint control failed masked",
+           _judge_status(_canned(cp_bare=200.0, cp_masked=80.0,
+                                 cp_ctl=150.0, cp_ctl_masked=99.0), "codepoint"),
+           {"unscored"})
+```
+
+`_check` and `_judge_status` are helpers `self_test()` already has for the family-name
+cases; if it inspects `judge()`'s return directly instead, use the same idiom it uses and
+assert on the set of `status` values whose `probe` is `"codepoint"`. Read the function
+before editing it — the four assertions above are the content, the calling convention is
+whatever is already there.
+
+Run it before shipping anything:
 ```bash
 cd /Users/lang/GolandProjects/github.com/lang315/camoufox
 python3 build-tester/scripts/probe_windows_fonts.py --self-test
@@ -4069,12 +4731,17 @@ For each of the two runs — baseline `34450188525` @ `c8c42ef`, then round 3
 /usr/bin/ssh buildpc 'powershell -Command "cd D:\camou-probe\artifact; gh run download <RUN_ID> -R lang315/camoufox -n CamoufoxBuilds-windows-x86_64 -D .; Get-ChildItem"'
 /usr/bin/ssh buildpc 'powershell -Command "cd D:\camou-probe\artifact; Expand-Archive -Force (Get-ChildItem *.zip)[0].FullName .\cf; Get-ChildItem -Recurse -Filter camoufox.exe | Select-Object -First 1 FullName"'
 ```
-Note the quoting: PowerShell arguments use **single** quotes inside the double-quoted
-`ssh` argument.
+Note the quoting, which is the reverse of what round 2's note said: the whole `ssh`
+argument is **single**-quoted here, and `powershell -Command` takes a **double**-quoted
+string inside it, so any literal quoting the PowerShell command itself needs must be
+single quotes. Getting this backwards ends the command early and the failure looks like a
+PowerShell syntax error, not a quoting one.
 
-Copy the probe over and run it:
+Copy the probe over and run it. `scp` treats the first `:` as the host/path separator, so
+a bare `buildpc:D:/…` target is ambiguous; give the path relative to the SSH session's
+home directory, or quote it so the drive letter survives:
 ```bash
-/usr/bin/scp build-tester/scripts/probe_windows_fonts.py buildpc:D:/camou-probe/probe.py
+/usr/bin/scp build-tester/scripts/probe_windows_fonts.py 'buildpc:D:\camou-probe\probe.py'
 /usr/bin/ssh buildpc 'powershell -Command "D:\camou-probe\venv\Scripts\python.exe D:\camou-probe\probe.py --executable-path <exe path> --bundle-dir <artifact fonts dir> --out D:\camou-probe\out.json"' \
   2>&1 | tee .superpowers/sdd-fonts3/probe-win-<label>.log
 /usr/bin/ssh buildpc 'powershell -Command "Get-Content D:\camou-probe\out.json"' \
@@ -4211,9 +4878,9 @@ the GREEN that close it:
 
 | Issue | Closes on |
 |---|---|
-| #94 | arm (n1) RED on `34432908522`'s Phase 0 reading, GREEN on `<SMOKE_P1>` |
+| #94 | arm (n1) RED on `34432908522`'s Phase 0 run — the width-only `PREF PATH LEAK` line, quoted verbatim, since that binary emits no `fontlist` kind and the log half of the verdict does not exist there — GREEN on `<SMOKE_P1>` with `pref-fallback … key=tinos allowed=0` present |
 | #92 | arm (n2) RED on Phase 0, GREEN on `<SMOKE_P1>` with `generic-map` naming different families |
-| #88 | arm (h3) RED on Phase 0, GREEN on `<SMOKE_P1>` with the `default` line naming an in-list family |
+| #88 | arm (h3) RED on Phase 0, GREEN on `<SMOKE_P1>` — say which GREEN shape fired: shape A is a `default` line naming an in-list family, shape B is no `default` line for that context together with a `generic-map` line naming one, which is what A2 produces once the group stops falling to the default font at all |
 | #91 | arm (n7) RED on Phase 0, GREEN on `<SMOKE_P1>` |
 | #82 | arm (n4) GREEN on `<SMOKE_P1>` **plus** the B6 RED; if B6 could not go RED, #82 **stays open** with the reason |
 | #90 | the measurement, plus the fix only if arm (n5) was RED |
@@ -4231,6 +4898,18 @@ Two sections the PR must carry beyond the per-issue ones:
   unchanged. The `@font-face` path is gated in the shape arm (e) measures, not by a
   scope — `InsertRuleFontFace` still carries no `AutoFontListContext`. The accepted
   offsets on `window-setter-seal.patch` and `system-ui-font-spoofing.patch` go here too.
+- **Which fontconfig the guard measured, and which one ships.** The smoke launches with
+  the bundle's **Linux** `fonts.conf`, where `sans-serif`/`serif`/`monospace` alias to
+  `Arimo`/`Tinos`/`Cousine` — all `lin`-only, all refused under a mac or win per-context
+  list, which is what makes A2's table decide every generic in arms (n1), (n2) and (n4).
+  A shipped Camoufox picks the conf by the **spoofed** OS
+  (`pythonlib/camoufox/utils.py:213-231`), so a mac-fingerprinted session runs with
+  `Helvetica`/`Times`/`Menlo` — all mac families, all allowed under a mac list — and
+  fontconfig answers its own generics there without A2 being consulted. #92 is still real,
+  because the refusal case is reachable whenever the per-context list and the spoofed OS
+  disagree, but arm (n2)'s RED is partly an artifact of the conf the guard chose. State it
+  next to what the guard proves (CLAUDE.md lesson 3); do not claim the arm covers the
+  shipped mac configuration.
 
 The evidence appendix — full smoke arm output, both probe JSON files, the per-kind
 counter tables, the `make dir` grep results — goes in a **comment** on the PR from the
@@ -4333,15 +5012,15 @@ pushed branch, and dispatched a duplicate 90-minute build from a misread notific
 | A2 (#88/#92), accessor, helper + table, `FindGenericFamilies`, `AddGenericFonts`, `GetDefaultFontLocked`, `GetDefaultFont`, `generic-map`, `default-unfiltered` | 4, Steps 2–7 |
 | A3 (#91), `SetStatus` / `Status()` / `Load()` | 5, Steps 3–5 |
 | A4 (#90), conditional `RoverfoxStorageManager` | 6, Steps 2–3 |
-| A5 (#82), no new code — measurement and diagnostic only | 2 Step 4, 7 Step 5 |
-| B0, `FONTCONFIG_FILE`, triage routing, counters, run 1's named outputs | 1, Steps 2–8 |
-| B1 | 2, Step 1 |
-| B2 | 2, Step 2 |
-| B3 | 2, Step 3 |
-| B4 | 2, Step 4 |
-| B5 | 2, Step 5 |
+| A5 (#82), no new code — measurement and diagnostic only | 2 Step 5, 7 Step 5 |
+| B0, `FONTCONFIG_FILE`, triage routing, counters, run 1's named outputs | 1, Steps 2–8; the signature half of the routing lands in 2, Step 1 |
+| B1 | 2, Step 2 |
+| B2 | 2, Step 3 |
+| B3 | 2, Step 4 — with an amended verdict; see the deviations below |
+| B4 | 2, Step 5 |
+| B5 | 2, Step 6 |
 | B6 | 7, Step 5 |
-| B7 | 2, Step 6 |
+| B7 | 2, Step 7 |
 | B8 | 8, Steps 3–4 |
 | C, evidence and closure, PR under 65,536 bytes, appendix as a comment | 9, Steps 4–6 |
 | D, out of scope, stated | Global Constraints (context 0) and 9 Step 2 (the rest) |
@@ -4359,22 +5038,41 @@ defined in Step 3, and called in Tasks 3 and 4 with the same three-parameter sig
 throughout (third parameter defaulted, so §A2's two-argument calls compile).
 `CamouGenericCandidate` is declared and defined in Task 4 with `(FontVisibilityProvider*,
 StyleGenericFontFamily, nsACString&, nsACString&)` at all three call sites.
-`kind_total`, `LOG_START` and `one_page_list_arg` are defined in Task 1 Step 4 / Task 2
-Step 1 and used by name afterwards. Arm tags `(n1)`, `(n2)`, `(h3)`, `(n4)`, `(n5)`,
+`kind_total` and `LOG_START` are defined in Task 1 Step 4; `one_page_list_arg` and
+`_ctx_tok` in Task 2 Step 2, and both are used later in the same heredoc by Steps 3–7.
+`_ctx_of` is arm (h3)'s own local. Arm tags `(n1)`, `(n2)`, `(h3)`, `(n4)`, `(n5)`,
 `(n7)` are consistent across the arms, `EXPECTED_RED`, `EXPECTED_GREEN` and the readback
 tables. The four log format strings in the "Log line contract" table are the strings
-Tasks 3 and 4 emit and the strings Task 2's arms parse.
+Tasks 3 and 4 emit and the strings Task 2's arms parse, and every parse of a
+last-position field (`key=`, `families=`, `family=`, `resolved=`) reads to end of line
+rather than to the next space, because family names contain spaces.
 
-**Gaps found and fixed inline.** One: §A2's `CamouIsFamilyAllowed` two-argument signature
-could not lowercase a key from `gfxTextRun.cpp` because `GenerateFontListKey` is
-protected — resolved with a defaulted third parameter, and the deviation stated in Task 3's
-Interfaces block rather than absorbed.
+**Deviations from the spec, each stated where it applies rather than absorbed.** Four:
+
+1. §A2 gives `CamouIsFamilyAllowed` two arguments. `GenerateFontListKey` is **protected**
+   (`gfxPlatformFontList.h:1002`, under the `protected:` at `:777`), so `gfxTextRun.cpp`
+   cannot lowercase a key the way in-class callers do. The accessor takes a defaulted
+   third parameter that hands the lowercased key back, so §A2's two-argument calls compile
+   unchanged. Stated in Task 3's Interfaces block.
+2. §B3 makes the `CAMOU-FL default` line the whole verdict for #88. That observable
+   disappears once A2 lands: `default` is emitted only from `gfxFontGroup::GetDefaultFont`,
+   which is reached only when the group's own list resolved to nothing, and A2 stops that
+   happening. Arm (h3) therefore has two GREEN shapes and reports which fired. The
+   controller is amending §B3 to match. Stated in Task 2 Step 4.
+3. §A2's `generic-map` bullet asks for the line on **every** context-scoped generic
+   resolution. `GetDefaultFontLocked` originally logged only when the helper answered;
+   it now logs the decline too, which is why Task 4's readback expects four `generic-map`
+   emit lines in `gfxPlatformFontList.cpp` rather than three.
+4. The candidate rows are `nullptr`-terminated rather than sized with `std::size`, which
+   lives in `<iterator>` and is not included by `gfxPlatformFontList.cpp` (its only
+   standard include is `<numeric>`). No new include, same semantics. Stated in Task 4
+   Step 3.
 
 **Resolved in the spec while this plan was being written.** §A2's last bullet gave
 `generic-map` without the `step=` field its own helper bullet requires — the one format
 the spec review flagged to reconcile at patch-writing time. Spec commit `919096e` fixes
 it to `CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s`, which is the string this
 plan's "Log line contract" already carried, so all six emit sites in Task 4 and the
-parser in Task 2 Step 2 agree with the spec as written. No plan change was needed beyond
+parser in Task 2 Step 3 agree with the spec as written. No plan change was needed beyond
 the pin.
 
