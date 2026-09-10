@@ -56,6 +56,39 @@ jobs:
           chmod +x "$bin" || true
           abs="$GITHUB_WORKSPACE/dist/$bin"
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
+          # Camoufox (#44 round 3): the fonts step now launches with
+          # FONTCONFIG_FILE pointing at the bundle's own fonts.conf, the way
+          # pythonlib/camoufox/utils.py:238 ships it, so the measurement is of
+          # the font universe a shipped Camoufox has rather than of the
+          # runner's host fontconfig. Export both paths from here rather than
+          # deriving them in Python: the package layout is a property of
+          # scripts/package.py, not of the guard.
+          # The path is PINNED to the linux directory, never `-name fonts.conf
+          # | head -1`. scripts/package.py copytrees the whole
+          # bundle/fontconfig directory, so the artifact carries THREE
+          # fonts.conf files and `head -1` would pick one by directory order:
+          #   linux/   sans-serif=Arimo  serif=Tinos            monospace=Cousine
+          #   macos/   sans-serif=Helvetica serif=Times         monospace=Menlo
+          #   windows/ sans-serif=Arial  serif=Times New Roman  monospace=Consolas
+          # All three contain the `<dir prefix="cwd">fonts</dir>` needle, so the
+          # substitution guard below cannot catch a wrong pick. Picking the
+          # macOS file would silently make three arms mean something else: (n1)
+          # would resolve serif to Times, which does not cover U+1C80, so the
+          # ungated pref path produces no leak and the arm reads GREEN for the
+          # wrong reason; (n2)'s monospace would resolve to Menlo, which is IN
+          # its fixture list, so #92 would look fixed with no A2 at all; and
+          # (n4)'s donor would get Menlo into the ctx-0 memo, which is its own
+          # SETUP-INVALID branch.
+          fdir=$(find cf -maxdepth 4 -type d -name fonts | head -1)
+          fconf=$(find cf -maxdepth 6 -type f -path '*/fontconfig/linux/fonts.conf' | head -1)
+          if [ -z "$fconf" ]; then
+            echo "::error::no fontconfig/linux/fonts.conf in the package"
+            find cf -maxdepth 6 -type f -name fonts.conf; exit 1
+          fi
+          echo "fonts_dir=$GITHUB_WORKSPACE/dist/$fdir" >> "$GITHUB_OUTPUT"
+          echo "fonts_conf=$GITHUB_WORKSPACE/dist/$fconf" >> "$GITHUB_OUTPUT"
+          echo "--- fonts ---"; echo "dir=$fdir conf=$fconf"
+          ls "$fdir" | head -5
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
       - name: "page.evaluate() is isolated from the page (#51/#62)"
@@ -648,6 +681,73 @@ jobs:
           os.environ["MOZ_LOG"] = "fontlist:4,textrun:4,timestamp,sync,append"
           os.environ["MOZ_LOG_FILE"] = os.path.join(LOG_DIR, "cfx%PID")
 
+          # ---- #44 round 3 (B0): confine fontconfig to the bundle ----------
+          # Until now every launch here ran the raw binary with the runner's
+          # host fontconfig, so ubuntu-24.04's fonts -- DejaVu among them --
+          # were in every font list and every arm measured a font universe no
+          # shipped Camoufox has (recon open question 4). pythonlib/camoufox/
+          # utils.py:238 sets FONTCONFIG_FILE for exactly this reason; this is
+          # the same substitution _generate_fontconfig (utils.py:58-92) makes.
+          #
+          # CONSEQUENCE, stated up front because it decides three arms:
+          # bundle/fontconfig/linux/fonts.conf aliases serif/sans-serif/
+          # monospace to Tinos/Arimo/Cousine -- all `lin`-only in fonts.json,
+          # so all refused under any mac or win per-context list. Every generic
+          # under such a list is therefore decided by A2's table, not by
+          # fontconfig. The file also carries ZERO <include> elements, so the
+          # host's /etc/fonts/conf.d/30-metric-aliases.conf is absent and
+          # `Times` is not silently aliased to `Tinos`.
+          #
+          # WHAT THIS GUARD CANNOT SEE (CLAUDE.md lesson 3). It measures the
+          # LINUX conf. A shipped Camoufox picks the conf by the SPOOFED os:
+          # pythonlib/camoufox/utils.py:213-231 maps user_agent_os through
+          # {'lin':'linux','mac':'macos','win':'windows'} and reads
+          # fontconfig/<os_dir>/fonts.conf. So a real mac-fingerprinted session
+          # runs with sans-serif/serif/monospace aliased to
+          # Helvetica/Times/Menlo -- all mac families, all ALLOWED under a mac
+          # list -- and fontconfig answers its generics correctly there without
+          # A2 ever being consulted. #92 is still real (the refusal case is
+          # reachable whenever the per-context list and the spoofed OS disagree,
+          # which is the whole point of a per-context list), but arm (n2)'s RED
+          # is partly an artifact of the conf this guard chose. Stated here and
+          # in the PR's NOT-verified section rather than discovered later.
+          FONTS_DIR = os.environ.get("CAMOU_FONTS_DIR", "")
+          FONTS_CONF_SRC = os.environ.get("CAMOU_FONTS_CONF", "")
+          assert FONTS_DIR and os.path.isdir(FONTS_DIR), (
+              f"CAMOU_FONTS_DIR is {FONTS_DIR!r}: the unpack step did not find the "
+              f"artifact's fonts directory, so this run would measure the runner's "
+              f"host fontconfig and every arm below would be about the wrong font "
+              f"universe.")
+          assert FONTS_CONF_SRC and os.path.isfile(FONTS_CONF_SRC), (
+              f"CAMOU_FONTS_CONF is {FONTS_CONF_SRC!r}: no fonts.conf in the "
+              f"artifact. Same consequence as above.")
+          FC_DIR = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "camou-fc")
+          os.makedirs(os.path.join(FC_DIR, "cache"), exist_ok=True)
+          _conf = open(FONTS_CONF_SRC, encoding="utf-8").read()
+          _needle = '<dir prefix="cwd">fonts</dir>'
+          assert _needle in _conf, (
+              f"{FONTS_CONF_SRC} does not contain {_needle!r}; the bundle's fonts.conf "
+              f"has changed shape and this substitution would silently do nothing.")
+          # Identity check, not a path check: all three bundled fonts.conf files
+          # carry the needle above, so only their alias targets tell them apart.
+          # Arimo/Tinos/Cousine appear ONLY in the linux file (verified: grep -c
+          # over the macos and windows files returns 0 for all three).
+          _missing = [f for f in ("Arimo", "Tinos", "Cousine") if f not in _conf]
+          assert not _missing, (
+              f"{FONTS_CONF_SRC} does not alias to {_missing}: this is not the LINUX "
+              f"fonts.conf, and arms (n1), (n2) and (n4) all rest on the Linux aliases. "
+              f"See the unpack step's -path '*/fontconfig/linux/fonts.conf' pin.")
+          _conf = _conf.replace(_needle, "<dir>%s</dir>" % FONTS_DIR)
+          FONTCONFIG_FILE = os.path.join(FC_DIR, "fonts.conf")
+          with open(FONTCONFIG_FILE, "w", encoding="utf-8") as _fh:
+              _fh.write(_conf)
+          os.environ["FONTCONFIG_FILE"] = FONTCONFIG_FILE
+          os.environ["XDG_CACHE_HOME"] = os.path.join(FC_DIR, "cache")
+          print(f"  [setup] FONTCONFIG_FILE={FONTCONFIG_FILE} "
+                f"src={FONTS_CONF_SRC} fonts_dir={FONTS_DIR} "
+                f"xdg_cache={os.environ['XDG_CACHE_HOME']}")
+          # -------------------------------------------------------------------
+
           def log_mark():
               # Byte offset of every log file that exists right now. Handing
               # this to camou_fl() reads only what was appended afterwards,
@@ -694,6 +794,20 @@ jobs:
                   if tok:
                       hist[tok] = hist.get(tok, 0) + 1
               return dict(sorted(hist.items())) or "no lines (module off, or the site never ran)"
+
+          # The mark for the WHOLE step, taken before any launch. kind_total()
+          # below counts against it rather than against an arm's own mark,
+          # because the question it answers is about the BINARY, not the arm:
+          # "does this build emit `fontlist` lines at all?" An arm that cannot
+          # tell "the binary predates this kind" from "the kind exists but not
+          # for my context" reports SETUP-INVALID on a binary that was never
+          # going to produce the line -- which under the routing fixed in Step 5
+          # fails the step for a reason no re-run can change.
+          LOG_START = log_mark()
+
+          def kind_total(kind):
+              """How many `CAMOU-FL <kind>` lines this RUN has emitted so far."""
+              return len(camou_fl(LOG_START, f"CAMOU-FL {kind} ", limit=None))
 
           def fffd_resolved(mark, limit=8):
               """`ctx=`/`resolved=` of each U+FFFD global-fallback in a window.
@@ -4288,14 +4402,35 @@ jobs:
           # (its green is vacuous) and must never be reported as "unfixed"
           # (it observed nothing), and its setup-invalid red must not fail the
           # step -- there is nothing a re-run could do about it.
+          # (run_id, signature, why). `run_id` is the run that ESTABLISHED the
+          # structural reason -- an entry without one is a guess, and the assert
+          # below refuses it. `signature` is a substring that must appear in the
+          # arm's OWN recorded unmeasured text when it failed for THAT reason,
+          # so that an arm going unmeasured for any other reason (a process
+          # split, an unreadable pid table, an invalid control) falls through to
+          # SETUP-INVALID and fails the step instead of absorbing silently.
+          #
+          # signature is None until Phase 0 run 1 has been READ. It cannot be
+          # written before then: note_unmeasured stores failures[0][:220], and
+          # which of arm (j)'s five branches fires under FONTCONFIG_FILE is not
+          # knowable from run 34428270062, which predates that launch. While it
+          # is None the absorb below behaves exactly as it does today, so this
+          # reshape alone cannot fail a run. Task 2 Step 1 fills both in from
+          # run 1's own text and turns the match on.
           KNOWN_UNMEASURABLE = {
-              "(j)": "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
-                     "the default font (DejaVu Sans) covers it; fffd-cache lines = 0 in "
-                     "run 34428270062",
-              "(j2)": "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
-                      "the default font (DejaVu Sans) covers it; fffd-cache lines = 0 in "
-                      "run 34428270062",
+              "(j)": ("34428270062", None,
+                      "#82: U+FFFD never reaches SystemFindFontForChar on this bundle -- "
+                      "the default font covers it; fffd-cache lines = 0 in run "
+                      "34428270062. Re-check under FONTCONFIG_FILE: with the host's "
+                      "DejaVu gone and monospace aliased to Cousine (no U+FFFD), this "
+                      "may have become measurable."),
+              "(j2)": ("34428270062", None,
+                       "#82: same, bare-donor variant."),
           }
+          for _k, _v in KNOWN_UNMEASURABLE.items():
+              assert isinstance(_v, tuple) and len(_v) == 3 and _v[0].isdigit(), (
+                  f"KNOWN_UNMEASURABLE[{_k}] must be (run_id, signature, why) with a "
+                  f"real run id: an arm may only be excused by a run someone can read.")
           # Four buckets. An arm in unmeasured_arms is red because its OWN
           # preconditions failed on this run: it reached no verdict, so calling
           # it a regression is as wrong as calling it a confirmed defect.
@@ -4319,7 +4454,9 @@ jobs:
                   expected.append(f"{t[:120]}...")
                   continue
               tag = next((k for k in KNOWN_UNMEASURABLE if t.startswith(k)), None)
-              if tag and tag in unmeasured_arms:
+              _sig = KNOWN_UNMEASURABLE[tag][1] if tag else None
+              if (tag and tag in unmeasured_arms
+                      and (_sig is None or _sig in unmeasured_arms[tag])):
                   unmeasurable.append(t)
                   continue
               tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
@@ -4347,9 +4484,9 @@ jobs:
               else:
                   state = "GREEN"
               print(f"  {k:5} {state}  {why}")
-          for k, why in KNOWN_UNMEASURABLE.items():
+          for k, (_run, _sig, why) in KNOWN_UNMEASURABLE.items():
               hit = any(t.startswith(k) for t in tripwires)
-              if hit and k in unmeasured_arms:
+              if hit and k in unmeasured_arms and (_sig is None or _sig in unmeasured_arms[k]):
                   state = "UNMEASURABLE (known) -- observed nothing; asserts NOTHING:"
               elif hit:
                   state = ("RED WITH A VERDICT -- this arm has become measurable, the "
@@ -4379,7 +4516,7 @@ jobs:
               for tag, first in unmeasured_arms.items():
                   print(f"  {tag:5} {first}")
           for t in unmeasured:
-              print(f"  RED but UNMEASURED: {t}")
+              print(f"  SETUP-INVALID: {t}")
           for t in unexpected:
               print(f"  UNEXPECTED RED: {t}")
           assert not (unexpected or unmeasured), (
@@ -4392,6 +4529,8 @@ jobs:
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
+          CAMOU_FONTS_DIR: ${{ steps.bin.outputs.fonts_dir }}
+          CAMOU_FONTS_CONF: ${{ steps.bin.outputs.fonts_conf }}
 
       # Bulk dump of what the step above captured. Separate from that step, and
       # `if: always()`, for two reasons: it must not spend the guard's
@@ -4414,7 +4553,15 @@ jobs:
                    # #83's mechanism site, added with the mFcSubstituteCache
                    # fix: a hit here answers a direct-named family before the
                    # gate is ever asked.
-                   "fc-subst"]
+                   "fc-subst",
+                   # Round 3. This list is DUPLICATED state: the guard step is a
+                   # different python3 process and cannot import from here, so a
+                   # kind added to one and not the other silently drops out of
+                   # the counter table. See the plan's "Log line contract".
+                   "pref-fallback",     # #94, the pref-memo read filter
+                   "fontlist",          # #94, what EnsureFontList resolved
+                   "generic-map",       # #92, which step answered a generic
+                   "default-unfiltered"]  # #88, the last-resort tail fired
           OTHER = "textrun-systemfallback"   # pre-existing eGfxLog_textrun line
           CAP = 3000                        # printed lines, head + tail
 
