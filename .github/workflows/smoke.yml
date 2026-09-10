@@ -1090,6 +1090,31 @@ jobs:
                     present: present, named: named};
           }"""
 
+          def collided_families(r, nm, label):
+              """Families the width comparison cannot decide in this context.
+
+              `measure[f]` is `w(f) != absentWidth`, so a family that renders
+              the probe string at the fallback face's own advance reads False
+              whether it resolved or not. `nm["present"]` answers the same
+              question without the absent reference -- from the two-stack width
+              test when its discriminator is valid, else from a bare
+              FontFace's status, which never touches the canvas. A family
+              present by that route and absent by width is undecided by width.
+              """
+              assert nm["absentStatus"] == "error", (
+                  f"{label}: a bare FontFace for an impossible family reports "
+                  f"{nm['absentStatus']!r} in the naming probe -- its presence source "
+                  "cannot tell a hit from a miss")
+              out = [f for f in PROBES if nm["present"][f] and not r["measure"][f]]
+              print(f"  [{label}] absentWidth={nm['absentMono']} absentBare={nm['absentBare']} "
+                    f"width-discriminator={'valid' if nm['refValid'] else 'INVALID'} "
+                    f"presence-source={nm['presentSource']} present={nm['present']}")
+              for f in out:
+                  print(f"  [{label}] width reference collides for {f}: it renders the probe "
+                        f"string at absentWidth ({nm['absentMono']}), so the width comparison "
+                        f"cannot decide it; fallback face = one of {nm['named']}")
+              return out
+
           # config launch -- `fonts` is this profile's own Windows subset, and
           # no context installs a per-context list. Covers arms (a), (c), (d).
           with sync_playwright() as pw:
@@ -1132,16 +1157,6 @@ jobs:
               f"{naming['absentMono']} differs from probe()'s {default['absentWidth']} in "
               "the same page -- the width apparatus is not reproducible")
           REF_VALID = naming["refValid"]
-          # Whichever source presence came from, it has to be able to tell a hit
-          # from a miss on a family that certainly is not there.
-          assert naming["absentStatus"] == "error", (
-              f"config launch / default: a bare FontFace for an impossible family reports "
-              f"{naming['absentStatus']!r} in the naming probe -- its second presence "
-              "source cannot tell a hit from a miss")
-          print(f"  [config launch / default] absentWidth={naming['absentMono']} "
-                f"absentBare={naming['absentBare']} width-discriminator="
-                f"{'valid' if REF_VALID else 'INVALID'} presence-source="
-                f"{naming['presentSource']} present={naming['present']}")
           if not REF_VALID:
               # Not a setup failure any more, a finding: `"f"` alone and
               # `"f", monospace` land on the SAME face, so the generic and the
@@ -1154,13 +1169,7 @@ jobs:
                     "FontFace.status instead (canvas-independent by construction)")
           print(f"  [config launch / default] families rendering the probe string at "
                 f"absentWidth and present in this context: {naming['named']}")
-          collided = [f for f in PROBES
-                      if naming["present"][f] and not default["measure"][f]]
-          for f in collided:
-              print(f"  [config launch / default] width reference collides for {f}: it "
-                    f"renders the probe string at absentWidth ({naming['absentMono']}), so "
-                    f"the width comparison cannot decide it; fallback face = one of "
-                    f"{naming['named']}")
+          collided = collided_families(default, naming, "config launch / default")
           if collided and not naming["named"]:
               print("  [config launch / default] the fallback face matches no family in any "
                     "fonts.json list -- an ungated read path chose it and it cannot be "
@@ -1336,13 +1345,22 @@ jobs:
                         'const mark = () => { try { document.documentElement.setAttribute('
                         '"data-fl", JSON.stringify(out)); } catch (e) {} }; '
                         'mark(); document.addEventListener("DOMContentLoaded", mark); })()')
-              fl_b = {}
+              fl_b, b_naming = {}, {}
               for name in ("mac", "win"):
                   ctx = b.new_context()
                   ctx.add_init_script(B_INIT % json.dumps(",".join(FONTS[name])))
                   pg = ctx.new_page()
                   ctxs[name] = probe(pg, f"b-{name}")
                   fl_b[name] = pg.evaluate('() => document.documentElement.getAttribute("data-fl")')
+                  # Same collision arm (a) hits, same context, fresh document:
+                  # MS Gothic renders the probe string at the fallback face's
+                  # own advance, so `measure` reads False for a family this
+                  # context resolved. Candidates are PROBES only, not all three
+                  # fonts.json lists -- arm (b) needs the verdict, and arm (a)
+                  # already carries the full sweep that names the face.
+                  pg2 = ctx.new_page()
+                  pg2.goto(f"data:text/html,<h1>b-{name}-fallback</h1>")
+                  b_naming[name] = pg2.evaluate(NAMING_JS, [PROBES, PROBES])
                   ctx.close()
               print(f"  [arm b / #83 instrumentation] setFontList per context {fl_b}")
               b.close()
@@ -1404,19 +1422,50 @@ jobs:
           # because Geneva regressed here. An arm that kills the run makes
           # every later arm unmeasurable in exactly the situation where
           # someone needs them most.
+          # Resolved per family, not raw `measure`: run 34482267222 read
+          # `MS Gothic: False` in the win context while document.fonts.check
+          # said True and FontFace.status said 'loaded' -- the same fallback-
+          # advance collision arm (a) hits, in arm (b) (CLAUDE.md lesson 4). A
+          # colliding family is decided by the two reads that remain, which are
+          # independent of the canvas and must AGREE; every other family keeps
+          # the width answer unchanged. `resolved` is what the four checks below
+          # score, so a leak still fails: a family absent by all three reads is
+          # False here exactly as it was before.
+          b_collided = {name: collided_families(ctxs[name], b_naming[name],
+                                                f"bare launch / {name} context")
+                        for name in ("mac", "win")}
+          b_resolved = {}
+          for name in ("mac", "win"):
+              r, out = ctxs[name], {}
+              for f in PROBES:
+                  if f not in b_collided[name]:
+                      out[f] = r["measure"][f]
+                      continue
+                  ff, st = bool(r["fontfaces"][f]), r["status"][f] == "loaded"
+                  assert ff == st, (
+                      f"bare launch / {name} context: {f!r} renders at the fallback face's "
+                      f"advance, so width cannot decide it, and the two reads that remain "
+                      f"DISAGREE: document.fonts.check={ff} FontFace.status={r['status'][f]!r}. "
+                      "Nothing in this run can say whether the family resolved.")
+                  out[f] = ff
+              b_resolved[name] = out
+              print(f"  [bare launch / {name} context] resolved (width, plus the two "
+                    f"non-canvas reads where width collides): {out}")
+          mac_res, win_res = b_resolved["mac"], b_resolved["win"]
+
           b_failures = []
-          if not all(mac["measure"][f] for f in MAC_ONLY):
+          if not all(mac_res[f] for f in MAC_ONLY):
               b_failures.append(
                   "a mac context cannot resolve macOS families under a bare launch -- the "
-                  f"per-context filter regressed: {mac['measure']}")
-          if any(mac["measure"][f] for f in WIN_ONLY):
+                  f"per-context filter regressed: {mac_res}")
+          if any(mac_res[f] for f in WIN_ONLY):
               b_failures.append(
-                  f"the mac context still resolves Windows-only families: {mac['measure']}")
-          if not all(win["measure"][f] for f in WIN_ONLY):
-              b_failures.append(f"win context: {win['measure']}")
-          if any(win["measure"][f] for f in MAC_ONLY):
+                  f"the mac context still resolves Windows-only families: {mac_res}")
+          if not all(win_res[f] for f in WIN_ONLY):
+              b_failures.append(f"win context: {win_res}")
+          if any(win_res[f] for f in MAC_ONLY):
               b_failures.append(
-                  f"the win context resolves macOS-only families: {win['measure']}")
+                  f"the win context resolves macOS-only families: {win_res}")
           print(f"  (b) per-context narrowing:  {'RED' if b_failures else 'GREEN'} -- {b_failures}")
           if b_failures:
               tripwires.append(f"(b) per-context narrowing: {b_failures}")
