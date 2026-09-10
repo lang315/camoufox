@@ -6356,9 +6356,12 @@ jobs:
               "(n2)": ("(n2) generic -> family under a per-context list (#92):",
                        "#92, a generic under a per-context list resolves by fontconfig "
                        "distance, not by the generic; unfixed until Task 4"),
-              "(h3)": ("(h3) default font after a per-context refusal (#88):",
-                       "#88, GetDefaultFont's last-resort walk is ungated and unscoped; "
-                       "unfixed until Task 4"),
+              # (h3) is NOT here. It is KNOWN_UNMEASURABLE on this binary --
+              # see that table below. EXPECTED_RED is consulted FIRST and
+              # absorbs whatever red an arm emits, which would have swallowed
+              # (h3)'s setup-invalid and broken Task 1's rule that a
+              # SETUP-INVALID fails the step. #88's Phase 0 RED is carried by
+              # (i)/(i2)'s refused-list render, not by (h3).
               "(n4)": ("(n4) replacement-char cache, donor/victim (#82):",
                        "#82, the U+FFFD cache measurement; RED here means the #93 gate "
                        "does not hold. A GREEN ROW HERE IS VACUOUS ON A BINARY WITH NO "
@@ -6452,6 +6455,19 @@ jobs:
                        "run's own bare-context tofu floor, so it resolved no real face "
                        "and never populated the cache this arm reads. Signature from "
                        "run 34496121342."),
+              "(h3)": ("34496121342", "setup invalid: no `CAMOU-FL default` lin",
+                       "#88: generic loop returns arbitrary allowed families; `default` "
+                       "never fires on a binary without A2, so #88 shape A is "
+                       "unobservable; shape B needs `generic-map`. Measured, not "
+                       "assumed: run 34496121342 counted `default` = 0 for the whole "
+                       "run while arm (h)'s mac generics measured three DIFFERENT "
+                       "widths (baseline 377, sans 433, serif 409), so mFonts was NOT "
+                       "empty and GetDefaultFont was never reached -- by the same "
+                       "fontconfig-distance path arm (n2) measures for #92. Task 7 "
+                       "retires this entry once `generic-map` exists and shape B "
+                       "becomes readable. An (h3) that reaches a real verdict is NOT "
+                       "absorbed here: it falls through to `unexpected` and fails the "
+                       "step, which is the point."),
               "(f)": ("34491802439", "arm (f) width reference collides: naming",
                       "#44 codepoint fallback is unmeasurable BY ADVANCE WIDTH under "
                       "FONTCONFIG_FILE. LIVE CAUSE, the one the arm records on every run: "
