@@ -1273,23 +1273,32 @@ jobs:
               """The `ctx=<n>` token of a CAMOU-FL line, or None."""
               return next((t for t in line.split() if t.startswith("ctx=")), None)
 
-          # The two contexts' ids, read from their own `set` lines. Each half's
-          # FIRST set line is that half's context: mac's is the first in the
-          # launch, win's the first after the win mark.
+          # The two contexts' ids, read from their own `set` lines. R8 (from the
+          # re-review of 98e64ed): camou_fl concatenates each FILE's matches in
+          # filename order, so "the first line" is time order only while both
+          # halves land in one log file. Mac's line is identified by TIME
+          # instead -- it is the one in the whole-launch window that is not in
+          # the win-mark window -- and the two ids being equal is scored below.
           _mac_sets = camou_fl(b2_mark, "CAMOU-FL set ", limit=None)
           _win_sets = (camou_fl(b2_win_mark, "CAMOU-FL set ", limit=None)
                        if b2_win_mark is not None else [])
-          b2_mac_ctx = ctx_token(_mac_sets[0]) if _mac_sets else None
+          _mac_only_sets = [ln for ln in _mac_sets if ln not in _win_sets]
+          b2_mac_ctx = ctx_token(_mac_only_sets[0]) if _mac_only_sets else None
           b2_win_ctx = ctx_token(_win_sets[0]) if _win_sets else None
           # R2: any re-install of the DONOR's list after the re-probe mark.
           b2_reinstall = next(
               (ln for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL set ", limit=None)
                if b2_mac_ctx and b2_mac_ctx in ln.split()), None)
-          # R4: did the recipient actually populate the memo for these families?
-          # A `gate` line under WIN's context for a probe family means the memo
-          # missed and the base lookup ran -- which is what writes the entry the
-          # re-probe would hit. With none of these there is nothing for mac to
-          # hit and an unchanged donor is vacuous.
+          # R4: did the recipient actually reach a gated read path for these
+          # families? R7 (re-review): a `gate` line shows that SOME gated read
+          # path ran for that family under that context -- CamouIsFontAllowed
+          # has nine call sites and only the one inside
+          # FindAndAddFamiliesLocked (gfxPlatformFontList.cpp:2034) is on the
+          # route that writes mFcSubstituteCache. A canvas render of a directly
+          # named family does take that route, so the line is good evidence the
+          # entry was written; it is not a proof, and it is used here only to
+          # rule out the vacuous case where the recipient wrote nothing at all
+          # for the re-probe to hit.
           b2_win_pop = [ln for ln in camou_fl(b2_win_mark, "CAMOU-FL gate", limit=None)
                         if b2_win_ctx and b2_win_ctx in ln.split()
                         and any(f"key={k}" in ln.lower() for k in FC_PROBE_KEYS)]
@@ -1311,20 +1320,46 @@ jobs:
           # try/except and its C2 donor assertion -- applied to this arm's
           # contexts. Collected, never hard-asserted: an AssertionError here
           # would kill the script before arms (e) through (k) ever run.
-          b2_failures = []
-          for _lab, _r in (("mac donor", mac2), ("win recipient", win2),
-                           ("mac after win", mac_after)):
+          #
+          # R6 (re-review of 98e64ed): the preconditions are in TWO groups and
+          # they gate different verdicts. `b2_leaked` -- this arm's primary #83
+          # signal -- is derived from canvas widths alone and depends on the
+          # fontlist log for nothing, so only the WIDTH preconditions may
+          # suppress it. The log-derived preconditions gate the re-probe half
+          # and only the re-probe half. Getting this wrong is not a false green
+          # but the mirror of the problem C5 solves: zero recipient `gate` lines
+          # on the probe families is EXACTLY what the pre-fix leak looks like
+          # (run 34428270062, and structurally guaranteed on a regression --
+          # the donor probes all six families first, so an unkeyed memo answers
+          # every one of the recipient's lookups and the gate is never
+          # reached). Gating the width verdict on it would report a regression
+          # as a capture failure and never print the leak.
+          b2_width_bad, b2_reprobe_bad = [], []
+          for _lab, _r in (("mac donor", mac2), ("win recipient", win2)):
               try:
                   check_signal(f"b2 / {_lab}", _r)
               except AssertionError as exc:
-                  b2_failures.append(f"arm (b2) no signal: {exc}")
+                  b2_width_bad.append(f"arm (b2) no signal: {exc}")
+          if not all(mac2["measure"][f] for f in MAC_ONLY):
+              b2_width_bad.append(
+                  f"arm (b2) setup invalid: the mac donor resolved {mac2['measure']} -- "
+                  f"it never resolved the macOS-only families, so there was nothing for "
+                  f"win to leak and win's clean result is vacuous. Same check arm (b2r) "
+                  f"makes for the same reason (CLAUDE.md lesson 4, donor side).")
+
+          # ---- re-probe-half preconditions ------------------------------------
+          try:
+              check_signal("b2 / mac after win", mac_after)
+          except AssertionError as exc:
+              b2_reprobe_bad.append(f"arm (b2) no signal (re-probe half only): {exc}")
           # The re-probe is only a measurement if it shared the donor's content
           # process: mFcSubstituteCache is a per-process singleton, so a page in
           # a different process cannot see win's entries and would report the
           # donor "unchanged" no matter what the memo holds.
           if isinstance(b2_pids_before, str) or isinstance(b2_pids_after, str):
-              b2_failures.append(
-                  f"arm (b2) setup invalid: could not read the content-process table "
+              b2_reprobe_bad.append(
+                  f"arm (b2) setup invalid (re-probe half only): could not read the "
+                  f"content-process table "
                   f"({b2_pids_before} / {b2_pids_after}), so the re-probe cannot be shown "
                   f"to have run where win's memo entries live.")
           elif (b2_pids_after - b2_pids_before) or not b2_pids_before:
@@ -1334,8 +1369,9 @@ jobs:
               # whenever pgrep succeeds but no line's last field is "tab", and
               # set() - set() is falsy, so without this the arm would assert
               # co-residency on zero evidence.
-              b2_failures.append(
-                  f"arm (b2) setup invalid: the donor re-probe cannot be shown to have "
+              b2_reprobe_bad.append(
+                  f"arm (b2) setup invalid (re-probe half only): the donor re-probe cannot "
+                  f"be shown to have "
                   f"shared the donor's content process. Tab pids were "
                   f"{sorted(b2_pids_before)} before and {sorted(b2_pids_after)} after -- "
                   f"either a new process appeared, or no tab process was visible at all. "
@@ -1358,42 +1394,57 @@ jobs:
           # the re-probe landing in mac's. Under dom.ipc.processCount=1 there
           # should be exactly one; the pids are printed, so a reader can see it.
           if b2_mac_ctx is None:
-              b2_failures.append(
-                  f"arm (b2) setup invalid: no `CAMOU-FL set` line was captured for the "
+              b2_reprobe_bad.append(
+                  f"arm (b2) setup invalid (re-probe half only): no `CAMOU-FL set` line "
+                  f"was captured for the "
                   f"donor's own list, so this arm cannot show that nothing flushed the "
                   f"memo between win's render and the re-probe -- and a flush would make "
                   f"the re-probe's 'unchanged' result vacuous. Either the fontlist log "
                   f"module did not capture, or this build predates the `CAMOU-FL set` "
                   f"line: check the dump step's `set` count.")
           elif b2_reinstall:
-              b2_failures.append(
-                  f"arm (b2) setup invalid: the donor's list was RE-INSTALLED after the "
+              b2_reprobe_bad.append(
+                  f"arm (b2) setup invalid (re-probe half only): the donor's list was "
+                  f"RE-INSTALLED after the "
                   f"re-probe mark ({b2_reinstall!r}). SetFontList flushes both font-name "
                   f"memos, so mac re-resolved through its own gate and its unchanged "
                   f"pattern says nothing about the per-context key.")
           # R4 (re-review): with no win entries in the memo there is nothing for
           # mac's second lookup to hit, so an unchanged donor is guaranteed
           # under a broken key as well as a working one. A `gate` line under
-          # win's context for a probe family is the evidence that the memo
-          # missed and the base lookup ran, which is what writes the entry.
+          # win's context for a probe family shows a gated read path ran for
+          # that family in that context -- see R7 at the derivation above for
+          # why that is evidence the entry was written rather than proof of it.
+          # This gates the RE-PROBE half only (R6): zero such lines is also the
+          # pre-fix leak's own signature, and the width verdict must still be
+          # computed and printed when it happens.
           if not b2_win_pop:
-              b2_failures.append(
-                  f"arm (b2) setup invalid: no `CAMOU-FL gate` line under the recipient's "
+              b2_reprobe_bad.append(
+                  f"arm (b2) setup invalid (re-probe half only): no `CAMOU-FL gate` line "
+                  f"under the recipient's "
                   f"context ({b2_win_ctx}) names any probe family, so nothing shows the "
                   f"recipient populated mFcSubstituteCache for the families the re-probe "
                   f"then looks up. With no entries to hit, the donor's unchanged pattern "
                   f"is guaranteed whatever the key does.")
-          if not all(mac2["measure"][f] for f in MAC_ONLY):
-              b2_failures.append(
-                  f"arm (b2) setup invalid: the mac donor resolved {mac2['measure']} -- "
-                  f"it never resolved the macOS-only families, so there was nothing for "
-                  f"win to leak and win's clean result is vacuous. Same check arm (b2r) "
-                  f"makes for the same reason (CLAUDE.md lesson 4, donor side).")
+          # R8: mac and win must be DIFFERENT contexts. If camou_fl's file
+          # grouping put win's `set` line where mac's was expected, the two ids
+          # come back equal and the reinstall check above looked for the wrong
+          # context while still passing.
+          if b2_mac_ctx is not None and b2_mac_ctx == b2_win_ctx:
+              b2_reprobe_bad.append(
+                  f"arm (b2) setup invalid (re-probe half only): the donor and recipient "
+                  f"`set` lines both read {b2_mac_ctx}, so the two contexts cannot be told "
+                  f"apart in the log and the reinstall check above was made against the "
+                  f"wrong context.")
+
           # Scored only on a valid setup, as arm (b2r) does: a leak verdict read
-          # off a dead donor is not a verdict.
+          # off a dead donor is not a verdict. Note the two guards: the width
+          # verdict needs only the width preconditions (R6).
+          b2_failures = list(b2_width_bad) + list(b2_reprobe_bad)
           b2_leaked, b2_reverse, b2_lost, b2_gained = [], [], [], []
-          if not b2_failures:
+          if not b2_width_bad:
               b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
+          if not b2_width_bad and not b2_reprobe_bad:
               # The keying half: the donor's pattern after win rendered must be
               # the pattern it had before. The two directions do NOT mean the
               # same thing, which is why they are collected separately -- see
