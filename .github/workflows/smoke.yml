@@ -3237,6 +3237,9 @@ jobs:
           if h3_failures:
               tripwires.append(f"(h3) default font after a per-context refusal (#88): {h3_failures}")
               note_unmeasured("(h3)", h3_failures, "DEFAULT FONT OUTSIDE THE LIST")
+              print(f"  (h3) default font after a per-context refusal (#88):  RED -- {h3_failures}")
+          else:
+              print("  (h3) default font after a per-context refusal (#88):  GREEN -- no tripwire")
           # -----------------------------------------------------------
 
           if e_failures:
@@ -3517,6 +3520,9 @@ jobs:
               # first would file a real NOT-CONSULTED verdict as unmeasured,
               # which is the opposite of what note_unmeasured is for.
               note_unmeasured("(n1)", n1_failures, "PREF PATH ")
+              print(f"  (n1) ungated pref-font path (#94):  RED -- {n1_failures}")
+          else:
+              print("  (n1) ungated pref-font path (#94):  GREEN -- no tripwire")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
@@ -3719,6 +3725,9 @@ jobs:
           if n2_failures:
               tripwires.append(f"(n2) generic -> family under a per-context list (#92): {n2_failures}")
               note_unmeasured("(n2)", n2_failures, "GENERIC MISMAPPED")
+              print(f"  (n2) generic -> family under a per-context list (#92):  RED -- {n2_failures}")
+          else:
+              print("  (n2) generic -> family under a per-context list (#92):  GREEN -- no tripwire")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
@@ -5861,6 +5870,9 @@ jobs:
           if n4_failures:
               tripwires.append(f"(n4) replacement-char cache, donor/victim (#82): {n4_failures}")
               note_unmeasured("(n4)", n4_failures, "U+FFFD CACHE LEAK")
+              print(f"  (n4) replacement-char cache, donor/victim (#82):  RED -- {n4_failures}")
+          else:
+              print("  (n4) replacement-char cache, donor/victim (#82):  GREEN -- no tripwire")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
@@ -6048,6 +6060,9 @@ jobs:
           if n5_failures:
               tripwires.append(f"(n5) per-context speech voices (#90): {n5_failures}")
               note_unmeasured("(n5)", n5_failures, "VOICES LEAK")
+              print(f"  (n5) per-context speech voices (#90):  RED -- {n5_failures}")
+          else:
+              print("  (n5) per-context speech voices (#90):  GREEN -- no tripwire")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
@@ -6265,6 +6280,9 @@ jobs:
               if n7_failures:
                   tripwires.append(f"(n7) FontFace load status for non-local faces (#91): {n7_failures}")
                   note_unmeasured("(n7)", n7_failures, "INVENTED LOAD STATUS")
+                  print(f"  (n7) FontFace load status for non-local faces (#91):  RED -- {n7_failures}")
+              else:
+                  print("  (n7) FontFace load status for non-local faces (#91):  GREEN -- no tripwire")
           # -----------------------------------------------------------
 
           # Phase D triage. This branch closes #80, #81 and #83, and #82 is
