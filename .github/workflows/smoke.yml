@@ -604,8 +604,104 @@ jobs:
           # must not agree.
           pip install --quiet 'playwright==1.55.0' fonttools
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
-          import json, os
+          import glob, json, os
           from playwright.sync_api import sync_playwright
+
+          # ---- #83/#88 diagnostic capture (Phase D) -------------------------
+          # Task 5 put nine CAMOU-FL lines behind MOZ_LOG's "fontlist" module;
+          # this turns them on. EVERY launch in this step already passes
+          # `env={**os.environ, ...}`, so setting the variables here
+          # instruments all of them and adds no launch of its own.
+          #
+          # Option choices, each read out of xpcom/base/Logging.cpp on the
+          # beta.31 tree rather than recalled:
+          #  * `%PID` (MOZ_LOG_PID_TOKEN, Logging.h:28) is expanded per process
+          #    by ExpandLogFileName (Logging.cpp:121-146): the parent writes
+          #    `cfx-main.<pid>.moz_log`, each content process
+          #    `cfx-child.<pid>.moz_log`. Without it every process in a launch
+          #    shares one file and no line can be attributed to a process.
+          #  * `append` -- the default open mode is "w" (Logging.cpp:572), so a
+          #    later launch that is handed a recycled pid would TRUNCATE an
+          #    earlier launch's file. That would silently delete arm (b2)'s
+          #    evidence and leave arm (j2)'s, which is the failure mode this
+          #    whole capture exists to avoid.
+          #  * `sync` (Logging.cpp:418) fflushes every line. The per-arm marks
+          #    below take byte offsets DURING a launch; without sync a line
+          #    written before a mark can land in the file after it, and the
+          #    slice would attribute the donor's lines to the recipient.
+          #  * `timestamp` (Logging.cpp:416) prefixes each line with a UTC
+          #    wall-clock time, which is what lets the dump step merge the
+          #    per-process files into one time order.
+          # `textrun:5` is for the pre-existing eGfxLog_textrun
+          # `(textrun-systemfallback-*)` line at gfxPlatformFontList.cpp:1475,
+          # which names the face system fallback actually returned.
+          LOG_DIR = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "camou-fontlog")
+          os.makedirs(LOG_DIR, exist_ok=True)
+          os.environ["MOZ_LOG"] = "fontlist:5,textrun:5,timestamp,sync,append"
+          os.environ["MOZ_LOG_FILE"] = os.path.join(LOG_DIR, "cfx%PID")
+
+          def log_mark():
+              # Byte offset of every log file that exists right now. Handing
+              # this to camou_fl() reads only what was appended afterwards,
+              # which is what attributes a line to ONE arm instead of to the
+              # ~20 launches this step makes.
+              return {p: os.path.getsize(p) for p in glob.glob(os.path.join(LOG_DIR, "*"))}
+
+          def camou_fl(mark, *needles, limit=12):
+              """Log lines appended since `mark` that contain every needle.
+
+              `limit=None` means unlimited; otherwise the LAST `limit` lines,
+              because the interesting render is the one at the end of an arm.
+              """
+              out = []
+              for p in sorted(glob.glob(os.path.join(LOG_DIR, "*"))):
+                  try:
+                      size = os.path.getsize(p)
+                      start = mark.get(p, 0)
+                      if start > size:
+                          # `append` means a log file cannot shrink, so this is
+                          # defensive. If one did, the offset is meaningless and
+                          # seeking to it returns nothing -- which is
+                          # indistinguishable from "the site never ran", the
+                          # worst way for this to fail. Read the whole file and
+                          # say so, so the over-report is visible.
+                          out.append(f"({os.path.basename(p)} shrank below the mark, "
+                                     f"{size} < {start}: showing the WHOLE file, so lines "
+                                     f"from earlier arms may appear below)")
+                          start = 0
+                      with open(p, encoding="utf-8", errors="replace") as fh:
+                          fh.seek(start)
+                          for line in fh:
+                              if all(n in line for n in needles):
+                                  out.append(f"{os.path.basename(p)} {line.rstrip()}")
+                  except OSError as exc:
+                      out.append(f"(could not read {os.path.basename(p)}: {exc})")
+              return out if limit is None else out[-limit:]
+
+          def ctx_histogram(mark, kind):
+              """How many CAMOU-FL <kind> lines carried each ctx= value."""
+              hist = {}
+              for ln in camou_fl(mark, f"CAMOU-FL {kind} ", limit=None):
+                  tok = next((t for t in ln.split() if t.startswith("ctx=")), None)
+                  if tok:
+                      hist[tok] = hist.get(tok, 0) + 1
+              return dict(sorted(hist.items())) or "no lines (module off, or the site never ran)"
+
+          def fffd_resolved(mark, limit=8):
+              """`ctx=`/`resolved=` of each U+FFFD global-fallback in a window.
+
+              `resolved=%s` is the LAST field of the format string
+              (gfxPlatformFontList.cpp:1644) and a family name contains spaces
+              ("Segoe UI"), so the value is everything to end of line -- taking
+              the next whitespace token would silently truncate it.
+              """
+              out = []
+              for ln in camou_fl(mark, "CAMOU-FL global-fallback", "ch=U+FFFD", limit=limit):
+                  ctx = next((t for t in ln.split() if t.startswith("ctx=")), "ctx=?")
+                  res = ln.split("resolved=", 1)[1] if "resolved=" in ln else "?"
+                  out.append(f"{ctx} resolved={res}")
+              return out
+          # -------------------------------------------------------------------
 
           FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
           MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
@@ -645,8 +741,17 @@ jobs:
                     absentWidth: absentW};
           }"""
 
-          def probe(page):
-              page.goto("data:text/html,<h1>f</h1>")
+          def probe(page, marker="f"):
+              # `marker` goes into the document URI, which is the only field
+              # the CAMOU-FL `group ... uri=` line carries that can name a
+              # context (the `gate` line has no uri at all). Without it every
+              # context in this step navigates to the same
+              # `data:text/html,<h1>f</h1>` and no font group in the log can be
+              # attributed to the context that produced it (#83). Arm (b2r)
+              # has always used a distinct URI per context and reproduces the
+              # same verdict as arm (b2), so the URI is not a variable either
+              # arm is sensitive to.
+              page.goto(f"data:text/html,<h1>{marker}</h1>")
               return page.evaluate(JS, PROBES)
 
           def check_signal(label, r):
@@ -663,7 +768,7 @@ jobs:
               b = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({"fonts": FONTS["win"]})})
-              default = probe(b.new_page())
+              default = probe(b.new_page(), "a-default")
               b.close()
 
           print(f"  [config launch / default] measure        {default['measure']}")
@@ -818,7 +923,7 @@ jobs:
                   ctx = b.new_context()
                   ctx.add_init_script(B_INIT % json.dumps(",".join(FONTS[name])))
                   pg = ctx.new_page()
-                  ctxs[name] = probe(pg)
+                  ctxs[name] = probe(pg, f"b-{name}")
                   fl_b[name] = pg.evaluate('() => document.documentElement.getAttribute("data-fl")')
                   ctx.close()
               print(f"  [arm b / #83 instrumentation] setFontList per context {fl_b}")
@@ -939,12 +1044,17 @@ jobs:
           # and probed. Confirmed by a single-variable pair (this
           # task's own discriminator): reference ordering alone does
           # not reproduce the leak; donor liveness alone does, fully,
-          # every family. This arm is EXPECTED RED on every build until
-          # #83 is fixed -- it is not a broken test, it is the honest
-          # state of the feature in the shape it is actually used.
+          # every family. This arm was EXPECTED RED through Phase B,
+          # where it was not a broken test but the honest state of the
+          # feature in the shape it is actually used. #83's fix is on
+          # this branch, so on this binary it is expected GREEN and a
+          # red here is a regression -- see EXPECTED_GREEN at the end
+          # of this step.
           # Kept as its own arm rather than folded into arm (b), so a
           # regression in the CLOSED-donor case (arm (b) going red)
           # remains separately visible from this one.
+          b2_mark = log_mark()
+          b2_win_mark = None
           with sync_playwright() as pw:
               b2 = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
@@ -978,15 +1088,22 @@ jobs:
               ctx2_mac = b2.new_context()
               ctx2_mac.add_init_script(INIT % json.dumps(",".join(FONTS["mac"])))
               pg_mac = ctx2_mac.new_page()
-              mac2 = probe(pg_mac)
+              mac2 = probe(pg_mac, "b2-mac")
               fl_mac = pg_mac.evaluate('() => document.documentElement.getAttribute("data-fl")')
               # Deliberately NOT closed here -- the one variable this
               # arm tests. Arm (b) above calls ctx.close() at this exact
               # point, before the next context exists.
+              # Second mark, taken between the donor's render and the
+              # recipient's: gate lines carry no uri, so a whole-launch
+              # histogram cannot say which context a gate answered for. Lines
+              # after this mark are the win half -- with the caveat that the
+              # donor is deliberately still alive and its process can keep
+              # logging, so this narrows the window rather than isolating it.
+              b2_win_mark = log_mark()
               ctx2_win = b2.new_context()
               ctx2_win.add_init_script(INIT % json.dumps(",".join(FONTS["win"])))
               pg_win = ctx2_win.new_page()
-              win2 = probe(pg_win)
+              win2 = probe(pg_win, "b2-win")
               fl_win = pg_win.evaluate('() => document.documentElement.getAttribute("data-fl")')
               print(f"  [donor-alive / #83 instrumentation] mac setFontList {fl_mac}")
               print(f"  [donor-alive / #83 instrumentation] win setFontList {fl_win}")
@@ -1006,6 +1123,27 @@ jobs:
           print(f"  [donor-alive / mac context] measure {mac2['measure']}")
           print(f"  [donor-alive / win context, donor still open] measure {win2['measure']}")
 
+          # #83 log slice. The question this answers is the one arm (b2)'s
+          # measurement cannot: when the win context rendered, which ctx= did
+          # the gate see, and which font group served it. The `group` line
+          # carries hop= (which link of provider -> document -> inner window ->
+          # BrowsingContext produced the id, or where it broke) and uri= (which
+          # context, via probe()'s marker); the `gate` histogram says which id
+          # CamouIsFontAllowed was actually asked about. ctx=0 in either is the
+          # fail-open case: CamouIsFontAllowed treats 0 as "no per-context
+          # list" and allows every family (CLAUDE.md lesson 5).
+          for _m in ("b2-mac", "b2-win"):
+              for _ln in camou_fl(b2_mark, "CAMOU-FL group", _m, limit=6):
+                  print(f"  [b2 / #83 log / {_m}] {_ln}")
+          print(f"  [b2 / #83 log] gate ctx histogram, whole launch: "
+                f"{ctx_histogram(b2_mark, 'gate')}")
+          print(f"  [b2 / #83 log] gate ctx histogram, win half only: "
+                f"{ctx_histogram(b2_win_mark, 'gate') if b2_win_mark is not None else 'mark never taken'}")
+          print(f"  [b2 / #83 log] scope-switch lines: "
+                f"{camou_fl(b2_mark, 'CAMOU-FL scope-switch', limit=8) or 'none'}")
+          print(f"  [b2 / #83 log] set lines (per-context lists installed): "
+                f"{camou_fl(b2_mark, 'CAMOU-FL set ', limit=8) or 'none'}")
+
           b2_failures = []
           b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
           if b2_leaked:
@@ -1014,7 +1152,7 @@ jobs:
                   f"never allowed, with the donor (mac) context still open -- the "
                   f"production shape this feature exists for. See #83.")
           print(f"  (b2) donor-alive per-context leak (#83):  "
-                f"{'RED (expected -- #83 not yet fixed)' if b2_failures else 'GREEN'} -- "
+                f"{'RED' if b2_failures else 'GREEN'} -- "
                 f"{b2_failures or 'win correctly saw none of macOS-only families even with the donor still open'}")
           if b2_failures:
               tripwires.append(f"(b2) donor-alive per-context leak (#83): {b2_failures}")
@@ -1075,6 +1213,7 @@ jobs:
 
           b2r = {}
           b2r_pids = {}
+          b2r_marks = {}
           with sync_playwright() as pw:
               b2r_browser = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
@@ -1088,6 +1227,9 @@ jobs:
                   env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
               b2r_ctxs = []
               for label in ("mac", "win"):
+                  # One mark per context, taken before that context exists, so
+                  # the win slice below is the win half of the launch.
+                  b2r_marks[label] = log_mark()
                   ctx = b2r_browser.new_context()
                   b2r_ctxs.append(ctx)
                   page = ctx.new_page()
@@ -1114,6 +1256,18 @@ jobs:
                     f"(expect saw=true applied=true): {b2r[label]['fl_doc']!r}")
               print(f"  [b2r / {label}] measure {b2r[label]['res']['measure']}")
           print(f"  [b2r / pids] {b2r_pids}")
+
+          # #83 log slice, same three questions as arm (b2)'s above. This arm's
+          # URIs already carry a per-context marker (`b2r-mac` / `b2r-win`),
+          # which is where probe()'s marker parameter came from.
+          for label in ("mac", "win"):
+              for _ln in camou_fl(b2r_marks[label], "CAMOU-FL group",
+                                  f"b2r-{label}", limit=6):
+                  print(f"  [b2r / #83 log / b2r-{label}] {_ln}")
+              print(f"  [b2r / #83 log / {label}] gate ctx histogram: "
+                    f"{ctx_histogram(b2r_marks[label], 'gate')}")
+              print(f"  [b2r / #83 log / {label}] set lines: "
+                    f"{camou_fl(b2r_marks[label], 'CAMOU-FL set ', limit=4) or 'none'}")
 
           b2r_failures = []
           for label in ("mac", "win"):
@@ -1191,6 +1345,12 @@ jobs:
                 f"{b2r_failures or 'win saw none of the macOS-only families -- H1 CONFIRMED: the list is process-local and the leak is process placement, not a broken gate'}")
           if b2r_failures:
               tripwires.append(f"(b2r) #83 discriminator: {b2r_failures}")
+              # Phase D: (b2r) left EXPECTED_RED, so without this a `no signal`
+              # or `setup invalid` red -- the two b2r_kind values that measure
+              # NOTHING -- would be reported as an UNEXPECTED RED, i.e. as a
+              # regression in the fix. "arm (b2r)/#83:" is the prefix ONLY the
+              # leak branch emits, which is exactly note_unmeasured's contract.
+              note_unmeasured("(b2r)", b2r_failures, "arm (b2r)/#83:")
           # -----------------------------------------------------------
 
           # -----------------------------------------------------------
@@ -2902,10 +3062,22 @@ jobs:
           #     family, leaving nothing to inherit. Turned off with
           #     gfx.font_rendering.fallback.async=false, and asserted: A's own
           #     automatic `final` must equal A's directly-named Tahoma width.
+          j_mark = log_mark()
           j_a, j_b, j_pids = two_contexts_one_launch(
               FFFD_DONOR, FFFD_NO_PROBE, JS_4C,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
+          # Task 4's fallback-observation question, now answerable: which face
+          # the donor's U+FFFD fallback actually settled on, from the browser's
+          # own log rather than inferred from a width. Three of this arm's five
+          # failure branches are `setup invalid` / `unmeasured` verdicts about
+          # the donor, and this line is what names WHY one of them fired --
+          # `resolved=<none>` means GlobalFontFallback refused everything, so
+          # there was never anything for context B to inherit.
+          print(f"  [arm j / U+FFFD fallback observed] "
+                f"{fffd_resolved(j_mark) or 'no global-fallback line for U+FFFD in this launch'}")
+          print(f"  [arm j / U+FFFD fallback observed] textrun system fallback: "
+                f"{camou_fl(j_mark, 'textrun-systemfallback', limit=4) or 'none'}")
           j_sig = j_a["named"]["Tahoma"]      # the leak signature
           # DIAGNOSTIC ONLY (wrong-GREEN item 1 above): Arial has no U+FFFD
           # glyph, so this routes through the same system fallback as `final`
@@ -3516,10 +3688,20 @@ jobs:
               # measured in its own bare launch before any candidate is named,
               # and a donor sitting on it is scored `setup invalid` -- the same
               # shape arm (j) uses.
+              j2_mark = log_mark()
               j2_a, j2_b, j2_pids = two_contexts_bare_then_narrow(
                   FFFD_NO_PROBE, JS_4C,
                   extra_prefs={"gfx.font_rendering.fallback.async": False,
                                "fission.autostart": False})
+              # Arm (j)'s fallback observation, for the bare donor. Both of this
+              # arm's `setup invalid` branches are statements about what the
+              # bare donor resolved; this names the face the browser itself
+              # reports, so a Phase D `setup invalid` says why rather than only
+              # that widths matched.
+              print(f"  [arm j2 / U+FFFD fallback observed] "
+                    f"{fffd_resolved(j2_mark) or 'no global-fallback line for U+FFFD in this launch'}")
+              print(f"  [arm j2 / U+FFFD fallback observed] textrun system fallback: "
+                    f"{camou_fl(j2_mark, 'textrun-systemfallback', limit=4) or 'none'}")
               j2_sig_families = [fam for fam, w in j2_a["named"].items()
                                  if abs(w - j2_a["final"]) < 0.01]
               # DIAGNOSTIC ONLY, for arm (j)'s reason: Arial has no U+FFFD glyph
@@ -3596,30 +3778,46 @@ jobs:
               note_unmeasured("(j2)", j2_failures, "REPLACEMENT-CHAR CACHE LEAK")
           # -----------------------------------------------------------
 
-          # Separate arms that are red because a known defect is still open
-          # from arms that are red because something broke. Without this the
-          # workflow is permanently red -- arm (b2) guards #83 and arms (j)/(j2)
-          # guard #82, neither of which is fixed -- and a genuinely new
-          # regression would be invisible under an already-failing run.
-          # An expected-red arm that turns GREEN is also reported: it means the
-          # defect it guards was fixed somewhere, and this list is now stale.
-          EXPECTED_RED = {
-              "(b2)": "#83, cross-context font leak, donor-alive; unfixed",
-              "(b2r)": "#83 DISCRIMINATOR, not a triaged defect -- a RED here is the "
-                       "measurement, and its own printed line is what the gate is read "
-                       "from. Listed so the run's later steps still execute; removed in "
-                       "Phase D once #83 is decided",
-              "(j)": "#82, U+FFFD cache; arm repaired 2026-09-09 to score by positive "
-                     "identification against the donor's own Tahoma width",
-              "(j2)": "#82, same, bare-context variant",
+          # Phase D triage. This branch closes #80, #81, #82 and #83, so on
+          # this binary NOTHING is expected red any more -- an entry left in
+          # EXPECTED_RED would hide a regression in the fix itself. The dict
+          # stays (empty) rather than being deleted: it is the machinery for
+          # triaging a future defect that is measured but not yet fixed, and
+          # the loop below prints nothing when it is empty.
+          #
+          # (b2r) is gone from BOTH tables. It was Phase B's #83 discriminator,
+          # where a RED *was* the measurement and the gate was read off its own
+          # `[b2r / kind]` line. On a binary carrying the fix it is an ordinary
+          # arm: a leak red there is a regression like any other, so it routes
+          # to UNEXPECTED, and a `no signal` / `setup invalid` red routes to
+          # UNMEASURED through the note_unmeasured() call at its tripwire.
+          EXPECTED_RED = {}
+          # The five arms that were triaged red in Phase B and must now be
+          # GREEN. Listed so the run prints a per-arm verdict line for each
+          # even when every one of them passes -- with EXPECTED_RED empty the
+          # loop below prints nothing, and Phase D's readback needs a line per
+          # arm to quote, not the absence of one.
+          EXPECTED_GREEN = {
+              "(b2)": "#83, cross-context font leak with the donor context still alive",
+              "(j)": "#82, U+FFFD replacement-char cache, narrow-list donor",
+              "(j2)": "#82, same, bare-context donor",
               "(i2)": "#81 ordering case -- both lists installed before either context "
-                      "renders, which clear-on-install cannot see; unfixed",
-              "(k)": "#80, url() web fonts refused when a fonts list is configured; unfixed",
+                      "renders",
+              "(k)": "#80, url() web fonts under a configured fonts list",
           }
-          expected, unexpected = [], []
+          # Three buckets, not two. An arm in unmeasured_arms is red because its
+          # OWN preconditions failed: it reached no verdict, so calling it a
+          # regression is as wrong as calling it a confirmed defect. It still
+          # fails the step -- an unmeasured arm is missing evidence and Phase D
+          # must not quote a green conclusion over it -- but under its own name.
+          expected, unmeasured, unexpected = [], [], []
           for t in tripwires:
               tag = next((k for k in EXPECTED_RED if t.startswith(k)), None)
-              (expected if tag else unexpected).append(t if not tag else f"{t[:120]}...")
+              if tag:
+                  expected.append(f"{t[:120]}...")
+                  continue
+              tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
+              (unmeasured if tag else unexpected).append(t)
           print("=== tripwire triage ===")
           for k, why in EXPECTED_RED.items():
               hit = any(t.startswith(k) for t in tripwires)
@@ -3634,19 +3832,120 @@ jobs:
                   state = ("GREEN -- was expected red, so the defect it guards may be "
                            "fixed; update EXPECTED_RED")
               print(f"  {k:5} {state}  {why}")
+          for k, why in EXPECTED_GREEN.items():
+              hit = any(t.startswith(k) for t in tripwires)
+              if hit and k in unmeasured_arms:
+                  state = "RED but UNMEASURED -- no verdict; does NOT assert:"
+              elif hit:
+                  state = "RED (UNEXPECTED) -- expected GREEN on this binary:"
+              else:
+                  state = "GREEN"
+              print(f"  {k:5} {state}  {why}")
           if unmeasured_arms:
               print("=== UNMEASURED (red, but the arm measured nothing -- not a verdict) ===")
               for tag, first in unmeasured_arms.items():
                   print(f"  {tag:5} {first}")
+          for t in unmeasured:
+              print(f"  RED but UNMEASURED: {t}")
           for t in unexpected:
               print(f"  UNEXPECTED RED: {t}")
-          assert not unexpected, (
+          assert not (unexpected or unmeasured), (
               f"{len(unexpected)} arm(s) red for a reason this guard does not already "
-              f"know about:\n" + "\n".join(unexpected))
+              f"know about:\n" + "\n".join(unexpected) +
+              f"\n{len(unmeasured)} arm(s) red because their OWN preconditions failed -- "
+              f"no verdict either way, and no evidence Phase D can quote:\n" +
+              "\n".join(unmeasured))
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
+
+      # Bulk dump of what the step above captured. Separate from that step, and
+      # `if: always()`, for two reasons: it must not spend the guard's
+      # 10-minute budget, and the run in which the guard FAILS is exactly the
+      # run whose log someone needs. It launches nothing -- MOZ_LOG was set
+      # inside the guard's own Python, so every one of its ~20 launches was
+      # already instrumented.
+      - name: "CAMOU-FL font log dump (#83/#88 diagnostic)"
+        if: always()
+        timeout-minutes: 5
+        run: |
+          python3 - <<'PY'
+          import glob, os, re, sys
+
+          LOG_DIR = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "camou-fontlog")
+          # The nine CAMOU-FL kinds Task 5 added (task-5-report.md section 2a),
+          # in the order they appear there.
+          KINDS = ["gate", "set", "group", "scope-switch", "fffd-cache",
+                   "global-fallback", "sys-fallback", "default", "facename"]
+          OTHER = "textrun-systemfallback"   # pre-existing eGfxLog_textrun line
+          CAP = 3000                        # printed lines, head + tail
+
+          files = sorted(glob.glob(os.path.join(LOG_DIR, "*")))
+          total_bytes = sum(os.path.getsize(p) for p in files)
+          print(f"log dir: {LOG_DIR}")
+          print(f"files: {len(files)}   bytes: {total_bytes}")
+          if not files:
+              # Not an error: this step also runs when the guard step failed
+              # before its first launch. Say which it is rather than printing
+              # an empty section that reads like "the log lines are gone".
+              print("NO LOG FILES -- either the guard step never launched a browser, or "
+                    "MOZ_LOG_FILE did not take effect. A build without patches/"
+                    "font-list-spoofing.patch has no CAMOU-FL sites at all.")
+              sys.exit(0)
+
+          # `timestamp` puts UTC wall clock at the head of every line
+          # (xpcom/base/Logging.cpp:797-801), so sorting on it merges the
+          # per-process files into one time order; file and line number break
+          # ties and keep a file's own lines in the order it wrote them.
+          TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d+) UTC")
+          rows, counts = [], {k: 0 for k in KINDS + [OTHER]}
+          for p in files:
+              base = os.path.basename(p)
+              with open(p, encoding="utf-8", errors="replace") as fh:
+                  for i, raw in enumerate(fh):
+                      line = raw.rstrip()
+                      if "CAMOU-FL " in line:
+                          kind = line.split("CAMOU-FL ", 1)[1].split(" ", 1)[0]
+                          counts[kind] = counts.get(kind, 0) + 1
+                      elif OTHER in line:
+                          counts[OTHER] += 1
+                      else:
+                          continue
+                      m = TS.match(line)
+                      rows.append((m.group(1) if m else "", base, i, line))
+          rows.sort(key=lambda r: (r[0], r[1], r[2]))
+
+          print(f"total matching lines: {len(rows)}")
+          for k in KINDS + [OTHER]:
+              print(f"  {k:18} {counts.get(k, 0)}")
+          for k in sorted(set(counts) - set(KINDS) - {OTHER}):
+              print(f"  {k:18} {counts[k]}   <-- kind not in Task 5's nine")
+          if not rows:
+              print("ZERO matching lines despite non-empty log files: the fontlist module "
+                    "logged, but no CAMOU-FL site ran. Check that this artifact carries "
+                    "patches/font-list-spoofing.patch.")
+
+          # The full set goes to a file the Upload results step collects, so a
+          # reader can re-slice what the cap below drops.
+          with open("camou-fl.txt", "w", encoding="utf-8") as out:
+              for ts, base, i, line in rows:
+                  out.write(f"{base}:{i}\t{line}\n")
+          print("full set written to camou-fl.txt (uploaded with smoke-results)")
+
+          print("=== CAMOU-FL lines, merged time order ===")
+          if len(rows) <= CAP:
+              shown = rows
+              elided = 0
+          else:
+              half = CAP // 2
+              shown = rows[:half] + rows[-half:]
+              elided = len(rows) - CAP
+          for n, (ts, base, i, line) in enumerate(shown):
+              if elided and n == CAP // 2:
+                  print(f"  ... {elided} line(s) elided; camou-fl.txt has all of them ...")
+              print(f"  {base}:{i} {line}")
+          PY
 
       - name: "record_video under headless=virtual (#93/#458 regression guard)"
         timeout-minutes: 15
@@ -3749,6 +4048,7 @@ jobs:
           path: |
             spoof-test.log
             smoke.log
+            camou-fl.txt
             goapi/integration-results/
           if-no-files-found: warn
           retention-days: 14
