@@ -955,17 +955,27 @@ jobs:
             const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
             const wf = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
             const wb = (f) => { c.font = '72px "' + f + '"'; return c.measureText(s).width; };
+            // Second presence source, for when the first one's discriminator
+            // collapses. A bare FontFace resolves synchronously in this fork
+            // and never touches the canvas, so it cannot be fooled by two
+            // faces sharing an advance -- it is arm (d)'s read, reused here.
+            const st = (f) => { try { return new FontFace(f, 'local("' + f + '")').status; }
+                                catch (e) { return 'exception'; } };
             const absentMono = wf('__CamouAbsentRef__0002');
             const absentBare = wb('__CamouAbsentRef__0002');
+            const refValid = (absentBare !== absentMono);
+            const src = refValid ? 'width' : 'FontFace.status';
+            const isPresent = (f) => refValid ? (wf(f) === wb(f)) : (st(f) === 'loaded');
             const present = {};
-            for (const f of probes) present[f] = (wf(f) === wb(f));
+            for (const f of probes) present[f] = isPresent(f);
             const named = [];
             for (const f of cands) {
               if (wf(f) !== absentMono) continue;   // not at the fallback advance
-              if (wb(f) === absentBare) continue;   // refused, not the fallback face
+              if (!isPresent(f)) continue;          // refused, so not the fallback face
               named.push(f);
             }
-            return {absentMono: absentMono, absentBare: absentBare,
+            return {absentMono: absentMono, absentBare: absentBare, refValid: refValid,
+                    presentSource: src, absentStatus: st('__CamouAbsentRef__0002'),
                     present: present, named: named};
           }"""
 
@@ -1010,29 +1020,31 @@ jobs:
               f"config launch / default: the naming probe's absent reference "
               f"{naming['absentMono']} differs from probe()'s {default['absentWidth']} in "
               "the same page -- the width apparatus is not reproducible")
-          REF_VALID = naming["absentBare"] != naming["absentMono"]
+          REF_VALID = naming["refValid"]
+          # Whichever source presence came from, it has to be able to tell a hit
+          # from a miss on a family that certainly is not there.
+          assert naming["absentStatus"] == "error", (
+              f"config launch / default: a bare FontFace for an impossible family reports "
+              f"{naming['absentStatus']!r} in the naming probe -- its second presence "
+              "source cannot tell a hit from a miss")
           print(f"  [config launch / default] absentWidth={naming['absentMono']} "
-                f"absentBare={naming['absentBare']} presence-discriminator="
-                f"{'valid' if REF_VALID else 'INVALID'} "
-                f"present={naming['present']}")
+                f"absentBare={naming['absentBare']} width-discriminator="
+                f"{'valid' if REF_VALID else 'INVALID'} presence-source="
+                f"{naming['presentSource']} present={naming['present']}")
+          if not REF_VALID:
+              # Not a setup failure any more, a finding: `"f"` alone and
+              # `"f", monospace` land on the SAME face, so the generic and the
+              # canvas default font are one and the same here -- the ungated
+              # last-resort default is serving both (#88's face). Presence
+              # falls to FontFace.status, which never touches the canvas.
+              print("  [config launch / default] the monospace generic and the canvas "
+                    "default font render the probe string at the same advance, so the "
+                    "width test cannot decide presence; presence read from "
+                    "FontFace.status instead (canvas-independent by construction)")
           print(f"  [config launch / default] families rendering the probe string at "
                 f"absentWidth and present in this context: {naming['named']}")
-          if REF_VALID:
-              collided = [f for f in PROBES
-                          if naming["present"][f] and not default["measure"][f]]
-          else:
-              # The absent-reference-free test cannot run. Fall back to the two
-              # reads that at least do not use the canvas at all; they are
-              # independent of it and of each other, but not of the context.
-              print("  [config launch / default] SETUP-INVALID for the presence probe: the "
-                    "monospace generic and the canvas default font render the probe string "
-                    "at the same advance, so presence cannot be decided without the absent "
-                    "reference. Collisions are taken from document.fonts.check + "
-                    "FontFace.status instead.")
-              collided = [f for f in PROBES
-                          if not default["measure"][f]
-                          and bool(default["fontfaces"][f])
-                          and default["status"][f] == "loaded"]
+          collided = [f for f in PROBES
+                      if naming["present"][f] and not default["measure"][f]]
           for f in collided:
               print(f"  [config launch / default] width reference collides for {f}: it "
                     f"renders the probe string at absentWidth ({naming['absentMono']}), so "
@@ -1066,12 +1078,11 @@ jobs:
               # Strengthening, not a weakening: a mac family that leaked AND
               # happened to render at the fallback advance would be invisible to
               # `measure` alone, exactly the way MS Gothic was.
-              if REF_VALID:
-                  assert not naming["present"][f], (
-                      f"the default context resolved {f!r} under a Windows launch -- the "
-                      "width comparison missed it because it renders at the fallback "
-                      "face's advance, but the absent-reference-free presence test says "
-                      f"it is there: {naming['present']}")
+              assert not naming["present"][f], (
+                  f"the default context resolved {f!r} under a Windows launch -- the "
+                  "width comparison missed it because it renders at the fallback face's "
+                  f"advance, but the presence test (source {naming['presentSource']}) "
+                  f"says it is there: {naming['present']}")
 
           # (c) document.fonts and text measurement are the same context.
           # Skipped for a colliding family: there `measure` is False by
@@ -2538,16 +2549,26 @@ jobs:
           # been measuring tofu in both cases and no gate could ever make
           # this arm discriminate -- that would be a probe-design defect,
           # not evidence about the gate.
-          assert f_control["mac"] != f["mac"], (
-              f"arm (f) positive control: naming 'PingFang HK' explicitly measured the "
-              f"SAME width ({f_control['mac']}) as the impossible-family fallback "
-              f"({f['mac']}) on mac -- U+6F22 never rendered as a real glyph here, so "
-              f"this arm cannot prove anything about the gate")
-          assert f_control["win"] != f["win"], (
-              f"arm (f) positive control: naming 'MS Gothic' explicitly measured the "
-              f"SAME width ({f_control['win']}) as the impossible-family fallback "
-              f"({f['win']}) on win -- U+6F22 never rendered as a real glyph here, so "
-              f"this arm cannot prove anything about the gate")
+          #
+          # This WAS a hard assert. It is now a recorded collision, because on
+          # this bundle it is the reference that broke, not the gate (CLAUDE.md
+          # lesson 4, the CJK bullet; the Geneva discriminator above already
+          # names "arm (f)'s CJK em-square collision" as an instance of the same
+          # class). `f[label]` doubles as the arm's tofu floor, and it was only
+          # ever a floor because the runner's host DejaVu drew a .notdef box:
+          # run 34445606698's mac bisection reads 23 for the refused family
+          # 'MS Gothic', run 34475502454's reads 48 for the same family in the
+          # same context. Under FONTCONFIG_FILE there is no host face left to
+          # draw that box, every bundled CJK family draws U+6F22 on the full em
+          # square, and 48 == 48 says nothing about WHICH face served it. A hard
+          # assert here would also erase arms (g)-(k) and the whole triage block
+          # for a probe-design limit that asserts nothing about #44.
+          f_floor_valid = {}
+          for label, fam in (("mac", "PingFang HK"), ("win", "MS Gothic")):
+              f_floor_valid[label] = f_control[label] != f[label]
+              print(f"  [{label} / arm f] tofu floor -- named {fam!r} width "
+                    f"{f_control[label]} vs impossible-family fallback {f[label]}: "
+                    f"{'floor is a real reference' if f_floor_valid[label] else 'COLLIDES, no floor'}")
 
           # Well-formedness floor for arm (e): document.fonts has
           # exactly the 3 rules this page declared, non-empty, real
@@ -2680,7 +2701,20 @@ jobs:
               bisect_disallowed[label] = [fam for fam in bisect_matches[label] if fam not in FONTS[label]]
 
           f_failures = []
-          if not f_repeatable:
+          if not all(f_floor_valid.values()):
+              # FIRST, and alone: everything below this point is scored against
+              # `f[label]` as a tofu floor, and the floor collided. This string
+              # is what note_unmeasured/`unmeasured_arms` records as the arm's
+              # signature, so it must be the only entry.
+              f_failures.append(
+                  f"arm (f) width reference collides: naming a context's own CJK family "
+                  f"measures the SAME width as the impossible-family fallback (mac "
+                  f"{f_control['mac']} vs {f['mac']}, win {f_control['win']} vs "
+                  f"{f['win']}). Every bundled CJK family draws U+6F22 on the full em "
+                  f"square and no host face is left to draw a .notdef box, so no advance "
+                  f"width here can say WHICH face served the codepoint: no tofu floor, no "
+                  f"discriminator, NO VERDICT about the gate either way")
+          elif not f_repeatable:
               f_failures.append(
                   f"mac settled value not repeatable across separate launches on the same "
                   f"list: mac={mac_final} mac2={mac2_final} -- width is not a deterministic "
@@ -2825,6 +2859,15 @@ jobs:
                   f"{e_failures}. Discriminator result -- {hypothesis}")
           if f_failures:
               tripwires.append(f"(f) codepoint fallback -- settled values: {f_failures}")
+              # Not note_unmeasured(): that helper takes ONE substring that only
+              # the real leak branch emits, and this arm has five real-verdict
+              # branches (not repeatable / never left the floor / same value /
+              # no allowed match / ambiguous). The condition here is exact --
+              # when the floor collides, the branch above is the ONLY entry in
+              # f_failures and no verdict was reached, so nothing real can be
+              # swallowed by recording it.
+              if not all(f_floor_valid.values()):
+                  unmeasured_arms["(f)"] = f_failures[0][:220]
           if g_failures:
               tripwires.append(f"(g) worker vs arm (b) per-context ground truth disagree: {g_failures}")
           if h_failures:
@@ -4572,6 +4615,17 @@ jobs:
                       "may have become measurable."),
               "(j2)": ("34428270062", None,
                        "#82: same, bare-donor variant."),
+              "(f)": ("34475502454", None,
+                      "#44 codepoint fallback is unmeasurable BY ADVANCE WIDTH under "
+                      "FONTCONFIG_FILE. Every bundled CJK family draws U+6F22 on the full "
+                      "em square (48 at 48px) and the host face that used to draw a "
+                      ".notdef box is gone, so run 34475502454's bisection reads 48 for "
+                      "EVERY candidate in BOTH contexts, refused ones included -- run "
+                      "34445606698, on the host fontconfig, read 23 for the same refused "
+                      "families. The gate is not what changed; the reference is. Needs a "
+                      "shape that is not an advance -- the pixel-checksum discriminator "
+                      "this step already uses for Geneva. Falls through to a step failure "
+                      "the moment this arm reaches a real verdict again."),
           }
           for _k, _v in KNOWN_UNMEASURABLE.items():
               assert isinstance(_v, tuple) and len(_v) == 3 and _v[0].isdigit(), (
