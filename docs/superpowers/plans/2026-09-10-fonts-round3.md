@@ -5309,9 +5309,11 @@ change beyond the pin:
 
 ## Outcome
 
-Written after the work landed, on `fix/fonts-round3` at `df0bdad`, 37 commits above
-`main` at `c8c42ef`, 6 files changed, 9,350 insertions and 207 deletions. Where this
-section and the plan above disagree, this section is what happened.
+Written after the work landed, against `fix/fonts-round3` at `df0bdad` — the last
+commit of the measurement work, the 37th above `main` at `c8c42ef`, 6 files
+changed, 9,350 insertions and 207 deletions. The commit carrying this section is
+the one after it. Where this section and the plan above disagree, this section is
+what happened.
 
 ### Which tasks ran
 
