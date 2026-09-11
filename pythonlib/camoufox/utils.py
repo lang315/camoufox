@@ -1035,7 +1035,14 @@ def launch_options(
         ff_version_str = str(ff_version)
         LeakWarning.warn('ff_version', i_know_what_im_doing)
     else:
-        ff_version_str = installed_verstr().split('.', 1)[0]
+        # A caller-supplied binary answers for itself (#97). installed_verstr()
+        # reads the MANAGED install and raises when there is none, so consulting
+        # it here made executable_path require a `camoufox fetch` the launch
+        # never uses. Derived from the binary about to run, not asserted by the
+        # caller, so no LeakWarning: the warning's premise does not apply.
+        ff_version_str = (
+            _bundle_verstr(executable_path) or installed_verstr().split('.', 1)[0]
+        )
 
     # Generate a fingerprint
     _used_preset = False

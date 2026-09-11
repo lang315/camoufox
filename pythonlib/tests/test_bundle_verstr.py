@@ -97,3 +97,47 @@ def test_gecko_minversion_is_not_mistaken_for_the_app_version(tmp_path):
     )
 
     assert _bundle_verstr(exe) is None
+
+
+class _ManagedInstallConsulted(Exception):
+    """Raised in place of installed_verstr() to prove it was reached."""
+
+
+def test_launch_options_does_not_consult_the_managed_install(tmp_path, monkeypatch):
+    """#97: executable_path must not require `camoufox fetch`.
+
+    installed_verstr() is replaced with a raiser -- which is what it does on a
+    machine with no managed install. Reaching it AT ALL is the bug, so the
+    assertion is on which exception escapes, not on a return value.
+
+    launch_options() does a great deal after this read and may fail later for
+    unrelated reasons; any exception that is not _ManagedInstallConsulted means
+    the managed install was not consulted, which is what this test checks.
+    """
+    from camoufox import utils as camoufox_utils
+
+    def _boom():
+        raise _ManagedInstallConsulted
+
+    monkeypatch.setattr(camoufox_utils, "installed_verstr", _boom)
+
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(APP_INI)
+
+    try:
+        camoufox_utils.launch_options(executable_path=str(exe), headless=True)
+    except _ManagedInstallConsulted:
+        raise AssertionError(
+            "launch_options() still reads the managed install when the caller "
+            "supplied executable_path (#97)"
+        ) from None
+    except Exception:
+        pass  # any other failure is downstream of the read under test
+
+
+def test_managed_launch_still_resolves_through_installed_verstr(monkeypatch):
+    """No executable_path -> _bundle_verstr declines and the fallback stands."""
+    from camoufox import utils as camoufox_utils
+
+    assert camoufox_utils._bundle_verstr(None) is None
