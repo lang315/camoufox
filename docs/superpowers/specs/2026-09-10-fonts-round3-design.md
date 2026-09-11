@@ -109,3 +109,75 @@ The existing family-name arms (`choose_host_family`, host-only survey, in-list c
 - DWrite non-shared substitution branch (dormant while `gfx.e10s.font-list.shared` is true).
 - `mFontFamilies` last-resort order beyond "first allowed".
 - Unbounded per-context memo growth.
+
+## Outcome
+
+Written after the work landed, on branch `fix/fonts-round3` at `df0bdad`, 37
+commits above `main` at `c8c42ef`. Where this section and the design above
+disagree, this section is what happened.
+
+### What shipped
+
+A1 (#94), A2 (#88 and #92) and A3 (#91) all shipped as designed, in
+`patches/font-list-spoofing.patch` (45 hunks to 56) and
+`patches/font-hijacker.patch` (+80/−29). **A4 (#90) did not ship**: it was
+written conditional on B5 going RED, B5 came back GREEN on run 34513429414, and
+#90 closes on the measurement alone with no code change. A5 (#82) needed no code
+by design, and the B6 diagnostic revert was required — see below.
+
+### Deviations from the design
+
+Three, each recorded at the point it applies rather than absorbed.
+
+1. **`CamouIsFamilyAllowed` carries a third parameter the design does not name.**
+   §A2 gives it two arguments. `GenerateFontListKey` is protected, so
+   `gfxTextRun.cpp` cannot lowercase a key the way in-class callers do. The
+   accessor takes a defaulted `nsACString* aLowerKeyOut = nullptr`, so every
+   two-argument call the design specifies compiles unchanged.
+2. **`generic-map` logs the decline as well as the answer.** §A2 asks for the
+   line on every context-scoped generic resolution. `GetDefaultFontLocked`
+   originally logged only when the helper answered; it now logs `step=none` too,
+   which is why four emit sites exist in `gfxPlatformFontList.cpp` rather than
+   three.
+3. **The candidate rows are `nullptr`-terminated** rather than sized with
+   `std::size`. Same semantics, no new include.
+
+Two design assumptions turned out to be wrong about the world rather than about
+the code, and both were corrected before they reached a verdict:
+
+- **§B4's original carrier.** Menlo's U+FFFD advance is 43 on this bundle, which
+  is exactly the fixture's tofu floor, so "leaked" and "rendered nothing" would
+  have been one number. Swapped to Lucida Grande (72), and Menlo kept as the
+  recovery fixture.
+- **§B0's pinned Linux fontconfig is a real blind spot, not a formality.** Its
+  generics alias to Tinos, Arimo and Cousine, all refused under a mac or win
+  per-context list, which is what makes the A2 table decide every generic in arms
+  (n1), (n2) and (n4). A shipped session picks the conf by the spoofed OS, so a
+  mac-fingerprinted session's generics are answered by fontconfig itself. #92 is
+  still real because the refusal case is reachable whenever the list and the
+  spoofed OS disagree, but arm (n2)'s RED is partly an artifact of the conf the
+  guard chose. Stated in the PR's not-verified list, as §B0 requires.
+
+### §C closure, as actually reached
+
+| issue | closes on | caveats that travel with it |
+|---|---|---|
+| #94 | (n1) RED run 34519345704, GREEN run 34544934746 with `pref-fallback ctx=6 key=tinos allowed=0` | Linux only; the `AddGenericFonts` half likely unmeasured; empty-key clause fail-closed even at ctx 0 |
+| #92 | (n2) RED run 34519345704, GREEN run 34544934746 with `generic-map` naming different families | Linux only; `system-ui` never asked for; one family where upstream gave up to three |
+| #88 | (h3) RED run 34519345704, GREEN run 34544934746 in **shape B** | shape B proves the refusing context never reaches `GetDefaultFont`; the gated walks and their unfiltered tails read 0 run-wide and are closed by reading |
+| #91 | (n7) RED run 34519345704, GREEN run 34544934746 | Linux only; mixed `local(), url()` reasoned, not measured |
+| #82 | (n4) GREEN run 34544934746 **plus** the B6 RED run 34544937587 | Linux only; (j2) still unmeasurable, so it rests on (n4) alone |
+| #90 | the measurement (B5 GREEN, run 34513429414); no fix | measurable only because CI now installs `espeak-ng`; the `FontListManager` consequence is written into the PR and #44, not closed here |
+| #87 | both halves `overall: PASS` on the round-3 Windows build 34531671179 | the baseline was **already** green on the codepoint half, so this measures round 2's gates through DWrite re-resolution, not round 3; macOS unmeasured |
+
+§C's byte limit held: PR body 40,088 bytes, appendix posted as a comment.
+CLAUDE.md's "Still ungated" paragraph is rewritten in the same PR, and this round
+did produce a lesson 8 — measure the font universe that ships, not the one the
+runner has.
+
+### §D, unchanged
+
+Every out-of-scope item is still out of scope and is stated in the PR's
+not-verified list: the context-0 fail-open, the macOS host and
+`CoreTextFontList::FindSystemFontFamily`, the DWrite non-shared substitution
+branch, the `mFontFamilies` last-resort order, and per-context memo growth.

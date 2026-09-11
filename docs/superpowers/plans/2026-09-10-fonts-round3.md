@@ -5305,3 +5305,170 @@ change beyond the pin:
   implemented in response to the plan review. Both passages are now quoted verbatim at
   their implementation sites (Task 1 Step 3, Task 2 Step 4).
 
+---
+
+## Outcome
+
+Written after the work landed, on `fix/fonts-round3` at `df0bdad`, 37 commits above
+`main` at `c8c42ef`, 6 files changed, 9,350 insertions and 207 deletions. Where this
+section and the plan above disagree, this section is what happened.
+
+### Which tasks ran
+
+| task | state | commits |
+|---|---|---|
+| 1 — B0 launch, triage, counters, Phase 0 run 1 | complete | `b167dea` … `749eb62` |
+| 2 — six RED-first arms | complete | `2227cd0` … `3a65e60` |
+| 3 — A1 (#94) | complete | `9421a93` |
+| 4 — A2 (#88, #92) | complete | `9d0f3b8` |
+| 5 — A3 (#91) | complete | `261b9fd` |
+| 6 — A4 (#90) | **SKIPPED** | — |
+| 7 — builds, smoke, B6 | complete | `c7b1ff1`, `9465029`, `25a04b8`, `b09c695` |
+| 8 — B8 Windows (#87) | complete | `df0bdad` |
+| 9 — docs, PR, issue comments | this section | — |
+
+**Task 6 was skipped because GATE: B5 came back GREEN.** Run 34513429414 read a
+13,362-voice `espeak-ng` registry, split it into two disjoint halves of 6,681, and
+each context read roughly 6,480 names all from its own half and none from the
+other's. The plan makes A4 conditional on B5 going RED; it did not, so #90 closes on
+the measurement with no code change. The gate verdict is recorded in
+`.superpowers/sdd-fonts3/gate-b5.md`, which is read by matching the anchored pattern
+`^GATE:` — an earlier version of that file said an unanchored grep was safe, which
+was false because the file discusses all three outcomes.
+
+**Step 5's B6 fired.** The trigger was resolved YES in
+`.superpowers/sdd-fonts3/gate-b4-phase0.md`: on both pre-fix binaries the donor
+reached the U+FFFD carrier through `mFonts` at exit 4 and `SystemFindFontForChar`
+was never taken, so neither could supply #82's RED. The diagnostic build
+34534150529 at `c7b1ff1` drops exactly one statement, the RED reproduced on run
+34544937587, and `9465029` reverts it exactly (`git diff 261b9fd 9465029` is empty
+over the whole tree).
+
+### Final run ids
+
+| run | workflow | head sha | conclusion | role |
+|---|---|---|---|---|
+| 34432908522 | Build and Release | `163ee25` | success | the Phase 0 Linux binary, a verified stand-in for `main` |
+| 34496121342 | Smoke Fingerprint | `749eb62` | success | Task 1's green Phase 0 run |
+| 34513429414 | Smoke Fingerprint | `f0aeb0d` | success | GATE: B5 GREEN |
+| 34519345704 | Smoke Fingerprint | `3a65e60` | success | **authoritative Phase 0**, 24/24 |
+| 34531660206 | Build and Release | `261b9fd` | success | BUILD_LINUX |
+| 34531671179 | Build and Release | `261b9fd` | success | BUILD_WINDOWS, never smoked |
+| 34534150529 | Build and Release | `c7b1ff1` | success | BUILD_B6, the diagnostic |
+| 34538378696 | Smoke Fingerprint | `25a04b8` | failure | first Phase 1 attempt |
+| 34543794646 | Smoke Fingerprint | `25a04b8` | failure | first B6 attempt |
+| 34544934746 | Smoke Fingerprint | `b09c695` | **success** | **SMOKE_P1**, on build 34531660206 |
+| 34544937587 | Smoke Fingerprint | `b09c695` | failure, by design | **SMOKE_B6**, on build 34534150529 |
+| 34450188525 | Build and Release | `c8c42ef` | success | the #87 Windows baseline |
+
+Every id read back with `gh run view <id> --json status,conclusion,headSha`. Which
+build each smoke consumed was read from the `gh run download` argument inside that
+smoke's own log, because `gh run view` does not expose the `run_id` input.
+
+### Final arm verdicts, run 34544934746
+
+Zero setup-invalid, zero unexpected red. `(b)`, `(b2)`, `(b2r)`, `(e)`, `(g)`,
+`(h)`, `(h3)`, `(i)`, `(i2)`, `(j)`, `(k)`, `(n1)`, `(n2)`, `(n4)`, `(n5)` and
+`(n7)` all GREEN; `(f)` and `(j2)` RED and absorbed by `KNOWN_UNMEASURABLE` with
+their signatures matched rather than by a bare tag. Counters: `fontlist` 3715,
+`generic-map` 101, `pref-fallback` 545, `default-unfiltered` 0, `default` 0, over
+30,065 CAMOU-FL lines.
+
+### Deviations from the plan
+
+**Phase 0 took nine smoke runs to re-baseline, and four arms changed shape.** The
+plan budgets one. Confining the launch to the bundle with `FONTCONFIG_FILE` removed
+DejaVu from the font universe, and four arms had been resting on it:
+
+- Arm (a) and arm (b) both hit a width-reference collision on MS Gothic once the
+  fallback face changed. Rule unified in a `collided_families()` helper
+  (`5b22523`, `aa67f7b`, `20085b1`, `c0ced3c`).
+- Arm (b)'s third macOS-only probe family is now **chosen at runtime** from Optima,
+  Palatino and Helvetica by a width-and-pixel precheck, because Geneva turned out
+  never to render. The run picked Optima. Issue #95 was filed for Geneva and is not
+  closed by this round (`f0d8ace`).
+- Arm (f) moved its probe codepoint from U+6F22 to U+FF71, which fixed its
+  bisection but not its discriminator; it remains known-unmeasurable by advance,
+  with U+FFE8 recorded as the candidate fixture for a later round.
+- Arms (i) and (i2) moved from "broken setup" to a verdict, and produced the
+  round's sharpest Phase 0 finding: a context whose list refuses every CJK family
+  was being served U+FF71 by Microsoft YaHei, named by per-family rasterisation
+  after advance alone could not tell five candidates apart (`11f39c2`, `a79ba89`,
+  `042e44d`).
+
+**Four other fixtures were wrong and were fixed against a run rather than argued**
+(`2ac18e4`, `03bf4fb`, `85c3700`, `372792b`): (n1)'s tofu-floor description, (n2)'s
+same-kind reference families, (n4)'s carrier (Menlo collides with the floor at 43,
+swapped for Lucida Grande), and (n7)'s bare `await` on `f.loaded`, which raced a
+5-second timer.
+
+**Two controls died of the fixes being correct, and both were repaired in
+`b09c695`** against real failing runs rather than synthetic ones. Arm (h)'s Windows
+positive control: with #92 fixed the win `sans-serif` *is* Segoe UI, so advance and
+pixels cannot separate "resolved the face-name lookup" from "fell back to that
+generic"; the verdict moved to the `CAMOU-FL facename … allowed=0/1` log line,
+attributed by `set n=` (574 families against 107) rather than by the answer. Arm
+(n4)'s donor pick: with the refusal dropped the victim's own `sys-fallback` line
+also names the carrier, so `[-1]` collapsed donor and victim onto one context;
+changed to `[0]`, with the same-context refusal kept and still reachable. That
+second failure was predicted in writing, from the arm's own source, before the run
+landed.
+
+**Four defects in the task briefs were corrected by the implementers rather than
+inherited.** Each is recorded here because sibling briefs carry the same shapes:
+
+1. **The per-section `awk` guard was vacuous.** `s="diff --git a/$sec"` never
+   matches a real `diff --git a/X b/X` line. Fixed to include `" b/$sec"`, then
+   proven both live (9 sections, 14–133 lines each, identical) and discriminating
+   (3 gfx sections, 33–115 changed lines).
+2. **The briefs' "no fuzz or offset on any gfx/thebes file" commit line was
+   false** of the whole stack, which carries 216 fuzz-or-offset lines over 46
+   patches. Replaced with the measured truth. Against the pre-round-3 baseline
+   **exactly one line changes**: `system-ui-font-spoofing.patch`'s single hunk moves
+   from `offset 281` to `offset 407`, the net lines this round adds above its
+   pristine anchor at 2245. `font-hijacker.patch`'s six lines and
+   `window-setter-seal.patch`'s fourteen are byte-identical before and after, and
+   the two edited patches apply at zero fuzz and zero offset on their own hunks.
+3. **Task 7 Step 4's `default-unfiltered` expectation was backwards.** The brief
+   said all four new kinds must be non-zero. All three emit sites sit on the
+   fail-open tail, so **zero is the healthy value** and non-zero is a finding. The
+   correction was written against the applied tree before the run, and the run read
+   zero.
+4. **Task 8's `choose_codepoint` selects nothing on any host.**
+   `bundle/fonts/macos/LastResort.otf` declares family `.LastResort` with a
+   format-13 cmap covering all 1,114,112 codepoints, and the brief unioned it into
+   the exclusion set. Fixed by applying the brief's own dot-prefix skip to both
+   loops, which takes the candidate count from 0 to 10. The brief's rule was run
+   verbatim first and the resulting `overall: UNSCORED` / `NOT RUN` artifact kept as
+   evidence.
+
+**One regeneration artifact, proven equivalent rather than explained away.**
+Rewriting `font-list-spoofing.patch` moved an untouched hunk header from
+`-1851,15` to `-1851,14` — a Myers realignment over a run of braces, not a
+correction of an off-by-one. Proven by applying the old and the new section to
+separate copies of `first-checkpoint` and confirming the new-applied file is
+byte-identical to the live edited one.
+
+**One prediction was falsified and is kept rather than dropped.** Arm (j) reads the
+same U+FFFD cache as (n4) and was expected RED on the diagnostic build. It stayed
+GREEN. That is consistent with the standing note that (j)'s green means "no
+inheritance", not "B rendered its own glyph".
+
+### Carried out of this round
+
+- **The third triage state for diagnostic-branch arms was never implemented.** An
+  arm that reaches its diagnostic branch still prints a row the triage table renders
+  as an ordinary green. Arm (n4)'s Phase 0 row is the live example; its
+  `EXPECTED_RED` entry carries an explicit caveat instead.
+- **`system-ui` is unmeasured.** `generic=7` appears zero times in the 5.2 MB
+  `camou-fl.txt` of run 34544934746. Task 4's carried concern — whether the
+  sans-serif row answers instead of the system-ui spoof for a context with a list,
+  and whether Linux emits two `generic-map` lines for it — needs a fixture that asks
+  for `system-ui`.
+- **Arm (f) is still unmeasurable by advance**; U+FFE8 or a pixel discriminator is
+  the way forward.
+- **Arm (j2) is still unmeasurable**, so #82 rests on (n4) alone.
+- **The Windows build 34531671179 was never smoked**, and macOS was never measured.
+- Task 8 carried two minors: font file handles are never closed through the bundle
+  walks, and the artifact SHA corroboration lives only in the probe JSONs.
+
