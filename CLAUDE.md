@@ -215,8 +215,8 @@ lookup before calling the gate complete.
 
 **8. Measure the font universe that ships, not the one the runner has.**
 For two rounds the smoke guard launched with the GitHub runner's own fontconfig,
-so every font measurement was taken against Ubuntu's host fonts — a universe no
-Camoufox ships. Four published findings came out of that. The unidentified face
+so every font measurement was taken in a universe that also held Ubuntu's host
+fonts — one no Camoufox ships. Four published findings came out of that. The unidentified face
 in #88, `375.70001220703125` px, and #92's monospace-on-a-proportional-face are
 both DejaVu Sans, a host font; so is the U+FFFD width `49.2166` in run
 34431222344. And bundled `Geneva.ttf` passed arm (b) twice: confined to the
