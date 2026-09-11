@@ -114,6 +114,7 @@ def test_launch_options_does_not_consult_the_managed_install(tmp_path, monkeypat
     unrelated reasons; any exception that is not _ManagedInstallConsulted means
     the managed install was not consulted, which is what this test checks.
     """
+    from camoufox import DefaultAddons
     from camoufox import utils as camoufox_utils
 
     def _boom():
@@ -126,7 +127,17 @@ def test_launch_options_does_not_consult_the_managed_install(tmp_path, monkeypat
     (tmp_path / "application.ini").write_bytes(APP_INI)
 
     try:
-        camoufox_utils.launch_options(executable_path=str(exe), headless=True)
+        # exclude_addons=[UBO]: without it, launch_options() reaches
+        # add_default_addons() -> maybe_download_addons(), which downloads
+        # uBlock Origin from addons.mozilla.org before hitting the guarded
+        # line. If that download raises (no network, DNS failure, sandboxed
+        # CI), the except Exception below swallows it and the test passes
+        # without ever exercising the read under test. DefaultAddons has one
+        # member, so excluding it makes the addon step a no-op: no network
+        # call, no write under the addons dir.
+        camoufox_utils.launch_options(
+            executable_path=str(exe), headless=True, exclude_addons=[DefaultAddons.UBO]
+        )
     except _ManagedInstallConsulted:
         raise AssertionError(
             "launch_options() still reads the managed install when the caller "
@@ -136,8 +147,7 @@ def test_launch_options_does_not_consult_the_managed_install(tmp_path, monkeypat
         pass  # any other failure is downstream of the read under test
 
 
-def test_managed_launch_still_resolves_through_installed_verstr(monkeypatch):
-    """No executable_path -> _bundle_verstr declines and the fallback stands."""
-    from camoufox import utils as camoufox_utils
-
-    assert camoufox_utils._bundle_verstr(None) is None
+# Not unit-covered here: the managed-launch direction through launch_options()
+# (no executable_path). Driving it re-enters the managed-fetch path and would
+# create ~/Library/Caches/camoufox on every run. The half that needs no drive,
+# _bundle_verstr(None) is None, is test_no_path_returns_none above.
