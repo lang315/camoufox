@@ -2,7 +2,7 @@ diff --git a/gfx/thebes/gfxFontUtils.cpp b/gfx/thebes/gfxFontUtils.cpp
 index 415a16baec..39557d0be8 100644
 --- a/gfx/thebes/gfxFontUtils.cpp
 +++ b/gfx/thebes/gfxFontUtils.cpp
-@@ -418,14 +418,38 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
+@@ -418,14 +418,39 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
       ((p) == PLATFORM_ID_UNICODE && ((e) != EncodingIDUVSForUnicodePlatform)))
  #else
  #  define acceptableFormat4(p, e, k)                                 \
@@ -13,7 +13,8 @@ index 415a16baec..39557d0be8 100644
 -    ((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDUCS4ForMicrosoftPlatform)
 +// Camoufox: a Unicode-platform UCS4 subtable is accepted as a LAST RESORT.
 +// Upstream's non-macOS branch takes format 10/12/13 only at (3, 10), so a
-+// face whose only subtable is (0, 3) or (0, 4) -- Geneva, Apple Symbols,
++// face whose only subtable is a non-UVS Unicode-platform one -- in this
++// bundle (0, 3) and (0, 4): Geneva, Apple Symbols,
 +// .LastResort, Heiti TC/SC, all shipped in bundle/fonts/macos/ -- gets
 +// keepFormat 0, ReadCMAP returns NS_ERROR_FAILURE, and the font entry is
 +// given an EMPTY character map: listed in the font list, never selected for
