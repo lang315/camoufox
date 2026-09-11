@@ -1424,10 +1424,10 @@ jobs:
           # produce a DIFFERENT checksum from the absent-reference, or
           # this test itself proves nothing.
           # Same launch shape and the SAME shared PIXEL_JS the MAC_ONLY
-          # precheck uses, so the two readings are comparable. Geneva is no
-          # longer a probe family; this stays because it is the standing
-          # evidence for the bundle issue, and it is a diagnostic with no
-          # assert -- see issue-geneva.md.
+          # precheck uses, so the two readings are comparable. Geneva is
+          # again one of the probed families (alongside three of #95's other
+          # four); this block remains a diagnostic with no assert -- see
+          # issue-geneva.md.
           # #95: Geneva is one of FIVE families whose only cmap subtable is a
           # Unicode-platform format-10/12/13 table, which upstream's non-macOS
           # acceptableUCS4Encoding rejects -- leaving an empty character map.
@@ -1440,10 +1440,6 @@ jobs:
           geneva_pixels = {"geneva": _gp["Geneva"]["pixels"],
                            "absent": _gp["__CamouAbsentRef__0001"]["pixels"],
                            "helvetica_neue": _gp["Helvetica Neue"]["pixels"]}
-          for _fam in CMAP95_FAMILIES:
-              _differs = _gp[_fam]["pixels"] != geneva_pixels["absent"]
-              print(f"  [#95 cmap discriminator] {_fam}: checksum="
-                    f"{_gp[_fam]['pixels']} differs from absent-reference: {_differs}")
           control_differs = geneva_pixels["helvetica_neue"] != geneva_pixels["absent"]
           geneva_pixel_differs = geneva_pixels["geneva"] != geneva_pixels["absent"]
           print(f"  [Geneva pixel discriminator] checksums: {geneva_pixels}")
@@ -1453,6 +1449,10 @@ jobs:
           print(f"  [Geneva pixel discriminator] Geneva differs from absent-reference "
                 f"(pixels, not width): {geneva_pixel_differs} "
                 f"-- {'Geneva DOES resolve; the width-based arm (b) measurement was a false negative' if geneva_pixel_differs else 'Geneva genuinely does not render distinct pixels; the width measurement was correct'}")
+          for _fam in CMAP95_FAMILIES:
+              _differs = _gp[_fam]["pixels"] != geneva_pixels["absent"]
+              print(f"  [#95 cmap discriminator] {_fam}: checksum="
+                    f"{_gp[_fam]['pixels']} differs from absent-reference: {_differs}")
 
           assert mac["measure"] != win["measure"], (
               "the mac and win contexts measured identically -- no per-context signal")
