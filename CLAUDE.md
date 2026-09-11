@@ -216,13 +216,13 @@ lookup before calling the gate complete.
 **8. Measure the font universe that ships, not the one the runner has.**
 For two rounds the smoke guard launched with the GitHub runner's own fontconfig,
 so every font measurement was taken against Ubuntu's host fonts — a universe no
-Camoufox ships. Three published findings came out of that. The unidentified face
+Camoufox ships. Four published findings came out of that. The unidentified face
 in #88, `375.70001220703125` px, and #92's monospace-on-a-proportional-face are
 both DejaVu Sans, a host font; so is the U+FFFD width `49.2166` in run
-34431222344. And bundled `Geneva.ttf` passed arm (b) twice, because a host face
-was answering for it; confined to the bundle it renders at exactly the
-absent-family reference (width 1333, pixel checksum 2482840822) and does not
-render at all — that is #95. Setting `FONTCONFIG_FILE` the way
+34431222344. And bundled `Geneva.ttf` passed arm (b) twice: confined to the
+bundle it measures exactly the absent-family reference (width 1333, pixel
+checksum 2482840822) and does not render at all, so the two greens were the
+wrong answer — that is #95. Setting `FONTCONFIG_FILE` the way
 `pythonlib/camoufox/utils.py:_generate_fontconfig` does changed the premise of
 four arms and one number in every table, and cost nine Phase 0 smoke runs to
 re-baseline. It also introduced its own blind spot, which has to be stated with
