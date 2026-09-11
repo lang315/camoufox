@@ -1,8 +1,8 @@
 diff --git a/gfx/thebes/gfxFontUtils.cpp b/gfx/thebes/gfxFontUtils.cpp
-index 415a16baec..8eb979d744 100644
+index 415a16baec..39557d0be8 100644
 --- a/gfx/thebes/gfxFontUtils.cpp
 +++ b/gfx/thebes/gfxFontUtils.cpp
-@@ -418,14 +418,30 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
+@@ -418,14 +418,38 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
       ((p) == PLATFORM_ID_UNICODE && ((e) != EncodingIDUVSForUnicodePlatform)))
  #else
  #  define acceptableFormat4(p, e, k)                                 \
@@ -17,13 +17,21 @@ index 415a16baec..8eb979d744 100644
 +// .LastResort, Heiti TC/SC, all shipped in bundle/fonts/macos/ -- gets
 +// keepFormat 0, ReadCMAP returns NS_ERROR_FAILURE, and the font entry is
 +// given an EMPTY character map: listed in the font list, never selected for
-+// any text run. A macOS build already accepts these (the XP_MACOSX branch
-+// above), which is why real macOS renders Geneva and a spoofed macOS profile
-+// on a Linux or Windows build does not -- a fingerprinting tell. See #95.
++// any text run. The XP_MACOSX branch above has accepted platform-0 UCS4
++// unconditionally for years, so this is not a new code path in Gecko, only
++// a newly reachable one on non-macOS builds -- which is why real macOS
++// renders Geneva and a spoofed macOS profile on Linux or Windows does not,
++// a fingerprinting tell. See #95.
 +//
-+// The `!(k)` term is what bounds this: the clause only fires when nothing
-+// else has been accepted yet, so every font that resolves today keeps the
-+// subtable it resolves through and is unaffected.
++// The `!(k)` term bounds this to when nothing else has been accepted yet:
++// no face in bundle/fonts/ changes which subtable it resolves through (574
++// simulated, 7 rescued, 0 changed). That bound relies on OpenType's
++// requirement that encoding records be sorted by platformID then
++// encodingID: within platform 0 the UCS4 record precedes any UVS record
++// (encoding 5), so accepting it here does not trip the break below
++// (platformID > PLATFORM_ID_UNICODE || !aUVSTableOffset ||
++// *aUVSTableOffset) on a UVS subtable that has not been seen yet -- dead
++// state for this path while only platform 3 could match here.
 +#  define acceptableUCS4Encoding(p, e, k)                       \
 +    (((p) == PLATFORM_ID_MICROSOFT &&                           \
 +      (e) == EncodingIDUCS4ForMicrosoftPlatform) ||             \
