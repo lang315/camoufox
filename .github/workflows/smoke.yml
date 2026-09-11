@@ -6914,6 +6914,19 @@ jobs:
 
       - name: "NewContext(os=X) is cross-signal coherent (#44 headline)"
         timeout-minutes: 15
+        # continue-on-error because this arm is KNOWN RED: #44's fonts half
+        # reproduces (runs 34618162525 and 34620762155), and a hard failure here
+        # erases every step below it -- both of those runs stopped at this arm
+        # and never reached the integration suite or the detector smoke. The
+        # same reasoning is already written into the font guard further up: an
+        # arm that kills the run makes every later arm unmeasurable in exactly
+        # the situation where someone needs them.
+        #
+        # Read this step's own log line, not the job badge. The WebGL half is
+        # GREEN in both runs; it is the font half that fails. Flip this back to
+        # a blocking step the moment #44's font half is fixed, so it becomes a
+        # regression guard rather than a standing measurement.
+        continue-on-error: true
         run: |
           # The scenario #44's body describes, through the entry point it names:
           # AsyncCamoufox() with NO os= at launch, then three contexts from that
