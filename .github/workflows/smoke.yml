@@ -1457,6 +1457,24 @@ jobs:
               print(f"  [#95 cmap discriminator] {_fam}: checksum="
                     f"{_gp[_fam]['pixels']} differs from absent-reference: {_differs}")
 
+          # This block was a diagnostic with no assert because Geneva was
+          # known-broken and there was nothing to guard. #95 makes these four
+          # families render, so from here on the failure mode worth catching is
+          # a REGRESSION back to the empty character map -- which is exactly
+          # what went unnoticed for the life of the bundle. The assert is
+          # deterministic: mac_list_probe sets the per-context list from the
+          # whole of fonts.json's mac list (not a random sample) and launches
+          # with CAMOU_CONFIG={}, so all four families are in-list every run.
+          _dead = [f for f in CMAP95_FAMILIES
+                   if _gp[f]["pixels"] == geneva_pixels["absent"]]
+          assert control_differs, (
+              "SETUP-INVALID: the positive control (Helvetica Neue) matches the "
+              "absent reference, so this block cannot tell rendered from "
+              "unrendered and the result below means nothing")
+          assert not _dead, (
+              f"#95 regression: {_dead} render identically to the absent "
+              f"reference, i.e. they are back to an empty character map")
+
           assert mac["measure"] != win["measure"], (
               "the mac and win contexts measured identically -- no per-context signal")
 
