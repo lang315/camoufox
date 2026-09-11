@@ -5378,8 +5378,8 @@ their signatures matched rather than by a bare tag. Counters: `fontlist` 3715,
 
 ### Deviations from the plan
 
-**Phase 0 took nine smoke runs to re-baseline, and four arms changed shape.** The
-plan budgets one. Confining the launch to the bundle with `FONTCONFIG_FILE` removed
+**Phase 0 took ten dispatches to re-baseline, nine of them superseded, and four
+arms changed shape.** The plan budgets one. Confining the launch to the bundle with `FONTCONFIG_FILE` removed
 DejaVu from the font universe, and four arms had been resting on it:
 
 - Arm (a) and arm (b) both hit a width-reference collision on MS Gothic once the
@@ -5451,10 +5451,17 @@ correction of an off-by-one. Proven by applying the old and the new section to
 separate copies of `first-checkpoint` and confirming the new-applied file is
 byte-identical to the live edited one.
 
-**One prediction was falsified and is kept rather than dropped.** Arm (j) reads the
-same U+FFFD cache as (n4) and was expected RED on the diagnostic build. It stayed
-GREEN. That is consistent with the standing note that (j)'s green means "no
-inheritance", not "B rendered its own glyph".
+**One prediction was falsified and is kept rather than dropped.** Arm (j) was
+expected RED on the diagnostic build, on the theory that its own GREEN rested on
+the same refusal. It stayed GREEN, and `phase1-readback.md` §A2a had recorded
+before the run that a (j) which stays GREEN means the standing note about (j)
+needs revisiting. Read off the run: (j)'s donor settles U+FFFD at Tahoma's 47, a
+family in its own list that resolves through `mFonts`, so system fallback is never
+taken; the arm's window carries `['ctx=7 resolved=none']` and no `fffd-cache`
+line, and the run's single `fffd-cache` line is in (n4)'s content process.
+**(j) does not read this cache on this bundle**, so its verdict is not evidence
+about the gate either way. The mechanism the prediction assumed was not
+identified.
 
 ### Carried out of this round
 
