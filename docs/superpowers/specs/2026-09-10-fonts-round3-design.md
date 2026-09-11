@@ -112,9 +112,10 @@ The existing family-name arms (`choose_host_family`, host-only survey, in-list c
 
 ## Outcome
 
-Written after the work landed, on branch `fix/fonts-round3` at `df0bdad`, 37
-commits above `main` at `c8c42ef`. Where this section and the design above
-disagree, this section is what happened.
+Written after the work landed, against `fix/fonts-round3` at `df0bdad`, the last
+commit of the measurement work and the 37th above `main` at `c8c42ef`. The
+commit carrying this section is the one after it. Where this section and the
+design above disagree, this section is what happened.
 
 ### What shipped
 
