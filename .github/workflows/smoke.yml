@@ -1431,8 +1431,11 @@ jobs:
           # #95: Geneva is one of FIVE families whose only cmap subtable is a
           # Unicode-platform format-10/12/13 table, which upstream's non-macOS
           # acceptableUCS4Encoding rejects -- leaving an empty character map.
-          # All five are probed so the other four are measured rather than
-          # assumed to follow Geneva.
+          # Four of the five are probed, so the other three are measured
+          # rather than assumed to follow Geneva. The fifth, .LastResort, is
+          # fixed by the same clause but is not probed: its family name begins
+          # with a dot, so it is not addressable from CSS and would read absent
+          # for a reason unrelated to this fix.
           CMAP95_FAMILIES = ["Geneva", "Apple Symbols", "Heiti TC", "Heiti SC"]
           _gp = mac_list_probe(
               PIXEL_JS,
