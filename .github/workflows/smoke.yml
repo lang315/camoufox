@@ -6922,10 +6922,22 @@ jobs:
         # arm that kills the run makes every later arm unmeasurable in exactly
         # the situation where someone needs them.
         #
-        # Read this step's own log line, not the job badge. The WebGL half is
-        # GREEN in both runs; it is the font half that fails. Flip this back to
-        # a blocking step the moment #44's font half is fixed, so it becomes a
-        # regression guard rather than a standing measurement.
+        # The red path emits a ::warning:: (see the verdict block below), so a
+        # RED is visible in the run summary and not only in the log. The WebGL
+        # half is GREEN in both runs; it is the font half that fails.
+        #
+        # BEFORE FLIPPING THIS BACK TO BLOCKING -- the moment #44's font half is
+        # fixed -- these must land first, or the flip makes each one a false red
+        # in a workflow that costs ~15 minutes a run:
+        #   1. The `lin` marker set has never been observed resolving. Both
+        #      measurement runs drew macos and win at launch, so lin=[] in all
+        #      six context readings. Validate it against a run that draws linux.
+        #   2. The renderer check is `len({renderer}) != 3`, so two contexts
+        #      drawing the SAME WebGL preset report as a #44 reproduction when
+        #      the real cause is a preset collision, which is not a bug. Compare
+        #      each context's renderer against launch_config's and report a
+        #      collision as setup-invalid, not as a verdict.
+        # The liveness guard (r['base'] <= 0) is already in, below.
         continue-on-error: true
         run: |
           # The scenario #44's body describes, through the entry point it names:
@@ -7002,9 +7014,27 @@ jobs:
             // sample, so `win=[...]` legitimately varies run to run. The
             // windows verdict never depends on it -- Segoe UI and Calibri
             // are both essential.
+            // probe() returns `w !== base`, so a context that laid out
+            // nothing (zero-width body, detached span) reads base === w === 0
+            // for EVERY family, absent reference included -- which prints as
+            // mac=[] win=[] lin=[] absent=false, byte-identical to a live
+            // context that simply refused every marker. Return the baseline so
+            // the arm can tell "refused" from "dead" with its own evidence,
+            // rather than borrowing a different run's (CLAUDE.md lesson 4).
+            const baseWidth = (() => {
+              const s = document.createElement('span');
+              s.style.cssText = 'position:absolute;font-size:72px';
+              s.textContent = 'mmmmmmmmwwwwwww';
+              document.body.appendChild(s);
+              s.style.fontFamily = 'monospace';
+              const b = s.getBoundingClientRect().width;
+              s.remove();
+              return b;
+            })();
             return {
               platform: navigator.platform,
               renderer,
+              base: baseWidth,
               mac: ['Helvetica Neue', 'Lucida Grande', 'PingFang HK'].filter(probe),
               win: ['Segoe UI', 'Calibri', 'Cambria'].filter(probe),
               lin: ['Arimo', 'Tinos', 'Noto Sans JP'].filter(probe),
@@ -7064,6 +7094,11 @@ jobs:
           if not any(r[k] for r in seen.values() for k in ('mac', 'win', 'lin')):
               invalid.append("no marker family resolved anywhere -- the width probe is "
                              "dead, not #44")
+          if any(r['base'] <= 0 for r in seen.values()):
+              invalid.append(f"a context laid out nothing (monospace baseline widths "
+                             f"{[r['base'] for r in seen.values()]}) -- that context's "
+                             f"probe is dead, so its empty marker lists are not a #44 "
+                             f"reading")
           if invalid:
               print("::warning::SETUP-INVALID -- this arm measured nothing:")
               for line in invalid:
@@ -7084,13 +7119,19 @@ jobs:
               bad.append("the three contexts share a WebGL renderer: "
                          f"{sorted({r['renderer'] for r in seen.values()})}")
 
+          # continue-on-error: true means the AssertionError below changes
+          # neither the step's badge nor the job's, so without this the only
+          # record of a RED is one line inside a multi-megabyte log. Annotate
+          # first, then raise.
+          if bad:
+              print("::warning::#44 headline arm RED (known, non-blocking): "
+                    + "; ".join(bad))
           assert not bad, "#44 reproduces:\n  " + "\n  ".join(bad)
           print("  #44 headline: three contexts, three coherent fingerprints")
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
-          GITHUB_TOKEN: ${{ github.token }}
 
       # Bulk dump of what the per-context font-list guard captured -- that is
       # the CAMOU-FL producer, now two steps above rather than one, since the
