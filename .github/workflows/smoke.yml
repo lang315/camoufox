@@ -2679,6 +2679,11 @@ jobs:
           f_bisect = {"mac": one_page("mac", JS_F_BISECT),
                       "win": one_page("win", JS_F_BISECT)}
           g = {"mac": one_page("mac", JS_G), "win": one_page("win", JS_G)}
+          # Arm (h)'s own window. efgh_mark spans arms (e)-(h), and arm (e)
+          # installs `src: local("Segoe UI")` @font-face rules of its own, so a
+          # `facename key=segoe ui` line read over efgh_mark cannot be said to
+          # be arm (h)'s. This mark contains exactly the two launches below.
+          h_mark = log_mark()
           h = {"mac": one_page("mac", JS_H), "win": one_page("win", JS_H)}
 
           print(f"  [mac / arm e] document.fonts status {e['mac']['status']} raw families {e['mac']['rawFamilies']}")
@@ -3049,26 +3054,132 @@ jobs:
           # companion for this arm is a follow-up.
           h_failures = []
           segoe_ref = g["win"]["gMain"]["Segoe UI"]
-          # MN8 (from PR #84's re-review): the previous version checked segoe_ref
-          # only against the WIN context's generics, so a mac-side clash --
-          # segoe_ref equal to a width the mac context can reach for free --
-          # would let the mac arm read "resolved Segoe UI" for a face that is
-          # simply the mac generic. The mac context is where the refusal is
-          # under test, so its own generics have to be in the clash set too.
-          h_ref_clash = [name for name, w in (
-                             ("win monospace baseline", g["win"]["baseline48"]),
-                             ("win sans-serif", h["win"]["sans"]),
-                             ("win serif", h["win"]["serif"]),
-                             ("mac monospace baseline", h["mac"]["baseline"]),
-                             ("mac sans-serif", h["mac"]["sans"]),
-                             ("mac serif", h["mac"]["serif"]))
-                         if segoe_ref == w]
-          if h_ref_clash:
-              h_failures.append(
-                  f"control invalid: the win context's family-name Segoe UI width ({segoe_ref}) "
-                  f"equals its {' and '.join(h_ref_clash)} width, so it cannot serve as the "
-                  f"genuine-face reference for this run")
+          # THE ADVANCE CONTROL FOR THE WIN HALF DIED WHEN #92 WAS FIXED.
+          # Arm (h)'s win half is the POSITIVE control: a context whose list
+          # contains Segoe UI must resolve local('Segoe UI'). It scored that by
+          # advance, against segoe_ref. Under A2 a generic resolves through the
+          # ordered table intersected with the context's list, and the first
+          # sans-serif-row family in FONTS['win'] is Segoe UI itself -- run
+          # 34538378696 logs `CAMOU-FL generic-map ctx=7 generic=2 step=row
+          # key=segoe ui`, and that run's win generics read 338/446/409 where
+          # Phase 0 (34519345704) read 312/312/312. So in the win context
+          # `sans-serif` IS Segoe UI: "the face-name lookup resolved the genuine
+          # face" and "the lookup was refused and the group fell back to
+          # sans-serif" name ONE FACE at ONE advance (446 in that run). No
+          # advance and no pixel checksum can separate them -- there is nothing
+          # to separate -- so the width is demoted to a discriminator that says
+          # when it cannot decide, and the verdict moves to the one observable
+          # that still distinguishes them: the `CAMOU-FL facename` line, which
+          # gfxPlatformFontList.cpp:1133 emits UNCONDITIONALLY, with allowed=0/1,
+          # BEFORE the refusal at :1136.
+          #
+          # ATTRIBUTION IS READ, NOT ASSUMED (CLAUDE.md lesson 4). "The file
+          # with allowed=1 is the win one" would assume this arm's answer. Each
+          # one_page() launch is its own process and so its own log file, and
+          # every launch emits `CAMOU-FL set ctx=N n=<families>` naming the size
+          # of the list it installed. len(FONTS['mac']) and len(FONTS['win'])
+          # differ (574 vs 107 in pythonlib/camoufox/fonts.json), so that count
+          # says which context a file belongs to without consulting the answer.
+          # Asserted distinct below: if the two lists ever became the same
+          # length this would pair files with contexts at random.
+          #
+          # MN8 (PR #84's re-review) is KEPT and made per-context. It added the
+          # mac generics to the clash set because a mac-side clash would let the
+          # MAC arm read "resolved Segoe UI" for a face that is simply the mac
+          # generic. That is a statement about the mac arm; a win-side clash is
+          # a statement about the win arm. Each label is now checked against its
+          # OWN generics, which is what MN8 meant, and a clash no longer fails
+          # the whole arm -- it makes that label's WIDTH half abstain while the
+          # log half decides. On a binary with no `facename` kind there is no
+          # log half, and a clash is still a hard control-invalid.
+          def _h_file(ln):
+              """The cfx<PID> basename camou_fl prefixes to every line."""
+              parts = ln.split(None, 1)
+              return parts[0] if parts else ""
+
+          _H_N = {"mac": len(FONTS["mac"]), "win": len(FONTS["win"])}
+          assert _H_N["mac"] != _H_N["win"], (
+              f"arm (h) SETUP-INVALID: FONTS['mac'] and FONTS['win'] are both "
+              f"{_H_N['mac']} families long, so `CAMOU-FL set n=` cannot say which log "
+              f"file belongs to which context and the facename control below would pair "
+              f"them at random.")
+          _h_all = camou_fl(h_mark, "CAMOU-FL ", limit=None)
+          _h_owner = {}
+          for _ln in _h_all:
+              if "CAMOU-FL set " in _ln:
+                  _tok = next((t for t in _ln.split() if t.startswith("n=")), None)
+                  if _tok:
+                      for _lab, _n in _H_N.items():
+                          if _tok[2:] == str(_n):
+                              _h_owner.setdefault(_h_file(_ln), set()).add(_lab)
+          # A file that installed BOTH lists cannot attribute anything.
+          _h_owner = {_k: next(iter(_v)) for _k, _v in _h_owner.items() if len(_v) == 1}
+          _h_face = {"mac": [], "win": []}
+          for _ln in _h_all:
+              if "CAMOU-FL facename" in _ln and "key=segoe ui" in _ln:
+                  _lab = _h_owner.get(_h_file(_ln))
+                  if _lab:
+                      _h_face[_lab].append(_ln)
+          _h_allowed = {_lab: {_ln.rsplit("allowed=", 1)[1].strip()
+                               for _ln in _lns if "allowed=" in _ln}
+                        for _lab, _lns in _h_face.items()}
+          _h_log_live = kind_total("facename") > 0
+          print(f"  [arm h] facename control: files in this arm's window -> context "
+                f"{_h_owner}; `key=segoe ui` lines mac={len(_h_face['mac'])} "
+                f"win={len(_h_face['win'])}; allowed values mac={sorted(_h_allowed['mac'])} "
+                f"win={sorted(_h_allowed['win'])}; kind_total(facename)="
+                f"{kind_total('facename')}")
+          for _lab in ("mac", "win"):
+              for _ln in _h_face[_lab][-2:]:
+                  print(f"      [{_lab}] {_ln}")
+          if not _h_log_live:
+              print("  [arm h] DIAGNOSTIC: this binary emits no `facename` line, so the "
+                    "gate's own answer cannot be read and the width below is all there is.")
+
+          _h_gen = {"mac": (("mac monospace baseline", h["mac"]["baseline"]),
+                            ("mac sans-serif", h["mac"]["sans"]),
+                            ("mac serif", h["mac"]["serif"])),
+                    "win": (("win monospace baseline", g["win"]["baseline48"]),
+                            ("win sans-serif", h["win"]["sans"]),
+                            ("win serif", h["win"]["serif"]))}
+          h_ref_clash = {_lab: [_name for _name, _w in _rows if segoe_ref == _w]
+                         for _lab, _rows in _h_gen.items()}
           for label, ground in (("mac", mac["measure"]), ("win", win["measure"])):
+              want = ground["Segoe UI"]
+              # ---- the verdict: the gate's own answer, which no generic can
+              # collide with, because it is a name and not a number.
+              seen = _h_allowed[label]
+              if not _h_log_live:
+                  pass
+              elif not seen:
+                  h_failures.append(
+                      f"{label}: setup invalid: no `CAMOU-FL facename ... key=segoe ui` line "
+                      f"attributed to a {label}-list launch in this arm's window (files seen: "
+                      f"{_h_owner}), so the face-name gate's answer for this context was never "
+                      f"observed")
+              elif len(seen) > 1:
+                  h_failures.append(
+                      f"{label}: setup invalid: the {label}-list launches disagree on the "
+                      f"face-name gate's answer for key=segoe ui ({sorted(seen)}), so this "
+                      f"context has no single answer to score")
+              elif (seen == {"1"}) != want:
+                  h_failures.append(
+                      f"{label}: the face-name gate answered allowed={sorted(seen)[0]} for "
+                      f"key=segoe ui, but arm (b) says this context "
+                      f"{'has' if want else 'does not have'} Segoe UI")
+              # ---- the width, now a discriminator that reports its own silence
+              if h_ref_clash[label]:
+                  print(f"  [{label} / arm h] the width half asserts NOTHING this run: "
+                        f"segoe_ref {segoe_ref} equals this context's "
+                        f"{' and '.join(h_ref_clash[label])} width, so 'resolved the "
+                        f"face-name lookup' and 'fell back to that generic' are the same "
+                        f"face. The `facename` line above is the verdict.")
+                  if not _h_log_live:
+                      h_failures.append(
+                          f"control invalid: the win context's family-name Segoe UI width "
+                          f"({segoe_ref}) equals the {label} context's "
+                          f"{' and '.join(h_ref_clash[label])} width, and this binary emits no "
+                          f"`facename` kind, so nothing can decide this context")
               for probe_key, probe_name in (("hFull", "local('Segoe UI')"),
                                             ("hPs", "local('SegoeUI')")):
                   w = h[label][probe_key]
@@ -3081,12 +3192,14 @@ jobs:
                         f"baseline={h[label]['baseline']} sans={h[label]['sans']} "
                         f"serif={h[label]['serif']} -> "
                         f"{'resolved Segoe UI' if resolved else 'fell back to ' + fell_back_to}")
-                  if resolved != ground["Segoe UI"]:
+                  if h_ref_clash[label]:
+                      continue
+                  if resolved != want:
                       h_failures.append(
                           f"{label}/{probe_name}: {'resolved' if resolved else 'did not resolve'} "
                           f"the Segoe UI face (width={w} segoe={segoe_ref} "
                           f"baseline={h[label]['baseline']}), arm (b) says this context "
-                          f"{'has' if ground['Segoe UI'] else 'does not have'} Segoe UI")
+                          f"{'has' if want else 'does not have'} Segoe UI")
 
           # -----------------------------------------------------------
           # Arm (h3): #88. Arm (h) proved the face-name gate FIRES for the mac
@@ -5836,11 +5949,37 @@ jobs:
           # tripping this arm's own "one context cannot leak to itself" branch
           # on the very build where #82's only GREEN has to come from.
           # Filter on the same predicate the arm already asserts further down.
+          #
+          # AND TAKE THE FIRST, NOT THE LAST. The `resolved=none` filter above
+          # repairs this only while the gate HOLDS. Measured, not reasoned:
+          # run 34543794646, the B6 diagnostic build with the fffd-cache
+          # refusal dropped, emitted
+          #   :779  sys-fallback ctx=6 ch=U+FFFD resolved=Lucida Grande   (donor)
+          #   :810  fffd-cache   ctx=7 key=lucida grande allowed=0
+          #   :811  sys-fallback ctx=7 ch=U+FFFD resolved=Lucida Grande   (VICTIM)
+          # -- because with the refusal gone the victim KEEPS the cached
+          # fontEntry, HasCharacter(0xFFFD) is true, and WhichSystemFontSupportsChar
+          # hands it back, so the victim's line names the carrier too. `[-1]` then
+          # picked the VICTIM as the donor, both ctx came out 7, and the arm
+          # reported "one context cannot leak to itself" on the one build where
+          # #82's RED has to come from -- while `victim fffd=72` in the same
+          # print showed the leak plainly.
+          #
+          # The donor renders FIRST, and camou_fl returns lines in (file, line)
+          # order; both contexts share one content process under
+          # dom.ipc.processCount=1, so within that one file line order IS time
+          # order and `[0]` is the donor's. The "same ctx" refusal below is KEPT,
+          # not replaced: if every naming line really did belong to one context,
+          # this arm still must not score a leak.
           _n4_sys_ok = [ln for ln in n4_sys
                         if "resolved=" in ln
                         and not ln.rstrip().endswith("resolved=none")]
-          n4_donor_ctx = _ctx_tok(_n4_sys_ok[-1]) if _n4_sys_ok else None
+          n4_donor_ctx = _ctx_tok(_n4_sys_ok[0]) if _n4_sys_ok else None
           n4_victim_ctx = _ctx_tok(n4_cache[-1]) if n4_cache else None
+          print(f"  [arm n4 / #82] sys-fallback lines NAMING a family, in (file, line) "
+                f"order: {[_ctx_tok(_l) for _l in _n4_sys_ok]} -- donor taken as the "
+                f"first ({n4_donor_ctx}), victim from the fffd-cache line "
+                f"({n4_victim_ctx})")
 
           def _n4_families(ctx):
               return [ln.split("families=", 1)[1].strip()
