@@ -1,0 +1,184 @@
+# Fonts round 3 — design
+
+Branch `fix/fonts-round3` off `main` @ `c8c42ef` (PR #93 merged). One PR, one commit per issue.
+Issues: #82, #87, #88, #90, #91, #92, and #94 (filed from this round's recon).
+Recon: `.superpowers/sdd-fonts3/recon.md` (git-ignored; its verdicts are restated here where they bind).
+
+## Decisions taken with the user
+
+1. One branch, one PR, commit per issue; #90 (speech) rides the same PR because it shares `smoke.yml` and the build.
+2. #92 maps a generic to a family with a static ordered table intersected with the context's list (no fontconfig spacing queries).
+3. #90 is measured first; fixed in-branch only if the arm goes RED.
+4. #82 closes on a RED-first control. If the PR #84 artifact cannot go RED (expected — #94 shadows the cache), one diagnostic build with the #82 read gate reverted supplies the RED, then the real build supplies the GREEN.
+5. The smoke launches with `FONTCONFIG_FILE` pointing at the bundle's `fonts.conf`, the way `pythonlib/camoufox/utils.py` ships it. Every existing number is re-baselined in Phase 0 before any new arm is scored.
+6. #94 (pref-font path) is fixed in this round; #82 is not measurable without it.
+
+## What the recon established (binding facts)
+
+- `gfxFontGroup::FindFontForChar` step 2, `WhichPrefFontSupportsChar` (`gfxTextRun.cpp:3924-4028`), walks `mLangGroupPrefFonts[lang][generic]` / `mEmojiPrefFont` with no gate. Both memos are process-global and built while the thread-local context is 0. Consumers of the memo: that function, and `gfxPlatformFontList::AddGenericFonts` (`gfxPlatformFontList.cpp:2688`). (#94)
+- `gfxFontGroup::GetDefaultFont` (`gfxTextRun.cpp:2201-2320`) opens no `AutoFontListContext`; `GetDefaultFontForPlatform` therefore memoizes generics under `:0`. Its shared-list last-resort walk (`:2237-2263`) and `GetDefaultFontLocked`'s two last resorts (`gfxPlatformFontList.cpp:2966-2970`) are ungated. Callers: `GetFirstValidFont` (scoped) and `FindFontForChar`'s `fontListLength == 0` branch (unscoped). (#88)
+- `gfxFcPlatformFontList::FindGenericFamilies` is gated and context-keyed; when every fontconfig candidate is refused the empty list is memoized and the group falls to the default font. DWrite and CoreText have no `FindGenericFamilies`; their generics come through the #94 memo. (#92)
+- `gfxFontGroup::EnsureFontList` appends `GetDefaultGeneric(mLanguage)` to every stack (`gfxTextRun.cpp:2011`); for `x-western` that is **serif** (`font.default.x-western`). Under `FONTCONFIG_FILE` the bundle's `fonts.conf` aliases `serif`/`sans-serif`/`monospace` to `Tinos`/`Arimo`/`Cousine` — Linux-bundle families, refused under any mac or win per-context list.
+- The `fffd-cache` log line is `CAMOU-FL fffd-cache ctx=%u key=%s allowed=%d` (`gfxPlatformFontList.cpp:1417-1419`); it prints only on a cache hit, so there is no `hit=` field.
+- `CamouIsFontAllowed` is file-static in `gfxPlatformFontList.cpp` (`:1083`, `:1248`); `gfxTextRun.cpp` cannot call it. Lock order is `mLock` then `sFontListMutex` (`FontListManager.cpp:64-72`).
+- `FontListManager` (`dom/base/FontListManager.h:14-26`) exposes membership tests only. No enumeration is added: "first allowed family" is computed by walking `SharedFontList()->Families()` through the gate.
+- Windows `PlatformGlobalFontFallback` re-resolves DWrite's answer through the gated `FindFamily`, so #87's codepoint arm needs no Windows-specific C++. macOS `CoreTextFontList::PlatformGlobalFontFallback` returns the system font through `FindSystemFontFamily` with no gate — recorded as NOT-verified, out of scope (no macOS host).
+- #91's four couplings reproduce on the tree; `CamouHasNonLocalSource()` is visible at `FontFace.cpp:285`, `:314` and `FontFaceImpl.cpp:370` only.
+- Bundle scan (all faces, all cmap subtables): U+FFFD absent from macOS `Helvetica Neue`, `Helvetica`, `Geneva`, `Courier`, `Avenir Next`, `Times`; present in `Menlo`, `Lucida Grande`. Windows: absent from `Arial`, `Calibri`, `Consolas`, `Courier New`, `Times New Roman`; present in `Segoe UI`, `Tahoma`, `Verdana`. DejaVu is in no bundle.
+- The smoke today launches the raw binary without `FONTCONFIG_FILE`, so the runner's host fonts are in every measurement.
+
+## A. C++ (all in `patches/font-list-spoofing.patch` unless stated)
+
+### A1. #94 — pref-font path
+- `gfxPlatformFontList::GetPrefFontsLangGroupLocked`: wrap the population (`ResolveGenericFontNames` / `GetFontFamiliesFromGenericFamilies`) in `AutoFontListContext ctx(0)` so the memo is always the unfiltered-by-context set. The launch mask still applies through the provider, which is process-wide anyway.
+- Both consumers filter at read with the two-gate, fail-closed test the `fffd-cache` read already uses (`gfxPlatformFontList.cpp:1415-1417`): `allowed = !key.IsEmpty() && !MaskedFontListBlocks(provider, key) && CamouIsFamilyAllowed(key)`. `gfxFontGroup::WhichPrefFontSupportsChar` applies it under `AutoFontListContext(mUserContextId)` with `mFontVisibilityProvider`; `gfxPlatformFontList::AddGenericFonts` applies it under the thread-local context its caller (`EnsureFontList`) already opened, with its `aFontVisibilityProvider` parameter. The launch-mask half is required because the memo carries no `FontVisibility`/provider in its key and a chrome caller (`MaskedFontListAppliesTo` false) can populate the cell first. Same for `mEmojiPrefFont`.
+- New log `CAMOU-FL pref-fallback ctx=%u key=%s allowed=%d` at the read filter.
+- New log `CAMOU-FL fontlist ctx=%u n=%u families=%s` at the end of `EnsureFontList` (after the `AddFamilyToFontList` loop, before `mResolvedFonts = true`), under `CAMOU_LOG_FONTLIST_ENABLED()`. Keys from `Key().AsString(SharedFontList())` / `Name()`; an empty name in the field is a child-process read failure and the guard treats it as unmeasured, never as a verdict. This is what lets B1, B2 and B4 read their preconditions instead of assuming them.
+- Context 0 stays fail-open — see §D.
+
+### A2. #88 + #92 — default font and generics, one mechanism
+- `gfxFontGroup::GetDefaultFont` opens `AutoFontListContext ctx(mUserContextId)` at entry so everything below it (`GetDefaultFontForPlatform`, the fontconfig generic loop) resolves and memoizes under the group's context.
+- A public accessor `bool gfxPlatformFontList::CamouIsFamilyAllowed(FontVisibilityProvider* aProvider, const nsACString& aKey)` = A1's three-part test (`!aKey.IsEmpty() && !MaskedFontListBlocks(aProvider, aKey) && CamouIsFontAllowed(aKey)`), thread-local context, `sFontListMutex` only, no `mLock`. Every gate this round adds asks both gates through it; the file-static stays private.
+- A base-class helper `bool gfxPlatformFontList::CamouGenericCandidate(FontVisibilityProvider* aProvider, StyleGenericFontFamily aGeneric, nsACString& aKeyOut)`: returns false when the thread-local context has no list (ctx 0 or no list installed) so callers keep upstream behaviour. Otherwise: (1) the table row for the generic, first key `CamouIsFamilyAllowed` accepts; (2) the other rows **in query-relative order** — for monospace: sans-serif then serif; for serif: sans-serif then monospace; for sans-serif and everything else: serif then monospace — so a proportional query never lands on a monospaced face while a proportional one is in the list; (3) `SharedFontList()->Families()` in index order (stable within a process; the child reads the parent's shared list), first family whose key resolves non-empty and is accepted. The `generic-map` line records which step answered (`step=row|rows|list|none`). `-moz-default` and `StyleGenericFontFamily::None` use the sans-serif row. Table (ordered, OS-agnostic; the intersection with the context's list is what makes it OS-correct):
+  - monospace: `Menlo, Monaco, Consolas, Courier New, Courier, Cousine, Liberation Mono, DejaVu Sans Mono, Noto Sans Mono`
+  - sans-serif, cursive, fantasy, system-ui, none: `Helvetica Neue, Helvetica, Segoe UI, Arial, Arimo, Liberation Sans, DejaVu Sans, Noto Sans`
+  - serif: `Times, Times New Roman, Georgia, Tinos, Liberation Serif, DejaVu Serif, Noto Serif`
+- The table step is **unconditional** for a context with a list: `gfxFcPlatformFontList::FindGenericFamilies` consults `CamouGenericCandidate` *before* the fontconfig loop and, when it answers **and** the gated `FindAndAddFamiliesLocked` resolves that key to a non-empty result, memoizes it under the `…:<ctx>` key and returns without running `FcFontSort` (the loop is `FcFontSort(..., trim=FcFalse, ...)` over the whole config, so it never reliably comes back empty and its non-empty answer is three families chosen by fontconfig distance, not by the generic — that is #92's mechanism). If the helper declines or the resolution comes back empty, fall through to the fontconfig loop; an empty result is never memoized in place of the loop. The loop remains the path for contexts without a list. (#92, Linux)
+- `gfxPlatformFontList::AddGenericFonts` (the DWrite/CoreText generic path, assembled from the pref memo) takes the same table step first when the context has a list; when the helper declines or resolves empty it falls through to the pref memo read-filtered by A1. #92 is thereby fixed platform-neutrally rather than deferred to an arm that cannot see it; measured only where a native arm runs.
+- `gfxPlatformFontList::GetDefaultFontLocked`: before the two last resorts, try `CamouGenericCandidate(SansSerif)` resolved through the gated lookup. Each last resort becomes a gate-approved walk **with an unfiltered tail**: if the walk finds nothing, return the unfiltered family upstream returned and log `CAMOU-FL default-unfiltered ctx=%u`. Same shape for `gfxFontGroup::GetDefaultFont`'s shared-list walk (`gfxTextRun.cpp:2237-2263`), using `CamouIsFamilyAllowed(mFontVisibilityProvider, key)`. A gate that finds nothing must not turn `family.IsNull()` into a release-build null dereference at `gfxTextRun.cpp:2207-2221`; `GetFontFamilyList`'s deliberate unfiltered refill (`gfxPlatformFontList.cpp:1332-1337`) is the precedent. (#88)
+- The `CAMOU-FL default` line stays; add `CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s` on **every** context-scoped generic resolution (`key=none` when the helper declined), so B2 can always say why it is the colour it is.
+
+### A3. #91 — real `FontFaceLoadStatus` for non-local faces (`patches/font-hijacker.patch`)
+- `FontFaceImpl::SetStatus`: if `CamouHasNonLocalSource()`, run the upstream body verbatim (equal early-out, backwards-transition guard, `mStatus = aStatus`, notifications, `UpdateOwnerPromise()`); otherwise the current gated body.
+- `FontFace::Status()`: for a non-local face return `mImpl->Status()`; otherwise the current gated computation.
+- `FontFace::Load()`: for a non-local face run the upstream body (`mImpl->Load()`, `UpdateOwnerKeepAlive()`, return `mLoaded`) so the real load happens and the promise resolves or rejects from `mStatus`; otherwise the current body.
+- `FontFaceImpl::Load` / `CreateUserFontEntry` / `DoLoad` regain their caller through that path; no other change.
+
+### A4. #90 — only if RED (`patches/speech-voices-spoofing.patch`)
+- Replace `sVoicesMap` with `RoverfoxStorageManager::PutString(VoicesKeyForUserContext(id), joined list)` / `GetString`, the shape `WebGLParamsManager` uses; `HasVoices` becomes a `GetString` success test. Keep the WebIDL one-shot flag as is.
+
+### A5. #82 — no new code. The read gate landed in #93. This round supplies the measurement (B4) and, if needed, the diagnostic revert (B6).
+
+## B. Guard (`.github/workflows/smoke.yml`)
+
+Phase 0 is workflow-only and runs against Linux build `34432908522` (@`163ee25`, identical patches to `main`) and the PR #84 artifact `34236331658` (@`8990915`, pre-#93). Phase 1 runs against the round-3 build.
+
+### B0. Launch and triage
+- Every launch sets `FONTCONFIG_FILE` to a `fonts.conf` generated the way `pythonlib/camoufox/utils.py:_generate_fontconfig` (`:58-92`) does it: copy `bundle/fontconfig/linux/fonts.conf` from the extracted artifact with `<dir prefix="cwd">fonts</dir>` replaced by the **absolute** `fonts/` path (cwd is irrelevant after that), `XDG_CACHE_HOME` pointing at a writable dir for `<cachedir prefix="xdg">`. The smoke pins the **Linux** conf (`bundle/fontconfig/linux/fonts.conf`; the artifact carries all three OS confs and `find | head -1` is not a choice) and asserts its text names `Tinos`, `Arimo` and `Cousine`. Consequence stated up front: that file aliases `serif`/`sans-serif`/`monospace` to `Tinos`/`Arimo`/`Cousine`, all refused under a mac or win per-context list, so every generic under such a list is decided by A2, not by fontconfig. What the guard cannot see (lesson 3): `pythonlib/camoufox/utils.py:215-238` selects the conf by the **spoofed** OS, so a shipped mac-fingerprinted session runs with the macOS conf (`Helvetica`/`Times`/`Menlo` — all allowed under a mac list) and fontconfig answers its generics itself; B2's RED is partly an artifact of the Linux conf, and A2 is what answers when the conf's aliases are refused. Written into the PR's NOT-verified list.
+- Phase 0 run 1 re-baselines every existing numeric expectation and settles the recon's open questions as named outputs: which exit answered U+FFFD in the mac context (now readable from `fontlist` + `pref-fallback` + `sys-fallback` lines once A1 lands; on the current binary, from width vs the named candidates), whether any `fffd-cache` line appears at all, and whether the fontconfig `monospace` face on the runner carries U+FFFD. Run 2 adds the new arms.
+- **Launch column.** Each arm below names its `CAMOU_CONFIG`. `{}` = bare launch, only the per-context list gates; `{"fonts": FONTS["win"]}` = the launch mask is asked first at every gate site, so mac fixtures render nothing from their lists there. New mac-fixture arms (B1, B2, B4) launch `{}`; B3 joins arm (h)'s existing `{}` launch (`smoke.yml:2175-2179`); B5 `{}`; B7 `{}`; B8 runs bare and masked by design.
+- Fix the triage routing: an arm whose setup is invalid must report `SETUP-INVALID` (fails the step), never fall into `KNOWN_UNMEASURABLE`. `KNOWN_UNMEASURABLE` is reserved for arms whose entry in that table names the run that established the structural reason.
+- Run ids are read back from `gh run list` before they go into any commit or PR text (lesson 6). Verified for this spec: `git diff 163ee25..c8c42ef -- patches additions settings bundle` is empty, `git diff 8990915..f1b60a6 -- patches additions settings bundle` is empty.
+- New log kinds `pref-fallback` and `generic-map` join the per-kind counter table.
+
+### B1. #94 arm — RED-first (launch `{}`)
+Mac context (list excludes every fontconfig/pref family); CSS stack names one allowed family that lacks the codepoint under test; the codepoint is chosen so the only families covering it in the bundle are outside the mac list (fontTools scan at workflow-authoring time, checked into the arm as a constant with the scan command in a comment). Precondition read from the log: the context's `fontlist` line names only families in the fixture's known non-carrier set. RED = width equals that outside family's width measured by name in a bare context (which must itself differ from the PUA tofu floor of the stack — the control), and no `pref-fallback ... allowed=0` line; GREEN = width equals the tofu floor or a listed family, and the log carries `pref-fallback ctx=N key=<outside family> allowed=0`.
+
+### B2. #92 arm — equal-width (launch `{}`)
+Mac context whose list contains `Menlo` (a monospace-row family; without one the helper's fallback maps `monospace` and `sans-serif` to the same family and the arm is RED for a reason it cannot show). `monospace` on `iiiii` and `mmmmm` must be equal (within 0.01); `sans-serif` on the same strings must differ (control — without it the arm is vacuous). Print all three generics' widths, the context's `fontlist` line and the `generic-map` lines. RED today (`monospace` is proportional). GREEN needs `generic-map` to name *different* in-list families for `monospace` and `sans-serif`, and the `monospace` width to match `Menlo` named directly in the same context.
+
+### B3. #88 predicate (joins arm (h)'s `{}` launch)
+Extend arm (h): after `facename ... key=segoe ui allowed=0`, GREEN has two shapes and the arm says which fired: (i) the following `default ctx=6 family=X` names a family in the mac list; or (ii) no `default` line exists for that context at all **and** a `generic-map ctx=6 … key=<in-list family>` line shows the group resolved through A2's table instead (after A2, `monospace` maps to `Menlo`, `mFonts` is non-empty and `GetDefaultFont` is never reached — the fix removes the symptom the `default` line reported). Shape (ii) is only accepted when `generic-map` lines exist in the run; on a binary without that kind, a missing `default` line is SETUP-INVALID. That log predicate is the verdict. The width half is a discriminator only: `X` named directly must differ from at least one other in-list family named directly in the same context and run; if it does not, the arm states that the width asserts nothing (262 of 513 mac families tie at 375.7 — an equality is not an identification). RED today (X = the fontconfig default).
+
+### B4. #82 fixture (launch `{}`)
+Donor context list `[Times, Menlo]`; victim list `[Times, Geneva]`; both stacks `"Times"` only. `Times` lacks U+FFFD; the appended generic is serif and A2's serif row starts with `Times`, so both groups resolve to `[Times, Times]` and the only U+FFFD carrier reachable in the donor is `Menlo`, through system fallback. U+FFFD is rendered as the first character of its own text run so `aPrevMatchedFont` (exit 8) is empty. Donor renders first in one page, victim in a new page, same process (assert content pid) and both pages same-scheme content documents so both groups sit at the same `FontVisibility` level (`mReplacementCharFallbackFamily` is indexed by level; a level mismatch reads an empty slot and looks exactly like the pre-#93 report B6 keys on). Preconditions read from the log, each a SETUP-INVALID if absent: donor `fontlist ctx=D … families=times[,times]` (no carrier in the stack); donor `sys-fallback ctx=D ch=U+FFFD resolved=Menlo` (cache populated); victim `fontlist ctx=V … families=times[,times]`; victim `fffd-cache ctx=V key=menlo allowed=0`. Width verdict: victim width must equal victim's own tofu floor (a PUA codepoint in the same stack) and must differ from Menlo's U+FFFD width measured by name in a bare context (the control; if those two are equal the arm asserts nothing). RED = victim width equals the Menlo width (leak). On the pre-#93 artifact the arm reports which exit answered (`pref-fallback`/`fontlist` lines do not exist there, so: no `fffd-cache` line and the width matched to the named candidates) — that report is the B6 trigger. If the donor's pref path answers with Menlo (`pref-fallback ctx=D key=menlo allowed=1`, no `sys-fallback` line — possible because the ctx-0 memo cell can hold up to three fontconfig families), the recovery fixture is donor `[Times, Lucida Grande]`, a carrier fontconfig's serif/sans candidates do not reach. The arm never asserts on a precondition it did not observe.
+
+### B5. #90 arm
+Two contexts, different voice lists installed by the init script, `speechSynthesis.getVoices()` read after `goto()` and after `voiceschanged`; content pids sampled between `new_page()` and `goto()` (the #83 shape). DOM hand-off for every page-world value. RED = a context reads the other's list or an empty list while its pid set changed; GREEN = each reads its own.
+
+### B6. #82 RED control (conditional)
+If B4 on the #84 artifact reports "answered before the cache", a diagnostic commit on top of A1–A3 drops only the `if (!allowed) fontEntry = nullptr` refusal in the `fffd-cache` hit block (`gfxPlatformFontList.cpp:1424-1426`) and **keeps the `fffd-cache` log line**, so the leak is named in the log. One build, one smoke: B4 must be RED with `fffd-cache ctx=V key=menlo allowed=0` present and the victim width equal to Menlo's. The revert is then dropped and the real build must be GREEN. The diagnostic commit never reaches `main`.
+
+### B7. #91 arm (launch `{}`)
+The smoke has no HTTP server today (every navigation is `data:`, an opaque origin from which an `http://` font `url()` is a CORS-blocked cross-origin fetch — both faces would read `error` for the wrong reason). The arm starts a `http.server` thread on `127.0.0.1` serving the page, a 404 path and a real control font file (a bundled face whose metrics differ from the fallback), and navigates to `http://127.0.0.1:<port>/…`. CSS `@font-face` with an allowed family name and `src: url(<404>)`, plus the control face. Score each face from its own `.loaded` promise (`.then`/`.catch`) or by polling until `status !== 'loading'` — `document.fonts.ready` alone does not guarantee a face left `loading`. RED today: 404 face reports `loaded`. GREEN: 404 face `error`, control face `loaded` and its width differs from the fallback (control).
+
+### B8. #87 arms (native Windows, `build-tester/scripts/probe_windows_fonts.py`; bare and masked launches by design)
+The existing family-name arms (`choose_host_family`, host-only survey, in-list control, bundled-unlisted) run unchanged in the same session against the same two binaries — #87's ask is both halves. Add the codepoint arm: scan the host's cmaps with fontTools, pick a codepoint whose covering host families are all off the launch list and none bundled; tofu floor = a PUA codepoint in the same stack; positive control = a codepoint covered only by an in-list host family renders identically bare vs masked. Run against the Windows baseline build `34450188525` (@`c8c42ef`, pre-fix) — RED there is a #94-shaped finding — and against the round-3 Windows build.
+
+## C. Evidence and closure
+
+- #94, #92, #88, #91: close on the round-3 smoke GREEN for their arm with the RED from Phase 0 on the same arm.
+- #82: close on B4 GREEN plus the B6 RED. If B6 cannot go RED either, #82 stays open with the reason written.
+- #90: close on the measurement, with the fix only if it was RED. A RED B5 also demonstrates the mechanism for `FontListManager`, which keeps its per-context value in the same process-local shape (`FontListManager.cpp:16`) with a cross-process disable flag (`:109-111`); that consequence is written into the PR and #44, not closed as a speech bug.
+- #87: close on both halves (family-name arms and the codepoint arm) GREEN on the round-3 Windows build, with the macOS host stated as unmeasured.
+- PR body under 65,536 bytes; evidence appendix as a comment from the start. CLAUDE.md "Still ungated" paragraph rewritten in the same PR; a lesson 8 only if this round produces one.
+
+## D. Out of scope, stated
+- Context 0 fail-open (lesson 5); referenced from A1.
+- macOS host measurement; `CoreTextFontList::FindSystemFontFamily`'s ungated return.
+- DWrite non-shared substitution branch (dormant while `gfx.e10s.font-list.shared` is true).
+- `mFontFamilies` last-resort order beyond "first allowed".
+- Unbounded per-context memo growth.
+
+## Outcome
+
+Written after the work landed, against `fix/fonts-round3` at `df0bdad`, the last
+commit of the measurement work and the 37th above `main` at `c8c42ef`. The
+commit carrying this section is the one after it. Where this section and the
+design above disagree, this section is what happened.
+
+### What shipped
+
+A1 (#94), A2 (#88 and #92) and A3 (#91) all shipped as designed, in
+`patches/font-list-spoofing.patch` (45 hunks to 56) and
+`patches/font-hijacker.patch` (+80/−29). **A4 (#90) did not ship**: it was
+written conditional on B5 going RED, B5 came back GREEN on run 34513429414, and
+#90 closes on the measurement alone with no code change. A5 (#82) needed no code
+by design, and the B6 diagnostic revert was required — see below.
+
+### Deviations from the design
+
+Three, each recorded at the point it applies rather than absorbed.
+
+1. **`CamouIsFamilyAllowed` carries a third parameter the design does not name.**
+   §A2 gives it two arguments. `GenerateFontListKey` is protected, so
+   `gfxTextRun.cpp` cannot lowercase a key the way in-class callers do. The
+   accessor takes a defaulted `nsACString* aLowerKeyOut = nullptr`, so every
+   two-argument call the design specifies compiles unchanged.
+2. **`generic-map` logs the decline as well as the answer.** §A2 asks for the
+   line on every context-scoped generic resolution. `GetDefaultFontLocked`
+   originally logged only when the helper answered; it now logs `step=none` too,
+   which is why four emit sites exist in `gfxPlatformFontList.cpp` rather than
+   three.
+3. **The candidate rows are `nullptr`-terminated** rather than sized with
+   `std::size`. Same semantics, no new include.
+
+Two design assumptions turned out to be wrong about the world rather than about
+the code, and both were corrected before they reached a verdict:
+
+- **§B4's original carrier.** Menlo's U+FFFD advance is 43 on this bundle, which
+  is exactly the fixture's tofu floor, so "leaked" and "rendered nothing" would
+  have been one number. Swapped to Lucida Grande (72), and Menlo kept as the
+  recovery fixture.
+- **§B0's pinned Linux fontconfig is a real blind spot, not a formality.** Its
+  generics alias to Tinos, Arimo and Cousine, all refused under a mac or win
+  per-context list, which is what makes the A2 table decide every generic in arms
+  (n1), (n2) and (n4). A shipped session picks the conf by the spoofed OS, so a
+  mac-fingerprinted session's generics are answered by fontconfig itself. #92 is
+  still real because the refusal case is reachable whenever the list and the
+  spoofed OS disagree, but arm (n2)'s RED is partly an artifact of the conf the
+  guard chose. Stated in the PR's not-verified list, as §B0 requires.
+
+### §C closure, as actually reached
+
+| issue | closes on | caveats that travel with it |
+|---|---|---|
+| #94 | (n1) RED run 34519345704, GREEN run 34544934746 with `pref-fallback ctx=6 key=tinos allowed=0` | Linux only; the `AddGenericFonts` half likely unmeasured; empty-key clause fail-closed even at ctx 0 |
+| #92 | (n2) RED run 34519345704, GREEN run 34544934746 with `generic-map` naming different families | Linux only; `system-ui` never asked for; one family where upstream gave up to three |
+| #88 | (h3) RED run 34519345704, GREEN run 34544934746 in **shape B** | shape B proves the refusing context never reaches `GetDefaultFont`; the gated walks and their unfiltered tails read 0 run-wide and are closed by reading |
+| #91 | (n7) RED run 34519345704, GREEN run 34544934746 | Linux only; mixed `local(), url()` reasoned, not measured |
+| #82 | (n4) GREEN run 34544934746 **plus** the B6 RED run 34544937587 | Linux only; (j2) still unmeasurable, so it rests on (n4) alone |
+| #90 | the measurement (B5 GREEN, run 34513429414); no fix | measurable only because CI now installs `espeak-ng`; the `FontListManager` consequence is written into the PR and #44, not closed here |
+| #87 | both halves `overall: PASS` on the round-3 Windows build 34531671179 | the baseline was **already** green on the codepoint half, so this measures round 2's gates through DWrite re-resolution, not round 3; macOS unmeasured |
+
+§C's byte limit held: PR body 40,088 bytes, appendix posted as a comment.
+CLAUDE.md's "Still ungated" paragraph is rewritten in the same PR, and this round
+did produce a lesson 8 — measure the font universe that ships, not the one the
+runner has.
+
+### §D, unchanged
+
+Every out-of-scope item is still out of scope and is stated in the PR's
+not-verified list: the context-0 fail-open, the macOS host and
+`CoreTextFontList::FindSystemFontFamily`, the DWrite non-shared substitution
+branch, the `mFontFamilies` last-resort order, and per-context memo growth.

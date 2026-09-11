@@ -116,6 +116,21 @@ PAGE_JS = r"""
     out['__fffd__'] = c.measureText('\uFFFD').width;
     c.font = '48px monospace';
     out['__monospace__'] = c.measureText(S).width;
+    // #87's codepoint half. Same stack for all three so the comparison is
+    // within one document, one thread and one launch:
+    //   __cp__      the codepoint whose only host carriers are OFF the launch
+    //               list and which nothing bundled covers -- reachable bare,
+    //               refused masked, if the gate holds
+    //   __cpfloor__ a PUA codepoint in the SAME stack: the tofu floor
+    //   __cpctl__   a codepoint covered only by an IN-LIST host family: must
+    //               render identically bare and masked, or the whole
+    //               measurement is about a dead font stack rather than a gate
+    var cpFont = '48px "__NoSuchFamilyAtAll7__"';
+    c.font = cpFont;
+    out['__cp__'] = c.measureText(String.fromCodePoint(%(cp)d)).width;
+    out['__cpfloor__'] = c.measureText('\uE000').width;
+    out['__cpctl__'] = (%(cpctl)d > 0)
+        ? c.measureText(String.fromCodePoint(%(cpctl)d)).width : null;
   } catch (e) {
     err = String(e);
   }
@@ -202,6 +217,51 @@ def _names_from_file(path):
     return out
 
 
+def _cmap_from_file(path):
+    """(family names, covered codepoints) out of one font file.
+
+    Same tolerance as _names_from_file: C:\\Windows\\Fonts holds .fon and other
+    formats fontTools cannot open, and a single unreadable face must not cost
+    the whole walk. Every cmap subtable of every face is unioned -- a font can
+    put its Unicode coverage in a format-4 BMP table, a format-12 full table,
+    or both, and reading only the first would under-report coverage, which for
+    this arm means picking a codepoint some family CAN render.
+
+    Inside a TrueType collection this over-attributes: every face's coverage is
+    unioned and every face's family name gets the union, so a .ttc carrying two
+    families credits each with the other's. Left as is because every direction
+    fails safe -- into `covered_elsewhere` or `out_list` it is conservative, and
+    into `by_cp` or `in_list` it names a family that cannot render the codepoint,
+    which the bare-vs-floor and tofu-control branches in `judge` then catch
+    empirically rather than on the strength of the cmap.
+    """
+    from fontTools.ttLib import TTCollection, TTFont  # lazy: --self-test needs neither
+
+    ext = path.suffix.lower()
+    if ext not in (".ttf", ".otf", ".ttc", ".otc"):
+        return set(), set()
+    try:
+        faces = (
+            list(TTCollection(str(path)).fonts)
+            if ext in (".ttc", ".otc")
+            else [TTFont(str(path), fontNumber=0, lazy=True)]
+        )
+    except Exception:
+        return set(), set()
+    names, cps = _names_from_file(path), set()
+    for face in faces:
+        try:
+            tables = list(face["cmap"].tables)
+        except Exception:
+            continue
+        for t in tables:
+            try:
+                cps |= set(t.cmap.keys())
+            except Exception:
+                continue
+    return names, cps
+
+
 def bundle_families(dirs):
     """Every family name the Windows *artifact* carries.
 
@@ -245,6 +305,51 @@ def host_families(root=r"C:\Windows\Fonts"):
         if p.is_file():
             for name in _names_from_file(p):
                 out.setdefault(name.casefold(), (name, str(p)))
+    return out
+
+
+def host_cmaps(root=r"C:\Windows\Fonts"):
+    """{casefolded name: (original spelling, set of codepoints)} for the host.
+
+    Sibling of host_families(); same directory, same machine-wide-only scope.
+    A family with several files (regular, bold, ...) accumulates the union of
+    their coverage, which is the right question here: "can this family render
+    the codepoint at all".
+    """
+    out = {}
+    base = Path(root)
+    if not base.is_dir():
+        return out
+    for p in sorted(base.iterdir()):
+        if not p.is_file():
+            continue
+        names, cps = _cmap_from_file(p)
+        for name in names:
+            key = name.casefold()
+            orig, seen = out.get(key, (name, set()))
+            out[key] = (orig, seen | cps)
+    return out
+
+
+def bundle_cmaps(dirs):
+    """{casefolded name: (original spelling, set of codepoints)} for the ARTIFACT.
+
+    Not derivable from host_cmaps: Makefile:190 packages Windows with
+    `--fonts macos linux`, so the normal case is a bundled family the host does
+    not have, which contributes no cmap to host_cmaps at all. choose_codepoint
+    subtracts this coverage because such a family answers the codepoint under
+    the masked launch legitimately.
+    """
+    out = {}
+    for d in dirs:
+        for p in sorted(Path(d).rglob("*")):
+            if not p.is_file():
+                continue
+            names, cps = _cmap_from_file(p)
+            for name in names:
+                key = name.casefold()
+                orig, seen = out.get(key, (name, set()))
+                out[key] = (orig, seen | cps)
     return out
 
 
@@ -325,6 +430,121 @@ def choose_host_family(candidates, bare_widths):
     )
 
 
+def choose_codepoint(host_cmaps, bundle_cmaps, bundled_keys, launch_keys):
+    """Pick the codepoint the masked launch must not be able to render.
+
+    Returns (cp, carriers, reason) or (None, [], reason).
+
+    The requirement is the same one that makes choose_host_family a control:
+    the value under test must be reachable in the BARE launch, or its refusal
+    under a mask is indistinguishable from "nothing covers it here". So the
+    codepoint must be covered by at least one host family, by NO bundled
+    family, and by NO family on the launch list.
+
+    `bundle_cmaps` is separate from `host_cmaps` and load-bearing. Filtering
+    only on `key in bundled_keys` while iterating host_cmaps excludes bundled
+    families that are ALSO installed on the host -- and Makefile:190 packages a
+    Windows artifact with `--fonts macos linux`, so the normal case is a bundled
+    family the host does NOT have. Such a family contributes no cmap to
+    host_cmaps, is invisible to a name-only filter, and would answer the
+    codepoint under the masked launch legitimately -- which this arm would then
+    score as a leak.
+
+    Dot-prefixed families are skipped on BOTH sides, which the task brief did
+    only on the `by_cp` side. That asymmetry made the arm structurally
+    impossible to run: `bundle/fonts/macos` ships `.LastResort`, whose format-13
+    cmap covers all 1114112 codepoints, so a single dot-prefixed face put every
+    codepoint into `covered_elsewhere` and `usable` was empty on a real host.
+    Measured on the round-3 Windows artifact: 0 candidates with the brief's
+    rule, 10 in-window with this one. The rest of this script already treats
+    dot-prefixed families as outside the measurement -- build_launch_list drops
+    them, the candidate pool excludes them, and the `by_cp` loop above skips
+    them -- so this is that same rule applied consistently, not a new one.
+    """
+    from collections import defaultdict
+    by_cp = defaultdict(list)
+    for key, (orig, cps) in host_cmaps.items():
+        if key in bundled_keys or key in launch_keys or orig.startswith("."):
+            continue
+        for cp in cps:
+            by_cp[cp].append(orig)
+    # Everything reachable under the masked launch: host families that are on
+    # the list, plus EVERY family the artifact bundles, whether or not the host
+    # also has it.
+    covered_elsewhere = set()
+    for key, (orig, cps) in host_cmaps.items():
+        if (key in bundled_keys or key in launch_keys) and not orig.startswith("."):
+            covered_elsewhere |= cps
+    for key, (orig, cps) in bundle_cmaps.items():
+        if not orig.startswith("."):
+            covered_elsewhere |= cps
+    usable = sorted(cp for cp, fams in by_cp.items()
+                    if cp not in covered_elsewhere and 0x0100 <= cp < 0x2FFF)
+    if not usable:
+        return None, [], (
+            "no codepoint is covered by a host-only, unlisted family and by "
+            "nothing bundled or listed: the codepoint arm cannot run here")
+    cp = usable[0]
+    return cp, sorted(by_cp[cp]), (
+        "lowest of %d codepoints covered only by host families that are "
+        "neither bundled nor on the launch list; bundle coverage of %d "
+        "families was subtracted" % (len(usable), len(bundle_cmaps)))
+
+
+def choose_codepoint_control(host_cmaps, launch_keys):
+    """A codepoint covered only by an IN-LIST host family. It must render the
+    same bare and masked; if it does not, the masked launch has no working font
+    stack and the arm above asserts nothing.
+
+    Returns (cp, carriers, reason); cp is 0 when no such codepoint exists.
+
+    Two things here were settled by measurement rather than by argument, both
+    on the round-3 Windows artifact on the build host.
+
+    The exclusion set is the task brief's -- off-list HOST families only. Also
+    subtracting off-list BUNDLED coverage is the stricter reading (such a family
+    answers bare and is refused masked, which would move the control), but it
+    leaves ZERO candidates anywhere in Unicode on this host, because 573 bundled
+    macOS/Linux families cover everything the five in-list Windows base families
+    cover. Measured instead: U+FC08, U+FC09 and U+FC0E each render and measure
+    bit-identically bare and masked (44.0167 / 51.3500 / 43.8833), so on this
+    host the brief's looser rule does hold and the stricter one only costs the
+    control.
+
+    The search window is the whole codespace, not the 0x0100..0x2FFF the
+    measurement codepoint uses. That window exists to keep the MEASUREMENT off
+    ASCII, CJK and the private-use area; a control only has to be stable, and
+    every in-window candidate here was rejected by the rule above. The lowest
+    surviving candidate is U+FC08.
+
+    A control that renders nothing is worse than none: the PUA alternative
+    (codepoints whose every non-dot carrier is on the launch list) yielded 306
+    candidates and every one measured the tofu floor in the BARE launch,
+    because a private-use codepoint has no script for platform fallback to
+    resolve. `judge` therefore checks the control against the bare floor before
+    trusting it.
+    """
+    from collections import defaultdict
+    in_list, out_list = defaultdict(list), set()
+    for key, (orig, cps) in host_cmaps.items():
+        if orig.startswith("."):
+            continue
+        if key in launch_keys:
+            for cp in cps:
+                in_list[cp].append(orig)
+        else:
+            out_list |= cps
+    usable = sorted(cp for cp in in_list if cp not in out_list)
+    if not usable:
+        return 0, [], (
+            "no codepoint anywhere is covered by an in-list host family and by "
+            "no off-list host family, so this host cannot supply a positive "
+            "control for the codepoint arm")
+    return usable[0], sorted(in_list[usable[0]]), (
+        "lowest of %d codepoints covered by an in-list host family and by no "
+        "off-list host family" % len(usable))
+
+
 def _v(launch, probe, status, reason):
     return {"launch": launch, "probe": probe, "status": status, "reason": reason}
 
@@ -336,6 +556,13 @@ def judge(results):
     invalid, else "fail" if any is fail, else "pass". A measurement whose own
     control failed is emitted as "unscored" and never as pass or fail -- a run
     that measured nothing must not print a conclusion.
+
+    Note for anyone re-scoring an OLD result object: a run from before the #87
+    codepoint arm carries no `codepoint` rows, and the `not cp_rows` clause at
+    the end scores it "unscored", never "pass". That is the intended fail-closed
+    direction -- a half that never ran must not read as a half that passed -- but
+    it means re-judging round 2's stored JSON with this file reports a
+    regression that is not one.
     """
     verdicts = []
     host = results.get("host_family")
@@ -531,10 +758,122 @@ def judge(results):
                                "%d of %d bundled-but-unlisted families were refused."
                                % (len(unlisted) - len(still), len(unlisted))))
 
+    # 7. #87's codepoint half. The family-name arms above never touch
+    #    SystemFindFontForChar / GlobalFontFallback at all.
+    cp = (results.get("codepoint") or {}).get("cp")
+    if cp:
+        bare_w = (results.get("bare") or {}).get("widths") or {}
+        mask_w = (results.get("launch_list") or {}).get("widths") or {}
+        ctx_w = (results.get("per_context") or {}).get("widths") or {}
+        bare_cp, bare_floor = bare_w.get("__cp__"), bare_w.get("__cpfloor__")
+        ctl_bare = bare_w.get("__cpctl__")
+        if bare_cp is None or bare_floor is None:
+            verdicts.append(_v("bare", "codepoint", "invalid",
+                               "the codepoint or its floor was never measured"))
+        elif abs(bare_cp - bare_floor) <= EPS:
+            verdicts.append(_v("bare", "codepoint", "unscored",
+                               "CONTROL FAILED: the codepoint measured its own tofu "
+                               "floor in the BARE launch, where no mask applies, so a "
+                               "refusal under a mask would assert nothing."))
+        elif not (results.get("codepoint") or {}).get("control_cp"):
+            # Distinct from the width comparison below, which would otherwise
+            # report "rendered differently bare (None) and masked (None)" and
+            # read as a broken font stack rather than as a control that was
+            # never selectable on this host.
+            verdicts.append(_v("bare", "codepoint", "unscored",
+                               "CONTROL MISSING: %s"
+                               % ((results.get("codepoint") or {})
+                                  .get("control_reason")
+                                  or "no in-list codepoint control was selected")))
+        elif ctl_bare is not None and abs(ctl_bare - bare_floor) <= EPS:
+            # A control that renders nothing cannot say the font stack is live.
+            # Measured: every "on-list carrier" candidate on this host was a
+            # private-use codepoint, and all 306 of them read the tofu floor in
+            # the BARE launch. Without this branch such a control fails the
+            # width comparison below and blames the masked font stack for it.
+            verdicts.append(_v("bare", "codepoint", "unscored",
+                               "CONTROL FAILED: the in-list codepoint control measured "
+                               "the tofu floor in the BARE launch (%s), so it renders "
+                               "nothing and cannot show the font stack is live."
+                               % ctl_bare))
+        elif ctl_bare is None:
+            verdicts.append(_v("bare", "codepoint", "unscored",
+                               "CONTROL FAILED: the in-list codepoint control was never "
+                               "measured in the BARE launch, so there is no reference to "
+                               "compare the masked launches against."))
+        else:
+            # The control is asked of EACH masked launch, against that launch's
+            # OWN control width and OWN tofu floor. Reading the launch_list
+            # control and calling the per_context row controlled is the
+            # cross-launch reference shape CLAUDE.md lesson 4 is about: the
+            # per-context launch carries a different font list, applied by a
+            # different mechanism, and its liveness is a separate question.
+            # Checking against this launch's own floor also closes the narrower
+            # gap that a control which renders bare but goes tofu under a mask,
+            # at a width coincidentally equal to its bare width, would slip past
+            # a bare-floor-only check.
+            for name, w in (("launch_list", mask_w), ("per_context", ctx_w)):
+                ctl_here, floor_here = w.get("__cpctl__"), w.get("__cpfloor__")
+                if ctl_here is None or floor_here is None:
+                    verdicts.append(_v(name, "codepoint", "unscored",
+                                       "CONTROL FAILED: the in-list codepoint control "
+                                       "(%s) or the tofu floor (%s) was never measured in "
+                                       "this launch." % (ctl_here, floor_here)))
+                    continue
+                if abs(ctl_here - floor_here) <= EPS:
+                    verdicts.append(_v(name, "codepoint", "unscored",
+                                       "CONTROL FAILED: the in-list codepoint control "
+                                       "measured this launch's own tofu floor (%s), so "
+                                       "codepoint fallback resolves nothing here and a "
+                                       "refusal says nothing." % ctl_here))
+                    continue
+                if abs(ctl_here - ctl_bare) > EPS:
+                    verdicts.append(_v(name, "codepoint", "unscored",
+                                       "CONTROL FAILED: the in-list codepoint control "
+                                       "rendered differently bare (%s) and in this launch "
+                                       "(%s), so this launch has no working font stack and "
+                                       "'refused' says nothing." % (ctl_bare, ctl_here)))
+                    continue
+                v = w.get("__cp__")
+                if v is None:
+                    verdicts.append(_v(name, "codepoint", "invalid",
+                                       "the codepoint was never measured"))
+                elif abs(v - bare_cp) <= EPS:
+                    verdicts.append(_v(name, "codepoint", "fail",
+                                       "U+%04X still resolves to a host family that is "
+                                       "off the list (width %s matches the bare launch), "
+                                       "so codepoint fallback reaches host fonts."
+                                       % (cp, v)))
+                else:
+                    verdicts.append(_v(name, "codepoint", "pass",
+                                       "U+%04X no longer resolves to its host carrier "
+                                       "(%s bare vs %s here)." % (cp, bare_cp, v)))
+    else:
+        # choose_codepoint found no usable codepoint. Without this row the
+        # block above appends NOTHING, `overall` stays "pass", and Task 9 would
+        # close #87 on "both halves GREEN" while one half never ran -- a
+        # silently absent measurement reading exactly like a passing one
+        # (CLAUDE.md lesson 3). The risk is real: covered_elsewhere subtracts
+        # every bundled family's coverage, a Windows artifact bundles the macOS
+        # and Linux sets including Noto (Makefile:190), and the search window is
+        # only 0x0100..0x2FFF.
+        verdicts.append(_v("bare", "codepoint", "unscored",
+                           "NOT RUN: %s" % ((results.get("codepoint") or {})
+                                            .get("chosen_reason") or
+                                            "no codepoint block in the result object")))
+
+    # #87 closes on BOTH halves, so a codepoint half that produced no scored row
+    # must not read as a pass. This is deliberately NARROW -- it looks only at
+    # rows whose probe is "codepoint" -- because "unscored" elsewhere (the
+    # bundled-unlisted sharpener when the in-list control failed) always travels
+    # with an invalid or fail row that already decides the run.
+    cp_rows = [v for v in verdicts if v["probe"] == "codepoint"]
     if any(v["status"] == "invalid" for v in verdicts):
         overall = "invalid"
     elif any(v["status"] == "fail" for v in verdicts):
         overall = "fail"
+    elif not cp_rows or any(v["status"] == "unscored" for v in cp_rows):
+        overall = "unscored"
     else:
         overall = "pass"
     return verdicts, overall
@@ -592,7 +931,7 @@ def build_launch_list(bundled, host, size):
 # Browser
 # --------------------------------------------------------------------------
 
-def build_url(families):
+def build_url(families, codepoint, codepoint_control):
     """The measurement runs in the PAGE world, as an inline <script> in the
     document, not through page.evaluate() -- evaluate runs in juggler's
     isolated world, and the page world is the one a fingerprinter occupies.
@@ -603,12 +942,15 @@ def build_url(families):
         "absent2": json.dumps(ABSENT_2),
         "families": json.dumps(list(families)),
         "node": RESULTS_NODE,
+        "cp": codepoint,
+        "cpctl": codepoint_control,
     }
     html = "<!doctype html><meta charset=utf-8><title>probe</title><script>%s</script>" % js
     return "data:text/html;charset=utf-8," + urllib.parse.quote(html, safe="")
 
 
-def measure(exe, families, camou_config, per_context_list, headful, timeout=60000):
+def measure(exe, families, camou_config, per_context_list, headful, timeout=60000,
+            codepoint=0, codepoint_control=0):
     """One launch, one context, one page -- the strongest isolation available.
 
     headless is the default. These are advance-width measurements, which need no
@@ -624,7 +966,7 @@ def measure(exe, families, camou_config, per_context_list, headful, timeout=6000
     except PackageNotFoundError:
         pw_version = "unknown"
 
-    url = build_url(families)
+    url = build_url(families, codepoint, codepoint_control)
     with sync_playwright() as pw:
         browser = pw.firefox.launch(
             executable_path=exe,
@@ -667,12 +1009,21 @@ def measure(exe, families, camou_config, per_context_list, headful, timeout=6000
 # --------------------------------------------------------------------------
 
 def _canned(host_w=120.0, list_w=None, ctx_w=None, absent=80.0,
-            data_fl='{"saw":true,"applied":true,"err":null}', absent2=None):
+            data_fl='{"saw":true,"applied":true,"err":null}', absent2=None,
+            cp=0x2C60, cp_bare=200.0, cp_masked=80.0, cp_floor=80.0,
+            cp_ctl=150.0, cp_ctl_masked=None, cp_ctl_ctx=None):
     """A minimal result object shaped exactly like a real run's."""
-    def run(host, extra=None):
+    ctl_masked = cp_ctl if cp_ctl_masked is None else cp_ctl_masked
+    # Separate from ctl_masked so a case can move ONE masked launch's control:
+    # the two masked launches carry different font lists applied by different
+    # mechanisms, and judge now scores each against its own.
+    ctl_ctx = ctl_masked if cp_ctl_ctx is None else cp_ctl_ctx
+
+    def run(host, cp_w, ctl_w, extra=None):
         w = {"__absent1__": absent, "__absent2__": absent if absent2 is None else absent2,
              "Host One": host, "Listed A": absent + 40, "Listed B": absent + 41,
-             "Unlisted X": absent, "__fffd__": 9.0, "__monospace__": absent}
+             "Unlisted X": absent, "__fffd__": 9.0, "__monospace__": absent,
+             "__cp__": cp_w, "__cpfloor__": cp_floor, "__cpctl__": ctl_w}
         w.update(extra or {})
         return {"widths": w, "data_fl": None, "page_error": None}
     return {
@@ -681,9 +1032,14 @@ def _canned(host_w=120.0, list_w=None, ctx_w=None, absent=80.0,
         "candidates": ["Host One"],
         "in_list_probes": ["Listed A", "Listed B"],
         "bundled_unlisted_probes": ["Unlisted X"],
-        "bare": run(host_w),
-        "launch_list": run(absent if list_w is None else list_w),
-        "per_context": dict(run(absent if ctx_w is None else ctx_w), data_fl=data_fl),
+        "codepoint": {"cp": cp, "carriers": ["Host One"],
+                      "chosen_reason": "canned",
+                      "control_cp": 0x2C61, "control_reason": "canned"},
+        "bare": run(host_w, cp_bare, cp_ctl),
+        "launch_list": run(absent if list_w is None else list_w,
+                           cp_masked, ctl_masked),
+        "per_context": dict(run(absent if ctx_w is None else ctx_w,
+                                cp_masked, ctl_ctx), data_fl=data_fl),
     }
 
 
@@ -850,8 +1206,15 @@ def self_test():
     print("helpers:")
     check("spread samples evenly", spread(list(range(10)), 3) == [0, 3, 6])
     check("spread returns all when short", spread([1, 2], 5) == [1, 2])
-    url = build_url(["Arial", "Segoe UI"])
+    url = build_url(["Arial", "Segoe UI"], 0x0101, 0x0301)
     check("data: URL is well formed", url.startswith("data:text/html;charset=utf-8,"))
+    decoded = urllib.parse.unquote(url)
+    check("the chosen codepoint reaches the page as a number",
+          "String.fromCodePoint(257)" in decoded)
+    check("the control codepoint reaches the page as a number",
+          "String.fromCodePoint(769)" in decoded and "(769 > 0)" in decoded)
+    check("the tofu floor is a PUA codepoint in the same stack",
+          "__NoSuchFamilyAtAll7__" in decoded and "\\uE000" in decoded)
     check("family names reach the page JSON",
           "Segoe%20UI" in url or "Segoe+UI" in url or "Segoe" in url)
     check("results node id is the runner.py one",
@@ -874,6 +1237,118 @@ def self_test():
             print("  fontTools not installed -- skipped")
     else:
         print("  bundle dirs not present -- skipped")
+
+    # The codepoint selectors, on canned cmaps. `judge` cannot see a reversed
+    # filter here: it is handed whatever codepoint was chosen and scores widths.
+    print("codepoint selection (#87):")
+    hc = {"alpha": ("Alpha", {0x0100, 0x0101}), "beta": ("Beta", {0x0200}),
+          "noto sans": ("Noto Sans", {0x0300})}
+    bc = {"noto sans": ("Noto Sans", {0x0100, 0x0300})}
+    cpv, carriers, why = choose_codepoint(hc, bc, {"noto sans"}, {"beta"})
+    check("skips a codepoint a BUNDLED family also covers", cpv == 0x0101)
+    check("names the host carrier", carriers == ["Alpha"])
+    check("reason reports the bundle subtraction", "bundle coverage of 1" in why)
+    cpv, carriers, why = choose_codepoint(
+        hc, {"noto sans": ("Noto Sans", {0x0100, 0x0101, 0x0300})},
+        {"noto sans"}, {"beta"})
+    check("returns None when the bundle covers everything", cpv is None)
+    check("None comes with a reason", "cannot run here" in why)
+    check("a LISTED host family's codepoint is never chosen",
+          choose_codepoint({"beta": ("Beta", {0x0200})}, {}, set(), {"beta"})[0] is None)
+    check("out-of-window codepoints are not chosen",
+          choose_codepoint({"a": ("A", {0x0041, 0x3000})}, {}, set(), set())[0] is None)
+    # bundle/fonts/macos ships .LastResort, whose cmap covers all 1114112
+    # codepoints. Counting it as bundle coverage empties `usable` on any real
+    # host, which is what made this arm report NOT RUN on the first attempt.
+    check("a dot-prefixed bundled family does not swallow every codepoint",
+          choose_codepoint({"alpha": ("Alpha", {0x0101})},
+                           {".lastresort": (".LastResort",
+                                            set(range(0x0100, 0x0200)))},
+                           set(), set())[0] == 0x0101)
+
+    hc2 = {"arial": ("Arial", {0x0300, 0x0301}), "segoe ui": ("Segoe UI", {0x0300})}
+    check("control is a codepoint only an in-list host family covers",
+          choose_codepoint_control(hc2, {"arial"})[0] == 0x0301)
+    check("control names its carrier",
+          choose_codepoint_control(hc2, {"arial"})[1] == ["Arial"])
+    check("control searches outside the measurement window",
+          choose_codepoint_control({"arial": ("Arial", {0xFC08}),
+                                    "segoe ui": ("Segoe UI", {0x0300})},
+                                   {"arial"})[0] == 0xFC08)
+    check("no control comes with a reason naming the host",
+          "cannot supply a positive control"
+          in choose_codepoint_control({"segoe ui": ("Segoe UI", {0x0300})},
+                                      {"arial"})[2])
+
+    print("codepoint arm (#87):")
+
+    def cp_status(obj):
+        """The set of statuses on rows whose probe is 'codepoint'."""
+        return {x["status"] for x in judge(obj)[0] if x["probe"] == "codepoint"}
+
+    check("reachable bare, refused under both masks -> pass",
+          cp_status(_canned()) == {"pass"})
+    check("still resolves to the host carrier under a mask -> fail",
+          cp_status(_canned(cp_masked=200.0)) == {"fail"})
+    check("codepoint measures its own tofu floor in the BARE launch -> unscored",
+          cp_status(_canned(cp_bare=80.0)) == {"unscored"})
+    check("in-list codepoint control moved between launches -> unscored",
+          cp_status(_canned(cp_ctl_masked=99.0)) == {"unscored"})
+    check("a control that is tofu in the BARE launch -> unscored",
+          cp_status(_canned(cp_ctl=80.0)) == {"unscored"})
+    check("and blames the control, not the masked font stack",
+          any("measured the tofu floor in the BARE launch" in x["reason"]
+              for x in judge(_canned(cp_ctl=80.0))[0]))
+
+    # Each masked launch is controlled by its OWN control width and floor. The
+    # task brief read the launch_list control and let the per_context row rest
+    # on it, which is a cross-launch reference (CLAUDE.md lesson 4).
+    def cp_pairs(obj):
+        return {(x["launch"], x["status"]) for x in judge(obj)[0]
+                if x["probe"] == "codepoint"}
+
+    check("per-context control moving alone unscores ONLY per_context",
+          cp_pairs(_canned(cp_ctl_ctx=99.0))
+          == {("launch_list", "pass"), ("per_context", "unscored")})
+    check("per-context control reading its own launch's floor -> unscored",
+          cp_pairs(_canned(cp_ctl_ctx=80.0))
+          == {("launch_list", "pass"), ("per_context", "unscored")})
+    check("launch_list control moving alone unscores ONLY launch_list",
+          cp_pairs(_canned(cp_ctl_masked=99.0, cp_ctl_ctx=150.0))
+          == {("launch_list", "unscored"), ("per_context", "pass")})
+    # M1's shape: the control goes tofu under both masks, at a width that
+    # happens to equal its own BARE width, so the "did it move" test sees
+    # nothing. Only comparing it against THIS launch's floor catches it.
+    coincide = _canned()
+    for _r in ("launch_list", "per_context"):
+        coincide[_r]["widths"]["__cpfloor__"] = 150.0
+        coincide[_r]["widths"]["__cpctl__"] = 150.0
+    check("a masked control gone tofu at its own bare width -> unscored",
+          cp_status(coincide) == {"unscored"})
+    missing_ctx = _canned()
+    del missing_ctx["per_context"]["widths"]["__cpctl__"]
+    check("an unmeasured per-context control is unscored, never a pass",
+          cp_pairs(missing_ctx)
+          == {("launch_list", "pass"), ("per_context", "unscored")})
+    check("a control never measured in the BARE launch -> unscored",
+          cp_status(_canned(cp_ctl=None)) == {"unscored"})
+    no_ctl = _canned()
+    no_ctl["codepoint"]["control_cp"] = 0
+    for r in ("bare", "launch_list", "per_context"):
+        no_ctl[r]["widths"]["__cpctl__"] = None
+    check("no control codepoint selectable on this host -> unscored",
+          cp_status(no_ctl) == {"unscored"})
+    check("and says CONTROL MISSING, not that the font stack is dead",
+          any("CONTROL MISSING" in x["reason"] for x in judge(no_ctl)[0]
+              if x["probe"] == "codepoint"))
+    no_cp = _canned()
+    no_cp["codepoint"]["cp"] = None
+    check("no codepoint selected -> an unscored row, not silence",
+          cp_status(no_cp) == {"unscored"})
+    check("and that alone stops the run reading as a pass",
+          judge(no_cp)[1] == "unscored")
+    check("a clean run still passes with the codepoint half present",
+          judge(_canned())[1] == "pass")
 
     if fails:
         print("\nSELF-TEST FAILED: %s" % ", ".join(fails))
@@ -898,6 +1373,19 @@ NOT verified by this run:
   * U+FFFD codepoint fallback is measured and printed but NOT scored: under a
     masked launch there is no reference guaranteed to differ from it, so a
     verdict there would not be a control (CLAUDE.md lesson 4).
+  * Which code path answers the codepoint arm. The probe names no generic in
+    `48px "__NoSuchFamilyAtAll7__"`, so a glyph can arrive from
+    GlobalFontFallback, from the #94 pref-path memo, or from
+    gfxFontGroup::GetDefaultFont()'s still-ungated shared-list walk. Widths do
+    not separate them, so a `fail` row here says "codepoint fallback reached a
+    host font", never which gate let it through.
+  * The `pass` direction of the codepoint arm, in one shape. The row compares
+    the masked width against the BARE width, so a mask that resolved the
+    codepoint through a DIFFERENT off-list family than the bare launch used
+    would differ from bare and score `pass` while still leaking. The masked
+    width against the masked tofu floor is the check that rules this out; both
+    numbers are in the JSON (`__cp__`, `__cpfloor__`) and are compared in the
+    run report, but no verdict row scores them.
   * Headless. Advance-width measurement needs no GL context, so this is not the
     headless-WebGL trap from issue #75, but it is still not a headful run.
   * The `pass` direction of the two masked arms is not fully controlled. The host
@@ -1016,12 +1504,38 @@ def main(argv=None):
     families = probed + [f for f in in_list_probes + bundled_unlisted_probes
                          if f not in probed]
 
+    # #87's codepoint half. Both cmap walks run here, once, because both are
+    # slow (every face of every file) and both feed one selection.
+    host_cps = host_cmaps()
+    # Checked here, before the far slower bundle walk over every artifact font
+    # file and before either selector runs on an empty dict, so the WSL mistake
+    # this guard exists to catch fails fast.
+    if not host_cps:
+        print(r"FATAL: no cmaps read from C:\Windows\Fonts. This script must run on "
+              "the native Windows interpreter, not under WSL.")
+        return 1
+    bundle_cps = bundle_cmaps(bundle_dirs)
+    cp_value, cp_carriers, cp_reason = choose_codepoint(
+        host_cps, bundle_cps, set(bundled), launch_keys)
+    cp_ctl, cp_ctl_carriers, cp_ctl_reason = choose_codepoint_control(
+        host_cps, launch_keys)
+
     results = {
         "candidates": probed,
         "candidates_total": len(candidates),
         "launch_list_families": launch_list,
         "in_list_probes": in_list_probes,
         "bundled_unlisted_probes": bundled_unlisted_probes,
+        "codepoint": {
+            "cp": cp_value,
+            "carriers": cp_carriers,
+            "chosen_reason": cp_reason,
+            "control_cp": cp_ctl,
+            "control_carriers": cp_ctl_carriers,
+            "control_reason": cp_ctl_reason,
+            "host_cmap_families": len(host_cps),
+            "bundle_cmap_families": len(bundle_cps),
+        },
         "bundle_family_count": len(bundled),
         "host_family_count": len(host),
         "env": {
@@ -1043,11 +1557,14 @@ def main(argv=None):
 
     # All three launches carry CAMOU_CONFIG, so the only thing that differs
     # between `bare` and `launch_list` is the `fonts` key itself.
-    results["bare"] = measure(args.executable_path, families, {}, None, args.headful)
+    results["bare"] = measure(args.executable_path, families, {}, None, args.headful,
+                              codepoint=cp_value or 0, codepoint_control=cp_ctl)
     results["launch_list"] = measure(args.executable_path, families,
-                                     {"fonts": launch_list}, None, args.headful)
+                                     {"fonts": launch_list}, None, args.headful,
+                                     codepoint=cp_value or 0, codepoint_control=cp_ctl)
     results["per_context"] = measure(args.executable_path, families, {},
-                                     launch_list, args.headful)
+                                     launch_list, args.headful,
+                                     codepoint=cp_value or 0, codepoint_control=cp_ctl)
 
     def write_out():
         """Durable before anything that can fail. Three browser launches on a
@@ -1095,6 +1612,14 @@ def main(argv=None):
     print("\n[U+FFFD, informational only] bare=%s launch_list=%s per_context=%s"
           % tuple(results[n]["widths"].get("__fffd__") for n in
                   ("bare", "launch_list", "per_context")))
+    print("\n[codepoint arm] U+%04X carriers=%s\n  chosen: %s"
+          % (cp_value or 0, cp_carriers, cp_reason))
+    print("  control U+%04X carriers=%s\n  chosen: %s"
+          % (cp_ctl, cp_ctl_carriers, cp_ctl_reason))
+    for name in ("bare", "launch_list", "per_context"):
+        w = results[name]["widths"]
+        print("    %-12s cp=%s floor=%s control=%s"
+              % (name, w.get("__cp__"), w.get("__cpfloor__"), w.get("__cpctl__")))
 
     if args.out:
         print("\nwrote %s" % args.out)
@@ -1106,6 +1631,9 @@ def main(argv=None):
     print("\noverall: %s" % overall.upper())
     if overall == "invalid":
         print("This run measured nothing usable. Do not report a pass or a fail from it.")
+    elif overall == "unscored":
+        print("The family-name half ran, but the codepoint half produced no scored "
+              "verdict. #87 asks for BOTH halves; do not close it on this run.")
     print(NOT_VERIFIED)
     return 0 if overall == "pass" else 1
 
