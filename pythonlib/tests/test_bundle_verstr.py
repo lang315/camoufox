@@ -60,6 +60,21 @@ def test_missing_application_ini_returns_none(tmp_path):
     assert _bundle_verstr(exe) is None
 
 
+def test_unreadable_application_ini_returns_none(tmp_path):
+    """The never-raises contract covers a file that exists but cannot be read.
+
+    A directory at the expected path raises IsADirectoryError -- an OSError
+    subclass, the same branch a permissions failure takes. Preferred over
+    chmod 000, which does nothing when the suite runs as root and which
+    Windows does not enforce, either of which would need a platform skip.
+    """
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").mkdir()
+
+    assert _bundle_verstr(exe) is None
+
+
 def test_unparsable_version_line_returns_none(tmp_path):
     exe = tmp_path / "camoufox"
     exe.write_bytes(b"")
