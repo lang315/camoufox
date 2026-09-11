@@ -7032,7 +7032,9 @@ jobs:
           LIBGL_ALWAYS_SOFTWARE: "1"
           GITHUB_TOKEN: ${{ github.token }}
 
-      # Bulk dump of what the step above captured. Separate from that step, and
+      # Bulk dump of what the per-context font-list guard captured -- that is
+      # the CAMOU-FL producer, now two steps above rather than one, since the
+      # #44 headline arm was inserted between them. Separate from that step, and
       # `if: always()`, for two reasons: it must not spend the guard's
       # 10-minute budget, and the run in which the guard FAILS is exactly the
       # run whose log someone needs. It launches nothing -- MOZ_LOG was set
