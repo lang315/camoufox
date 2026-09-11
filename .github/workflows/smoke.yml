@@ -1428,11 +1428,22 @@ jobs:
           # longer a probe family; this stays because it is the standing
           # evidence for the bundle issue, and it is a diagnostic with no
           # assert -- see issue-geneva.md.
+          # #95: Geneva is one of FIVE families whose only cmap subtable is a
+          # Unicode-platform format-10/12/13 table, which upstream's non-macOS
+          # acceptableUCS4Encoding rejects -- leaving an empty character map.
+          # All five are probed so the other four are measured rather than
+          # assumed to follow Geneva.
+          CMAP95_FAMILIES = ["Geneva", "Apple Symbols", "Heiti TC", "Heiti SC"]
           _gp = mac_list_probe(
-              PIXEL_JS, ["Geneva", "__CamouAbsentRef__0001", "Helvetica Neue"], "g")
+              PIXEL_JS,
+              CMAP95_FAMILIES + ["__CamouAbsentRef__0001", "Helvetica Neue"], "g")
           geneva_pixels = {"geneva": _gp["Geneva"]["pixels"],
                            "absent": _gp["__CamouAbsentRef__0001"]["pixels"],
                            "helvetica_neue": _gp["Helvetica Neue"]["pixels"]}
+          for _fam in CMAP95_FAMILIES:
+              _differs = _gp[_fam]["pixels"] != geneva_pixels["absent"]
+              print(f"  [#95 cmap discriminator] {_fam}: checksum="
+                    f"{_gp[_fam]['pixels']} differs from absent-reference: {_differs}")
           control_differs = geneva_pixels["helvetica_neue"] != geneva_pixels["absent"]
           geneva_pixel_differs = geneva_pixels["geneva"] != geneva_pixels["absent"]
           print(f"  [Geneva pixel discriminator] checksums: {geneva_pixels}")
