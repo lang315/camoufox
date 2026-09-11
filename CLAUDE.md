@@ -213,6 +213,25 @@ lives in a base class, grep every platform subclass (`gfxFcPlatformFontList`,
 `gfxDWriteFontList`, `gfxMacPlatformFontList`) for an early return on the same
 lookup before calling the gate complete.
 
+**8. Measure the font universe that ships, not the one the runner has.**
+For two rounds the smoke guard launched with the GitHub runner's own fontconfig,
+so every font measurement was taken against Ubuntu's host fonts — a universe no
+Camoufox ships. Three published findings came out of that. The unidentified face
+in #88, `375.70001220703125` px, and #92's monospace-on-a-proportional-face are
+both DejaVu Sans, a host font; so is the U+FFFD width `49.2166` in run
+34431222344. And bundled `Geneva.ttf` passed arm (b) twice, because a host face
+was answering for it; confined to the bundle it renders at exactly the
+absent-family reference (width 1333, pixel checksum 2482840822) and does not
+render at all — that is #95. Setting `FONTCONFIG_FILE` the way
+`pythonlib/camoufox/utils.py:_generate_fontconfig` does changed the premise of
+four arms and one number in every table, and cost nine Phase 0 smoke runs to
+re-baseline. It also introduced its own blind spot, which has to be stated with
+the result: the guard pins the **Linux** conf, whose generics alias to
+Tinos/Arimo/Cousine and are refused under a mac or win list, while a shipped
+session picks the conf by the **spoofed** OS and gets generics its list allows.
+The rule: before a font measurement is evidence, say which font universe it was
+taken in, and check that it is the one the product ships.
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
@@ -237,19 +256,58 @@ matching arm (b)'s per-context ground truth. The arm's own discriminator in that
 run named the defect a quoted family key rather than a missing context scope.
 Treat any different shape as unmeasured.
 
-Still ungated after it:
-`gfxFontGroup::GetDefaultFont()`'s shared-list branch, the last-resort walk —
-this is the face that serves text after a per-context refusal (#88, DejaVu
-Sans on the Linux bundle) and the face the generic families `serif` /
-`monospace` land on under a per-context list (#92); the non-shared
-`LookupInFaceNameLists` and `CommonFontFallback` `else` branches, dormant while
-`gfx.e10s.font-list.shared` is true; and `LookupLocalFont` on the macOS and
-Windows platform font lists, which a Linux guard cannot see. PR #93 additionally
-gated the two fallback caches (`mCodepointsWithNoFonts` per context, the U+FFFD
-`mReplacementCharFallbackFamily` hit) by reading — the U+FFFD one is unmeasurable
-on this bundle because the default font covers U+FFFD (#82 stays open) — and
-removed the `@font-face` gate for faces that carry a `url()` source (#80; the
-real `FontFace.status` is #91).
+PR #93 gated the two fallback caches by reading — `mCodepointsWithNoFonts` per
+context, and the U+FFFD `mReplacementCharFallbackFamily` hit — and removed the
+`@font-face` gate for faces that carry a `url()` source (#80).
+
+Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
+"gated and measured" and "gated by reading" matters for each:
+
+- **The pref-font memo read path (#94).** `GetPrefFontsLangGroupLocked`
+  populates under `AutoFontListContext ctx(0)`, so the memo's per-context
+  contents no longer depend on who missed first; the launch mask still applies
+  at population. Both consumers filter at read.
+  `WhichPrefFontSupportsChar` is **measured** on Linux (smoke arm (n1), run
+  34544934746: the probe moves from Tinos's own 33 to its own floor 43 with
+  `pref-fallback ctx=6 key=tinos allowed=0`). `AddGenericFonts`' half is
+  **gated by reading only** — on the runner it is reached for `system-ui` and
+  `x-math` alone.
+- **Generic family to family map under a per-context list (#92).**
+  `CamouGenericCandidate` resolves an ordered table intersected with the
+  context's list, consulted by `FindGenericFamilies` before the fontconfig loop
+  and by `AddGenericFonts` on the DWrite/CoreText path. **Measured** on Linux
+  (arm (n2): 215/215/215 becomes 215/305/280 with one `generic-map` line per
+  generic). `system-ui` (`generic=7`) is asked for in **no** run of that round,
+  so that row is unmeasured, and a generic under a list now yields one family
+  where upstream gave up to three.
+- **`gfxFontGroup::GetDefaultFont`'s scope and shared-list walk, plus
+  `GetDefaultFontLocked`'s two last resorts (#88).** What is **measured** is
+  that a refusing context never reaches `GetDefaultFont` at all (arm (h3), shape
+  B: no `default` line for the context, `generic-map` naming three in-list
+  families). The gated walks themselves are **reasoned from the code**:
+  `default` and `default-unfiltered` both read 0 run-wide.
+- **`FontFaceLoadStatus` for non-local faces (#91).** **Measured**, three
+  observables: the 404 face goes `loaded` to `error`, the control stays `loaded`
+  at 1920, and `/nope.ttf` joins the fetched-path list.
+
+Every gate-approved last-resort walk now has an **unfiltered tail**: if the walk
+finds nothing it returns the unfiltered family upstream would have returned and
+logs `CAMOU-FL default-unfiltered`. That line therefore fires only on fail-open,
+so **zero is the healthy count** and a non-zero one is a finding. The tail is
+deliberate: a gate that finds nothing must not turn `family.IsNull()` into a
+release-build null dereference at `gfxTextRun.cpp:2207-2221`.
+`GetFontFamilyList`'s existing unfiltered refill is the precedent.
+
+Still ungated after round 3: `CoreTextFontList::FindSystemFontFamily`'s return
+on the macOS system-font path; the DWrite non-shared substitution branch and the
+non-shared `LookupInFaceNameLists` / `CommonFontFallback` `else` branches, all
+dormant while `gfx.e10s.font-list.shared` is true; `LookupLocalFont` on the
+macOS and Windows platform font lists, which a Linux guard cannot see; and the
+**context-0 fail-open**, which no round has changed (lesson 5). The macOS host
+is unmeasured entirely. #82 is closed by measurement on Linux — arm (n4) GREEN
+on run 34544934746 against a RED on run 34544937587, a build differing by one
+statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
+bundle, so it rests on one arm.
 
 ## Constraints when editing this repo
 
