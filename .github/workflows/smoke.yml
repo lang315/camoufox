@@ -6912,6 +6912,126 @@ jobs:
           # only cost is more syscalls.
           PYTHONUNBUFFERED: "1"
 
+      - name: "NewContext(os=X) is cross-signal coherent (#44 headline)"
+        timeout-minutes: 15
+        run: |
+          # The scenario #44's body describes, through the entry point it names:
+          # AsyncCamoufox() with NO os= at launch, then three contexts from that
+          # ONE browser asking for three different OSes. The two older #44 guards
+          # drive raw Playwright with a hand-written CAMOU_CONFIG, which is not
+          # this path -- a hand-built config has no webGl:parameters and so never
+          # reached the early-exit that caused the original defect.
+          #
+          # No ff_version is passed. On a runner with no managed install that
+          # used to raise CamoufoxNotInstalled (#97); reaching the browser at all
+          # is this arm's incidental proof that #97 holds end to end.
+          #
+          # xvfb is mandatory: headless returns '(no webgl)' for every renderer
+          # read, which reads as a clean negative while measuring nothing.
+          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
+          import asyncio, os
+          from camoufox.async_api import AsyncCamoufox, AsyncNewContext
+
+          READ = '''() => {
+            const c = document.createElement('canvas');
+            const gl = c.getContext('webgl');
+            const dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+            const renderer = dbg ? gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+                                 : '(no webgl)';
+            const probe = (f) => {
+              const s = document.createElement('span');
+              s.style.cssText = 'position:absolute;font-size:72px';
+              s.textContent = 'mmmmmmmmwwwwwww';
+              document.body.appendChild(s);
+              s.style.fontFamily = 'monospace';
+              const base = s.getBoundingClientRect().width;
+              s.style.fontFamily = `"${f}", monospace`;
+              const w = s.getBoundingClientRect().width;
+              s.remove();
+              return w !== base;
+            };
+            // Markers must be (1) bundled by Camoufox for exactly this OS --
+            // NOT a host font the CI runner happens to have -- and (2) not
+            // that OS's own `monospace` generic alias, or the probe compares
+            // a face against itself and reads ABSENT although present.
+            //
+            // DejaVu Sans / Liberation Sans / Ubuntu are NOT bundled -- they
+            // are the CI runner's own host fonts, invisible once
+            // FONTCONFIG_FILE points at the bundle -- and Menlo/Consolas ARE
+            // each OS's monospace alias (bundle/fontconfig/{macos,windows}
+            // /fonts.conf). Do not put them back.
+            return {
+              platform: navigator.platform,
+              renderer,
+              mac: ['Helvetica Neue', 'Monaco', 'Lucida Grande'].filter(probe),
+              win: ['Segoe UI', 'Calibri', 'Cambria'].filter(probe),
+              lin: ['Arimo', 'Tinos', 'Noto Sans JP'].filter(probe),
+              absent: probe('__CamouAbsentRef__0001'),
+            };
+          }'''
+
+          EXPECT = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}
+
+          async def main():
+              seen = {}
+              async with AsyncCamoufox(
+                  headless=False,
+                  executable_path=os.environ['CAMOUFOX_BIN'],
+              ) as browser:
+                  for os_name in ('macos', 'windows', 'linux'):
+                      ctx = await AsyncNewContext(browser, os=os_name)
+                      page = await ctx.new_page()
+                      await page.goto('data:text/html,<h1>c</h1>')
+                      seen[os_name] = await page.evaluate(READ)
+                      await ctx.close()
+              return seen
+
+          seen = asyncio.run(main())
+          for os_name, r in seen.items():
+              print(f"  [{os_name}] platform={r['platform']} renderer={r['renderer']}")
+              print(f"  [{os_name}] mac={r['mac']} win={r['win']} lin={r['lin']} "
+                    f"absent={r['absent']}")
+
+          # -- setup validity, before any verdict (CLAUDE.md lesson 4) ----------
+          # A reference is only a control if something guarantees it can differ.
+          invalid = []
+          if any(r['renderer'] == '(no webgl)' for r in seen.values()):
+              invalid.append("no GL context -- every renderer read is '(no webgl)'")
+          if any(r['absent'] for r in seen.values()):
+              invalid.append("the deliberately-absent family measured as present "
+                             "-- the width probe cannot tell present from absent")
+          if len({r['platform'] for r in seen.values()}) != 3:
+              invalid.append(f"contexts did not differ on navigator.platform: "
+                             f"{[r['platform'] for r in seen.values()]}")
+          if invalid:
+              print("::warning::SETUP-INVALID -- this arm measured nothing:")
+              for line in invalid:
+                  print(f"  - {line}")
+              raise SystemExit("setup-invalid")
+
+          # -- verdict ----------------------------------------------------------
+          bad = []
+          for os_name, r in seen.items():
+              own = EXPECT[os_name]
+              others = [k for k in ('mac', 'win', 'lin') if k != own]
+              if not r[own]:
+                  bad.append(f"{os_name}: none of its own marker fonts resolved")
+              for other in others:
+                  if r[other]:
+                      bad.append(f"{os_name}: leaked {other} marker fonts {r[other]}")
+          if len({r['renderer'] for r in seen.values()}) != 3:
+              bad.append("the three contexts share a WebGL renderer: "
+                         f"{sorted({r['renderer'] for r in seen.values()})}")
+
+          assert not bad, "#44 reproduces:\n  " + "\n  ".join(bad)
+          print("  #44 headline: three contexts, three coherent fingerprints")
+          PY
+        env:
+          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GITHUB_TOKEN: ${{ github.token }}
+
       # Bulk dump of what the step above captured. Separate from that step, and
       # `if: always()`, for two reasons: it must not spend the guard's
       # 10-minute budget, and the run in which the guard FAILS is exactly the
