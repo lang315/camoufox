@@ -164,6 +164,47 @@ def warn_if_executable_predates_playwright(path: Optional[Path]) -> None:
     )
 
 
+def _bundle_verstr(path: Optional[Path]) -> Optional[str]:
+    """Firefox major version of the build at `path`, read from its own bundle.
+
+    Packages ship application.ini -- a Gecko invariant generated from
+    build/application.ini.in -- but not version.json, which the installer
+    writes into INSTALL_DIR (pkgman.py:652). So Version.from_path() cannot
+    read a package or a raw build artifact, while `[App] Version=` can: it
+    carries the same "<major>.<minor>.<patch>-<build>" shape
+    installed_verstr() returns.
+
+    On macOS the binary sits in Contents/MacOS and the file ships in
+    Contents/Resources, beside properties.json -- the same fallback
+    _load_properties() makes. Unlike that function this one is not gated on
+    OS_NAME: the check is a cheap existence test either way, and leaving it
+    ungated keeps the behaviour testable on every host.
+
+    Returns None -- never raises -- when there is no executable path, no
+    application.ini beside it, or no parsable version line. The caller then
+    falls back to the managed install, which is the pre-existing behaviour.
+    """
+    if path is None:
+        return None
+    parent = Path(path).parent
+    for ini in (
+        parent / "application.ini",
+        parent.parent / "Resources" / "application.ini",
+    ):
+        try:
+            text = ini.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            # Only [App] carries a bare `Version=`; [Gecko] uses
+            # MinVersion=/MaxVersion=, so no section tracking is needed.
+            if line.startswith("Version="):
+                major = line[len("Version=") :].strip().split('.', 1)[0]
+                if major.isdigit():
+                    return major
+    return None
+
+
 def _resolved_playwright_version_str() -> str:
     from importlib.metadata import version
 
