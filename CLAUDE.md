@@ -169,7 +169,7 @@ comparable.** Before trusting a red or a green, state what would produce it
 contradiction with a fact already known to be true — not by the result looking
 wrong.
 
-**5. The font gate fails open, by construction.**
+**5. The font gate fails open, by construction — for the per-context half.**
 `gfxFontGroup` caches its user context id once in its constructor, through
 `mFontVisibilityProvider->GetDocument()` → inner window → `BrowsingContext` —
 four hops, each failing silently to 0. `CamouIsFontAllowed` treats context 0 as
@@ -179,9 +179,49 @@ consults the launch-level `fonts` key: that question is answered separately by
 `FontVisibilityProvider`. So a failed context id is not caught further down —
 nothing re-asks the question this gate could not answer. Two separate hops of
 that chain have already been found failing
-(`OffscreenCanvas::GetDocument()` off-main-thread, and whatever #83 turns out to
-be). Fixing individual hops does not close the class: a gate that cannot
-establish who is asking should deny.
+(`OffscreenCanvas::GetDocument()` off-main-thread; #83 turned out to be a cache,
+not a hop). Fixing individual hops does not close the class — but the class is
+narrower than this paragraph first read (#105, smoke run 34698688879 on build
+34578327006, arm `(ctx105)`). Five sites ask this gate with no
+`MaskedFontListBlocks` beside it — `LookupInSharedFaceNameList`
+(`gfxPlatformFontList.cpp:1127`), both `GetFontList` branches (`:1409`, `:1427`),
+`GetFontFamilyList` (`:1450`) and `CommonFontFallback`'s non-shared branch
+(`:1713`) — and under a launch mask none of them can serve a masked family to a
+page: the face-name one is skipped by its caller (`gfxUserFontSet.cpp:463-469`
+refuses `local()` outright when `MaskedFontListAppliesTo`), `GetFontList` is
+reached only by the chrome font enumerator, and `GetFontFamilyList` and the
+non-shared branch are dormant while `gfx.e10s.font-list.shared` is true (default
+`true`, `StaticPrefList.yaml:7513-7516`, `mirror: once`, overridden nowhere in
+`settings/`, `additions/`, `pythonlib/` or `assets/`). Every *other* live lookup
+site pairs the gate with `MaskedFontListBlocks`, which answers from the document's
+`FontVisibilityProvider` and never from the context id, and asks *first* —
+`CamouIsFamilyAllowed` is `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)` —
+so the fail-open gate is never reached for a masked family. Measured on the
+codepoint-fallback path, U+1F600 → Twemoji Mozilla under a mac launch list, on the
+Linux bundle conf: a bare `new_context()` and a persistent context (userContextId 0
+per `TargetRegistry.js:1152`; its own `CAMOU-FL pref-fallback ctx=0` line is
+consistent with that, though a `ctx=0` line cannot distinguish a genuine id 0 from
+a hop that failed to it) both drew a missing glyph (checksum 524399160, against
+4262204629 unmasked), the browser's own system-fallback line read
+`(textrun-systemfallback-global) … match: [<none>]` — so `CommonFontFallback` ran
+and found nothing — and no `CAMOU-FL gate` line for Twemoji appeared under the
+mask; the unmasked launch showed this gate answering `ctx=0 hasList=0 key=twemoji
+mozilla allowed=1`, attributable to the emoji pref-list population at
+`camouUnfiltered(0)` (the only forced-0 scope on that path; the line carries no
+call-site tag), which is the fail-open doing what that scope intends. What a
+listless or misresolved context loses is only its own per-context list, and
+context 0 cannot carry one because chrome documents share id 0 — denying at 0
+would mask the browser's own UI. What `(ctx105)` cannot see: the macOS conf, where
+Apple Color Emoji serves U+1F600 legitimately and would mask a Twemoji leak; and,
+because the gate line has no call-site tag, whether `CommonFontFallback`'s own gate
+was reached — that half rests on the caller reading above. A pixel "tofu floor"
+across codepoints does not exist — a missing glyph is a hexbox carrying its own
+codepoint's digits (`gfxFontMissingGlyphs.cpp:492-510`) — so refusal is read from
+the browser's fallback and gate lines, not from pixels. The check that
+generalises: before calling a fail-open gate a leak, enumerate every gate above it
+and which one asks first — a short-circuited pair, or a caller that refuses the
+whole lookup, can make the fail-open unreachable for the case you care about, and
+a bare "the gate allows everything" reading will not show you either.
 
 **6. Read the state back before you name it.**
 Three times in one day of the #44 work, a specific detail was asserted without
@@ -358,7 +398,10 @@ on the macOS system-font path; the DWrite non-shared substitution branch and the
 non-shared `LookupInFaceNameLists` / `CommonFontFallback` `else` branches, all
 dormant while `gfx.e10s.font-list.shared` is true; `LookupLocalFont` on the
 macOS and Windows platform font lists, which a Linux guard cannot see; and the
-**context-0 fail-open**, which no round has changed (lesson 5). The macOS host
+**context-0 fail-open** for the per-context half only — the launch mask reaches
+context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
+the Linux bundle conf, and at the remaining live sites by reading the callers
+(lesson 5). The macOS host
 is unmeasured entirely. #82 is closed by measurement on Linux — arm (n4) GREEN
 on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
