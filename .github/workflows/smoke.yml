@@ -1542,7 +1542,11 @@ jobs:
           # `<none>`, means a DIFFERENT gate refused first -- MaskedFontListBlocks,
           # asked before CamouIsFontAllowed inside CamouIsFamilyAllowed's
           # `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)` and
-          # short-circuiting it -- not that CommonFontFallback was ever asked.
+          # short-circuiting it -- not that CommonFontFallback's own gate was ever
+          # asked about this family. The `-global` tag on the sysfb line is
+          # positive evidence that CommonFontFallback itself ran and found
+          # nothing: SystemFindFontForChar calls it unconditionally and falls
+          # to GlobalFontFallback only when it returns nothing.
           #
           # Two other paths can serve U+1F600 before CommonFontFallback runs,
           # and each leaves its own line:
@@ -1592,10 +1596,10 @@ jobs:
           # face.
           #
           # Refusal is therefore read from the browser's OWN evidence instead
-          # of from pixels: an EMPTY gate window for the target family (#105's
-          # own site, CommonFontFallback, was never asked -- something
-          # upstream of it, MaskedFontListBlocks or the pref-list population
-          # filter, refused the family first) together with a sysfb line
+          # of from pixels: an EMPTY gate window for the target family (CamouIsFontAllowed
+          # was never asked about it -- either the pref-list population filter
+          # kept it out upstream, or MaskedFontListBlocks refused it inside the
+          # family lookup CommonFontFallback performs, short-circuiting the gate) together with a sysfb line
           # reading `match: [<none>]` (SystemFindFontForChar ran and found
           # nothing, which is only reached after every earlier path already
           # failed to serve). A leak cannot produce that shape silently: a
@@ -1742,7 +1746,7 @@ jobs:
           if not (_refs_differ and _l1_twemoji and _l3_refused):
               _why = (f"references invalid: L1!=L3={_refs_differ}, "
                       f"L1 twemoji pref/gate hit={_l1_twemoji}, "
-                      f"L3 sysfb reads <none>={_l3_refused} "
+                      f"L3 sysfb reads <none>={bool(_l3_refused)} "
                       f"L1={_l1['emoji']} L3={_l3['emoji']} "
                       f"L3.sysfb={_l3['sysfb']}")[:220]
               unmeasured_arms["(ctx105)"] = _why
@@ -7020,8 +7024,8 @@ jobs:
                           "persistent = userContextId 0) under a launch fonts list must not "
                           "reach a fallback family the list excludes; measured on U+1F600, "
                           "scored by checksum-vs-L1 and by an allowed=1 pref/gate line "
-                          "naming a family the mac list excludes, with refusal read from an "
-                          "empty gate window plus the browser's own sysfb match: [<none>] "
+                          "naming a family the mac list excludes, with refusal read from no allowed=1 "
+                          "gate/pref line for a family outside the mac list plus the browser's own sysfb match: [<none>] "
                           "line (L3 is a discriminator against L1, not a pixel reference)",
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
