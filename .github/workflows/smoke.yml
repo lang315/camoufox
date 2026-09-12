@@ -6954,58 +6954,47 @@ jobs:
           # only cost is more syscalls.
           PYTHONUNBUFFERED: "1"
 
-      - name: "NewContext(os=X) is cross-signal coherent (#44 headline)"
+      - name: "mixed-OS contexts from one launch honour the launch font mask, warn, and keep WebGL per-context (#44 contract guard)"
         timeout-minutes: 15
-        # continue-on-error because this arm is KNOWN RED: #44's fonts half
-        # reproduces (runs 34618162525 and 34620762155), and a hard failure here
-        # erases every step below it -- both of those runs stopped at this arm
-        # and never reached the integration suite or the detector smoke. The
-        # same reasoning is already written into the font guard further up: an
-        # arm that kills the run makes every later arm unmeasurable in exactly
-        # the situation where someone needs them.
+        # This step used to be the "#44 headline" measurement, marked
+        # continue-on-error because it asserted the UNSUPPORTED behaviour --
+        # that every context resolves its own OS's fonts from one launch --
+        # and was known red (runs 34618162525, 34620762155, 34656256911,
+        # 34658431749, 34678025310: five runs, three launch draws, same result).
         #
-        # The red path emits a ::warning:: (see the verdict block below), so a
-        # RED is visible in the run summary and not only in the log. The WebGL
-        # half is GREEN in both runs; it is the font half that fails.
+        # That behaviour is documented as unsupported. Since 8f36f9b (#45/#73)
+        # pythonlib warns at NewContext time that the launch font list is a
+        # process-wide mask a per-context list can only narrow, and tells the
+        # caller to launch one browser per OS. So the contract is:
+        #   (1) the context whose os= matches the LAUNCH's spoofed OS resolves
+        #       its required marker fonts;
+        #   (2) the other two contexts resolve NO markers -- not their own (the
+        #       mask holds) and not anyone else's (no cross-OS leak);
+        #   (3) warn_fonts_excluded_by_launch fires for each of those two (the
+        #       matching context may or may not fire it -- both sides are random
+        #       30-78% samples of the same list, so its set difference can be
+        #       non-empty too -- and is not asserted);
+        #   (4) WebGL stays per-context: all three contexts reporting the
+        #       launch's renderer is the original #44 defect.
+        # This step guards that contract and is BLOCKING.
         #
-        # BEFORE FLIPPING THIS BACK TO BLOCKING -- the moment #44's font half is
-        # fixed -- these must land first, or the flip makes each one a false red
-        # in a workflow that costs ~15 minutes a run:
-        #   1. The `lin` marker set has never been observed resolving. Both
-        #      measurement runs drew macos and win at launch, so lin=[] in all
-        #      six context readings. Validate it against a run that draws linux.
-        #   2. The renderer check is `len({renderer}) != 3`, so two contexts
-        #      drawing the SAME WebGL preset report as a #44 reproduction when
-        #      the real cause is a preset collision, which is not a bug. Compare
-        #      each context's renderer against launch_config's and report a
-        #      collision as setup-invalid, not as a verdict.
-        # The liveness guard (r['base'] <= 0) is already in, below.
-        continue-on-error: true
+        # Marker validity is established here, deterministically: one explicit
+        # launch per OS before the headline launch. The old arm depended on a
+        # random draw to ever exercise the lin set; this does not.
         run: |
-          # The scenario #44's body describes, through the entry point it names:
-          # AsyncCamoufox() with NO os= at launch, then three contexts from that
-          # ONE browser asking for three different OSes. The two older #44 guards
-          # drive raw Playwright with a hand-written CAMOU_CONFIG, which is not
-          # this path -- a hand-built config has no webGl:parameters and so never
-          # reached the early-exit that caused the original defect.
+          # Entry point #44's body names: AsyncCamoufox() with NO os= at launch,
+          # then three contexts from that ONE browser with three different os=.
+          # `opts` is precomputed via launch_options() and reused through
+          # `from_options=` so the printed FONTCONFIG_FILE / spoofed OS are read
+          # back from the launch that actually ran (CLAUDE.md lesson 6).
           #
-          # The launch below reads `AsyncCamoufox(from_options=opts)`, not the
-          # bare AsyncCamoufox(headless=..., executable_path=...) call this
-          # paragraph describes -- `opts` is precomputed with the exact same
-          # arguments via launch_options() so the launch's own env (FONTCONFIG_FILE,
-          # the OS its fingerprint resolved to) can be printed below, then reused
-          # for the actual launch rather than guessed at from a second, separately
-          # random call. See the comment above `opts = launch_options(...)`.
+          # No ff_version is passed; on a runner with no managed install that
+          # used to raise (#97), so reaching the browser is #97's end-to-end proof.
           #
-          # No ff_version is passed. On a runner with no managed install that
-          # used to raise CamoufoxNotInstalled (#97); reaching the browser at all
-          # is this arm's incidental proof that #97 holds end to end.
-          #
-          # xvfb is mandatory: headless returns '(no webgl)' for every renderer
-          # read, which reads as a clean negative while measuring nothing.
+          # xvfb is mandatory: headless returns '(no webgl)' for every renderer.
           pip install --quiet -e pythonlib 'playwright==1.55.0'
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
-          import asyncio, os
+          import asyncio, os, warnings
           from camoufox.async_api import AsyncCamoufox, AsyncNewContext
           from camoufox.utils import (_reassemble_camou_config, get_target_os,
                                        launch_options)
@@ -7032,37 +7021,18 @@ jobs:
             // NOT a host font the CI runner happens to have -- and (2) not
             // that OS's own `monospace` generic alias, or the probe compares
             // a face against itself and reads ABSENT although present.
+            // DejaVu Sans / Liberation Sans / Ubuntu are the runner's host
+            // fonts, invisible under FONTCONFIG_FILE; Menlo/Consolas are the
+            // mac/win monospace aliases; Monaco is monospaced at 600/1000em
+            // next to Menlo's 602 and collapses to the same width at 72px.
+            // PingFang HK (855/755) replaced it. Cambria is NOT in
+            // _ESSENTIAL_FONTS_WINDOWS, so it is in the random sample and is
+            // never required -- see REQUIRED below.
             //
-            // DejaVu Sans / Liberation Sans / Ubuntu are NOT bundled -- they
-            // are the CI runner's own host fonts, invisible once
-            // FONTCONFIG_FILE points at the bundle -- and Menlo/Consolas ARE
-            // each OS's monospace alias (bundle/fontconfig/{macos,windows}
-            // /fonts.conf). Do not put them back.
-            //
-            // Monaco (tried first, dropped) is a third variant of the same
-            // trap: it is bundled mac-only and is not the raw fontconfig
-            // monospace alias (that's Menlo), but it IS monospaced, at
-            // 600/1000em for 'm'/'w' -- next to Menlo's 602/1000em, the
-            // mac context's own `monospace` baseline. At 72px that is
-            // 43.2px vs 43.344px, which per-glyph rounding collapses to the
-            // same width, so probe('Monaco') reads ABSENT although present.
-            // A monospaced face can never be a reliable marker against a
-            // monospaced baseline. Replaced with PingFang HK: mac-exclusive
-            // (bundle/fonts/macos/PingFang.ttc, in _ESSENTIAL_FONTS_MACOS),
-            // and at 855/755 per 1000em for 'm'/'w' -- far from Menlo's 602.
-            //
-            // Cambria is NOT in _ESSENTIAL_FONTS_WINDOWS (only "Cambria
-            // Math" is); it comes from the 30-78% random non-essential
-            // sample, so `win=[...]` legitimately varies run to run. The
-            // windows verdict never depends on it -- Segoe UI and Calibri
-            // are both essential.
-            // probe() returns `w !== base`, so a context that laid out
-            // nothing (zero-width body, detached span) reads base === w === 0
-            // for EVERY family, absent reference included -- which prints as
-            // mac=[] win=[] lin=[] absent=false, byte-identical to a live
-            // context that simply refused every marker. Return the baseline so
-            // the arm can tell "refused" from "dead" with its own evidence,
-            // rather than borrowing a different run's (CLAUDE.md lesson 4).
+            // probe() returns `w !== base`, so a dead layout reads
+            // base === w === 0 for every family, absent reference included --
+            // byte-identical to a live context refusing every marker. The
+            // baseline is returned so the two can be told apart (lesson 4).
             const baseWidth = (() => {
               const s = document.createElement('span');
               s.style.cssText = 'position:absolute;font-size:72px';
@@ -7085,99 +7055,172 @@ jobs:
           }'''
 
           EXPECT = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}
+          # Markers a context of that OS must resolve when nothing masks it.
+          # Cambria is a random-sample font (not essential) and is excluded.
+          REQUIRED = {
+              'mac': ['Helvetica Neue', 'Lucida Grande', 'PingFang HK'],
+              'win': ['Segoe UI', 'Calibri'],
+              'lin': ['Arimo', 'Tinos', 'Noto Sans JP'],
+          }
+          NARROW = "can only narrow it, never restore a family (#44)"
+          BIN = os.environ['CAMOUFOX_BIN']
 
-          # Compute the launch options ourselves, once, and reuse them for the
-          # actual launch below via `from_options=`. A SECOND, independent
-          # launch_options() call would draw its own random top-level
-          # fingerprint and could print an OS/FONTCONFIG_FILE that never
-          # launched anything -- this way what gets printed is read back from
-          # what the browser actually used (CLAUDE.md lesson 6), not a
-          # separately-derived stand-in.
-          opts = launch_options(
-              headless=False,
-              executable_path=os.environ['CAMOUFOX_BIN'],
-          )
+          async def read_context(browser, os_name):
+              # warn_fonts_excluded_by_launch is called inside AsyncNewContext,
+              # in this coroutine, after the executor-side fingerprint draw
+              # returns (async_api.py:230) -- so a catch_warnings around the
+              # await captures it.
+              with warnings.catch_warnings(record=True) as rec:
+                  warnings.simplefilter("always")
+                  ctx = await AsyncNewContext(browser, os=os_name)
+              fired = sum(1 for w in rec if NARROW in str(w.message))
+              page = await ctx.new_page()
+              await page.goto('data:text/html,<h1>c</h1>')
+              r = await page.evaluate(READ)
+              await ctx.close()
+              r['warned'] = fired
+              return r
+
+          # -- precheck: every marker set resolves under its own OS ------------
+          # One explicit launch per OS, context of the same OS. If a required
+          # marker does not resolve HERE, the headline cannot read it either,
+          # and any empty list below would be the probe, not the contract.
+          async def precheck():
+              out = {}
+              for os_name in ('macos', 'windows', 'linux'):
+                  async with AsyncCamoufox(os=os_name, headless=False,
+                                           executable_path=BIN) as b:
+                      out[os_name] = await read_context(b, os_name)
+              return out
+
+          pre = asyncio.run(precheck())
+          invalid = []
+          for os_name, r in pre.items():
+              own = EXPECT[os_name]
+              print(f"  [precheck {os_name}] {own}={r[own]} base={r['base']} absent={r['absent']}")
+              missing = [f for f in REQUIRED[own] if f not in r[own]]
+              if missing:
+                  invalid.append(f"precheck {os_name}: required {own} markers did not resolve "
+                                 f"under their own launch: {missing}")
+              if r['absent']:
+                  invalid.append(f"precheck {os_name}: the absent reference resolved")
+              if r['base'] <= 0:
+                  invalid.append(f"precheck {os_name}: probe laid out nothing (base={r['base']})")
+
+          # -- headline: one launch, no os=, three contexts --------------------
+          opts = launch_options(headless=False, executable_path=BIN)
           fontconfig_file = opts['env'].get('FONTCONFIG_FILE', '(unset)')
           launch_config = _reassemble_camou_config(opts)
-          spoofed_os = (
-              get_target_os(launch_config) if launch_config is not None else
-              '(unavailable -- the CAMOU_CONFIG_* chunks in the launch env did not reassemble)'
-          )
-          print(f"  [launch] fontconfig={fontconfig_file} spoofed_os={spoofed_os}")
+          if launch_config is None:
+              invalid.append("launch config did not reassemble from CAMOU_CONFIG_* -- cannot "
+                             "read the launch's OS or renderer")
+              spoofed_os, launch_renderer = '(unavailable)', None
+          else:
+              spoofed_os = get_target_os(launch_config)
+              launch_renderer = launch_config.get('webGl:renderer')
+          print(f"  [launch] fontconfig={fontconfig_file} spoofed_os={spoofed_os} "
+                f"renderer={launch_renderer}")
 
-          async def main():
+          async def headline():
               seen = {}
               async with AsyncCamoufox(from_options=opts) as browser:
                   for os_name in ('macos', 'windows', 'linux'):
-                      ctx = await AsyncNewContext(browser, os=os_name)
-                      page = await ctx.new_page()
-                      await page.goto('data:text/html,<h1>c</h1>')
-                      seen[os_name] = await page.evaluate(READ)
-                      await ctx.close()
+                      seen[os_name] = await read_context(browser, os_name)
               return seen
 
-          seen = asyncio.run(main())
+          seen = asyncio.run(headline())
           for os_name, r in seen.items():
               print(f"  [{os_name}] platform={r['platform']} renderer={r['renderer']}")
               print(f"  [{os_name}] mac={r['mac']} win={r['win']} lin={r['lin']} "
-                    f"absent={r['absent']}")
+                    f"absent={r['absent']} base={r['base']} warned={r['warned']}")
 
-          # -- setup validity, before any verdict (CLAUDE.md lesson 4) ----------
-          # A reference is only a control if something guarantees it can differ.
-          invalid = []
+          # -- setup validity (lesson 4) ----------------------------------------
           if any(r['renderer'] == '(no webgl)' for r in seen.values()):
               invalid.append("no GL context -- every renderer read is '(no webgl)'")
           if any(r['absent'] for r in seen.values()):
-              invalid.append("the deliberately-absent family measured as present "
-                             "-- the width probe cannot tell present from absent")
+              invalid.append("the deliberately-absent family measured as present")
           if len({r['platform'] for r in seen.values()}) != 3:
               invalid.append(f"contexts did not differ on navigator.platform: "
                              f"{[r['platform'] for r in seen.values()]}")
-          if not any(r[k] for r in seen.values() for k in ('mac', 'win', 'lin')):
-              invalid.append("no marker family resolved anywhere -- the width probe is "
-                             "dead, not #44")
           if any(r['base'] <= 0 for r in seen.values()):
-              invalid.append(f"a context laid out nothing (monospace baseline widths "
-                             f"{[r['base'] for r in seen.values()]}) -- that context's "
-                             f"probe is dead, so its empty marker lists are not a #44 "
-                             f"reading")
+              invalid.append(f"a context laid out nothing (base widths "
+                             f"{[r['base'] for r in seen.values()]})")
+          # get_target_os() returns the SHORT key ('mac'/'win'/'lin') -- the
+          # same vocabulary as EXPECT's values and fonts.json's keys -- not the
+          # long os= names. Run 34682740205 went SETUP-INVALID on exactly this.
+          launch_key = spoofed_os if spoofed_os in ('mac', 'win', 'lin') else None
+          if launch_key is None:
+              invalid.append(f"launch spoofed_os={spoofed_os!r} is not one of mac/win/lin")
+          renderers = [r['renderer'] for r in seen.values()]
+          all_launch = launch_renderer is not None and all(x == launch_renderer for x in renderers)
+          # Two contexts drawing the same WebGL renderer is a coincidence, not
+          # the #44 defect (that is all three == launch). Context renderers are
+          # sampled from webgl/webgl_data.db (AsyncNewContext passes no preset);
+          # its mac and lin pools share 3 strings, so on a weighted draw
+          # it happens on roughly 1 run in 37. It must NOT go through
+          # `invalid`: that exits before the font verdict, and the font half is
+          # what this guard exists for. Only the WebGL sub-verdict is skipped;
+          # the font contract is still measured.
+          # Measurable when a verdict follows: three distinct (green), all equal
+          # to the launch (defect), or all equal to one NON-launch renderer (leak,
+          # the elif below). Only exactly-two-equal is a collision with no verdict
+          # -- announcing the leak shape as a "collision" would mislabel the one
+          # shape this guard most wants to catch.
+          webgl_measurable = all_launch or len(set(renderers)) in (1, 3)
+          if not webgl_measurable:
+              print(f"::notice::WebGL preset collision between contexts: {sorted(renderers)} "
+                    f"(launch={launch_renderer}) -- WebGL half not evaluated this run")
           if invalid:
-              print("::warning::SETUP-INVALID -- this arm measured nothing:")
+              print("::error::SETUP-INVALID -- this guard measured nothing:")
               for line in invalid:
                   print(f"  - {line}")
               raise SystemExit("setup-invalid")
 
-          # -- verdict ----------------------------------------------------------
+          # -- contract verdict --------------------------------------------------
           bad = []
           for os_name, r in seen.items():
               own = EXPECT[os_name]
-              others = [k for k in ('mac', 'win', 'lin') if k != own]
-              if not r[own]:
-                  bad.append(f"{os_name}: none of its own marker fonts resolved")
-              for other in others:
-                  if r[other]:
-                      bad.append(f"{os_name}: leaked {other} marker fonts {r[other]}")
-          if len({r['renderer'] for r in seen.values()}) != 3:
-              bad.append("the three contexts share a WebGL renderer: "
-                         f"{sorted({r['renderer'] for r in seen.values()})}")
+              if own == launch_key:
+                  missing = [f for f in REQUIRED[own] if f not in r[own]]
+                  if missing:
+                      bad.append(f"{os_name} (matches launch {spoofed_os}): required markers "
+                                 f"missing {missing} -- the launch mask refused its own OS")
+              else:
+                  for k in ('mac', 'win', 'lin'):
+                      if r[k]:
+                          bad.append(f"{os_name} (masked by launch {spoofed_os}): resolved {k} "
+                                     f"markers {r[k]} -- expected none")
+                  if r['warned'] == 0:
+                      bad.append(f"{os_name} (masked by launch {spoofed_os}): "
+                                 f"warn_fonts_excluded_by_launch did not fire")
+          if all_launch:
+              bad.append(f"every context reports the LAUNCH renderer {launch_renderer!r} "
+                         f"-- the original #44 WebGL defect")
+          elif len(set(renderers)) == 1:
+              # All three on ONE renderer that is not the launch's. The win pool
+              # shares no string with mac or lin in webgl_data.db, so three
+              # contexts of three OSes cannot land on one renderer by chance:
+              # this is a cross-context leak (the #83 class), not a collision.
+              # Also the only bucket that catches launch_renderer=None.
+              bad.append(f"all three contexts report one renderer {renderers[0]!r} that is "
+                         f"not the launch's -- a cross-context leak, not a preset draw")
 
-          # continue-on-error: true means the AssertionError below changes
-          # neither the step's badge nor the job's, so without this the only
-          # record of a RED is one line inside a multi-megabyte log. Annotate
-          # first, then raise.
-          if bad:
-              print("::warning::#44 headline arm RED (known, non-blocking): "
-                    + "; ".join(bad))
-          assert not bad, "#44 reproduces:\n  " + "\n  ".join(bad)
-          print("  #44 headline: three contexts, three coherent fingerprints")
+          assert not bad, "#44 contract violated:\n  " + "\n  ".join(bad)
+          print(f"  #44 contract holds: launch={spoofed_os}, matching context resolved "
+                f"{REQUIRED[launch_key]}, both masked contexts empty and warned, "
+                + ("three distinct renderers" if webgl_measurable else
+                   "WebGL half not evaluated (preset collision, see ::notice::)"))
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
+          # Block-buffered stdout would lose the precheck and [launch] lines if
+          # the process died before flushing; those lines are the evidence.
+          PYTHONUNBUFFERED: "1"
 
       # Bulk dump of what the per-context font-list guard captured -- that is
       # the CAMOU-FL producer, now two steps above rather than one, since the
-      # #44 headline arm was inserted between them. Separate from that step, and
+      # #44 contract guard was inserted between them. Separate from that step, and
       # `if: always()`, for two reasons: it must not spend the guard's
       # 10-minute budget, and the run in which the guard FAILS is exactly the
       # run whose log someone needs. It launches nothing -- MOZ_LOG was set
