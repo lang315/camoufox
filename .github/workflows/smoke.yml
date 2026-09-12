@@ -7153,18 +7153,20 @@ jobs:
               invalid.append(f"launch spoofed_os={spoofed_os!r} is not one of mac/win/lin")
           renderers = [r['renderer'] for r in seen.values()]
           all_launch = launch_renderer is not None and all(x == launch_renderer for x in renderers)
-          # Two contexts drawing the same WebGL preset is a coincidence, not the
-          # #44 defect (that is all three == launch). The mac and lin preset
-          # pools share four renderer strings, so it happens on roughly 1 run in
-          # 16. It must NOT go through `invalid`: that exits before the font
-          # verdict, and the font half is what this guard exists for. Only the
-          # WebGL sub-verdict is skipped; the font contract is still measured.
+          # Two contexts drawing the same WebGL renderer is a coincidence, not
+          # the #44 defect (that is all three == launch). Context renderers are
+          # sampled from webgl/webgl_data.db (AsyncNewContext passes no preset);
+          # its mac and lin pools share 3 strings, so on a weighted draw
+          # it happens on roughly 1 run in 37. It must NOT go through
+          # `invalid`: that exits before the font verdict, and the font half is
+          # what this guard exists for. Only the WebGL sub-verdict is skipped;
+          # the font contract is still measured.
           webgl_measurable = all_launch or len(set(renderers)) == 3
           if not webgl_measurable:
               print(f"::notice::WebGL preset collision between contexts: {sorted(renderers)} "
                     f"(launch={launch_renderer}) -- WebGL half not evaluated this run")
           if invalid:
-              print("::warning::SETUP-INVALID -- this guard measured nothing:")
+              print("::error::SETUP-INVALID -- this guard measured nothing:")
               for line in invalid:
                   print(f"  - {line}")
               raise SystemExit("setup-invalid")
@@ -7189,15 +7191,27 @@ jobs:
           if all_launch:
               bad.append(f"every context reports the LAUNCH renderer {launch_renderer!r} "
                          f"-- the original #44 WebGL defect")
+          elif len(set(renderers)) == 1:
+              # All three on ONE renderer that is not the launch's. The win pool
+              # shares no string with mac or lin in webgl_data.db, so three
+              # contexts of three OSes cannot land on one renderer by chance:
+              # this is a cross-context leak (the #83 class), not a collision.
+              # Also the only bucket that catches launch_renderer=None.
+              bad.append(f"all three contexts report one renderer {renderers[0]!r} that is "
+                         f"not the launch's -- a cross-context leak, not a preset draw")
 
           assert not bad, "#44 contract violated:\n  " + "\n  ".join(bad)
           print(f"  #44 contract holds: launch={spoofed_os}, matching context resolved "
                 f"{REQUIRED[launch_key]}, both masked contexts empty and warned, "
-                f"three distinct renderers")
+                + ("three distinct renderers" if webgl_measurable else
+                   "WebGL half not evaluated (preset collision, see ::notice::)"))
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
+          # Block-buffered stdout would lose the precheck and [launch] lines if
+          # the process died before flushing; those lines are the evidence.
+          PYTHONUNBUFFERED: "1"
 
       # Bulk dump of what the per-context font-list guard captured -- that is
       # the CAMOU-FL producer, now two steps above rather than one, since the
