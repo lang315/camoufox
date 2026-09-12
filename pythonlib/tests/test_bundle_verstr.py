@@ -279,10 +279,17 @@ def test_version_json_still_answers_when_no_application_ini(tmp_path, monkeypatc
         camoufox_utils.warn_if_executable_predates_playwright(exe)
 
 
-_REAL_BINARY = "/tmp/cf97/cf/Camoufox.app/Contents/MacOS/camoufox"
+# Point CAMOUFOX_TEST_PACKAGE at any extracted package's binary to run this on
+# another host; the default is where this branch's evidence was taken.
+_REAL_BINARY = os.environ.get(
+    "CAMOUFOX_TEST_PACKAGE", "/tmp/cf97/cf/Camoufox.app/Contents/MacOS/camoufox"
+)
 
 
-@pytest.mark.skipif(not os.path.exists(_REAL_BINARY), reason="extracted package not present")
+@pytest.mark.skipif(
+    not os.path.exists(_REAL_BINARY),
+    reason="no extracted package at CAMOUFOX_TEST_PACKAGE (or the default path)",
+)
 def test_real_package_does_not_warn(monkeypatch):
     """The regression that matters: if parsing the beta suffix misreads a
     current package as below the floor, every executable_path user gets a
