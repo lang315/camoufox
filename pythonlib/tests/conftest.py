@@ -1,8 +1,26 @@
 """Shared fixtures for the camoufox test suite."""
 
+from pathlib import Path
+
 import pytest
 
 from camoufox import pkgman
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def repo_get_path(file: str) -> str:
+    """What a managed install would carry, read from the repo instead.
+
+    Mirrors Makefile package-linux --includes: properties.json from settings/,
+    the fontconfig tree and fonts from bundle/. get_env_vars() resolves the
+    Linux fontconfig through get_path too (utils.py:316), and raises when it
+    finds no fonts.conf -- settings/ has none.
+    """
+    head = str(file).replace("\\", "/").split("/")[0]
+    if head in ("fontconfig", "fontconfigs", "fonts"):
+        return str(REPO_ROOT / "bundle" / file)
+    return str(REPO_ROOT / "settings" / file)
 
 
 @pytest.fixture(autouse=True)

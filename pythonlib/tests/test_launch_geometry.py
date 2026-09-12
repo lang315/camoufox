@@ -8,7 +8,6 @@ Run with:
 import os
 import sys
 from contextlib import contextmanager
-from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -18,13 +17,12 @@ import pytest  # noqa: E402
 from browserforge.fingerprints import Screen  # noqa: E402
 
 from camoufox import utils  # noqa: E402
+from conftest import repo_get_path  # noqa: E402
 
 # What get_screen_cons() reports under the Xvfb that headless='virtual' starts:
 # virtdisplay.py sizes it "1x1x24", and launch_options mutates os.environ's
 # DISPLAY, so the parent process enumerates that stub as its only monitor.
 XVFB_STUB = Screen(max_width=1, max_height=1)
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 @contextmanager
@@ -36,8 +34,11 @@ def host(screen_cons):
         # executable_path stays None here, so validate_config()'s
         # _load_properties() falls to get_path("properties.json"), which
         # otherwise reaches CamoufoxFetcher (#108). Read it straight from the
-        # repo instead of a managed install.
-        mock.patch.object(utils, "get_path", lambda file: str(REPO_ROOT / "settings" / file))
+        # repo instead of a managed install. get_env_vars() also resolves the
+        # Linux fontconfig bundle through get_path (utils.py:319), so the stub
+        # has to route fontconfig/fonts to bundle/, not settings/ -- see
+        # conftest.repo_get_path.
+        mock.patch.object(utils, "get_path", repo_get_path)
     ):
         yield
 

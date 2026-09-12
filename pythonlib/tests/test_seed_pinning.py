@@ -97,7 +97,7 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
         headless=True,
         os='linux',
         exclude_addons=[DefaultAddons.UBO],  # skip network addon download
-        executable_path=str(fake_exe),  # skip the "camoufox not installed" check
+        executable_path=str(fake_exe),  # so get_env_vars() reads the fontconfig bundle above
         env={},
     )
 
