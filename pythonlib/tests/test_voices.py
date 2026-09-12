@@ -13,6 +13,8 @@ them and the host machine's native voices leak through.
 """
 
 import os
+import tempfile
+from pathlib import Path
 import sys
 
 import pytest
@@ -111,17 +113,33 @@ def test_unknown_os_falls_back_to_macos():
 # 14805 espeak-ng entries on a stock Linux box -- under a fingerprint claiming
 # macOS or Windows.
 
+from unittest import mock  # noqa: E402
+
 from camoufox.exceptions import InvalidPropertyType  # noqa: E402
 from camoufox.utils import validate_voices  # noqa: E402
+from conftest import repo_get_path  # noqa: E402
 
 
 def _launch_config(**kwargs):
     """Rebuild the config dict from the chunked CAMOU_CONFIG_* env vars."""
     import json
 
+    import camoufox.utils as utils
     from camoufox.utils import launch_options
 
-    opts = launch_options(headless=True, i_know_what_im_doing=True, **kwargs)
+    # No executable_path is passed, so launch_options() would otherwise reach
+    # installed_verstr() and then the managed install / fetcher (#108).
+    # get_env_vars() also resolves the Linux fontconfig bundle through
+    # get_path (utils.py:319), so the stub has to route fontconfig/fonts to
+    # bundle/, not settings/ -- see conftest.repo_get_path.
+    # get_env_vars() writes the generated fonts-<hash>.conf under INSTALL_DIR;
+    # keep it out of the real user cache.
+    with tempfile.TemporaryDirectory() as cache, (
+        mock.patch.object(utils, "INSTALL_DIR", Path(cache))
+    ), mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
+        mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
+    ), mock.patch.object(utils, "get_path", repo_get_path):
+        opts = launch_options(headless=True, i_know_what_im_doing=True, **kwargs)
     env = opts["env"]
     chunks = sorted(
         (k for k in env if k.startswith("CAMOU_CONFIG_")),
