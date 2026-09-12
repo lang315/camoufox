@@ -7153,11 +7153,16 @@ jobs:
               invalid.append(f"launch spoofed_os={spoofed_os!r} is not one of mac/win/lin")
           renderers = [r['renderer'] for r in seen.values()]
           all_launch = launch_renderer is not None and all(x == launch_renderer for x in renderers)
-          if not all_launch and len(set(renderers)) < 3:
-              # Two contexts drew the same WebGL preset. Not the #44 defect
-              # (that is all three == launch), so not a verdict.
-              invalid.append(f"WebGL preset collision between contexts: {sorted(renderers)} "
-                             f"(launch={launch_renderer})")
+          # Two contexts drawing the same WebGL preset is a coincidence, not the
+          # #44 defect (that is all three == launch). The mac and lin preset
+          # pools share four renderer strings, so it happens on roughly 1 run in
+          # 16. It must NOT go through `invalid`: that exits before the font
+          # verdict, and the font half is what this guard exists for. Only the
+          # WebGL sub-verdict is skipped; the font contract is still measured.
+          webgl_measurable = all_launch or len(set(renderers)) == 3
+          if not webgl_measurable:
+              print(f"::notice::WebGL preset collision between contexts: {sorted(renderers)} "
+                    f"(launch={launch_renderer}) -- WebGL half not evaluated this run")
           if invalid:
               print("::warning::SETUP-INVALID -- this guard measured nothing:")
               for line in invalid:
