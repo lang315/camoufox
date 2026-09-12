@@ -1465,15 +1465,25 @@ jobs:
           # deterministic: mac_list_probe sets the per-context list from the
           # whole of fonts.json's mac list (not a random sample) and launches
           # with CAMOU_CONFIG={}, so all four families are in-list every run.
+          # Registered as a tripwire, NOT asserted inline. An inline assert here
+          # raises ~4300 lines before arm j2 and would erase every later arm in
+          # this step -- including the U+FFFD global-fallback reading, which is
+          # the one thing a control run against a build WITHOUT this patch
+          # exists to capture. That is the same defect the #44 headline arm was
+          # just fixed for: a red arm that erases the evidence below it. The
+          # triage table at the end of the step fails the step on any tripwire
+          # not listed in EXPECTED_RED, so a regression still goes red -- after
+          # every other arm has reported.
           _dead = [f for f in CMAP95_FAMILIES
                    if _gp[f]["pixels"] == geneva_pixels["absent"]]
-          assert control_differs, (
-              "SETUP-INVALID: the positive control (Helvetica Neue) matches the "
-              "absent reference, so this block cannot tell rendered from "
-              "unrendered and the result below means nothing")
-          assert not _dead, (
-              f"#95 regression: {_dead} render identically to the absent "
-              f"reference, i.e. they are back to an empty character map")
+          if not control_differs:
+              unmeasured_arms["(cmap95)"] = (
+                  "the positive control (Helvetica Neue) matches the absent "
+                  "reference, so this block cannot tell rendered from unrendered")
+          elif _dead:
+              tripwires.append(
+                  f"(cmap95) #95 families render identically to the absent "
+                  f"reference, i.e. back to an empty character map: {_dead}")
 
           assert mac["measure"] != win["measure"], (
               "the mac and win contexts measured identically -- no per-context signal")
