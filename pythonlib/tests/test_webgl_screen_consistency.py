@@ -18,6 +18,7 @@ carry a 1080p floor.
 """
 
 import os
+import tempfile
 import sys
 
 import pytest
@@ -279,8 +280,11 @@ def test_preset_screens_are_never_lifted():
     _user_set_screen_window is computed before the preset merges in."""
     import json
     from pathlib import Path
+    from unittest import mock
 
+    import camoufox.utils as utils
     from camoufox.utils import launch_options
+    from conftest import repo_get_path
 
     presets = json.loads(
         (Path(__file__).parent.parent / "camoufox" / "fingerprint-presets-v150.json").read_text()
@@ -306,9 +310,21 @@ def test_preset_screens_are_never_lifted():
     assert found, "expected the v150 presets to still carry sub-netbook screens"
 
     for preset in found:
-        env = launch_options(
-            headless=True, fingerprint_preset=preset, i_know_what_im_doing=True
-        )["env"]
+        # No executable_path is passed, so launch_options() would otherwise
+        # reach installed_verstr() and then the managed install / fetcher (#108).
+        # get_env_vars() also resolves the Linux fontconfig bundle through
+        # get_path (utils.py:319), so the stub has to route fontconfig/fonts
+        # to bundle/, not settings/ -- see conftest.repo_get_path.
+        # get_env_vars() writes the generated fonts-<hash>.conf under
+        # INSTALL_DIR; keep it out of the real user cache.
+        with tempfile.TemporaryDirectory() as cache, (
+            mock.patch.object(utils, "INSTALL_DIR", Path(cache))
+        ), mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
+            mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
+        ), mock.patch.object(utils, "get_path", repo_get_path):
+            env = launch_options(
+                headless=True, fingerprint_preset=preset, i_know_what_im_doing=True
+            )["env"]
         raw = "".join(
             env[k]
             for k in sorted(

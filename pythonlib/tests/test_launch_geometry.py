@@ -6,6 +6,8 @@ Run with:
 """
 
 import os
+import tempfile
+from pathlib import Path
 import sys
 from contextlib import contextmanager
 from unittest import mock
@@ -17,6 +19,7 @@ import pytest  # noqa: E402
 from browserforge.fingerprints import Screen  # noqa: E402
 
 from camoufox import utils  # noqa: E402
+from conftest import repo_get_path  # noqa: E402
 
 # What get_screen_cons() reports under the Xvfb that headless='virtual' starts:
 # virtdisplay.py sizes it "1x1x24", and launch_options mutates os.environ's
@@ -27,9 +30,22 @@ XVFB_STUB = Screen(max_width=1, max_height=1)
 @contextmanager
 def host(screen_cons):
     """Run launch_options() against a stubbed host, without touching the disk."""
-    with mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
+    # get_env_vars() writes the generated fonts-<hash>.conf under INSTALL_DIR;
+    # keep it out of the real user cache.
+    with tempfile.TemporaryDirectory() as cache, (
+        mock.patch.object(utils, "INSTALL_DIR", Path(cache))
+    ), mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
         mock.patch.object(utils, "installed_verstr", lambda: "150.0.2")
-    ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"):
+    ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"), (
+        # executable_path stays None here, so validate_config()'s
+        # _load_properties() falls to get_path("properties.json"), which
+        # otherwise reaches CamoufoxFetcher (#108). Read it straight from the
+        # repo instead of a managed install. get_env_vars() also resolves the
+        # Linux fontconfig bundle through get_path (utils.py:319), so the stub
+        # has to route fontconfig/fonts to bundle/, not settings/ -- see
+        # conftest.repo_get_path.
+        mock.patch.object(utils, "get_path", repo_get_path)
+    ):
         yield
 
 
