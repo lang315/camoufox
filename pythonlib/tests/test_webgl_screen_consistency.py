@@ -18,6 +18,7 @@ carry a 1080p floor.
 """
 
 import os
+import tempfile
 import sys
 
 import pytest
@@ -314,7 +315,11 @@ def test_preset_screens_are_never_lifted():
         # get_env_vars() also resolves the Linux fontconfig bundle through
         # get_path (utils.py:319), so the stub has to route fontconfig/fonts
         # to bundle/, not settings/ -- see conftest.repo_get_path.
-        with mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
+        # get_env_vars() writes the generated fonts-<hash>.conf under
+        # INSTALL_DIR; keep it out of the real user cache.
+        with tempfile.TemporaryDirectory() as cache, (
+            mock.patch.object(utils, "INSTALL_DIR", Path(cache))
+        ), mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
             mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
         ), mock.patch.object(utils, "get_path", repo_get_path):
             env = launch_options(
