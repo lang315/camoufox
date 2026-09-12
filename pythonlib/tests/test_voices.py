@@ -111,13 +111,11 @@ def test_unknown_os_falls_back_to_macos():
 # 14805 espeak-ng entries on a stock Linux box -- under a fingerprint claiming
 # macOS or Windows.
 
-from pathlib import Path  # noqa: E402
 from unittest import mock  # noqa: E402
 
 from camoufox.exceptions import InvalidPropertyType  # noqa: E402
 from camoufox.utils import validate_voices  # noqa: E402
-
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from conftest import repo_get_path  # noqa: E402
 
 
 def _launch_config(**kwargs):
@@ -129,9 +127,12 @@ def _launch_config(**kwargs):
 
     # No executable_path is passed, so launch_options() would otherwise reach
     # installed_verstr() and then the managed install / fetcher (#108).
+    # get_env_vars() also resolves the Linux fontconfig bundle through
+    # get_path (utils.py:319), so the stub has to route fontconfig/fonts to
+    # bundle/, not settings/ -- see conftest.repo_get_path.
     with mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
         mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
-    ), mock.patch.object(utils, "get_path", lambda file: str(REPO_ROOT / "settings" / file)):
+    ), mock.patch.object(utils, "get_path", repo_get_path):
         opts = launch_options(headless=True, i_know_what_im_doing=True, **kwargs)
     env = opts["env"]
     chunks = sorted(
