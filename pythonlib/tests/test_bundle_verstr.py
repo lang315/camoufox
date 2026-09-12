@@ -197,6 +197,17 @@ def test_bundle_version_without_build_tag_returns_none(tmp_path):
     assert _bundle_version(exe) is None
 
 
+def test_bundle_version_empty_build_token_returns_none(tmp_path):
+    # Version.__post_init__ does ord(x[0]) per dot-separated build token, so a
+    # trailing dot ("beta.") raises IndexError inside the constructor. The
+    # never-raises contract must absorb that, not leak it out of the warning.
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(b"[App]\nVersion=152.0.4-beta.\n")
+
+    assert _bundle_version(exe) is None
+
+
 def test_bundle_version_missing_file_returns_none(tmp_path):
     exe = tmp_path / "camoufox"
     exe.write_bytes(b"")
@@ -235,6 +246,9 @@ def test_warning_silent_for_a_package_at_or_above_the_floor(tmp_path, monkeypatc
     exe.write_bytes(b"")
     (tmp_path / "application.ini").write_bytes(APP_INI)  # beta.31
 
+    # Silence must mean "parsed and at/above the floor", not "failed to parse
+    # and returned early" -- those print identically without this line.
+    assert _bundle_version(exe) is not None
     with warnings.catch_warnings(record=True) as rec:
         warnings.simplefilter("always")
         camoufox_utils.warn_if_executable_predates_playwright(exe)

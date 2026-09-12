@@ -218,7 +218,12 @@ def _bundle_version(path: Optional[Path]) -> Optional[Version]:
     version, sep, build = value.partition("-")
     if not sep or not build:
         return None
-    return Version(build=build, version=version)
+    try:
+        return Version(build=build, version=version)
+    except (ValueError, IndexError):
+        # Version.__post_init__ indexes each dot-separated build token; an
+        # empty token ("beta.") raises IndexError. Never-raises contract.
+        return None
 
 
 def _bundle_verstr(path: Optional[Path]) -> Optional[str]:
