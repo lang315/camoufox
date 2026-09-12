@@ -12,6 +12,7 @@ Run with:
     cd pythonlib && python -m pytest tests/test_webgl_pool_disjoint.py -v
 """
 
+import json
 import os
 import sqlite3
 import sys
@@ -22,11 +23,16 @@ _DB = os.path.join(os.path.dirname(__file__), "..", "camoufox", "webgl", "webgl_
 
 
 def _pools():
+    # Pool on what the guard actually compares: sample_webgl() returns the
+    # `data` column's JSON and the page reports its "webGl:renderer" -- not the
+    # bare `renderer` column. The two agree on every row today; if they ever
+    # desync, the guard sees `data`, so this test must too.
     con = sqlite3.connect(_DB)
-    rows = con.execute("SELECT renderer, win, mac, lin FROM webgl_fingerprints").fetchall()
+    rows = con.execute("SELECT data, win, mac, lin FROM webgl_fingerprints").fetchall()
     con.close()
     pools = {"win": set(), "mac": set(), "lin": set()}
-    for renderer, win, mac, lin in rows:
+    for data, win, mac, lin in rows:
+        renderer = json.loads(data)["webGl:renderer"]
         for key, weight in (("win", win), ("mac", mac), ("lin", lin)):
             if float(weight) > 0:
                 pools[key].add(renderer)
