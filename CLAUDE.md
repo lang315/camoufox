@@ -232,6 +232,48 @@ session picks the conf by the **spoofed** OS and gets generics its list allows.
 The rule: before a font measurement is evidence, say which font universe it was
 taken in, and check that it is the one the product ships.
 
+**9. A log is not a measurement until you know which binary produced it.**
+The #95/#97/#44 pass published three claims that a single readback overturned,
+and all three had the same shape: a number was correct, and what it was a
+number *about* was assumed.
+
+- **The "absent reference moved" finding did not exist.** PR #98 reported the
+  probe's absent-family checksum moving `2482840822 → 1610098690` and offered a
+  mechanism for it. The earlier figure came from run 34477369394, which consumed
+  build **34432908522** — a `fix/fonts-round2` build, with PR #93 and PR #96
+  both landing in between, both of which changed fallback gating. A proper
+  control (`main` build 34658266360 vs the branch build, same smoke.yml commit)
+  reads `1610098690` on **both**. The reference never moved; the delta was three
+  PRs wide; and the mechanism was an explanation invented for a non-event, which
+  is exactly how several lessons above were earned.
+- **The stated control did not control what the sentence needed.** The defence
+  offered was that `helvetica_neue` read `2304685864` in both runs. That is a
+  real control and it is not nothing — it shows the **probe** is comparable
+  across the two runs. It says nothing about whether the two **binaries** differ
+  only by the patch under test. Lesson 4 says a reference must be guaranteed to
+  differ; this is its other half: a reference must also be guaranteed to be
+  *about the same thing*. State which of the two a control establishes.
+- **All three #44 runs ran on a build carrying an unmerged patch.** PR #100's
+  independence argument read as a forward-looking hypothetical about a build
+  without #95 when every run already had it (`gh run download "34578327006"`,
+  branch `fix/95-cmap-unicode-ucs4`). The argument survived on its merits, but
+  it rested on an implied provenance that was false.
+
+Two standing steps, both cheap, both of which would have caught all three before
+they reached a PR body: **resolve every run id to its build, and that build's
+branch**, before quoting the run; and **grep the arms you did not change**, since
+the highest-value finding in that review came out of logs already sitting on disk.
+
+**A corollary about guards.** The fix for "this arm has no assert" was an inline
+`assert` placed where the values were computed — ~4300 lines above another arm in
+the same step. On the control build it raised before that arm could report, and
+would have erased the one reading the control existed to capture. This is the
+same defect the #44 headline arm had been fixed for **one commit earlier in the
+same batch**. In a long single-step guard, a failing check must be *registered*
+(`tripwires.append`, triaged at the end of the step) and never asserted in place;
+an assert mid-step is a decision that every arm below it is worth less than an
+early exit. The shape recurs — check for it whenever adding a check.
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
