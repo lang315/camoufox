@@ -7145,9 +7145,12 @@ jobs:
           if any(r['base'] <= 0 for r in seen.values()):
               invalid.append(f"a context laid out nothing (base widths "
                              f"{[r['base'] for r in seen.values()]})")
-          launch_key = EXPECT.get(spoofed_os)
+          # get_target_os() returns the SHORT key ('mac'/'win'/'lin') -- the
+          # same vocabulary as EXPECT's values and fonts.json's keys -- not the
+          # long os= names. Run 34682740205 went SETUP-INVALID on exactly this.
+          launch_key = spoofed_os if spoofed_os in ('mac', 'win', 'lin') else None
           if launch_key is None:
-              invalid.append(f"launch spoofed_os={spoofed_os!r} is not one of {list(EXPECT)}")
+              invalid.append(f"launch spoofed_os={spoofed_os!r} is not one of mac/win/lin")
           renderers = [r['renderer'] for r in seen.values()]
           all_launch = launch_renderer is not None and all(x == launch_renderer for x in renderers)
           if not all_launch and len(set(renderers)) < 3:
