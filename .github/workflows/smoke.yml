@@ -7161,7 +7161,12 @@ jobs:
           # `invalid`: that exits before the font verdict, and the font half is
           # what this guard exists for. Only the WebGL sub-verdict is skipped;
           # the font contract is still measured.
-          webgl_measurable = all_launch or len(set(renderers)) == 3
+          # Measurable when a verdict follows: three distinct (green), all equal
+          # to the launch (defect), or all equal to one NON-launch renderer (leak,
+          # the elif below). Only exactly-two-equal is a collision with no verdict
+          # -- announcing the leak shape as a "collision" would mislabel the one
+          # shape this guard most wants to catch.
+          webgl_measurable = all_launch or len(set(renderers)) in (1, 3)
           if not webgl_measurable:
               print(f"::notice::WebGL preset collision between contexts: {sorted(renderers)} "
                     f"(launch={launch_renderer}) -- WebGL half not evaluated this run")
