@@ -14,7 +14,7 @@ def repo_get_path(file: str) -> str:
 
     Mirrors Makefile package-linux --includes: properties.json from settings/,
     the fontconfig tree and fonts from bundle/. get_env_vars() resolves the
-    Linux fontconfig through get_path too (utils.py:316), and raises when it
+    Linux fontconfig through get_path too (utils.py:319), and raises when it
     finds no fonts.conf -- settings/ has none.
     """
     head = str(file).replace("\\", "/").split("/")[0]

@@ -6,6 +6,8 @@ Run with:
 """
 
 import os
+import tempfile
+from pathlib import Path
 import sys
 from contextlib import contextmanager
 from unittest import mock
@@ -28,7 +30,11 @@ XVFB_STUB = Screen(max_width=1, max_height=1)
 @contextmanager
 def host(screen_cons):
     """Run launch_options() against a stubbed host, without touching the disk."""
-    with mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
+    # get_env_vars() writes the generated fonts-<hash>.conf under INSTALL_DIR;
+    # keep it out of the real user cache.
+    with tempfile.TemporaryDirectory() as cache, (
+        mock.patch.object(utils, "INSTALL_DIR", Path(cache))
+    ), mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
         mock.patch.object(utils, "installed_verstr", lambda: "150.0.2")
     ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"), (
         # executable_path stays None here, so validate_config()'s
