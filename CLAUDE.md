@@ -232,6 +232,61 @@ session picks the conf by the **spoofed** OS and gets generics its list allows.
 The rule: before a font measurement is evidence, say which font universe it was
 taken in, and check that it is the one the product ships.
 
+**9. A log is not a measurement until you know which binary produced it.**
+The #95/#97/#44 pass published three claims that a single readback overturned,
+and all three had the same shape: a number was correct, and what it was a
+number *about* was assumed.
+
+- **The "absent reference moved" finding was not this patch's.** An earlier
+  revision of PR #98's body reported the probe's absent-family checksum moving
+  `2482840822 → 1610098690` and offered a mechanism for it. The earlier figure
+  came from run 34477369394, which consumed build **34432908522** — a build of
+  #93's own branch at `163ee251`, already carrying all of #93's patch work. PR
+  #96 landed between that build and this branch's base and changed fallback
+  gating (`font-hijacker.patch`, `font-list-spoofing.patch`), and the branch adds
+  #95 on top, so the delta was two PRs of browser code presented as one patch's.
+  A proper control (`main` build 34658266360 vs the branch build 34578327006,
+  both smoke runs on the same smoke.yml commit) reads `1610098690` on **both**.
+  The reference does not move under *this* patch — #96 is the only remaining
+  candidate for what did — and
+  the mechanism offered was an explanation invented for a movement this patch
+  never caused, which is exactly how several lessons above were earned.
+- **The stated control did not control what the sentence needed.** The defence
+  offered was that `helvetica_neue` read `2304685864` in both runs. That is a
+  real control and it is not nothing — it shows the **probe** is comparable
+  across the two runs. It says nothing about whether the two **binaries** differ
+  only by the patch under test. Lesson 4 says a reference must be guaranteed to
+  differ; this is its other half: a reference must also be guaranteed to be
+  *about the same thing*. State which of the two a control establishes.
+- **All four #44 runs ran on a build carrying an unmerged patch.** PR #100's
+  independence argument read as a forward-looking hypothetical about a build
+  without #95 when every run already had it (`gh run download "34578327006"`,
+  branch `fix/95-cmap-unicode-ucs4`). The argument survived on its merits, but
+  it rested on an implied provenance that was false.
+
+Two standing steps, both cheap, both of which would have caught all three before
+they reached a PR body: **resolve every run id to its build, and that build's
+branch**, before quoting the run; and **grep the arms you did not change**, since
+the highest-value finding in that review came out of logs already sitting on disk.
+
+*Corollary to 9, about guards.* The fix for "this arm has no assert" was an
+inline `assert` placed where the values were computed (`a9f1682`, smoke.yml
+line 1474) — with arm j2 at line 5794 of the same step. On the control build it **would have** raised
+before j2 could report, erasing j2's U+FFFD global-fallback reading — the one
+thing a control run against a patch-less build exists to capture. That is a
+deduction from the code (`geneva == absent` on that build, so `_dead` is
+non-empty), not an observation: the only smoke run ever dispatched on
+`a9f1682`, 34665048721, was cancelled at step 4 once the layout was checked, and
+the assert never executed in CI. It is the same defect the #44 headline arm had been fixed
+for **earlier in the same batch** (`3c49ff7`, "let the known-red #44 arm report
+without erasing the run"). In a long single-step guard, a failing check must be
+*registered* (`tripwires.append`, triaged at the end of the step) and never
+asserted in place; an assert mid-step is a decision that every arm below it is
+worth less than an early exit. The deferred form is **measured**, not reasoned:
+on run 34665134880 j2 reported, then `(cmap95)` was triaged `UNEXPECTED RED`,
+and the step still went red. The shape recurs — check for it whenever adding a
+check.
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
