@@ -12,8 +12,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 def repo_get_path(file: str) -> str:
     """What a managed install would carry, read from the repo instead.
 
-    Mirrors Makefile package-linux --includes: properties.json from settings/,
-    the fontconfig tree and fonts from bundle/. get_env_vars() resolves the
+    Mirrors how `make package-linux` lays out the bundle: properties.json and
+    the fontconfig tree via --includes (settings/, bundle/fontconfig), fonts via
+    --fonts (bundle/fonts). get_env_vars() resolves the
     Linux fontconfig through get_path too (utils.py:319), and raises when it
     finds no fonts.conf -- settings/ has none.
     """
@@ -30,6 +31,10 @@ def no_browser_fetch(monkeypatch):
     Running the suite locally used to download the browser (issue #108). Every
     entry point that ends in a network request raises here, so the offending
     test names itself rather than silently opening a socket to GitHub.
+
+    What this cannot see: the uBlock Origin addon download (addons.py:56) binds
+    webdl at import time and catches the refusal at addons.py:94-97, so it is
+    printed into captured output rather than failing the test (#110).
     """
 
     def _refuse(*args, **kwargs):
