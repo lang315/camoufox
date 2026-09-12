@@ -175,11 +175,13 @@ async def run_tests(
 
     # One browser per OS, not one browser for everything.
     #
-    # The launch-level font list becomes a process-wide whitelist:
-    # gfxPlatformFontList's constructor writes it to font.system.whitelist and
-    # ApplyWhitelist() then DELETES every other family from mFontFamilies. A
-    # per-context setFontList() runs later and can only narrow what survived, so
-    # a macOS profile inside a browser launched as Windows can never get its
+    # The launch-level font list is a process-wide mask, enforced at lookup
+    # time as an AND-gate (patches/font-hijacker.patch, header): a family the
+    # launch list does not name is refused wherever a font is looked up, and a
+    # per-context setFontList() can only narrow that further, never widen it.
+    # (An earlier version of the patch deleted the families outright via
+    # ApplyWhitelist(); the outcome is the same, the mechanism is not.) So a
+    # macOS profile inside a browser launched as Windows can never get its
     # Apple families back -- measured 0/3 vs 3/3 marker fonts (#44/#45).
     #
     # A browser process therefore hosts exactly one font environment. Grouping

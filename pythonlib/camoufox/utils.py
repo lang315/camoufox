@@ -139,15 +139,22 @@ def warn_if_executable_predates_playwright(path: Optional[Path]) -> None:
     (Browser.setDefaultViewport)" with nothing pointing at the real cause.
     Refusing to launch would break setups that currently work.
 
-    A build with no version.json beside it -- an unpackaged objdir build, say --
-    tells us nothing, so it is left alone.
+    The version comes from the bundle's own application.ini (what packages
+    ship), falling back to version.json (what an unpackaged objdir build with a
+    managed-style layout might carry). A build with neither tells us nothing,
+    so it is left alone.
     """
     if path is None:
         return
-    try:
-        installed = Version.from_path(Path(path).parent)
-    except (FileNotFoundError, KeyError, ValueError):
-        return
+    # Packages ship application.ini but no version.json, so for every real
+    # executable_path the version.json read below raised FileNotFoundError and
+    # this function silently returned -- it had never fired for anyone (#102).
+    installed = _bundle_version(path)
+    if installed is None:
+        try:
+            installed = Version.from_path(Path(path).parent)
+        except (FileNotFoundError, KeyError, ValueError):
+            return
 
     required = effective_version_min()
     if installed >= required:
@@ -162,6 +169,61 @@ def warn_if_executable_predates_playwright(path: Optional[Path]) -> None:
         RuntimeWarning,
         stacklevel=3,
     )
+
+
+def _bundle_app_version_line(path: Optional[Path]) -> Optional[str]:
+    """The raw value of `[App] Version=` from the bundle's own application.ini.
+
+    Packages ship application.ini -- a Gecko invariant generated from
+    build/application.ini.in -- but not version.json, which the installer
+    writes into INSTALL_DIR. On macOS the binary sits in Contents/MacOS and
+    the file in Contents/Resources; both layouts are tried. Only [App] carries
+    a bare `Version=` ([Gecko] uses MinVersion=/MaxVersion=), and [App] is the
+    first section, so no section tracking is needed. Returns None -- never
+    raises -- on no path, no file, or no such line.
+    """
+    if path is None:
+        return None
+    parent = Path(path).parent
+    for ini in (
+        parent / "application.ini",
+        parent.parent / "Resources" / "application.ini",
+    ):
+        try:
+            text = ini.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            if line.startswith("Version="):
+                return line[len("Version="):].strip()
+    return None
+
+
+def _bundle_version(path: Optional[Path]) -> Optional[Version]:
+    """The build at `path` as a Version, on the axis Version compares.
+
+    Version.__lt__/__eq__ compare `sorted_rel`, which is derived from the BUILD
+    TAG (`beta.31`) -- not the Firefox version. PLAYWRIGHT_BROWSER_FLOORS is
+    keyed the same way (`beta.30`). application.ini's `Version=` carries both
+    halves as `<firefox>-<build>`; this splits them so the result can stand in
+    for Version.from_path() where a package has no version.json (#102).
+
+    Returns None when there is no parsable line or the value has no `-<build>`
+    half: a version with no build tag cannot be placed on the floor axis, and
+    guessing one would produce a confident wrong answer.
+    """
+    value = _bundle_app_version_line(path)
+    if value is None:
+        return None
+    version, sep, build = value.partition("-")
+    if not sep or not build:
+        return None
+    try:
+        return Version(build=build, version=version)
+    except (ValueError, IndexError):
+        # Version.__post_init__ indexes each dot-separated build token; an
+        # empty token ("beta.") raises IndexError. Never-raises contract.
+        return None
 
 
 def _bundle_verstr(path: Optional[Path]) -> Optional[str]:
@@ -183,26 +245,17 @@ def _bundle_verstr(path: Optional[Path]) -> Optional[str]:
     Returns None -- never raises -- when there is no executable path, no
     application.ini beside it, or no parsable version line. The caller then
     falls back to the managed install, which is the pre-existing behaviour.
+
+    Reads the FIRST `Version=` line only. An earlier version kept scanning past
+    a non-numeric value to later lines and to the next candidate file; Gecko's
+    generated application.ini carries exactly one `Version=` (in [App]), so
+    that branch was unreachable and is not preserved.
     """
-    if path is None:
+    value = _bundle_app_version_line(path)
+    if value is None:
         return None
-    parent = Path(path).parent
-    for ini in (
-        parent / "application.ini",
-        parent.parent / "Resources" / "application.ini",
-    ):
-        try:
-            text = ini.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            # Only [App] carries a bare `Version=`; [Gecko] uses
-            # MinVersion=/MaxVersion=, so no section tracking is needed.
-            if line.startswith("Version="):
-                major = line[len("Version=") :].strip().split('.', 1)[0]
-                if major.isdigit():
-                    return major
-    return None
+    major = value.split('.', 1)[0]
+    return major if major.isdigit() else None
 
 
 def _resolved_playwright_version_str() -> str:
