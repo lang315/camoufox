@@ -247,7 +247,8 @@ number *about* was assumed.
   #95 on top, so the delta was two PRs of browser code presented as one patch's.
   A proper control (`main` build 34658266360 vs the branch build 34578327006,
   both smoke runs on the same smoke.yml commit) reads `1610098690` on **both**.
-  The reference does not move under *this* patch — #96 is what moved it — and
+  The reference does not move under *this* patch — #96 is the only remaining
+  candidate for what did — and
   the mechanism offered was an explanation invented for a movement this patch
   never caused, which is exactly how several lessons above were earned.
 - **The stated control did not control what the sentence needed.** The defence
@@ -269,14 +270,14 @@ branch**, before quoting the run; and **grep the arms you did not change**, sinc
 the highest-value finding in that review came out of logs already sitting on disk.
 
 *Corollary to 9, about guards.* The fix for "this arm has no assert" was an
-inline `assert` placed where the values were computed (`a9f1682`) — 4319 lines
-above arm j2 in the same step. On the control build it **would have** raised
+inline `assert` placed where the values were computed (`a9f1682`, smoke.yml
+line 1474) — with arm j2 at line 5794 of the same step. On the control build it **would have** raised
 before j2 could report, erasing j2's U+FFFD global-fallback reading — the one
 thing a control run against a patch-less build exists to capture. That is a
 deduction from the code (`geneva == absent` on that build, so `_dead` is
-non-empty), not an observation: the only run ever dispatched on `a9f1682`,
-34665048721, was cancelled at step 4 once the layout was checked, and the assert
-never executed in CI. It is the same defect the #44 headline arm had been fixed
+non-empty), not an observation: the only smoke run ever dispatched on
+`a9f1682`, 34665048721, was cancelled at step 4 once the layout was checked, and
+the assert never executed in CI. It is the same defect the #44 headline arm had been fixed
 for **earlier in the same batch** (`3c49ff7`, "let the known-red #44 arm report
 without erasing the run"). In a long single-step guard, a failing check must be
 *registered* (`tripwires.append`, triaged at the end of the step) and never
