@@ -179,9 +179,33 @@ consults the launch-level `fonts` key: that question is answered separately by
 `FontVisibilityProvider`. So a failed context id is not caught further down —
 nothing re-asks the question this gate could not answer. Two separate hops of
 that chain have already been found failing
-(`OffscreenCanvas::GetDocument()` off-main-thread, and whatever #83 turns out to
-be). Fixing individual hops does not close the class: a gate that cannot
-establish who is asking should deny.
+(`OffscreenCanvas::GetDocument()` off-main-thread; #83 turned out to be a cache,
+not a hop). Fixing individual hops does not close the class — but the class is
+narrower than this paragraph first read (#105, smoke run 34698688879 on build
+34578327006, arm `(ctx105)`): every live lookup site on the shared font list
+pairs this gate with `MaskedFontListBlocks`, which answers from the document's
+`FontVisibilityProvider` and never from the context id, and asks *first* —
+`CamouIsFamilyAllowed` is `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)`,
+so under a launch mask the fail-open gate is never reached for a masked family.
+Measured on U+1F600 → Twemoji Mozilla under a mac launch list: a bare
+`new_context()` and a persistent context (userContextId 0, confirmed by its own
+`CAMOU-FL pref-fallback ctx=0` line) both drew the missing-glyph hexbox
+(checksum 524399160, against 4262204629 unmasked), the browser's own
+system-fallback line read `match: [<none>]`, and no `CAMOU-FL gate` line for
+Twemoji appeared under the mask — while the unmasked launch showed this gate
+answering `ctx=0 hasList=0 key=twemoji mozilla allowed=1` during the emoji
+pref-list population under `camouUnfiltered(0)`, which is the fail-open doing
+what that scope intends. What a listless or misresolved context loses is only
+its own per-context list, and context 0 cannot carry one because chrome
+documents share id 0 — denying at 0 would mask the browser's own UI. The one
+site that asks `CamouIsFontAllowed` alone, `CommonFontFallback`'s non-shared
+branch, is dormant while `gfx.e10s.font-list.shared` is true (assumed by the
+guard, not read back). What `(ctx105)` cannot see: it runs under the Linux
+bundle conf; on the macOS conf, Apple Color Emoji serves U+1F600 legitimately
+and would mask a Twemoji leak. A pixel "tofu floor" across codepoints does not
+exist — a missing glyph is a hexbox carrying its own codepoint's digits
+(`gfxFontMissingGlyphs.cpp:492-510`) — so refusal is read from the browser's
+fallback and gate lines, not from pixels.
 
 **6. Read the state back before you name it.**
 Three times in one day of the #44 work, a specific detail was asserted without
@@ -358,7 +382,8 @@ on the macOS system-font path; the DWrite non-shared substitution branch and the
 non-shared `LookupInFaceNameLists` / `CommonFontFallback` `else` branches, all
 dormant while `gfx.e10s.font-list.shared` is true; `LookupLocalFont` on the
 macOS and Windows platform font lists, which a Linux guard cannot see; and the
-**context-0 fail-open**, which no round has changed (lesson 5). The macOS host
+**context-0 fail-open** for the per-context half only — the launch mask reaches
+context 0 at every live site, measured by `(ctx105)` (lesson 5). The macOS host
 is unmeasured entirely. #82 is closed by measurement on Linux — arm (n4) GREEN
 on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
