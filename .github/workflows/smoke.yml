@@ -1506,6 +1506,107 @@ jobs:
           # triage table at the end of the step fails the step on any tripwire
           # not listed in EXPECTED_RED, so a regression still goes red -- after
           # every other arm has reported.
+          # #105 CTX-0 GUARD: a context with NO per-context list -- a bare
+          # new_context() (ctx >= 1) or a persistent context (ctx 0) -- under a
+          # launch-level "fonts" list must not reach a fallback family that list
+          # excludes. CamouIsFontAllowed answers allow-all for such a context;
+          # what stands between it and the family is MaskedFontListBlocks, which
+          # answers from the document's FontVisibilityProvider and never from the
+          # context id. This measures that on the one common-fallback family the
+          # Linux bundle ships (TwemojiMozilla.ttf, bundle/fonts/linux; listed
+          # first by gfxPlatformGtk::GetCommonFallbackFonts for emoji) against a
+          # launch list -- fonts.json's mac list -- that does not contain it.
+          # L1 (no mask) and L3 (per-context list) are the two references; lesson
+          # 4: they must differ from each other, in-run, or nothing here counts.
+          # The resolved face is read from the (textrun-systemfallback-common|
+          # global) line gfxPlatformFontList.cpp:1606 logs under textrun:4.
+          CTX105_JS = """() => {
+            const c = document.createElement('canvas');
+            c.width = 120; c.height = 120;
+            const x = c.getContext('2d');
+            x.fillStyle = 'white'; x.fillRect(0, 0, 120, 120);
+            x.fillStyle = 'black';
+            x.font = '48px "NoSuchFamilyAtAll5"';
+            x.fillText('\\u{1F600}', 10, 80);
+            const d = x.getImageData(0, 0, 120, 120).data;
+            let sum = 0;
+            for (let i = 0; i < d.length; i++) { sum = (Math.imul(sum, 31) + d[i]) >>> 0; }
+            return sum;
+          }"""
+
+          def ctx105_launch(fonts, mode, marker):
+              """One launch, one context, one page. Returns (checksum, log lines).
+
+              fonts: None for CAMOU_CONFIG={}, else the launch-level list.
+              mode: "bare" (new_context, no list), "listed" (new_context +
+              setFontList(mac)), or "persistent" (launch_persistent_context,
+              userContextId 0 -- TargetRegistry.js:1152).
+              """
+              cfg = {} if fonts is None else {"fonts": fonts}
+              env = {**os.environ, "CAMOU_CONFIG": json.dumps(cfg)}
+              mark = log_mark()
+              with sync_playwright() as pw:
+                  if mode == "persistent":
+                      prof = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), f"ctx105-{marker}")
+                      os.makedirs(prof, exist_ok=True)
+                      ctx = pw.firefox.launch_persistent_context(
+                          prof, executable_path=os.environ["CAMOUFOX_BIN"],
+                          headless=False, env=env)
+                      closer = ctx
+                  else:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False, env=env)
+                      ctx = b.new_context()
+                      if mode == "listed":
+                          ctx.add_init_script(
+                              'if (typeof window.setFontList === "function") '
+                              'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                      closer = b
+                  page = ctx.new_page()
+                  page.goto(f"data:text/html,<h1>{marker}</h1>")
+                  try:
+                      pixels = page.evaluate(CTX105_JS)
+                  finally:
+                      closer.close()
+              return pixels, camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=4)
+
+          def ctx105_match(lines):
+              """The LAST `match: [Name]` in the window; '?' when there is none."""
+              found = [ln.split("match: [", 1)[1].split("]", 1)[0] for ln in lines if "match: [" in ln]
+              return found[-1] if found else "?"
+
+          c105 = {}
+          c105["L1"] = ctx105_launch(None, "bare", "L1")
+          c105["L3"] = ctx105_launch(FONTS["mac"], "listed", "L3")
+          c105["L2"] = ctx105_launch(FONTS["mac"], "bare", "L2")
+          c105["L2p"] = ctx105_launch(FONTS["mac"], "persistent", "L2p")
+          for _k in ("L1", "L3", "L2", "L2p"):
+              print(f"  [#105 ctx-0 guard] {_k}: checksum={c105[_k][0]} "
+                    f"match={ctx105_match(c105[_k][1])!r} lines={c105[_k][1]}")
+          _l1px, _l1m = c105["L1"][0], ctx105_match(c105["L1"][1])
+          _l3px = c105["L3"][0]
+          if _l1px == _l3px or _l1m in ("?", "<none>"):
+              _why = (f"references do not discriminate: L1 checksum={_l1px} match={_l1m!r}, "
+                      f"L3 checksum={_l3px} match={ctx105_match(c105['L3'][1])!r}")
+              unmeasured_arms["(ctx105)"] = _why
+              tripwires.append(f"(ctx105) unmeasured: {_why}")
+          else:
+              for _k in ("L2", "L2p"):
+                  _px, _m = c105[_k][0], ctx105_match(c105[_k][1])
+                  if _px == _l1px and _m == _l1m:
+                      tripwires.append(
+                          f"(ctx105) {_k}: a context with no per-context list, under a launch "
+                          f"fonts list that excludes {_m!r}, resolved U+1F600 through it exactly "
+                          f"as the unmasked launch did (checksum {_px}) -- the launch mask did "
+                          f"not reach this fallback path (#105)")
+                  elif _px != _l1px:
+                      print(f"  [#105 ctx-0 guard] {_k}: refused (checksum differs from L1"
+                            f"{', equals L3' if _px == _l3px else ''})")
+                  else:
+                      _why = f"{_k}: checksum equals L1 ({_px}) but the fallback line names {_m!r}, not {_l1m!r}"
+                      unmeasured_arms["(ctx105)"] = _why
+                      tripwires.append(f"(ctx105) unmeasured: {_why}")
+
           _dead = [f for f in CMAP95_FAMILIES
                    if _gp[f]["pixels"] == geneva_pixels["absent"]]
           if not control_differs:
@@ -6740,6 +6841,10 @@ jobs:
           # each even when every one passes -- Phase D's readback needs a line
           # per arm to quote, not the absence of one.
           EXPECTED_GREEN = {
+              "(ctx105)": "#105, a context with no per-context list (bare new_context, or "
+                          "persistent = userContextId 0) under a launch fonts list must not "
+                          "reach a fallback family the list excludes; measured on U+1F600 -> "
+                          "Twemoji Mozilla, L1/L3 as references",
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
                       "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
