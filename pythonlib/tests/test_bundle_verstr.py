@@ -12,11 +12,18 @@ Run with:
 
 import os
 import sys
+import warnings
 
 # Make `import camoufox` resolve to the in-tree pythonlib without an install.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest  # noqa: E402
+
+from camoufox import utils as camoufox_utils  # noqa: E402
+from camoufox import pkgman  # noqa: E402
+from camoufox.pkgman import Version  # noqa: E402
 from camoufox.utils import _bundle_verstr  # noqa: E402
+from camoufox.utils import _bundle_version  # noqa: E402
 
 APP_INI = b"""; This file is not used.
 [App]
@@ -151,3 +158,123 @@ def test_launch_options_does_not_consult_the_managed_install(tmp_path, monkeypat
 # (no executable_path). Driving it re-enters the managed-fetch path and would
 # create ~/Library/Caches/camoufox on every run. The half that needs no drive,
 # _bundle_verstr(None) is None, is test_no_path_returns_none above.
+
+
+# --- _bundle_version: both halves of `Version=`, on the axis Version compares --
+
+def test_bundle_version_reads_build_tag_and_firefox_version(tmp_path):
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(APP_INI)
+
+    v = _bundle_version(exe)
+    assert v is not None
+    assert v.build == "beta.31"
+    assert v.version == "152.0.4"
+    # The comparison Version actually makes is on the build tag.
+    assert v >= Version(build="beta.30")
+    assert v > Version(build="beta.29")
+
+
+def test_bundle_version_macos_app_layout(tmp_path):
+    contents = tmp_path / "Camoufox.app" / "Contents"
+    exe = contents / "MacOS" / "camoufox"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    (contents / "Resources").mkdir(parents=True)
+    (contents / "Resources" / "application.ini").write_bytes(APP_INI)
+
+    v = _bundle_version(exe)
+    assert v is not None and v.build == "beta.31"
+
+
+def test_bundle_version_without_build_tag_returns_none(tmp_path):
+    # A `Version=` with no `-<build>` half cannot be placed on the floor axis.
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(b"[App]\nVersion=152.0.4\n")
+
+    assert _bundle_version(exe) is None
+
+
+def test_bundle_version_missing_file_returns_none(tmp_path):
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    assert _bundle_version(exe) is None
+
+
+def test_bundle_version_none_path_returns_none():
+    assert _bundle_version(None) is None
+
+
+# --- warn_if_executable_predates_playwright: now reachable for packages -------
+
+def _pin_playwright(monkeypatch, major_minor):
+    """effective_version_min() reads the resolved Playwright; pin it so the floor
+    is deterministic regardless of what is installed on the host."""
+    monkeypatch.setattr(pkgman, "_resolved_playwright_version", lambda: major_minor)
+
+
+def test_warning_fires_for_a_package_below_the_floor(tmp_path, monkeypatch):
+    """#102: packages ship no version.json, so this warning never fired for any
+    real user. With application.ini as the source it fires when it should."""
+    _pin_playwright(monkeypatch, (1, 61))  # floor becomes beta.30
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(
+        b"[App]\nVersion=152.0.0-beta.29\n"
+    )
+
+    with pytest.warns(RuntimeWarning, match=r"is beta\.29, but Playwright .* needs at least beta\.30"):
+        camoufox_utils.warn_if_executable_predates_playwright(exe)
+
+
+def test_warning_silent_for_a_package_at_or_above_the_floor(tmp_path, monkeypatch):
+    _pin_playwright(monkeypatch, (1, 61))
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(APP_INI)  # beta.31
+
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        camoufox_utils.warn_if_executable_predates_playwright(exe)
+    assert [w for w in rec if "needs at least" in str(w.message)] == []
+
+
+def test_warning_silent_when_playwright_is_below_the_pairing(tmp_path, monkeypatch):
+    # Playwright < 1.61 never sends the fields beta.29 rejects; no floor is raised.
+    _pin_playwright(monkeypatch, (1, 60))
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "application.ini").write_bytes(b"[App]\nVersion=152.0.0-beta.29\n")
+
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        camoufox_utils.warn_if_executable_predates_playwright(exe)
+    assert [w for w in rec if "needs at least" in str(w.message)] == []
+
+
+def test_version_json_still_answers_when_no_application_ini(tmp_path, monkeypatch):
+    # An unpackaged objdir build with version.json keeps the pre-#102 path.
+    _pin_playwright(monkeypatch, (1, 61))
+    exe = tmp_path / "camoufox"
+    exe.write_bytes(b"")
+    (tmp_path / "version.json").write_bytes(b'{"version": "152.0.0", "release": "beta.29"}')
+
+    with pytest.warns(RuntimeWarning, match=r"is beta\.29"):
+        camoufox_utils.warn_if_executable_predates_playwright(exe)
+
+
+_REAL_BINARY = "/tmp/cf97/cf/Camoufox.app/Contents/MacOS/camoufox"
+
+
+@pytest.mark.skipif(not os.path.exists(_REAL_BINARY), reason="extracted package not present")
+def test_real_package_does_not_warn(monkeypatch):
+    """The regression that matters: if parsing the beta suffix misreads a
+    current package as below the floor, every executable_path user gets a
+    spurious warning on every launch. Read against a real extracted build."""
+    _pin_playwright(monkeypatch, (1, 61))
+    with warnings.catch_warnings(record=True) as rec:
+        warnings.simplefilter("always")
+        camoufox_utils.warn_if_executable_predates_playwright(_REAL_BINARY)
+    assert [w for w in rec if "needs at least" in str(w.message)] == []
