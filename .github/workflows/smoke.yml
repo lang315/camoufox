@@ -1518,8 +1518,17 @@ jobs:
           # launch list -- fonts.json's mac list -- that does not contain it.
           # L1 (no mask) and L3 (per-context list) are the two references; lesson
           # 4: they must differ from each other, in-run, or nothing here counts.
-          # The resolved face is read from the (textrun-systemfallback-common|
-          # global) line gfxPlatformFontList.cpp:1606 logs under textrun:4.
+          # The resolved face is read from whichever path served it: the
+          # pref-fallback line (`CAMOU-FL pref-fallback ctx=%u key=%s
+          # allowed=%d`, gfxPlatformFontList.cpp:2906, from font.name-list.emoji
+          # naming "Twemoji Mozilla") or the (textrun-systemfallback-common|
+          # global) line gfxPlatformFontList.cpp:1606 logs under textrun:4, if
+          # the pref-font path did not serve it first. The verdict is by
+          # CHECKSUM against L1, not by name: L1 needs no fallback line of its
+          # own because the pref-font path may serve it before system fallback
+          # ever runs, so L3 is a valid "nothing rendered" reference only when
+          # its OWN system-fallback line found nothing -- that is what is
+          # checked below, not whether L1 logged a name.
           CTX105_JS = """() => {
             const c = document.createElement('canvas');
             c.width = 120; c.height = 120;
@@ -1535,7 +1544,8 @@ jobs:
           }"""
 
           def ctx105_launch(fonts, mode, marker):
-              """One launch, one context, one page. Returns (checksum, log lines).
+              """One launch, one context, one page. Returns (checksum,
+              system-fallback log lines, pref-fallback log lines).
 
               fonts: None for CAMOU_CONFIG={}, else the launch-level list.
               mode: "bare" (new_context, no list), "listed" (new_context +
@@ -1568,7 +1578,9 @@ jobs:
                       pixels = page.evaluate(CTX105_JS)
                   finally:
                       closer.close()
-              return pixels, camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=4)
+              return (pixels,
+                      camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=4),
+                      camou_fl(mark, "CAMOU-FL pref-fallback", limit=6))
 
           def ctx105_match(lines):
               """The LAST `match: [Name]` in the window; '?' when there is none."""
@@ -1582,28 +1594,31 @@ jobs:
           c105["L2p"] = ctx105_launch(FONTS["mac"], "persistent", "L2p")
           for _k in ("L1", "L3", "L2", "L2p"):
               print(f"  [#105 ctx-0 guard] {_k}: checksum={c105[_k][0]} "
-                    f"match={ctx105_match(c105[_k][1])!r} lines={c105[_k][1]}")
+                    f"match={ctx105_match(c105[_k][1])!r} pref={c105[_k][2]} "
+                    f"lines={c105[_k][1]}")
           _l1px, _l1m = c105["L1"][0], ctx105_match(c105["L1"][1])
-          _l3px = c105["L3"][0]
-          if _l1px == _l3px or _l1m in ("?", "<none>"):
+          _l3px, _l3m = c105["L3"][0], ctx105_match(c105["L3"][1])
+          if _l1px == _l3px or _l3m != "<none>":
               _why = (f"references do not discriminate: L1 checksum={_l1px} match={_l1m!r}, "
-                      f"L3 checksum={_l3px} match={ctx105_match(c105['L3'][1])!r}")
+                      f"L3 checksum={_l3px} match={_l3m!r}")
               unmeasured_arms["(ctx105)"] = _why
               tripwires.append(f"(ctx105) unmeasured: {_why}")
           else:
               for _k in ("L2", "L2p"):
                   _px, _m = c105[_k][0], ctx105_match(c105[_k][1])
-                  if _px == _l1px and _m == _l1m:
+                  if _px == _l1px:
                       tripwires.append(
                           f"(ctx105) {_k}: a context with no per-context list, under a launch "
                           f"fonts list that excludes {_m!r}, resolved U+1F600 through it exactly "
                           f"as the unmasked launch did (checksum {_px}) -- the launch mask did "
                           f"not reach this fallback path (#105)")
-                  elif _px != _l1px:
-                      print(f"  [#105 ctx-0 guard] {_k}: refused (checksum differs from L1"
-                            f"{', equals L3' if _px == _l3px else ''})")
+                  elif _m == "<none>" and _px != _l1px:
+                      print(f"  [#105 ctx-0 guard] {_k}: refused (global fallback found "
+                            f"nothing; checksum differs from L1)")
                   else:
-                      _why = f"{_k}: checksum equals L1 ({_px}) but the fallback line names {_m!r}, not {_l1m!r}"
+                      _why = (f"{_k}: checksum={_px} (differs from L1's {_l1px}) but the "
+                              f"fallback line names {_m!r}, not '<none>' -- neither a leak "
+                              f"nor a clean refusal")
                       unmeasured_arms["(ctx105)"] = _why
                       tripwires.append(f"(ctx105) unmeasured: {_why}")
 
