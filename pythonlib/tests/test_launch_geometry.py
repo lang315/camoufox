@@ -8,6 +8,7 @@ Run with:
 import os
 import sys
 from contextlib import contextmanager
+from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -23,13 +24,21 @@ from camoufox import utils  # noqa: E402
 # DISPLAY, so the parent process enumerates that stub as its only monitor.
 XVFB_STUB = Screen(max_width=1, max_height=1)
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 @contextmanager
 def host(screen_cons):
     """Run launch_options() against a stubbed host, without touching the disk."""
     with mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
         mock.patch.object(utils, "installed_verstr", lambda: "150.0.2")
-    ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"):
+    ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"), (
+        # executable_path stays None here, so validate_config()'s
+        # _load_properties() falls to get_path("properties.json"), which
+        # otherwise reaches CamoufoxFetcher (#108). Read it straight from the
+        # repo instead of a managed install.
+        mock.patch.object(utils, "get_path", lambda file: str(REPO_ROOT / "settings" / file))
+    ):
         yield
 
 

@@ -279,12 +279,15 @@ def test_preset_screens_are_never_lifted():
     _user_set_screen_window is computed before the preset merges in."""
     import json
     from pathlib import Path
+    from unittest import mock
 
+    import camoufox.utils as utils
     from camoufox.utils import launch_options
 
     presets = json.loads(
         (Path(__file__).parent.parent / "camoufox" / "fingerprint-presets-v150.json").read_text()
     )
+    repo_root = Path(__file__).resolve().parent.parent.parent
 
     def small_presets(node):
         if isinstance(node, dict):
@@ -306,9 +309,16 @@ def test_preset_screens_are_never_lifted():
     assert found, "expected the v150 presets to still carry sub-netbook screens"
 
     for preset in found:
-        env = launch_options(
-            headless=True, fingerprint_preset=preset, i_know_what_im_doing=True
-        )["env"]
+        # No executable_path is passed, so launch_options() would otherwise
+        # reach installed_verstr() and then the managed install / fetcher (#108).
+        with mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
+            mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
+        ), mock.patch.object(
+            utils, "get_path", lambda file: str(repo_root / "settings" / file)
+        ):
+            env = launch_options(
+                headless=True, fingerprint_preset=preset, i_know_what_im_doing=True
+            )["env"]
         raw = "".join(
             env[k]
             for k in sorted(

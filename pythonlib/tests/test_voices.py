@@ -111,17 +111,28 @@ def test_unknown_os_falls_back_to_macos():
 # 14805 espeak-ng entries on a stock Linux box -- under a fingerprint claiming
 # macOS or Windows.
 
+from pathlib import Path  # noqa: E402
+from unittest import mock  # noqa: E402
+
 from camoufox.exceptions import InvalidPropertyType  # noqa: E402
 from camoufox.utils import validate_voices  # noqa: E402
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def _launch_config(**kwargs):
     """Rebuild the config dict from the chunked CAMOU_CONFIG_* env vars."""
     import json
 
+    import camoufox.utils as utils
     from camoufox.utils import launch_options
 
-    opts = launch_options(headless=True, i_know_what_im_doing=True, **kwargs)
+    # No executable_path is passed, so launch_options() would otherwise reach
+    # installed_verstr() and then the managed install / fetcher (#108).
+    with mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
+        mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
+    ), mock.patch.object(utils, "get_path", lambda file: str(REPO_ROOT / "settings" / file)):
+        opts = launch_options(headless=True, i_know_what_im_doing=True, **kwargs)
     env = opts["env"]
     chunks = sorted(
         (k for k in env if k.startswith("CAMOU_CONFIG_")),
