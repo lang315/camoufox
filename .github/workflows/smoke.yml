@@ -1506,6 +1506,7 @@ jobs:
           # triage table at the end of the step fails the step on any tripwire
           # not listed in EXPECTED_RED, so a regression still goes red -- after
           # every other arm has reported.
+
           # ---- #105 CTX-0 GUARD: launch fonts mask vs codepoint fallback ----
 
           # A context with NO per-context list -- a bare new_context() (ctx >=
@@ -1515,23 +1516,33 @@ jobs:
           # `!hasList || ...`, patches/font-list-spoofing.patch:515); what
           # stands between it and the family is MaskedFontListBlocks, which
           # answers from the document's FontVisibilityProvider and never from
-          # the context id. This measures that on the one common-fallback
-          # family the Linux bundle ships (TwemojiMozilla.ttf,
-          # bundle/fonts/linux) against a launch list -- fonts.json's mac list
-          # -- that does not contain it.
+          # the context id. bundle/fonts/linux ships THREE families in the
+          # emoji/symbol fallback chain, none mac-allowed: TwemojiMozilla.ttf,
+          # NotoSansSymbols-Regular.ttf, NotoSansSymbols2-Regular.ttf. This
+          # measures the first of them against a launch list -- fonts.json's
+          # mac list -- that contains none of the three. The `gate` window
+          # below is needle-filtered on "twemoji" and cannot see a leak of the
+          # other two; the sysfb line (which names whatever served, not just
+          # Twemoji) and the pref window (which is not needle-filtered) carry
+          # the weight for them.
           #
           # The target site is CommonFontFallback
           # (patches/font-list-spoofing.patch:809), gated by CamouIsFontAllowed
           # ALONE, unpaired with MaskedFontListBlocks -- unlike the shared-list
-          # branch's paired CamouIsFamilyAllowed, which this block does not
-          # read back (gfx.e10s.font-list.shared is assumed live, not
-          # checked). A `CAMOU-FL gate ctx=%u hasList=%d key=%s allowed=%d
-          # main=%d` line naming twemoji under the mask is CommonFontFallback
-          # being asked and answering allowed -- the launch mask did not block
-          # it before the per-context gate. Its absence, plus a
-          # system-fallback line reading `<none>`, means a DIFFERENT gate
-          # refused first (see below), not that CommonFontFallback was ever
-          # asked.
+          # branch's paired CamouIsFamilyAllowed. This block ASSUMES
+          # gfx.e10s.font-list.shared is true (so the shared branch of
+          # CommonFontFallback is the one live) and does not read it back.
+          # The `CAMOU-FL gate ctx=%u hasList=%d key=%s allowed=%d main=%d`
+          # line carries NO call-site tag -- every CamouIsFontAllowed caller
+          # writes the identical prefix (FindAndAddFamiliesLocked,
+          # GetFontFamilyList, LookupInSharedFaceNameList, both pref sites
+          # through CamouIsFamilyAllowed), so the `gate` window can show only
+          # whether ANY gate allowed twemoji under the mask, never which one
+          # asked. An empty window, plus a system-fallback line reading
+          # `<none>`, means a DIFFERENT gate refused first -- MaskedFontListBlocks,
+          # asked before CamouIsFontAllowed inside CamouIsFamilyAllowed's
+          # `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)` and
+          # short-circuiting it -- not that CommonFontFallback was ever asked.
           #
           # Two other paths can serve U+1F600 before CommonFontFallback runs,
           # and each leaves its own line:
@@ -1552,14 +1563,18 @@ jobs:
           # filter (#94, which keeps Twemoji out of the emoji pref list under
           # the mask) and for GlobalFontFallback's own pairing
           # (patches/font-hijacker.patch:80-112) -- NOT for CommonFontFallback's
-          # unpaired gate, which is #105's actual target and which the `gate`
-          # window below exists to show was even asked.
+          # unpaired gate, which is #105's actual target. The `gate` window
+          # below can show only that NO gate allowed twemoji under the mask;
+          # it cannot show whether CommonFontFallback's own gate specifically
+          # was ever reached.
           #
           # References: L1 (no mask) and L3 (per-context list) must differ
-          # in-run (lesson 4), and L1 must show POSITIVE evidence of what
-          # served it -- a pref-fallback or gate line naming Twemoji Mozilla
-          # allowed=1 -- so the arm knows what a served family's own evidence
-          # looks like before it goes looking for its absence in L2/L2p.
+          # in-run (lesson 4), and L1 must show a pref-fallback or gate line
+          # naming Twemoji Mozilla ALLOWED (not that it served -- that is
+          # inferred, not checked, from L1's absent sysfb line plus a
+          # checksum distinct from every masked launch) -- so the arm knows
+          # what a served family's own evidence looks like before it goes
+          # looking for its absence in L2/L2p.
           #
           # A pixel FLOOR ACROSS CODEPOINTS does not work. An earlier revision
           # of this block tried one (U+E000) and went SETUP-INVALID on it (run
@@ -1590,9 +1605,9 @@ jobs:
           # catch. L3 is used only as a discriminator against L1, never as a
           # pixel or checksum reference for L2/L2p.
           #
-          # Fail-open tail: any `CAMOU-FL default-unfiltered` line (precedent
-          # smoke.yml ~:3496, ~:3965) is its own tripwire; zero is the healthy
-          # count.
+          # Fail-open tail: any `CAMOU-FL default-unfiltered` line (precedent:
+          # arm (h3)'s and arm (n2)'s captures, earlier in this step) is its
+          # own tripwire; zero is the healthy count.
           #
           # What this arm cannot see. It launches under the pinned LINUX
           # bundle fontconfig (inherited via `{**os.environ}`; the step's own
@@ -1663,7 +1678,7 @@ jobs:
                       closer.close()
               return {
                   "emoji": result,
-                  "sysfb": camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=4),
+                  "sysfb": camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=None),
                   "gate": camou_fl(mark, "CAMOU-FL gate", "twemoji", limit=None),
                   "pref": camou_fl(mark, "CAMOU-FL pref-fallback", limit=None),
                   "unfiltered": camou_fl(mark, "CAMOU-FL default-unfiltered", limit=None),
@@ -1683,7 +1698,10 @@ jobs:
               """Lines in d's pref/gate windows with allowed=1 for a family
               the mac list does not contain -- the shape a checksum-vs-L1
               comparison alone can miss when the pref-font path serves the
-              family before system fallback ever runs."""
+              family before system fallback ever runs. The `gate` half is
+              captured pre-filtered on "twemoji" (see ctx105_launch) and can
+              therefore only ever name Twemoji Mozilla; the `pref` half is
+              captured unfiltered and can name any family."""
               mac_lower = {f.lower() for f in FONTS["mac"]}
               hits = []
               for ln in d["pref"] + d["gate"]:
@@ -1720,7 +1738,7 @@ jobs:
           _l1, _l3 = c105["L1"], c105["L3"]
           _refs_differ = _l1["emoji"] != _l3["emoji"]
           _l1_twemoji = ctx105_has_family(_l1, "twemoji mozilla")
-          _l3_refused = any("match: [<none>]" in ln for ln in _l3["sysfb"])
+          _l3_refused = _l3["sysfb"] and all("match: [<none>]" in ln for ln in _l3["sysfb"])
           if not (_refs_differ and _l1_twemoji and _l3_refused):
               _why = (f"references invalid: L1!=L3={_refs_differ}, "
                       f"L1 twemoji pref/gate hit={_l1_twemoji}, "
@@ -1734,7 +1752,7 @@ jobs:
               for _k in ("L2", "L2p"):
                   _d = c105[_k]
                   _leak_lines = ctx105_leaks(_d)
-                  _refused_shape = any("match: [<none>]" in ln for ln in _d["sysfb"])
+                  _refused_shape = _d["sysfb"] and all("match: [<none>]" in ln for ln in _d["sysfb"])
                   if _d["emoji"] == _l1["emoji"]:
                       tripwires.append(
                           f"(ctx105) {_k}: a context with no per-context list, under a "
