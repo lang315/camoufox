@@ -245,6 +245,11 @@ def _bundle_verstr(path: Optional[Path]) -> Optional[str]:
     Returns None -- never raises -- when there is no executable path, no
     application.ini beside it, or no parsable version line. The caller then
     falls back to the managed install, which is the pre-existing behaviour.
+
+    Reads the FIRST `Version=` line only. An earlier version kept scanning past
+    a non-numeric value to later lines and to the next candidate file; Gecko's
+    generated application.ini carries exactly one `Version=` (in [App]), so
+    that branch was unreachable and is not preserved.
     """
     value = _bundle_app_version_line(path)
     if value is None:
