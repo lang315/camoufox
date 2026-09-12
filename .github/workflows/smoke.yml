@@ -1506,6 +1506,286 @@ jobs:
           # triage table at the end of the step fails the step on any tripwire
           # not listed in EXPECTED_RED, so a regression still goes red -- after
           # every other arm has reported.
+
+          # ---- #105 CTX-0 GUARD: launch fonts mask vs codepoint fallback ----
+
+          # A context with NO per-context list -- a bare new_context() (ctx >=
+          # 1) or a persistent context (ctx 0) -- under a launch-level "fonts"
+          # list must not reach a fallback family that list excludes.
+          # CamouIsFontAllowed answers allow-all for such a context (it is
+          # `!hasList || ...`, patches/font-list-spoofing.patch:515); what
+          # stands between it and the family is MaskedFontListBlocks, which
+          # answers from the document's FontVisibilityProvider and never from
+          # the context id. bundle/fonts/linux ships THREE families in the
+          # emoji/symbol fallback chain, none mac-allowed: TwemojiMozilla.ttf,
+          # NotoSansSymbols-Regular.ttf, NotoSansSymbols2-Regular.ttf. This
+          # measures the first of them against a launch list -- fonts.json's
+          # mac list -- that contains none of the three. The `gate` window
+          # below is needle-filtered on "twemoji" and cannot see a leak of the
+          # other two; the sysfb line (which names whatever served, not just
+          # Twemoji) and the pref window (which is not needle-filtered) carry
+          # the weight for them.
+          #
+          # The target site is CommonFontFallback
+          # (patches/font-list-spoofing.patch:809), gated by CamouIsFontAllowed
+          # ALONE, unpaired with MaskedFontListBlocks -- unlike the shared-list
+          # branch's paired CamouIsFamilyAllowed. This block ASSUMES
+          # gfx.e10s.font-list.shared is true (so the shared branch of
+          # CommonFontFallback is the one live) and does not read it back.
+          # The `CAMOU-FL gate ctx=%u hasList=%d key=%s allowed=%d main=%d`
+          # line carries NO call-site tag -- every CamouIsFontAllowed caller
+          # writes the identical prefix (FindAndAddFamiliesLocked,
+          # GetFontFamilyList, LookupInSharedFaceNameList, both pref sites
+          # through CamouIsFamilyAllowed), so the `gate` window can show only
+          # whether ANY gate allowed twemoji under the mask, never which one
+          # asked. An empty window, plus a system-fallback line reading
+          # `<none>`, means a DIFFERENT gate refused first -- MaskedFontListBlocks,
+          # asked before CamouIsFontAllowed inside CamouIsFamilyAllowed's
+          # `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)` and
+          # short-circuiting it -- not that CommonFontFallback's own gate was ever
+          # asked about this family. The `-global` tag on the sysfb line is
+          # positive evidence that CommonFontFallback itself ran and found
+          # nothing: SystemFindFontForChar calls it unconditionally and falls
+          # to GlobalFontFallback only when it returns nothing.
+          #
+          # Two other paths can serve U+1F600 before CommonFontFallback runs,
+          # and each leaves its own line:
+          #  * gfxFontGroup::WhichPrefFontSupportsChar (gfxTextRun.cpp) reads
+          #    font.name-list.emoji, which names "Twemoji Mozilla" on this
+          #    profile, and logs `CAMOU-FL pref-fallback ctx=%u key=%s
+          #    allowed=%d`. AddGenericFonts (gfxPlatformFontList.cpp, a
+          #    generic-family path) emits the SAME prefix, so a captured
+          #    window cannot tell the two call sites apart -- only that one of
+          #    them ran.
+          #  * gfxPlatformFontList::SystemFindFontForChar, on the
+          #    global-fallback path, logs `(textrun-systemfallback-common|
+          #    global) char: u+%6.6x ... match: [%s]` under MOZ_LOG's textrun
+          #    module (no line number cited -- CLAUDE.md lesson 9, unresolved
+          #    without a generated tree).
+          #
+          # A GREEN below is therefore evidence for the pref-list population
+          # filter (#94, which keeps Twemoji out of the emoji pref list under
+          # the mask) and for GlobalFontFallback's own pairing
+          # (patches/font-hijacker.patch:80-112) -- NOT for CommonFontFallback's
+          # unpaired gate, which is #105's actual target. The `gate` window
+          # below can show only that NO gate allowed twemoji under the mask;
+          # it cannot show whether CommonFontFallback's own gate specifically
+          # was ever reached.
+          #
+          # References: L1 (no mask) and L3 (per-context list) must differ
+          # in-run (lesson 4), and L1 must show a pref-fallback or gate line
+          # naming Twemoji Mozilla ALLOWED (not that it served -- that is
+          # inferred, not checked, from L1's absent sysfb line plus a
+          # checksum distinct from every masked launch) -- so the arm knows
+          # what a served family's own evidence looks like before it goes
+          # looking for its absence in L2/L2p.
+          #
+          # A pixel FLOOR ACROSS CODEPOINTS does not work. An earlier revision
+          # of this block tried one (U+E000) and went SETUP-INVALID on it (run
+          # 34696033492, L3 floor=3482689396, L2/L2p floor=837171717): a
+          # missing glyph is drawn as a hexbox carrying the codepoint's OWN hex
+          # digits (gfxFontMissingGlyphs::DrawMissingGlyph,
+          # gfxFontMissingGlyphs.cpp:492-510, called from
+          # gfxFont::DrawMissingGlyph, gfxFont.cpp:2240/2289), so U+E000 and
+          # U+1F600 can never draw the same pixels by construction -- and the
+          # box's size comes from the run's current font metrics, which is why
+          # L3's and L2's hexboxes differed from EACH OTHER too. That also
+          # answers what `524399160` (L2's and L2p's U+1F600 checksum,
+          # unchanged across every run so far) actually is: the hexbox for
+          # U+1F600 in that context's own default-font metrics, not a rendered
+          # face.
+          #
+          # Refusal is therefore read from the browser's OWN evidence instead
+          # of from pixels: an EMPTY gate window for the target family (CamouIsFontAllowed
+          # was never asked about it -- either the pref-list population filter
+          # kept it out upstream, or MaskedFontListBlocks refused it inside the
+          # family lookup CommonFontFallback performs, short-circuiting the gate) together with a sysfb line
+          # reading `match: [<none>]` (SystemFindFontForChar ran and found
+          # nothing, which is only reached after every earlier path already
+          # failed to serve). A leak cannot produce that shape silently: a
+          # family that serves U+1F600 either names itself on the sysfb
+          # `match: [...]` line, or serves earlier through the pref path and
+          # leaves its own `key=... allowed=1` line for the read below to
+          # catch. L3 is used only as a discriminator against L1, never as a
+          # pixel or checksum reference for L2/L2p.
+          #
+          # Fail-open tail: any `CAMOU-FL default-unfiltered` line (precedent:
+          # arm (h3)'s and arm (n2)'s captures, earlier in this step) is its
+          # own tripwire; zero is the healthy count.
+          #
+          # What this arm cannot see. It launches under the pinned LINUX
+          # bundle fontconfig (inherited via `{**os.environ}`; the step's own
+          # `[setup] FONTCONFIG_FILE=` line names it). A shipped
+          # mac-fingerprinted session picks the macOS conf, where Apple Color
+          # Emoji serves U+1F600 legitimately -- a real Twemoji leak there
+          # would be masked by a correct-looking render, so a GREEN here is a
+          # statement about the Linux conf only. Separately:
+          # bundle/fonts/macos/AppleColorEmoji.ttf ships and "Apple Color
+          # Emoji" is mac-allowed, yet run 34693684958 read
+          # `(textrun-systemfallback-global) ... match: [<none>] ... cmaps: 0`
+          # for all three masked launches -- that bundled, allowed emoji face
+          # was not reached through system fallback for a reason this arm does
+          # not explain. Stated as unmeasured, outside #105.
+          CTX105_JS = """() => {
+            const c = document.createElement('canvas');
+            c.width = 120; c.height = 120;
+            const x = c.getContext('2d');
+            x.fillStyle = 'white'; x.fillRect(0, 0, 120, 120);
+            x.fillStyle = 'black';
+            x.font = '48px "NoSuchFamilyAtAll5"';
+            x.fillText('\\u{1F600}', 10, 80);
+            const d = x.getImageData(0, 0, 120, 120).data;
+            let sum = 0;
+            for (let i = 0; i < d.length; i++) { sum = (Math.imul(sum, 31) + d[i]) >>> 0; }
+            return sum;
+          }"""
+
+          def ctx105_launch(fonts, mode, marker):
+              """One launch, one context, one page. Returns a dict: `emoji`
+              (the U+1F600 pixel checksum) and four log-line windows read
+              since this launch's own mark -- `sysfb` (system-fallback,
+              limit=4), `gate`, `pref`, `unfiltered` (CAMOU-FL gate /
+              pref-fallback / default-unfiltered, all limit=None: the
+              family-naming lines are SCORED below, not just printed, so
+              nothing here may be trimmed).
+
+              fonts: None for CAMOU_CONFIG={}, else the launch-level list.
+              mode: "bare" (new_context, no list), "listed" (new_context +
+              setFontList(mac)), or "persistent" (launch_persistent_context,
+              userContextId 0 -- TargetRegistry.js:1152).
+              """
+              cfg = {} if fonts is None else {"fonts": fonts}
+              env = {**os.environ, "CAMOU_CONFIG": json.dumps(cfg)}
+              mark = log_mark()
+              with sync_playwright() as pw:
+                  if mode == "persistent":
+                      prof = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), f"ctx105-{marker}")
+                      os.makedirs(prof, exist_ok=True)
+                      ctx = pw.firefox.launch_persistent_context(
+                          prof, executable_path=os.environ["CAMOUFOX_BIN"],
+                          headless=False, env=env)
+                      closer = ctx
+                  else:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False, env=env)
+                      ctx = b.new_context()
+                      if mode == "listed":
+                          ctx.add_init_script(
+                              'if (typeof window.setFontList === "function") '
+                              'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
+                      closer = b
+                  page = ctx.new_page()
+                  page.goto(f"data:text/html,<h1>{marker}</h1>")
+                  try:
+                      result = page.evaluate(CTX105_JS)
+                  finally:
+                      closer.close()
+              return {
+                  "emoji": result,
+                  "sysfb": camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=None),
+                  "gate": camou_fl(mark, "CAMOU-FL gate", "twemoji", limit=None),
+                  "pref": camou_fl(mark, "CAMOU-FL pref-fallback", limit=None),
+                  "unfiltered": camou_fl(mark, "CAMOU-FL default-unfiltered", limit=None),
+              }
+
+          def ctx105_parse(ln):
+              """('key value', allowed bool) parsed from a CAMOU-FL
+              gate/pref-fallback line, or (None, None) if the line carries no
+              `key=`. Family names carry spaces, so key= is parsed up to
+              ' allowed='."""
+              if "key=" not in ln:
+                  return None, None
+              key = ln.split("key=", 1)[1].split(" allowed=", 1)[0]
+              return key, "allowed=1" in ln
+
+          def ctx105_leaks(d):
+              """Lines in d's pref/gate windows with allowed=1 for a family
+              the mac list does not contain -- the shape a checksum-vs-L1
+              comparison alone can miss when the pref-font path serves the
+              family before system fallback ever runs. The `gate` half is
+              captured pre-filtered on "twemoji" (see ctx105_launch) and can
+              therefore only ever name Twemoji Mozilla; the `pref` half is
+              captured unfiltered and can name any family."""
+              mac_lower = {f.lower() for f in FONTS["mac"]}
+              hits = []
+              for ln in d["pref"] + d["gate"]:
+                  key, allowed = ctx105_parse(ln)
+                  if key is not None and allowed and key not in mac_lower:
+                      hits.append(ln)
+              return hits
+
+          def ctx105_has_family(d, family):
+              """Whether d's pref/gate windows carry an allowed=1 line naming
+              `family` exactly."""
+              return any(ctx105_parse(ln) == (family, True) for ln in d["pref"] + d["gate"])
+
+          c105 = {}
+          c105["L1"] = ctx105_launch(None, "bare", "L1")
+          c105["L3"] = ctx105_launch(FONTS["mac"], "listed", "L3")
+          c105["L2"] = ctx105_launch(FONTS["mac"], "bare", "L2")
+          c105["L2p"] = ctx105_launch(FONTS["mac"], "persistent", "L2p")
+          for _k in ("L1", "L3", "L2", "L2p"):
+              _d = c105[_k]
+              print(f"  [#105 ctx-0 guard] {_k}: emoji={_d['emoji']} "
+                    f"sysfb={_d['sysfb']} "
+                    f"gate({len(_d['gate'])})={_d['gate']} "
+                    f"pref({len(_d['pref'])})={_d['pref']} "
+                    f"unfiltered({len(_d['unfiltered'])})={_d['unfiltered']}")
+          print(f"  [#105 ctx-0 guard] L2 emoji == L2p emoji (two listless "
+                f"launches agree, unscored): "
+                f"{c105['L2']['emoji'] == c105['L2p']['emoji']}")
+
+          _du_hits = [ln for _k in c105 for ln in c105[_k]["unfiltered"]]
+          if _du_hits:
+              tripwires.append(f"(ctx105) default-unfiltered fired: {_du_hits}")
+
+          _l1, _l3 = c105["L1"], c105["L3"]
+          _refs_differ = _l1["emoji"] != _l3["emoji"]
+          _l1_twemoji = ctx105_has_family(_l1, "twemoji mozilla")
+          _l3_refused = _l3["sysfb"] and all("match: [<none>]" in ln for ln in _l3["sysfb"])
+          if not (_refs_differ and _l1_twemoji and _l3_refused):
+              _why = (f"references invalid: L1!=L3={_refs_differ}, "
+                      f"L1 twemoji pref/gate hit={_l1_twemoji}, "
+                      f"L3 sysfb reads <none>={bool(_l3_refused)} "
+                      f"L1={_l1['emoji']} L3={_l3['emoji']} "
+                      f"L3.sysfb={_l3['sysfb']}")[:220]
+              unmeasured_arms["(ctx105)"] = _why
+              tripwires.append(f"(ctx105) unmeasured: {_why}")
+          else:
+              _reasons = []
+              for _k in ("L2", "L2p"):
+                  _d = c105[_k]
+                  _leak_lines = ctx105_leaks(_d)
+                  _refused_shape = _d["sysfb"] and all("match: [<none>]" in ln for ln in _d["sysfb"])
+                  if _d["emoji"] == _l1["emoji"]:
+                      tripwires.append(
+                          f"(ctx105) {_k}: a context with no per-context list, under a "
+                          f"launch fonts list, resolved U+1F600 through it exactly as "
+                          f"the unmasked launch did (checksum {_d['emoji']}) -- the "
+                          f"launch mask did not reach this fallback path (#105); "
+                          f"pref/gate allowed=1 lines: {_leak_lines}")
+                  elif _leak_lines:
+                      _fam, _ = ctx105_parse(_leak_lines[0])
+                      tripwires.append(
+                          f"(ctx105) {_k}: a context with no per-context list, under a "
+                          f"launch fonts list that excludes {_fam!r}, was answered "
+                          f"allowed=1 for it -- the launch mask did not reach this "
+                          f"fallback path (#105); lines: {_leak_lines}")
+                  elif _refused_shape:
+                      print(f"  [#105 ctx-0 guard] {_k}: refused (checksum differs "
+                            f"from L1, sysfb reads match: [<none>], no allowed=1 "
+                            f"line for a non-mac family)")
+                  else:
+                      _reasons.append(
+                          f"{_k}: emoji={_d['emoji']} (differs from L1's "
+                          f"{_l1['emoji']}) but sysfb does not read <none> and no "
+                          f"allowed=1 line for a non-mac family; sysfb={_d['sysfb']} "
+                          f"gate={_d['gate']} pref={_d['pref']}")
+              if _reasons:
+                  _why = "; ".join(_reasons)[:220]
+                  unmeasured_arms["(ctx105)"] = _why
+                  tripwires.append(f"(ctx105) unmeasured: {_why}")
+
           _dead = [f for f in CMAP95_FAMILIES
                    if _gp[f]["pixels"] == geneva_pixels["absent"]]
           if not control_differs:
@@ -6740,6 +7020,13 @@ jobs:
           # each even when every one passes -- Phase D's readback needs a line
           # per arm to quote, not the absence of one.
           EXPECTED_GREEN = {
+              "(ctx105)": "#105, a context with no per-context list (bare new_context, or "
+                          "persistent = userContextId 0) under a launch fonts list must not "
+                          "reach a fallback family the list excludes; measured on U+1F600, "
+                          "scored by checksum-vs-L1 and by an allowed=1 pref/gate line "
+                          "naming a family the mac list excludes, with refusal read from no allowed=1 "
+                          "gate/pref line for a family outside the mac list plus the browser's own sysfb match: [<none>] "
+                          "line (L3 is a discriminator against L1, not a pixel reference)",
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
                       "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
