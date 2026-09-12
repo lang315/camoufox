@@ -1465,6 +1465,38 @@ jobs:
           # deterministic: mac_list_probe sets the per-context list from the
           # whole of fonts.json's mac list (not a random sample) and launches
           # with CAMOU_CONFIG={}, so all four families are in-list every run.
+          # #101 GUARD: dot-prefixed family names must NOT be addressable by
+          # name in a mac-list context. Real macOS hides them from
+          # CTFontManagerCopyAvailableFontFamilyNames() and Gecko refuses them
+          # by name in LookupLocalFont (CoreTextFontList.cpp:1425), so a page
+          # asking for ".LastResort" on a real Mac gets the generic fallback.
+          # Run 34681622483 (build 34578327006) measured all five below
+          # resolving by name here -- 49 such entries in fonts.json['mac'] were
+          # a by-name enumeration tell. They are removed; this guards that.
+          # The launch is CAMOU_CONFIG={} and the context carries FONTS["mac"],
+          # so what is measured is the per-context list alone.
+          # Deferred through tripwires, never asserted inline (lesson 9).
+          DOT101 = [".LastResort", ".SF NS", ".PingFang HK", ".Aqua Kana", ".Helvetica LT MM"]
+          _dp = mac_list_probe(PIXEL_JS, DOT101 + ["__CamouAbsentRef__0001", "Helvetica Neue"], "d")
+          _dabs = _dp["__CamouAbsentRef__0001"]["pixels"]
+          _dctl = _dp["Helvetica Neue"]["pixels"] != _dabs
+          print(f"  [#101 dot-name guard] absent={_dabs} control(Helvetica Neue)={_dp['Helvetica Neue']['pixels']} "
+                f"control_differs={_dctl}")
+          _dotlive = []
+          for _f in DOT101:
+              _d = _dp[_f]["pixels"] != _dabs
+              print(f"  [#101 dot-name guard] {_f!r}: checksum={_dp[_f]['pixels']} differs_from_absent={_d}")
+              if _d:
+                  _dotlive.append(_f)
+          if not _dctl:
+              unmeasured_arms["(dot101)"] = (
+                  "the positive control (Helvetica Neue) matches the absent reference, "
+                  "so this block cannot tell resolved from unresolved")
+          elif _dotlive:
+              tripwires.append(
+                  f"(dot101) dot-prefixed families resolve BY NAME in a mac-list context "
+                  f"-- a by-name enumeration tell real macOS does not have: {_dotlive}")
+
           # Registered as a tripwire, NOT asserted inline. An inline assert here
           # raises ~4300 lines before arm j2 and would erase every later arm in
           # this step -- including the U+FFFD global-fallback reading, which is
