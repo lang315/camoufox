@@ -1556,19 +1556,39 @@ jobs:
           # window below exists to show was even asked.
           #
           # References: L1 (no mask) and L3 (per-context list) must differ
-          # in-run (lesson 4). L3 cannot be used as L2/L2p's refusal FLOOR --
-          # GetDefaultFontLocked's #88 branch
-          # (patches/font-list-spoofing.patch:1072) answers from the context's
-          # OWN list only when FontListManager::HasFontList(ctx) is true, so
-          # L3 (which has a list) and L2/L2p (which do not) can take different
-          # default-font paths for reasons that have nothing to do with #105 --
-          # L3 != L2 is guaranteed by that gate whether or not L2 leaked. The
-          # floor used below instead is an IN-CONTEXT codepoint nothing
-          # mac-side covers: U+E000, the same private-use point arm (n1)
-          # already validates as a mac-side floor on this bundle (N1_PUA,
-          # smoke.yml ~:3695). Refusal is scored as emoji-checksum ==
-          # floor-checksum, drawn on the same canvas in the same context --
-          # never against L3.
+          # in-run (lesson 4), and L1 must show POSITIVE evidence of what
+          # served it -- a pref-fallback or gate line naming Twemoji Mozilla
+          # allowed=1 -- so the arm knows what a served family's own evidence
+          # looks like before it goes looking for its absence in L2/L2p.
+          #
+          # A pixel FLOOR ACROSS CODEPOINTS does not work. An earlier revision
+          # of this block tried one (U+E000) and went SETUP-INVALID on it (run
+          # 34696033492, L3 floor=3482689396, L2/L2p floor=837171717): a
+          # missing glyph is drawn as a hexbox carrying the codepoint's OWN hex
+          # digits (gfxFontMissingGlyphs::DrawMissingGlyph,
+          # gfxFontMissingGlyphs.cpp:492-510, called from
+          # gfxFont::DrawMissingGlyph, gfxFont.cpp:2240/2289), so U+E000 and
+          # U+1F600 can never draw the same pixels by construction -- and the
+          # box's size comes from the run's current font metrics, which is why
+          # L3's and L2's hexboxes differed from EACH OTHER too. That also
+          # answers what `524399160` (L2's and L2p's U+1F600 checksum,
+          # unchanged across every run so far) actually is: the hexbox for
+          # U+1F600 in that context's own default-font metrics, not a rendered
+          # face.
+          #
+          # Refusal is therefore read from the browser's OWN evidence instead
+          # of from pixels: an EMPTY gate window for the target family (#105's
+          # own site, CommonFontFallback, was never asked -- something
+          # upstream of it, MaskedFontListBlocks or the pref-list population
+          # filter, refused the family first) together with a sysfb line
+          # reading `match: [<none>]` (SystemFindFontForChar ran and found
+          # nothing, which is only reached after every earlier path already
+          # failed to serve). A leak cannot produce that shape silently: a
+          # family that serves U+1F600 either names itself on the sysfb
+          # `match: [...]` line, or serves earlier through the pref path and
+          # leaves its own `key=... allowed=1` line for the read below to
+          # catch. L3 is used only as a discriminator against L1, never as a
+          # pixel or checksum reference for L2/L2p.
           #
           # Fail-open tail: any `CAMOU-FL default-unfiltered` line (precedent
           # smoke.yml ~:3496, ~:3965) is its own tripwire; zero is the healthy
@@ -1588,30 +1608,27 @@ jobs:
           # was not reached through system fallback for a reason this arm does
           # not explain. Stated as unmeasured, outside #105.
           CTX105_JS = """() => {
-            function draw(cp) {
-              const c = document.createElement('canvas');
-              c.width = 120; c.height = 120;
-              const x = c.getContext('2d');
-              x.fillStyle = 'white'; x.fillRect(0, 0, 120, 120);
-              x.fillStyle = 'black';
-              x.font = '48px "NoSuchFamilyAtAll5"';
-              x.fillText(String.fromCodePoint(cp), 10, 80);
-              const d = x.getImageData(0, 0, 120, 120).data;
-              let sum = 0;
-              for (let i = 0; i < d.length; i++) { sum = (Math.imul(sum, 31) + d[i]) >>> 0; }
-              return sum;
-            }
-            return {emoji: draw(0x1F600), floor: draw(0xE000)};
+            const c = document.createElement('canvas');
+            c.width = 120; c.height = 120;
+            const x = c.getContext('2d');
+            x.fillStyle = 'white'; x.fillRect(0, 0, 120, 120);
+            x.fillStyle = 'black';
+            x.font = '48px "NoSuchFamilyAtAll5"';
+            x.fillText('\\u{1F600}', 10, 80);
+            const d = x.getImageData(0, 0, 120, 120).data;
+            let sum = 0;
+            for (let i = 0; i < d.length; i++) { sum = (Math.imul(sum, 31) + d[i]) >>> 0; }
+            return sum;
           }"""
 
           def ctx105_launch(fonts, mode, marker):
-              """One launch, one context, one page. Returns a dict:
-              `emoji`/`floor` pixel checksums (U+1F600 and the U+E000 floor,
-              same canvas, same context), and four log-line windows read since
-              this launch's own mark -- `sysfb` (system-fallback, limit=4),
-              `gate`, `pref`, `unfiltered` (CAMOU-FL gate / pref-fallback /
-              default-unfiltered, all limit=None: the family-naming lines are
-              SCORED below, not just printed, so nothing here may be trimmed).
+              """One launch, one context, one page. Returns a dict: `emoji`
+              (the U+1F600 pixel checksum) and four log-line windows read
+              since this launch's own mark -- `sysfb` (system-fallback,
+              limit=4), `gate`, `pref`, `unfiltered` (CAMOU-FL gate /
+              pref-fallback / default-unfiltered, all limit=None: the
+              family-naming lines are SCORED below, not just printed, so
+              nothing here may be trimmed).
 
               fonts: None for CAMOU_CONFIG={}, else the launch-level list.
               mode: "bare" (new_context, no list), "listed" (new_context +
@@ -1645,29 +1662,40 @@ jobs:
                   finally:
                       closer.close()
               return {
-                  "emoji": result["emoji"],
-                  "floor": result["floor"],
+                  "emoji": result,
                   "sysfb": camou_fl(mark, "textrun-systemfallback", "u+01f600", limit=4),
                   "gate": camou_fl(mark, "CAMOU-FL gate", "twemoji", limit=None),
                   "pref": camou_fl(mark, "CAMOU-FL pref-fallback", limit=None),
                   "unfiltered": camou_fl(mark, "CAMOU-FL default-unfiltered", limit=None),
               }
 
+          def ctx105_parse(ln):
+              """('key value', allowed bool) parsed from a CAMOU-FL
+              gate/pref-fallback line, or (None, None) if the line carries no
+              `key=`. Family names carry spaces, so key= is parsed up to
+              ' allowed='."""
+              if "key=" not in ln:
+                  return None, None
+              key = ln.split("key=", 1)[1].split(" allowed=", 1)[0]
+              return key, "allowed=1" in ln
+
           def ctx105_leaks(d):
               """Lines in d's pref/gate windows with allowed=1 for a family
               the mac list does not contain -- the shape a checksum-vs-L1
               comparison alone can miss when the pref-font path serves the
-              family before system fallback ever runs. Family names carry
-              spaces, so key= is parsed up to ' allowed='."""
+              family before system fallback ever runs."""
               mac_lower = {f.lower() for f in FONTS["mac"]}
               hits = []
               for ln in d["pref"] + d["gate"]:
-                  if "allowed=1" not in ln or "key=" not in ln:
-                      continue
-                  key = ln.split("key=", 1)[1].split(" allowed=", 1)[0]
-                  if key not in mac_lower:
+                  key, allowed = ctx105_parse(ln)
+                  if key is not None and allowed and key not in mac_lower:
                       hits.append(ln)
               return hits
+
+          def ctx105_has_family(d, family):
+              """Whether d's pref/gate windows carry an allowed=1 line naming
+              `family` exactly."""
+              return any(ctx105_parse(ln) == (family, True) for ln in d["pref"] + d["gate"])
 
           c105 = {}
           c105["L1"] = ctx105_launch(None, "bare", "L1")
@@ -1676,25 +1704,29 @@ jobs:
           c105["L2p"] = ctx105_launch(FONTS["mac"], "persistent", "L2p")
           for _k in ("L1", "L3", "L2", "L2p"):
               _d = c105[_k]
-              print(f"  [#105 ctx-0 guard] {_k}: emoji={_d['emoji']} floor={_d['floor']} "
+              print(f"  [#105 ctx-0 guard] {_k}: emoji={_d['emoji']} "
                     f"sysfb={_d['sysfb']} "
                     f"gate({len(_d['gate'])})={_d['gate']} "
                     f"pref({len(_d['pref'])})={_d['pref']} "
                     f"unfiltered({len(_d['unfiltered'])})={_d['unfiltered']}")
+          print(f"  [#105 ctx-0 guard] L2 emoji == L2p emoji (two listless "
+                f"launches agree, unscored): "
+                f"{c105['L2']['emoji'] == c105['L2p']['emoji']}")
 
           _du_hits = [ln for _k in c105 for ln in c105[_k]["unfiltered"]]
           if _du_hits:
               tripwires.append(f"(ctx105) default-unfiltered fired: {_du_hits}")
 
           _l1, _l3 = c105["L1"], c105["L3"]
-          _l1_rendered = _l1["emoji"] != _l1["floor"]
-          _l3_is_floor = _l3["emoji"] == _l3["floor"]
           _refs_differ = _l1["emoji"] != _l3["emoji"]
-          if not (_l1_rendered and _l3_is_floor and _refs_differ):
-              _why = (f"references invalid: L1 emoji={_l1['emoji']} floor={_l1['floor']} "
-                      f"rendered={_l1_rendered}, L3 emoji={_l3['emoji']} "
-                      f"floor={_l3['floor']} is_floor={_l3_is_floor}, "
-                      f"L1!=L3={_refs_differ}")[:220]
+          _l1_twemoji = ctx105_has_family(_l1, "twemoji mozilla")
+          _l3_refused = any("match: [<none>]" in ln for ln in _l3["sysfb"])
+          if not (_refs_differ and _l1_twemoji and _l3_refused):
+              _why = (f"references invalid: L1!=L3={_refs_differ}, "
+                      f"L1 twemoji pref/gate hit={_l1_twemoji}, "
+                      f"L3 sysfb reads <none>={_l3_refused} "
+                      f"L1={_l1['emoji']} L3={_l3['emoji']} "
+                      f"L3.sysfb={_l3['sysfb']}")[:220]
               unmeasured_arms["(ctx105)"] = _why
               tripwires.append(f"(ctx105) unmeasured: {_why}")
           else:
@@ -1702,6 +1734,7 @@ jobs:
               for _k in ("L2", "L2p"):
                   _d = c105[_k]
                   _leak_lines = ctx105_leaks(_d)
+                  _refused_shape = any("match: [<none>]" in ln for ln in _d["sysfb"])
                   if _d["emoji"] == _l1["emoji"]:
                       tripwires.append(
                           f"(ctx105) {_k}: a context with no per-context list, under a "
@@ -1710,20 +1743,21 @@ jobs:
                           f"launch mask did not reach this fallback path (#105); "
                           f"pref/gate allowed=1 lines: {_leak_lines}")
                   elif _leak_lines:
-                      _fam = _leak_lines[0].split("key=", 1)[1].split(" allowed=", 1)[0]
+                      _fam, _ = ctx105_parse(_leak_lines[0])
                       tripwires.append(
                           f"(ctx105) {_k}: a context with no per-context list, under a "
                           f"launch fonts list that excludes {_fam!r}, was answered "
                           f"allowed=1 for it -- the launch mask did not reach this "
                           f"fallback path (#105); lines: {_leak_lines}")
-                  elif _d["emoji"] == _d["floor"]:
-                      print(f"  [#105 ctx-0 guard] {_k}: refused (emoji checksum equals "
-                            f"its own U+E000 floor, no allowed=1 line for a non-mac "
-                            f"family)")
+                  elif _refused_shape:
+                      print(f"  [#105 ctx-0 guard] {_k}: refused (checksum differs "
+                            f"from L1, sysfb reads match: [<none>], no allowed=1 "
+                            f"line for a non-mac family)")
                   else:
                       _reasons.append(
-                          f"{_k}: emoji={_d['emoji']} floor={_d['floor']} (neither equal) "
-                          f"with no allowed=1 line for a non-mac family; "
+                          f"{_k}: emoji={_d['emoji']} (differs from L1's "
+                          f"{_l1['emoji']}) but sysfb does not read <none> and no "
+                          f"allowed=1 line for a non-mac family; sysfb={_d['sysfb']} "
                           f"gate={_d['gate']} pref={_d['pref']}")
               if _reasons:
                   _why = "; ".join(_reasons)[:220]
@@ -6966,11 +7000,11 @@ jobs:
           EXPECTED_GREEN = {
               "(ctx105)": "#105, a context with no per-context list (bare new_context, or "
                           "persistent = userContextId 0) under a launch fonts list must not "
-                          "reach a fallback family the list excludes; measured on U+1F600 "
-                          "against an in-context U+E000 floor (L3 is a discriminator for "
-                          "the references, not a refusal floor), with the pref-fallback and "
-                          "gate windows read for an allowed=1 line naming a family the mac "
-                          "list excludes",
+                          "reach a fallback family the list excludes; measured on U+1F600, "
+                          "scored by checksum-vs-L1 and by an allowed=1 pref/gate line "
+                          "naming a family the mac list excludes, with refusal read from an "
+                          "empty gate window plus the browser's own sysfb match: [<none>] "
+                          "line (L3 is a discriminator against L1, not a pixel reference)",
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
                       "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
