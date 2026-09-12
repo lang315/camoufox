@@ -1465,6 +1465,25 @@ jobs:
           # deterministic: mac_list_probe sets the per-context list from the
           # whole of fonts.json's mac list (not a random sample) and launches
           # with CAMOU_CONFIG={}, so all four families are in-list every run.
+          # #101 MEASUREMENT (diagnostic, no assert): are dot-prefixed family
+          # names CSS-addressable in a mac-list context on this build? Real
+          # macOS hides them from CTFontManagerCopyAvailableFontFamilyNames()
+          # and Gecko refuses them by name in LookupLocalFont, so on a real Mac
+          # a page asking for ".LastResort" by name gets the fallback. If they
+          # differ from the absent reference HERE, the 49 dot-prefixed entries
+          # in fonts.json['mac'] are a live enumeration tell; if they equal it,
+          # they are inert for by-name enumeration. Same probe, same launch
+          # shape as the #95 discriminator directly above, so the readings are
+          # comparable within this run.
+          DOT101 = [".LastResort", ".SF NS", ".PingFang HK", ".Aqua Kana", ".Helvetica LT MM"]
+          _dp = mac_list_probe(PIXEL_JS, DOT101 + ["__CamouAbsentRef__0001", "Helvetica Neue"], "d")
+          _dabs = _dp["__CamouAbsentRef__0001"]["pixels"]
+          print(f"  [#101 dot-name probe] absent={_dabs} control(Helvetica Neue)={_dp['Helvetica Neue']['pixels']} "
+                f"control_differs={_dp['Helvetica Neue']['pixels'] != _dabs}")
+          for _f in DOT101:
+              print(f"  [#101 dot-name probe] {_f!r}: checksum={_dp[_f]['pixels']} "
+                    f"differs_from_absent={_dp[_f]['pixels'] != _dabs}")
+
           # Registered as a tripwire, NOT asserted inline. An inline assert here
           # raises ~4300 lines before arm j2 and would erase every later arm in
           # this step -- including the U+FFFD global-fallback reading, which is
