@@ -6,6 +6,8 @@ import pytest
 
 from camoufox import multiversion, pkgman, utils
 
+_REAL_INSTALL = pkgman.CamoufoxFetcher.install
+
 
 def test_missing_linux_profile_directory_is_created(tmp_path, monkeypatch):
     home = tmp_path / "home"
@@ -63,6 +65,9 @@ def test_fetch_prepares_profile_directory(monkeypatch):
     monkeypatch.setattr(multiversion, "install_versioned", lambda *args, **kwargs: None)
     monkeypatch.setattr(pkgman, "ensure_browser_profile_dir", lambda: calls.append(True))
     fetcher = object.__new__(pkgman.CamoufoxFetcher)
+    # The autouse fetcher guard (#108) replaces install(); this test exercises
+    # the real one with install_versioned already stubbed, so restore it.
+    monkeypatch.setattr(pkgman.CamoufoxFetcher, "install", _REAL_INSTALL)
 
     fetcher.install()
 
