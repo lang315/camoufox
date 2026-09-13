@@ -1,26 +1,152 @@
 {
-  "url": "https://www.facebook.com/",
-  "surfaces_touched": {
-    "canvas": 1,
-    "navigator": 2,
-    "screen": 1,
-    "webgl": 1
+  "provenance": {
+    "binary": "/private/tmp/claude-501/-Users-lang-GolandProjects-github-com-lang315-camoufox/ef539575-b878-426a-8800-e2bcc3c25773/scratchpad/cfx-macos/extracted/Camoufox.app/Contents/MacOS/camoufox",
+    "binary_sha256": "b0dcf0aad633d0d9a42d77e5763c59659badfceb0b05d290bb366c3e96eafe04",
+    "build_run_id": "34744383071",
+    "launch_differs_from_shipped": [
+      "no CAMOU_CONFIG: harness.py:49-50 unsets it, so the site is served the real host UA, platform and screen -- and Meta selects the JS it serves on what it sees",
+      "no addons: pythonlib/camoufox/utils.py:1079 calls add_default_addons (uBlock Origin, addons.py:19) on the shipped launch path; a bare Marionette launch loads none",
+      "no BrowserForge fingerprint (pythonlib path only)",
+      "no generated fontconfig (pythonlib path only)",
+      "harness.py:12-13 forces webgl.force-enabled and webgl.enable-webgl2, and sets media.peerconnection.ice.obfuscate_host_addresses=False, switching off a privacy protection the product ships with",
+      "headless: harness.py:52 hardcodes headless=True. Headless Firefox has no GL context, which is why the two webgl prefs above are forced; a webgl entry here is produced under those forced prefs, not under a shipped headful session"
+    ],
+    "payload": "XUL",
+    "payload_sha256": "db0f5da4b657c43825e8e996159fe4648d1c886b326ad38a3bfefb85b2520546"
   },
-  "request_host_counts": {
-    "static.xx.fbcdn.net": 22,
-    "www.facebook.com": 5,
-    "www.instagram.com": 1
-  },
-  "cookie_names": [
-    "datr",
-    "dpr",
-    "fr",
-    "ps_l",
-    "ps_n",
-    "sb",
-    "wd"
-  ],
-  "cookie_hosts": [
-    ".facebook.com"
+  "caveat": "Logged out, instagram.com and threads.net serve a login wall. A surface set collected there may describe the wall's bundle rather than the application. An empty set does not mean the site reads nothing.",
+  "targets": [
+    {
+      "url": "https://www.facebook.com/",
+      "surfaces_touched": [
+        "canvas",
+        "navigator",
+        "screen",
+        "webgl"
+      ],
+      "drain_windows_active": {
+        "canvas": 1,
+        "navigator": 3,
+        "screen": 1,
+        "webgl": 1
+      },
+      "by_site": {
+        "facebook.com": {
+          "surfaces_touched": [
+            "canvas",
+            "navigator",
+            "screen",
+            "webgl"
+          ],
+          "drain_windows_active": {
+            "canvas": 1,
+            "navigator": 3,
+            "screen": 1,
+            "webgl": 1
+          },
+          "request_count": 28
+        }
+      },
+      "request_host_counts": {
+        "static.xx.fbcdn.net": 22,
+        "www.facebook.com": 5,
+        "www.instagram.com": 1
+      },
+      "cookie_names": [
+        "datr",
+        "dpr",
+        "fr",
+        "sb",
+        "wd"
+      ],
+      "cookie_hosts": [
+        ".facebook.com"
+      ]
+    },
+    {
+      "url": "https://www.instagram.com/",
+      "surfaces_touched": [
+        "navigator",
+        "screen"
+      ],
+      "drain_windows_active": {
+        "navigator": 2,
+        "screen": 1
+      },
+      "by_site": {
+        "instagram.com": {
+          "surfaces_touched": [
+            "navigator",
+            "screen"
+          ],
+          "drain_windows_active": {
+            "navigator": 2,
+            "screen": 1
+          },
+          "request_count": 42
+        }
+      },
+      "request_host_counts": {
+        "static.cdninstagram.com": 31,
+        "www.instagram.com": 9,
+        "www.facebook.com": 2
+      },
+      "cookie_names": [
+        "csrftoken",
+        "datr",
+        "dpr",
+        "ig_did",
+        "mid",
+        "wd"
+      ],
+      "cookie_hosts": [
+        ".instagram.com"
+      ]
+    },
+    {
+      "url": "https://www.threads.net/",
+      "surfaces_touched": [
+        "navigator",
+        "screen"
+      ],
+      "drain_windows_active": {
+        "navigator": 2,
+        "screen": 1
+      },
+      "by_site": {
+        "threads.net": {
+          "surfaces_touched": [],
+          "drain_windows_active": {},
+          "request_count": 1
+        },
+        "threads.com": {
+          "surfaces_touched": [
+            "navigator",
+            "screen"
+          ],
+          "drain_windows_active": {
+            "navigator": 2,
+            "screen": 1
+          },
+          "request_count": 59
+        }
+      },
+      "request_host_counts": {
+        "static.cdninstagram.com": 28,
+        "scontent.cdninstagram.com": 19,
+        "www.threads.com": 11,
+        "www.threads.net": 1,
+        "www.instagram.com": 1
+      },
+      "cookie_names": [
+        "csrftoken",
+        "dpr",
+        "ig_did"
+      ],
+      "cookie_hosts": [
+        ".threads.com",
+        ".threads.net"
+      ]
+    }
   ]
 }
