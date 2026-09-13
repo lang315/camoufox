@@ -20,25 +20,44 @@ cookies**, which no fingerprint quality can fix. This is the operational playboo
 `datr` / `sb` / `fr` are identity linkage: reuse them across sessions and FB
 cross-links your identities **regardless of a clean, coherent fingerprint**.
 
-## `datr` is per-property, measured (#117)
+## `datr` is per-property on a direct visit, measured (#117)
 
-instagram.com sets a cookie named `datr` too (`recon_fb_live.json`). It is a
+instagram.com sets a cookie named `datr` too (`recon_fb_live.json`). It holds a
 different value: one profile visiting both properties ends up holding two
-distinct `datr` cookies, on `.facebook.com` and `.instagram.com`
-(`build-tester/observer/probe_cross_property_cookies.json`, both visit orders,
-logged out).
+distinct `datr` cookies, on `.facebook.com` and `.instagram.com`, in both visit
+orders (`build-tester/observer/probe_cross_property_cookies.json`).
 
-So a profile carries one browser identity *per property*, not one shared across
-Meta. The rules below are unchanged by this — a fresh profile per identity still
-resets all of them at once — but two things follow that were previously assumed
-rather than known. Clearing facebook.com's cookies alone leaves instagram.com's
-`datr` intact and still linking. And a `datr` seen on instagram.com is not
-evidence of facebook.com linkage; they are separate identifiers.
+Two things had to be excluded before that difference could be read at all, and
+the artifact records both rather than assuming them. The pair is one entry per
+host (`entries` equals the host count), so the reading is not two facebook
+`datr` values plus a matching instagram one — a shape that yields exactly the
+same "two distinct values" tuple while meaning the opposite. And both entries
+carry the same OriginAttributes suffix, so they sit in the same cookie jar;
+a `Partitioned` cookie under CHIPS would otherwise make the comparison a
+difference between jars rather than between identities.
 
-Two caveats sit on this. It is logged out: `datr` is documented above as being
-tied to `c_user` at login, and whether that binding is per-property needs an
-account and was not measured. And `values_identical: false` is a statement about
-this run, not a guarantee about the mechanism.
+So on this flow a profile carries one browser identity *per property*. The rules
+below are unchanged — a fresh profile per identity still resets all of them at
+once — but two things follow that were previously assumed. Clearing
+facebook.com's cookies alone leaves instagram.com's `datr` intact and still
+linking. And a `datr` seen on instagram.com is not evidence of facebook.com
+linkage; they are separate identifiers.
+
+Three caveats bound this, and the third is the one that most limits it.
+
+It is logged out: `datr` is documented above as being tied to `c_user` at login,
+and whether that binding is per-property needs an account and was not measured.
+
+`values_differ` is a statement about this run, not a guarantee about the
+mechanism.
+
+And each property was opened by its own URL, with no navigation between them —
+no link shim, no `?next=` handoff, no page embedding the other property. Cookie
+scoping only stops client-side JS from reading across domains; it says nothing
+about whether Meta's servers write one id into both jars, and they own both
+origins. A handoff is the likeliest vector for that even logged out, and it is
+exactly what this measurement did not exercise. Treat the result as bounding
+the cold direct-visit flow, not the properties in general.
 
 The device-signal cookies behave the opposite way: `dpr` and `wd` hold *identical*
 values across both properties, which is expected — they describe one spoofed
