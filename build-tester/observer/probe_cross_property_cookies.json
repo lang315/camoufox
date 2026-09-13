@@ -15,23 +15,49 @@
     "payload": "XUL",
     "payload_sha256": "db0f5da4b657c43825e8e996159fe4648d1c886b326ad38a3bfefb85b2520546"
   },
-  "caveat": "Logged out. `datr` is documented as being tied to `c_user` at login (docs/observer/fb-tracking-recon.md:30-46); whether that binding is per-property needs an account and is out of scope. `values_identical: true` means equal in this run, not equal by construction -- two independently generated browser ids colliding is vanishingly unlikely but is not excluded by this measurement.",
+  "caveats": [
+    "Logged out. `datr` is documented as being tied to `c_user` at login (docs/observer/fb-tracking-recon.md:30-46); whether that binding is per-property needs an account and is out of scope.",
+    "DIRECT-URL VISITS ONLY. Each property is opened by its own URL, with no navigation between them -- no link shim, no `?next=` handoff, no page embedding the other property. That is the state in which any cross-property identity sync is LEAST likely to fire, so a result of `values_differ` bounds this flow, not the properties in general.",
+    "A difference is readable only where `comparable` is true: one entry per host and one OriginAttributes suffix across them. A pair with `comparable: false` spans two different cookie jars and says nothing about how many identities were issued."
+  ],
   "comparator_selftest": {
-    "differing": {
-      "name": "cfxprobe",
+    "cfxdiffer": {
+      "name": "cfxdiffer",
       "hosts": [
         "127.0.0.1",
         "localhost"
       ],
+      "entries": 2,
+      "scopes": [
+        "127.0.0.1/",
+        "localhost/"
+      ],
+      "oa_suffixes": [
+        ""
+      ],
+      "one_entry_per_host": true,
+      "same_partition": true,
+      "comparable": true,
       "values_identical": false,
       "distinct_values": 2
     },
-    "identical": {
-      "name": "cfxprobe",
+    "cfxsame": {
+      "name": "cfxsame",
       "hosts": [
         "127.0.0.1",
         "localhost"
       ],
+      "entries": 2,
+      "scopes": [
+        "127.0.0.1/",
+        "localhost/"
+      ],
+      "oa_suffixes": [
+        ""
+      ],
+      "one_entry_per_host": true,
+      "same_partition": true,
+      "comparable": true,
       "values_identical": true,
       "distinct_values": 1
     }
@@ -53,6 +79,17 @@
             ".facebook.com",
             ".instagram.com"
           ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
           "values_identical": false,
           "distinct_values": 2
         },
@@ -62,6 +99,17 @@
             ".facebook.com",
             ".instagram.com"
           ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
           "values_identical": true,
           "distinct_values": 1
         },
@@ -71,6 +119,17 @@
             ".facebook.com",
             ".instagram.com"
           ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
           "values_identical": true,
           "distinct_values": 1
         }
@@ -81,9 +140,24 @@
           ".facebook.com",
           ".instagram.com"
         ],
+        "entries": 2,
+        "scopes": [
+          ".facebook.com/",
+          ".instagram.com/"
+        ],
+        "oa_suffixes": [
+          ""
+        ],
+        "one_entry_per_host": true,
+        "same_partition": true,
+        "comparable": true,
         "values_identical": false,
         "distinct_values": 2
-      }
+      },
+      "hosts_seen_in_jar": [
+        ".facebook.com",
+        ".instagram.com"
+      ]
     },
     {
       "order": [
@@ -97,6 +171,17 @@
             ".facebook.com",
             ".instagram.com"
           ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
           "values_identical": false,
           "distinct_values": 2
         },
@@ -106,6 +191,17 @@
             ".facebook.com",
             ".instagram.com"
           ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
           "values_identical": true,
           "distinct_values": 1
         },
@@ -115,6 +211,17 @@
             ".facebook.com",
             ".instagram.com"
           ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
           "values_identical": true,
           "distinct_values": 1
         }
@@ -125,14 +232,32 @@
           ".facebook.com",
           ".instagram.com"
         ],
+        "entries": 2,
+        "scopes": [
+          ".facebook.com/",
+          ".instagram.com/"
+        ],
+        "oa_suffixes": [
+          ""
+        ],
+        "one_entry_per_host": true,
+        "same_partition": true,
+        "comparable": true,
         "values_identical": false,
         "distinct_values": 2
-      }
+      },
+      "hosts_seen_in_jar": [
+        ".facebook.com",
+        ".instagram.com"
+      ]
     }
   ],
   "verdict": {
-    "datr_pair_seen_both_orders": true,
+    "datr_pair_spans_both_properties_both_orders": true,
+    "comparable_both_orders": true,
+    "values_differ_both_orders": true,
     "values_identical_both_orders": false,
     "order_dependent": false
-  }
+  },
+  "tripwires": []
 }
