@@ -22,8 +22,8 @@ cross-links your identities **regardless of a clean, coherent fingerprint**.
 
 ## The default is already safe
 
-Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:87`,
-`async_api.py:85`) — an ephemeral profile. Every launch starts with no
+Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:90`,
+`async_api.py:88`) — an ephemeral profile. Every launch starts with no
 `datr` / `sb` / `fr`. Keep that default unless you have a specific reason not to.
 
 ## Rules
@@ -50,5 +50,8 @@ Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:87`,
   `cloverlabs-camoufox` install shadowing the editable one will exercise pre-fix
   code and fake an incoherence — uninstall it before an editable dev setup
   (`build-tester/run_tests.sh:60` does this).
-- `docs/observer/README.md:106` still carries a stale "canvas-only" observer-scope
-  claim; all 7 surfaces are wired (`build-tester/observer/recon_fb_live.json`).
+- `docs/observer/README.md:108-111` carried a stale "canvas-only" observer-scope
+  claim; all 7 surfaces are wired (`build-tester/observer/REPORT.md:16-29`, and
+  the assert at `build-tester/observer/test_observer_records.py:17-18`). Fixed in
+  #113 — `recon_fb_live.json` does not establish this: it records the four
+  surfaces facebook.com touched on one load, a different question.

@@ -45,8 +45,8 @@ where the host's real value differs so a leak can't hide). Scripts in
   - **macOS: 3/4 broken** — the synthetic screen is frequently `960×540` (implausibly small for
     a Mac), so the fixed headless window (`inner 1280×720`) and `outer 1728` dwarf it.
   - **Linux: 0/4** — clean.
-  The config-level clamp `clamp_window_dimensions` (`fingerprints.py:376`) IS called
-  (`utils.py:775`, gated only by `not _user_set_screen_window`) and `window.outerWidth` IS a
+  The config-level clamp `clamp_window_dimensions` (def `fingerprints.py:470`, called at `utils.py:1205`) IS called
+  (`utils.py:1205`, gated only by `not _user_set_screen_window`) and `window.outerWidth` IS a
   spoofed key (`fingerprint-injection.patch`), yet the runtime still reports impossible
   geometry — so the fix requires root-causing the config→runtime gap, not just re-running a clamp.
 
@@ -94,7 +94,7 @@ fingerprint suite (≥1000) does not regress.
 ### WS3 — Fix implausible headless screens (macOS `960×540`)
 
 **Files:** `pythonlib/camoufox/fingerprints.py` / `utils.py` (screen generation —
-`get_screen_cons`, the headless screen constraint at `utils.py:755`). Determine whether the
+`get_screen_cons`, the headless screen constraint — def `utils.py:484`, call `utils.py:1135`). Determine whether the
 tiny macOS screen is a browserforge data quirk or a headless `get_screen_cons` behavior, then
 ensure generated/selected screens are ≥ the headless window (no `screen < inner`). Reject or
 regenerate implausibly-small desktop screens.
@@ -106,12 +106,12 @@ regenerate implausibly-small desktop screens.
 **File:** `docs/observer/fb-identity-hygiene.md` (new)
 
 Playbook for FB's linkage cookies (`datr`/`sb`/`fr`) — the ephemeral default
-(`persistent_context=False`, `sync_api.py:87`) already handles the common case. Rules mapped
+(`persistent_context=False`, `sync_api.py:90`) already handles the common case. Rules mapped
 to verified pythonlib kwargs (grep-checked): one identity = one fresh profile; distinct
 `user_data_dir` if persisting; one egress IP per identity (`proxy=`); don't route TLS through
 a ClientHello-rewriting proxy (genuine FF JA3 is a strength, `plan/device-faking-targets.md:140,218`).
 Also note (provenance): dpr is confirmed coherent via `overrideDPPX` (narrows
-`device-faking-targets.md:56` #24), and `docs/observer/README.md:106` still carries a stale
+`device-faking-targets.md:56` #24), and `docs/observer/README.md:108-111` carried a stale
 "canvas-only observer" claim (all 7 surfaces are wired).
 
 **Verify:** every option name exists in `pythonlib`.

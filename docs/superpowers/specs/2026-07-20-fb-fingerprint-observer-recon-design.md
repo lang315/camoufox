@@ -43,7 +43,7 @@ harness and converged on this design:
   (`canvas-spoofing.patch`), webrtc (`webrtc-ip-spoofing.patch`), navigator ×4
   (`navigator-spoofing.patch`), screen ×2 (`screen-spoofing.patch`), fonts ×2
   (`font-list-spoofing.patch`), audio ×4 (`audio-fingerprint-manager.patch`). The README's
-  "Step 1: canvas only" line is **stale**.
+  "Step 1: canvas only" line was **stale**; corrected in #113.
 - `build-tester/observer/timing_parity_probe.js` already exists (detectability check).
 - Already spoofable via MaskConfig (`settings/properties.json`): `battery:*`,
   `mediaDevices:*` (enumerateDevices), `navigator.oscpu`, `navigator.productSub`,
