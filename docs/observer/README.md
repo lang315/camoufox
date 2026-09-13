@@ -105,7 +105,13 @@ happen asynchronously off that path.
 
 ## Scope / status
 
-This is Step 1: infrastructure + the **canvas** surface wired end-to-end. Other
-per-access surfaces (webgl, webrtc, fonts, navigator, screen, audio) and the
-engine-cached / un-spoofed surfaces are follow-on work; until then they appear in
-the "Not observable" list.
+All seven per-access surfaces are wired end-to-end: canvas and webgl
+(`canvas-spoofing.patch`), audio (`audio-fingerprint-manager.patch`), fonts
+(`font-list-spoofing.patch`), navigator (`navigator-spoofing.patch`), screen
+(`screen-spoofing.patch`), webrtc (`webrtc-ip-spoofing.patch`). Verified at
+runtime — see `build-tester/observer/REPORT.md:16-29` and the re-runnable assert
+in `build-tester/observer/test_observer_records.py:17-18`.
+
+The engine-cached and un-spoofed surfaces remain outside the observer by
+construction, not as follow-on work: they consult no spoof config, so there is
+nothing to hook. They appear in the "Not observable" list above.

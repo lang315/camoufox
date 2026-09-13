@@ -134,7 +134,7 @@ git commit -m "test(fb): cross-layer coherence audit harness (real Playwright la
 
 ### Task 2: Root-cause + fix window-geometry incoherence (Windows `outer > screen`)
 
-> **This is a systematic-debugging task, not a pre-scripted edit.** `clamp_window_dimensions` is already called (`utils.py:775`) and `window.outerWidth` is a spoofed key (`fingerprint-injection.patch`), yet runtime geometry is still impossible — so the exact fix depends on the root cause, which Step 1 finds. Follow superpowers:systematic-debugging.
+> **This is a systematic-debugging task, not a pre-scripted edit.** `clamp_window_dimensions` is already called (`utils.py:1205`; def at `fingerprints.py:470`) and `window.outerWidth` is a spoofed key (`fingerprint-injection.patch`), yet runtime geometry is still impossible — so the exact fix depends on the root cause, which Step 1 finds. Follow superpowers:systematic-debugging.
 
 **Files:**
 - Modify: `pythonlib/camoufox/fingerprints.py` (`clamp_window_dimensions` ~L376, `handle_screenXY` ~L953, `from_browserforge` ~L978) and/or `pythonlib/camoufox/utils.py` (the clamp call site ~L774-775).
@@ -148,7 +148,7 @@ git commit -m "test(fb): cross-layer coherence audit harness (real Playwright la
 
 - [ ] **Step 2: Write/adjust the failing assertion** if Step 1 shows a narrower invariant (e.g. `outer ≤ screen` specifically). The Task 1 harness already asserts nesting; only add to it if Step 1 reveals a sub-case it misses.
 
-- [ ] **Step 3: Implement the minimal fix at the root-caused site.** Most likely candidate (confirm via Step 1): in the synthetic path, ensure `window.outerWidth/outerHeight` are populated from the generated window and clamped so `outer ≤ avail ≤ screen` survives to runtime — mirroring how `handle_screenXY` (fingerprints.py:953-961) already clamps `outerWidth > screen.width`, but for whichever field/path Step 1 shows is leaking. Keep it surgical; do not touch the `no_viewport`/#666 logic.
+- [ ] **Step 3: Implement the minimal fix at the root-caused site.** Most likely candidate (confirm via Step 1): in the synthetic path, ensure `window.outerWidth/outerHeight` are populated from the generated window and clamped so `outer ≤ avail ≤ screen` survives to runtime — mirroring how `handle_screenXY` (def `fingerprints.py:1311`; the clamp at `fingerprints.py:1344-1352`) already clamps `outerWidth > screen.width`, but for whichever field/path Step 1 shows is leaking. Keep it surgical; do not touch the `no_viewport`/#666 logic.
 
 - [ ] **Step 4: Run the audit — windows must go green**
 
@@ -170,7 +170,7 @@ git commit -m "fix(fingerprints): clamp window geometry to screen at runtime (#<
 > Systematic-debugging task. Follow superpowers:systematic-debugging.
 
 **Files:**
-- Modify: `pythonlib/camoufox/fingerprints.py` / `pythonlib/camoufox/utils.py` — the screen generation (`get_screen_cons` constraint at `utils.py:755`, `generate_fingerprint(screen=…)`).
+- Modify: `pythonlib/camoufox/fingerprints.py` / `pythonlib/camoufox/utils.py` — the screen generation (`get_screen_cons` constraint — def `utils.py:484`, call `utils.py:1135` — and `generate_fingerprint(screen=…)`).
 - Test: `build-tester/observer/audit_coherence.py`.
 
 - [ ] **Step 1: Root cause.** Determine whether the tiny `960×540` macOS screen comes from (a) `get_screen_cons(headless=True)` deliberately constraining to a small screen in headless (an intentional headless behavior that then breaks `screen ≥ inner`), or (b) a browserforge macOS data pool that ships implausibly small screens. Sample `get_random_preset("macos")` and `generate_fingerprint(os="macos", screen=get_screen_cons(True))` directly (pure Python, no browser) and print the screen dims across ~20 draws. Record which source produces `< 1280`-wide screens and how often.
@@ -206,7 +206,7 @@ stores) and `ps_l`/`ps_n` (login state). `datr`/`sb`/`fr` are **identity linkage
 reused across sessions, they cross-link your identities regardless of a clean fingerprint.
 
 ## Default is already safe
-Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:87`), an
+Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:90`), an
 ephemeral profile — every launch starts with no `datr`/`sb`/`fr`. Keep it unless you
 have a reason not to.
 
@@ -225,7 +225,7 @@ have a reason not to.
   `overrideDPPX`), host-independent — this narrows `plan/device-faking-targets.md:56` #24.
 - Window geometry (`wd` cookie) coherence is enforced by the coherence audit
   (`build-tester/observer/audit_coherence.py`).
-- `docs/observer/README.md:106` still claims a stale "canvas-only" observer scope; all 7
+- `docs/observer/README.md:108-111` claimed a stale "canvas-only" observer scope (fixed in #113); all 7
   surfaces are wired (`build-tester/observer/recon_fb_live.json`).
 ```
 
