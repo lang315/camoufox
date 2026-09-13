@@ -163,4 +163,7 @@ def test_fetcher_guard_escapes_the_addon_download_swallow(tmp_path):
     there (#110).
     """
     with pytest.raises(pytest.fail.Exception, match=r"reached the browser fetcher"):
-        addons_mod.download_and_extract("https://example.invalid/x.xpi", str(tmp_path), "n")
+        # Through maybe_download_addons, so addons.py:94's except-Exception is on
+        # the stack: a guard raising a plain Exception would be swallowed here and
+        # this test would fail to raise.
+        maybe_download_addons([DefaultAddons.UBO], [])
