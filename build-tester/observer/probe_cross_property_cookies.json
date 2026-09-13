@@ -1,0 +1,138 @@
+{
+  "issue": 117,
+  "provenance": {
+    "binary": "/private/tmp/claude-501/-Users-lang-GolandProjects-github-com-lang315-camoufox/ef539575-b878-426a-8800-e2bcc3c25773/scratchpad/cfx-macos/extracted/Camoufox.app/Contents/MacOS/camoufox",
+    "binary_sha256": "b0dcf0aad633d0d9a42d77e5763c59659badfceb0b05d290bb366c3e96eafe04",
+    "build_run_id": "34744383071",
+    "launch_differs_from_shipped": [
+      "no CAMOU_CONFIG: Session.__enter__ unsets it, so the site is served the real host UA, platform and screen -- and Meta selects the JS it serves on what it sees",
+      "no addons: pythonlib/camoufox/utils.py:1079 calls add_default_addons (uBlock Origin, addons.py:19) on the shipped launch path; a bare Marionette launch loads none",
+      "no BrowserForge fingerprint (pythonlib path only)",
+      "no generated fontconfig (pythonlib path only)",
+      "FIREFOX_WEBGL_PREFS forces webgl.force-enabled and webgl.enable-webgl2, and sets media.peerconnection.ice.obfuscate_host_addresses=False, switching off a privacy protection the product ships with",
+      "headless: Session.__enter__ hardcodes headless=True. Headless Firefox has no GL context, which is why the two webgl prefs above are forced; a webgl entry here is produced under those forced prefs, not under a shipped headful session"
+    ],
+    "payload": "XUL",
+    "payload_sha256": "db0f5da4b657c43825e8e996159fe4648d1c886b326ad38a3bfefb85b2520546"
+  },
+  "caveat": "Logged out. `datr` is documented as being tied to `c_user` at login (docs/observer/fb-tracking-recon.md:30-46); whether that binding is per-property needs an account and is out of scope. `values_identical: true` means equal in this run, not equal by construction -- two independently generated browser ids colliding is vanishingly unlikely but is not excluded by this measurement.",
+  "comparator_selftest": {
+    "differing": {
+      "name": "cfxprobe",
+      "hosts": [
+        "127.0.0.1",
+        "localhost"
+      ],
+      "values_identical": false,
+      "distinct_values": 2
+    },
+    "identical": {
+      "name": "cfxprobe",
+      "hosts": [
+        "127.0.0.1",
+        "localhost"
+      ],
+      "values_identical": true,
+      "distinct_values": 1
+    }
+  },
+  "single_target_sanity": {
+    "shared_name_pairs": [],
+    "datr_pair": null
+  },
+  "runs": [
+    {
+      "order": [
+        "https://www.facebook.com/",
+        "https://www.instagram.com/"
+      ],
+      "shared_name_pairs": [
+        {
+          "name": "datr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "values_identical": false,
+          "distinct_values": 2
+        },
+        {
+          "name": "dpr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "values_identical": true,
+          "distinct_values": 1
+        },
+        {
+          "name": "wd",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "values_identical": true,
+          "distinct_values": 1
+        }
+      ],
+      "datr": {
+        "name": "datr",
+        "hosts": [
+          ".facebook.com",
+          ".instagram.com"
+        ],
+        "values_identical": false,
+        "distinct_values": 2
+      }
+    },
+    {
+      "order": [
+        "https://www.instagram.com/",
+        "https://www.facebook.com/"
+      ],
+      "shared_name_pairs": [
+        {
+          "name": "datr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "values_identical": false,
+          "distinct_values": 2
+        },
+        {
+          "name": "dpr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "values_identical": true,
+          "distinct_values": 1
+        },
+        {
+          "name": "wd",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "values_identical": true,
+          "distinct_values": 1
+        }
+      ],
+      "datr": {
+        "name": "datr",
+        "hosts": [
+          ".facebook.com",
+          ".instagram.com"
+        ],
+        "values_identical": false,
+        "distinct_values": 2
+      }
+    }
+  ],
+  "verdict": {
+    "datr_pair_seen_both_orders": true,
+    "values_identical_both_orders": false,
+    "order_dependent": false
+  }
+}

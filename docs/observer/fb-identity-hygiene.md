@@ -20,6 +20,31 @@ cookies**, which no fingerprint quality can fix. This is the operational playboo
 `datr` / `sb` / `fr` are identity linkage: reuse them across sessions and FB
 cross-links your identities **regardless of a clean, coherent fingerprint**.
 
+## `datr` is per-property, measured (#117)
+
+instagram.com sets a cookie named `datr` too (`recon_fb_live.json`). It is a
+different value: one profile visiting both properties ends up holding two
+distinct `datr` cookies, on `.facebook.com` and `.instagram.com`
+(`build-tester/observer/probe_cross_property_cookies.json`, both visit orders,
+logged out).
+
+So a profile carries one browser identity *per property*, not one shared across
+Meta. The rules below are unchanged by this — a fresh profile per identity still
+resets all of them at once — but two things follow that were previously assumed
+rather than known. Clearing facebook.com's cookies alone leaves instagram.com's
+`datr` intact and still linking. And a `datr` seen on instagram.com is not
+evidence of facebook.com linkage; they are separate identifiers.
+
+Two caveats sit on this. It is logged out: `datr` is documented above as being
+tied to `c_user` at login, and whether that binding is per-property needs an
+account and was not measured. And `values_identical: false` is a statement about
+this run, not a guarantee about the mechanism.
+
+The device-signal cookies behave the opposite way: `dpr` and `wd` hold *identical*
+values across both properties, which is expected — they describe one spoofed
+device — and serves as a real-world positive control for the comparison, beside
+the synthetic one the probe runs against itself.
+
 ## The default is already safe
 
 Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:90`,
