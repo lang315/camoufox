@@ -45,6 +45,9 @@ def host(screen_cons):
         # has to route fontconfig/fonts to bundle/, not settings/ -- see
         # conftest.repo_get_path.
         mock.patch.object(utils, "get_path", repo_get_path)
+    ), (
+        # The addon download would trip the fetcher guard (#110).
+        mock.patch.object(utils, "add_default_addons", lambda *_a, **_k: None)
     ):
         yield
 
