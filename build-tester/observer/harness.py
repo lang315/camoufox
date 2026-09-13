@@ -1,4 +1,5 @@
-import contextlib, functools, http.server, json, os, socketserver, threading, time
+from pathlib import Path
+import contextlib, functools, hashlib, http.server, json, os, socketserver, threading, time
 
 BIN_DEFAULT = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
 # SurfaceId source of truth is the C++ enum in additions/camoucfg/AccessObserver.hpp
@@ -15,6 +16,60 @@ FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True,
 def default_binary():
     """Resolved camoufox binary path: $CFX_BIN, else the local build."""
     return os.environ.get("CFX_BIN", BIN_DEFAULT)
+
+# This harness is NOT the browser the product ships. Every artifact carries this
+# list so no reader mistakes one for the other.
+LAUNCH_DIFFERS_FROM_SHIPPED = [
+    "no CAMOU_CONFIG: Session.__enter__ unsets it, so the site is served the real "
+    "host UA, platform and screen -- and Meta selects the JS it serves on what it sees",
+    "no addons: pythonlib/camoufox/utils.py:1079 calls add_default_addons (uBlock "
+    "Origin, addons.py:19) on the shipped launch path; a bare Marionette launch loads none",
+    "no BrowserForge fingerprint (pythonlib path only)",
+    "no generated fontconfig (pythonlib path only)",
+    "FIREFOX_WEBGL_PREFS forces webgl.force-enabled and webgl.enable-webgl2, and sets "
+    "media.peerconnection.ice.obfuscate_host_addresses=False, switching off a "
+    "privacy protection the product ships with",
+    "headless: Session.__enter__ hardcodes headless=True. Headless Firefox has no GL "
+    "context, which is why the two webgl prefs above are forced; a webgl entry here "
+    "is produced under those forced prefs, not under a shipped headful session",
+]
+
+def _sha256(p):
+    h = hashlib.sha256()
+    with p.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def provenance():
+    binary = default_binary()
+    p = Path(binary)
+    if not p.is_file():
+        raise SystemExit(
+            f"binary not found: {binary}\n"
+            "BIN_DEFAULT points at /tmp/cfx_sync4, which no longer "
+            "exists on any current host. Set CFX_BIN to the extracted build."
+        )
+    out = {
+        "binary": binary,
+        "binary_sha256": _sha256(p),
+        "build_run_id": os.environ.get("CFX_BUILD_RUN", "unset"),
+        "launch_differs_from_shipped": LAUNCH_DIFFERS_FROM_SHIPPED,
+    }
+    # The launched binary is a ~72KB launcher stub on macOS; hashing it alone does
+    # not identify a build, since the stub can be byte-identical across builds whose
+    # patched C++ differs. Hash the payload beside it as well.
+    for name in ("XUL", "libxul.so", "xul.dll"):
+        payload = p.parent / name
+        if payload.is_file():
+            out["payload"] = name
+            out["payload_sha256"] = _sha256(payload)
+            break
+    else:
+        out["payload"] = "not found beside the binary -- provenance is the stub only"
+    return out
+
 
 _SNAP_JS = ("try{var {getCollector}=ChromeUtils.importESModule("
             "'resource://gre/modules/TrackingObserver.sys.mjs');var c=getCollector();"
