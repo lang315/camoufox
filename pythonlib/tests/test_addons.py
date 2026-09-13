@@ -152,3 +152,15 @@ def test_failed_download_removes_partial_dir(addons_dir, monkeypatch):
     # trusting an addon that has no manifest.json.
     assert not path.exists()
     assert out == []
+
+
+def test_fetcher_guard_escapes_the_addon_download_swallow(tmp_path):
+    """The autouse guard (#108) must fail a test that reaches the addon download.
+
+    addons.py:94 catches Exception and continues, which is product behaviour
+    (an offline launch still works without uBO). The guard raises through
+    pytest.fail(), whose exception is a BaseException, so it is not caught
+    there (#110).
+    """
+    with pytest.raises(pytest.fail.Exception, match=r"reached the browser fetcher"):
+        addons_mod.download_and_extract("https://example.invalid/x.xpi", str(tmp_path), "n")

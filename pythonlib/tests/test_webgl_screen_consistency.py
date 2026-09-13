@@ -321,7 +321,10 @@ def test_preset_screens_are_never_lifted():
             mock.patch.object(utils, "INSTALL_DIR", Path(cache))
         ), mock.patch.object(utils, "installed_verstr", lambda: "150.0.2"), (
             mock.patch.object(utils, "launch_path", lambda **_kwargs: "/nonexistent/camoufox")
-        ), mock.patch.object(utils, "get_path", repo_get_path):
+        ), mock.patch.object(utils, "get_path", repo_get_path), (
+            # The addon download would trip the fetcher guard (#110).
+            mock.patch.object(utils, "add_default_addons", lambda *_a, **_k: None)
+        ):
             env = launch_options(
                 headless=True, fingerprint_preset=preset, i_know_what_im_doing=True
             )["env"]
