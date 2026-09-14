@@ -1,5 +1,8 @@
 {
-  "issue": 117,
+  "issues": [
+    117,
+    119
+  ],
   "provenance": {
     "binary": "/private/tmp/claude-501/-Users-lang-GolandProjects-github-com-lang315-camoufox/ef539575-b878-426a-8800-e2bcc3c25773/scratchpad/cfx-macos/extracted/Camoufox.app/Contents/MacOS/camoufox",
     "binary_sha256": "b0dcf0aad633d0d9a42d77e5763c59659badfceb0b05d290bb366c3e96eafe04",
@@ -17,7 +20,8 @@
   },
   "caveats": [
     "Logged out. `datr` is documented as being tied to `c_user` at login (docs/observer/fb-tracking-recon.md:30-46); whether that binding is per-property needs an account and is out of scope.",
-    "DIRECT-URL VISITS ONLY. Each property is opened by its own URL, with no navigation between them -- no link shim, no `?next=` handoff, no page embedding the other property. That is the state in which any cross-property identity sync is LEAST likely to fire, so a result of `values_differ` bounds this flow, not the properties in general.",
+    "The `runs` arms are DIRECT-URL VISITS: each property is opened by its own URL, with no navigation between them. That is the state in which cross-property identity sync is LEAST likely to fire, so a `values_differ` from those two arms bounds that flow and not the properties in general. The `handoff` arm is the one that navigates between them.",
+    "The handoff arm follows the outbound link as the logged-out page publishes it, or facebook's link shim built by hand when the page publishes none. A click handler that rewrites the href at click time is not exercised, and `vector_used` says which route the run took.",
     "A difference is readable only where `comparable` is true: one entry per host and one OriginAttributes suffix across them. A pair with `comparable: false` spans two different cookie jars and says nothing about how many identities were issued."
   ],
   "comparator_selftest": {
@@ -60,6 +64,41 @@
       "comparable": true,
       "values_identical": true,
       "distinct_values": 1
+    }
+  },
+  "chain_recorder_selftest": {
+    "hops": [
+      "/hop1",
+      "/hop2",
+      "/timing_probe.html"
+    ],
+    "recorded": 3,
+    "redirects": [
+      0,
+      1,
+      2
+    ],
+    "triggered_by": [
+      "system",
+      "system",
+      "system"
+    ]
+  },
+  "arrival_selftest": {
+    "server_redirect": {
+      "hop": "https://www.instagram.com/",
+      "mechanism": "server_redirect",
+      "source": "https://l.facebook.com/l.php?u=x"
+    },
+    "page_navigation": {
+      "hop": "https://www.instagram.com/",
+      "mechanism": "page_navigation",
+      "source": "https://l.facebook.com"
+    },
+    "driver_typed": {
+      "hop": "https://www.instagram.com/",
+      "mechanism": "driver_typed",
+      "source": null
     }
   },
   "single_target_sanity": {
@@ -252,12 +291,274 @@
       ]
     }
   ],
+  "handoff": [
+    {
+      "vector_used": "real_link",
+      "ig_links_on_facebook_page": 1,
+      "navigated_to": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.instagram.com%2F&h=AUDCy4CgjoPZ3Tv8zMCZ5CJATWRQyf46y_5nLobaAaosnsKbETxprzLzsK2HoJiQzWT9QvGn2upaWkquB6fLtx-U1m6tBLoYoFGufpAwKWLRBFsYrklhCroVtZY7mwcys7Thc8YYUEVlxtwzTzs533NJgaU",
+      "final_url": "https://www.instagram.com/",
+      "navigation_chain": [
+        {
+          "url": "https://www.facebook.com/",
+          "method": "GET",
+          "ts": 1789370296317,
+          "redirects": 0,
+          "referrer": null,
+          "triggered_by": "system"
+        },
+        {
+          "url": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.instagram.com%2F&h=AUDCy4CgjoPZ3Tv8zMCZ5CJATWRQyf46y_5nLobaAaosnsKbETxprzLzsK2HoJiQzWT9QvGn2upaWkquB6fLtx-U1m6tBLoYoFGufpAwKWLRBFsYrklhCroVtZY7mwcys7Thc8YYUEVlxtwzTzs533NJgaU",
+          "method": "GET",
+          "ts": 1789370305761,
+          "redirects": 0,
+          "referrer": null,
+          "triggered_by": "system"
+        },
+        {
+          "url": "https://www.instagram.com/",
+          "method": "GET",
+          "ts": 1789370306120,
+          "redirects": 0,
+          "referrer": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.instagram.com%2F&h=AUDCy4CgjoPZ3Tv8zMCZ5CJATWRQyf46y_5nLobaAaosnsKbETxprzLzsK2HoJiQzWT9QvGn2upaWkquB6fLtx-U1m6tBLoYoFGufpAwKWLRBFsYrklhCroVtZY7mwcys7Thc8YYUEVlxtwzTzs533NJgaU",
+          "triggered_by": "https://l.facebook.com"
+        }
+      ],
+      "facebook_host_after_entry": true,
+      "arrival": {
+        "hop": "https://www.instagram.com/",
+        "mechanism": "page_navigation",
+        "source": "https://l.facebook.com"
+      },
+      "arrival_carried_by_facebook": true,
+      "arrived_on_instagram": true,
+      "shared_name_pairs": [
+        {
+          "name": "datr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
+          "values_identical": false,
+          "distinct_values": 2
+        },
+        {
+          "name": "dpr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
+          "values_identical": true,
+          "distinct_values": 1
+        },
+        {
+          "name": "wd",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
+          "values_identical": true,
+          "distinct_values": 1
+        }
+      ],
+      "datr": {
+        "name": "datr",
+        "hosts": [
+          ".facebook.com",
+          ".instagram.com"
+        ],
+        "entries": 2,
+        "scopes": [
+          ".facebook.com/",
+          ".instagram.com/"
+        ],
+        "oa_suffixes": [
+          ""
+        ],
+        "one_entry_per_host": true,
+        "same_partition": true,
+        "comparable": true,
+        "values_identical": false,
+        "distinct_values": 2
+      },
+      "hosts_seen_in_jar": [
+        ".facebook.com",
+        ".instagram.com"
+      ]
+    },
+    {
+      "vector_used": "real_link",
+      "ig_links_on_facebook_page": 1,
+      "navigated_to": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.instagram.com%2F&h=AUASX15zlMmL4VsbNX2Nkvfv_W0q9Duiliuaj40glPXhr8CCAh0kn3r1w9Qy81VIqWmp2ugsYmq3SC1mxXAaJ0dwMbxY0sTSYjrtYnNNOeb5fdRTrpouITwNLwXJ3jugt6fJQX0SxJ6wIEUnkuvZ4mSt9LE",
+      "final_url": "https://www.instagram.com/",
+      "navigation_chain": [
+        {
+          "url": "https://www.facebook.com/",
+          "method": "GET",
+          "ts": 1789370316798,
+          "redirects": 0,
+          "referrer": null,
+          "triggered_by": "system"
+        },
+        {
+          "url": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.instagram.com%2F&h=AUASX15zlMmL4VsbNX2Nkvfv_W0q9Duiliuaj40glPXhr8CCAh0kn3r1w9Qy81VIqWmp2ugsYmq3SC1mxXAaJ0dwMbxY0sTSYjrtYnNNOeb5fdRTrpouITwNLwXJ3jugt6fJQX0SxJ6wIEUnkuvZ4mSt9LE",
+          "method": "GET",
+          "ts": 1789370325753,
+          "redirects": 0,
+          "referrer": null,
+          "triggered_by": "system"
+        },
+        {
+          "url": "https://www.instagram.com/",
+          "method": "GET",
+          "ts": 1789370326058,
+          "redirects": 0,
+          "referrer": "https://l.facebook.com/l.php?u=https%3A%2F%2Fwww.instagram.com%2F&h=AUASX15zlMmL4VsbNX2Nkvfv_W0q9Duiliuaj40glPXhr8CCAh0kn3r1w9Qy81VIqWmp2ugsYmq3SC1mxXAaJ0dwMbxY0sTSYjrtYnNNOeb5fdRTrpouITwNLwXJ3jugt6fJQX0SxJ6wIEUnkuvZ4mSt9LE",
+          "triggered_by": "https://l.facebook.com"
+        }
+      ],
+      "facebook_host_after_entry": true,
+      "arrival": {
+        "hop": "https://www.instagram.com/",
+        "mechanism": "page_navigation",
+        "source": "https://l.facebook.com"
+      },
+      "arrival_carried_by_facebook": true,
+      "arrived_on_instagram": true,
+      "shared_name_pairs": [
+        {
+          "name": "datr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
+          "values_identical": false,
+          "distinct_values": 2
+        },
+        {
+          "name": "dpr",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
+          "values_identical": true,
+          "distinct_values": 1
+        },
+        {
+          "name": "wd",
+          "hosts": [
+            ".facebook.com",
+            ".instagram.com"
+          ],
+          "entries": 2,
+          "scopes": [
+            ".facebook.com/",
+            ".instagram.com/"
+          ],
+          "oa_suffixes": [
+            ""
+          ],
+          "one_entry_per_host": true,
+          "same_partition": true,
+          "comparable": true,
+          "values_identical": true,
+          "distinct_values": 1
+        }
+      ],
+      "datr": {
+        "name": "datr",
+        "hosts": [
+          ".facebook.com",
+          ".instagram.com"
+        ],
+        "entries": 2,
+        "scopes": [
+          ".facebook.com/",
+          ".instagram.com/"
+        ],
+        "oa_suffixes": [
+          ""
+        ],
+        "one_entry_per_host": true,
+        "same_partition": true,
+        "comparable": true,
+        "values_identical": false,
+        "distinct_values": 2
+      },
+      "hosts_seen_in_jar": [
+        ".facebook.com",
+        ".instagram.com"
+      ]
+    }
+  ],
   "verdict": {
     "datr_pair_spans_both_properties_both_orders": true,
     "comparable_both_orders": true,
     "values_differ_both_orders": true,
     "values_identical_both_orders": false,
-    "order_dependent": false
+    "order_dependent": false,
+    "handoff_navigation_crossed_both_runs": true,
+    "handoff_readable_both_runs": true,
+    "handoff_values_differ_both_runs": true,
+    "handoff_values_identical_both_runs": false,
+    "handoff_vectors_used": [
+      "real_link",
+      "real_link"
+    ]
   },
   "tripwires": []
 }

@@ -78,8 +78,11 @@ _COOKIE_JS = ("try{let o=[];for(let c of Services.cookies.cookies){o.push({name:
               "return JSON.stringify(o);}catch(e){return 'ERR:'+e;}")
 
 @contextlib.contextmanager
-def serve(directory):
-    h = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
+def serve(directory, handler=None):
+    """Serve `directory` on an ephemeral port. `handler` overrides the request
+    handler class, so a caller can serve real 30x responses that
+    SimpleHTTPRequestHandler cannot produce."""
+    h = functools.partial(handler or http.server.SimpleHTTPRequestHandler, directory=str(directory))
     httpd = socketserver.TCPServer(("127.0.0.1", 0), h)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
