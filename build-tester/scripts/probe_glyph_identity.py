@@ -167,7 +167,7 @@ def _sha256(path):
     return h.hexdigest()
 
 
-def provenance():
+def provenance(executable_path=None):
     """Name the binary these readings came from.
 
     A reading is not a measurement until you know which binary produced it
@@ -175,6 +175,20 @@ def provenance():
     a path the caller passed, so the resolver is the only thing that knows.
     """
     out = {}
+    if executable_path:
+        # An explicitly named binary is the whole provenance: pythonlib's
+        # resolver did not choose it and cannot describe it.
+        binary = Path(executable_path)
+        out["binary"] = str(binary)
+        for name in ("XUL", "libxul.so", "xul.dll"):
+            payload = binary.parent / name
+            if payload.is_file():
+                out["payload"] = name
+                out["payload_sha256"] = _sha256(payload)
+                break
+        else:
+            out["payload"] = "not found beside the binary"
+        return out
     try:
         from camoufox import pkgman
 
@@ -196,11 +210,12 @@ def provenance():
     return out
 
 
-def run_once(target_os, prove_red=False, headless=False):
+def run_once(target_os, prove_red=False, headless=False, executable_path=None):
     from camoufox.sync_api import Camoufox
 
     test = VIETNAMESE + LATIN1_CONTROL + ("o" if prove_red else "")
-    with Camoufox(headless=headless, os=target_os, locale="vi-VN") as browser:
+    extra = {"executable_path": executable_path} if executable_path else {}
+    with Camoufox(headless=headless, os=target_os, locale="vi-VN", **extra) as browser:
         page = browser.new_page()
         page.goto("data:text/html,<meta charset=utf-8><body>glyph identity probe")
         raw = page.evaluate(_JS, {"test": test, "decoy": DECOYS, "fams": FAMILIES})
@@ -251,6 +266,10 @@ def main():
     ap.add_argument("--prove-red", action="store_true",
                     help="put 'o' in both sets, so every family MUST collide")
     ap.add_argument("--headless", action="store_true")
+    ap.add_argument("--executable-path",
+                    help="binary to measure; without it pythonlib picks its own "
+                         "download, which is the UPSTREAM build and carries none "
+                         "of this fork's font work")
     ap.add_argument("--out", help="write the full result as JSON")
     ap.add_argument("--self-test", action="store_true",
                     help="exercise the triage logic; launches no browser")
@@ -264,13 +283,15 @@ def main():
     runs = []
     for target in targets:
         for _ in range(args.reps):
-            run = run_once(target, prove_red=args.prove_red, headless=args.headless)
+            run = run_once(target, prove_red=args.prove_red,
+                           headless=args.headless,
+                           executable_path=args.executable_path)
             runs.append(run)
             print(f"[{target}] {run['verdict']} selftest={json.dumps(run['selftest'])}")
             for trip in run["tripwires"]:
                 print("    tripwire:", json.dumps(trip, ensure_ascii=False))
 
-    result = {"provenance": provenance(), "host": sys.platform,
+    result = {"provenance": provenance(args.executable_path), "host": sys.platform,
               "vietnamese_codepoints": len(VIETNAMESE),
               "latin1_control": LATIN1_CONTROL, "decoys": len(DECOYS),
               "families": FAMILIES, "runs": runs}
