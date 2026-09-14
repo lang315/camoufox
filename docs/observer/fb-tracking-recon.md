@@ -65,14 +65,83 @@ Events observed (all fired at **login / session-init**, `user:"0"` before auth c
 | `ods_web_batch` | operational metrics / counters |
 
 Each event carries a `webSessionId` that links all events in a session, precise
-timestamps, and an encoded `e` payload (the actual signal data). The `e` blob was
-**not decoded** — it is a login-time signal, and decoding a live sample would require
-capturing it unredacted during a fresh authentication.
+timestamps, and an encoded `e` payload (the actual signal data).
 
-**Observed firing behavior:** `/ajax/bz` fired during the fresh-login flow only. On an
-already-established (persisted) session, normal browsing — scroll + cross-page
-navigation, headless and headful, three attempts — produced **zero** `/ajax/bz` posts.
-So the `bd_pdc_signals` collection is session-establishment-gated, not continuous.
+### Session-establishment gating, with a denominator (#121)
+
+`/ajax/bz` fires during the fresh-login flow and not during ordinary browsing of an
+already-established session. Re-measured on `152.0.4-beta.31` (build run
+`34744383071`, payload `XUL` sha256 `db0f5da4b657c438…`), driven through the real
+pythonlib + Playwright launch with uBlock Origin loaded as it ships:
+
+| arm | `/ajax/bz` | total requests through the listener |
+|---|---|---|
+| fresh login, clean profile | **15** | — |
+| established session, browsing | **0** | 379 |
+| established session, second run | **0** | 347 |
+
+The denominator is the point. The earlier beta.28 note reported this from three
+attempts with no request count, and a bare zero cannot be told apart from a listener
+that never fired — this document reported exactly such a zero twice before the counter
+existed. Several hundred requests reaching the listener while none of them is
+`/ajax/bz` makes the zero a statement about Facebook rather than about the instrument.
+
+### Message shape
+
+Across the fresh-login arm, the multipart parts and their counts:
+
+```
+q x15   ts x15   blob x13   post_0 x12   post_1 x1
+
+app_id        numeric-string(16)
+webSessionId  string(20)
+user          numeric-string(1)      -- "0"-length, i.e. pre-auth
+trigger       string(19), string(20)
+posts[].a     string(27)
+posts[].b     list[2]
+posts[].d     string(91)
+posts[].e     string(241), string(924)
+posts[].r     int
+posts[].s     string(20)
+posts[].t     int
+```
+
+New against the shape above: the fields **`d`** and **`r`**, and the multipart parts
+**`blob`**, **`post_0`**, **`post_1`**. `user` being one character long is consistent
+with these firing before authentication completes.
+
+### The `e` payload: characterized, not decoded
+
+| | 241-char | 924-char |
+|---|---|---|
+| alphabet | printable ASCII | printable ASCII |
+| distinct characters | 68 | 39 |
+| entropy per character | 5.787 | 4.783 |
+| ceiling for that alphabet | 6.087 | 5.285 |
+| strict base64 / base64url | rejected | rejected |
+
+**It is not base64.** Sixty-eight distinct characters exceed the sixty-five in the
+base64url set including `=`. Two earlier attempts here appeared to decode it only
+because Python's `base64.b64decode` defaults to `validate=False`: it silently discards
+out-of-alphabet characters and returns bytes from whatever remains, so it "succeeds" on
+data that is not base64 at all. Both sizes are rejected under `validate=True`.
+
+**There are two encodings under one field name.** A 68-symbol alphabet and a 39-symbol
+one are not one format at two sizes. Each reaches 90–95% of its own alphabet's entropy
+ceiling — dense, but structured rather than random.
+
+So a standard container decode is not the route; anyone continuing should look for a
+custom alphabet rather than reach for base64.
+
+### What this does not cover
+
+Only `/ajax/bz` was captured. Nothing here describes the other `/ajax/` paths the
+control arms saw — `/ajax/bootloader-endpoint/`, `/ajax/qm/`,
+`/ajax/webstorage/process_keys/`, and `/ajax/bnzai`, the last of which appears in no
+other document in this repository and was not investigated.
+
+One profile, one account, one host, one day. The fresh-login arm ran once; only the
+established-session arm is replicated.
 
 ## camoufox's position
 
@@ -92,4 +161,12 @@ The user logs in manually in a headful window; tooling captures `page.on("reques
 (host + path + param keys only) and polls `context.cookies()` (names + kind + length
 only) — **no cookie values, no POST bodies, no query values are ever written to disk**.
 `/ajax/bz` bodies are multipart-parsed and redacted to the event schema. Session
-capture is logged-out-representative; a logged-in run is operator-driven and single.
+capture is logged-out-representative; a logged-in run is operator-driven, and the
+fresh-login arm is single while the established-session arm is replicated.
+
+Path filtering bounds the **disk artifact** only. Every POST body a session makes,
+the login POST included, transits browser, driver and capture-process memory before
+any filter runs; this design does not and cannot prevent that. Raw captures are never
+opened by an agent, are read only by a standalone analyzer whose output is the
+redacted shape above, live outside this repository under a private directory excluded
+from search indexing and backups, and are swept after thirty days.
