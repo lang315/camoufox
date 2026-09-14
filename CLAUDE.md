@@ -12,7 +12,24 @@ The actual Firefox tree lives in `camoufox-<version>-<release>/` (e.g. `camoufox
 
 ## Build commands
 
-The build system is designed for **Linux**. Windows and macOS binaries are **cross-compiled from Linux** — they are never built natively. (`scripts/install-deps.sh` covers macOS/Linux host dependencies for local `make dir` + bootstrap experimentation; a full production build path is Linux/Docker.)
+The build system is designed for **Linux**, and `multibuild.py` cross-compiles
+Windows from it. **macOS is not cross-compiled** — `.github/workflows/build.yml`
+runs the macOS legs natively on `macos-26` runners, because FF150 hard-requires
+the macOS 26 SDK (`mac_sdk_min_version()` is 26.2 and `widget/cocoa/nsCocoaWindow.mm`
+uses `NSGlassEffectView`; a macos-15 runner fails with `use of undeclared
+identifier 'NSGlassEffectView'`). That SDK is universal, so the macOS x86_64 leg
+cross-compiles on the arm64 runner. `make setup-macos-sdk` downloads the SDK only
+when the host is not Darwin. (`scripts/install-deps.sh` covers macOS/Linux host
+dependencies for local `make dir` + bootstrap experimentation.)
+
+**Dispatch a build rather than building locally.** `gh workflow run build.yml
+--repo <fork> -f build_target=macos-arm64` (targets: `full`, `linux-x86_64`,
+`linux-arm64`, `linux-i686`, `windows-x86_64`, `windows-i686`, `macos-x86_64`,
+`macos-arm64`) uploads `CamoufoxBuilds-<target>-<arch>` with a 14-day retention,
+fetched with `gh run download <run-id> -n <name>`. Before dispatching, check
+whether an existing run already covers the commit you care about: a run whose
+diff against yours touches no `patches/`, `additions/`, `settings/`, `assets/` or
+`upstream.sh` is the same browser. A cold macOS leg is ~2h.
 
 ```bash
 bash scripts/install-deps.sh   # install host build deps (Python ≥3.11, Rust, aria2, p7zip, go, msitools, wget, sqlite)
