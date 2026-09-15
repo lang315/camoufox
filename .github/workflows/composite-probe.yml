@@ -33,7 +33,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg
       - run: pip install -e pythonlib 'playwright<1.63'
 
       # record_video_dir muxes through Playwright's own ffmpeg build, which is a
@@ -135,8 +135,12 @@ jobs:
       - name: Do the videos contain the page, or a blank screen?
         if: always()
         run: |
-          FFMPEG=$(find ~/.cache/ms-playwright -name 'ffmpeg-linux' -type f | head -1)
-          echo "ffmpeg: ${FFMPEG:-<not found>}"
+          # The system ffmpeg, not Playwright's: that build is trimmed for muxing
+          # and carries no signalstats filter, so the previous revision found the
+          # binary, ran it, matched no YAVG lines, and reported "no luma samples"
+          # for all three arms -- a silent no-op that looked like a measurement.
+          FFMPEG=$(command -v ffmpeg)
+          echo "ffmpeg: ${FFMPEG:-<not found>}  ($($FFMPEG -filters 2>/dev/null | grep -c signalstats) signalstats filter)"
           for d in vid/arm1 vid/arm2 vid/arm3; do
             f=$(find "$d" -name '*.webm' 2>/dev/null | head -1)
             if [ -z "$f" ]; then echo "$d: NO VIDEO"; continue; fi
