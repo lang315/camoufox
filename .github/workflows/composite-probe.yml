@@ -36,6 +36,14 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y xvfb
       - run: pip install -e pythonlib 'playwright<1.63'
 
+      # record_video_dir muxes through Playwright's own ffmpeg build, which is a
+      # separate download from the package. Without it every arm dies with
+      # "Executable doesn't exist at .../ffmpeg-1011/ffmpeg-linux" and writes no
+      # file -- which looks exactly like the empty container this probe is
+      # hunting for. Only the browsers are skipped here; the binary under test
+      # comes from the artifact.
+      - run: python -m playwright install ffmpeg
+
       - name: Fetch the binary
         env:
           GH_TOKEN: ${{ github.token }}
