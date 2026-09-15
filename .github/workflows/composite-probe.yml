@@ -15,12 +15,14 @@ name: Composite probe
 # environment, so a 110-byte container in arm 2 is about Composite rather than
 # about recording being broken.
 
-on:
-  workflow_dispatch:
-    inputs:
-      run_id:
-        description: "Build run id holding CamoufoxBuilds-linux-x86_64"
-        required: true
+# on: pull_request rather than workflow_dispatch -- a dispatchable workflow has
+# to exist on the default branch, and a throwaway probe does not belong on main.
+# The build id is fixed here for the same reason: it is the linux-x86_64 build of
+# the merge under test (34998440365, branch sync/upstream-772).
+on: pull_request
+
+env:
+  BUILD_RUN_ID: "34998440365"
 
 jobs:
   probe:
@@ -38,7 +40,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
+          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" \
             -n CamoufoxBuilds-linux-x86_64 -D build
           find build -maxdepth 2 -name '*.zip' -exec unzip -q {} -d build/x \;
           BIN=$(find build -name 'camoufox' -type f | head -1)
