@@ -67,34 +67,32 @@ jobs:
           out = pathlib.Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
           headless = True if mode == "off" else "virtual"
 
-          # Something that actually changes between frames: a still page can
-          # legitimately encode to almost nothing, which would be indistinguishable
-          # from the empty container this probe is looking for.
+          # Two pages, because they answer different questions.
           #
-          # set_content, not a data: URL. As a data: URL the '#' in '#000' opens a
-          # fragment, so everything from there on was cut off, the page had no style
-          # at all, and all three arms filmed the same blank white screen -- luma
-          # 235-236 across 101 frames, identical in every arm. The measurement was
-          # fine; its subject was not.
-          PAGE = (
-              "<style>@keyframes s{from{background:#000}to{background:#fff}}"
-              "body{margin:0;height:100vh;animation:s .25s infinite alternate}</style>"
-              "<body></body>"
-          )
+          # GUARD is byte-identical to smoke.yml's #93/#458 regression guard
+          # (800x600, static "hello world", 2s). That is the only page whose size
+          # can be compared against efb0a09's table -- 110 bytes off, 54494 on --
+          # because that table was produced by this scenario. A different page
+          # would make the comparison meaningless no matter how careful the rest.
+          #
+          # ANIM alternates black and white at 4 Hz so frame luma can show whether
+          # the recording holds the page or a blank screen; a static page cannot
+          # distinguish those.
+          GUARD = "<h1 style='font-size:200px'>hello world</h1>"
+          ANIM = ("<style>@keyframes s{from{background:#000}to{background:#fff}}"
+                  "body{margin:0;height:100vh;animation:s .25s infinite alternate}</style><body></body>")
+          PAGE, VP, WAIT = (GUARD, {"width": 800, "height": 600}, 2) if os.environ.get("PROBE_PAGE") == "guard" \
+                           else (ANIM, {"width": 640, "height": 480}, 3)
+          print("page:", os.environ.get("PROBE_PAGE", "anim"), flush=True)
 
-          # exclude_addons: launch_options() otherwise downloads uBlock Origin from
-          # addons.mozilla.org on every launch (#110). The first attempt at this probe
-          # sat in arm 1 for over an hour with no output, and an addon fetch is the
-          # one network call in this path. Nothing here needs an ad blocker.
-          print('launching:', headless, flush=True)
           with Camoufox(headless=headless, executable_path=os.environ["CAMOUFOX_BIN"],
                         exclude_addons=list(DefaultAddons)) as browser:
               print('launched', flush=True)
-              ctx = browser.new_context(record_video_dir=str(out), viewport={"width": 640, "height": 480})
+              ctx = browser.new_context(record_video_dir=str(out), viewport=VP)
               page = ctx.new_page()
               page.set_content(PAGE)
               print('navigated', flush=True)
-              time.sleep(3)
+              time.sleep(WAIT)
               ctx.close()
               browser.close()
 
@@ -106,24 +104,30 @@ jobs:
               print(f"RESULT {mode} composite={os.environ.get('CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE','unset')} bytes=0 file=NONE")
           PY
 
-      - timeout-minutes: 6
+      - timeout-minutes: 10
         name: "Arm 1 — headless=True, no Xvfb (control: does recording work at all)"
         continue-on-error: true
-        run: python probe.py off vid/arm1
+        run: |
+          PROBE_PAGE=guard python probe.py off vid/arm1-guard
+          python probe.py off vid/arm1
 
-      - timeout-minutes: 6
+      - timeout-minutes: 10
         name: "Arm 2 — headless=virtual, Composite OFF"
         continue-on-error: true
         env:
           CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE: "0"
-        run: python probe.py virtual vid/arm2
+        run: |
+          PROBE_PAGE=guard python probe.py virtual vid/arm2-guard
+          python probe.py virtual vid/arm2
 
-      - timeout-minutes: 6
+      - timeout-minutes: 10
         name: "Arm 3 — headless=virtual, Composite ON"
         continue-on-error: true
         env:
           CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE: "1"
-        run: python probe.py virtual vid/arm3
+        run: |
+          PROBE_PAGE=guard python probe.py virtual vid/arm3-guard
+          python probe.py virtual vid/arm3
 
       - name: Table
         if: always()
@@ -148,7 +152,7 @@ jobs:
           # for all three arms -- a silent no-op that looked like a measurement.
           FFMPEG=$(command -v ffmpeg)
           echo "ffmpeg: ${FFMPEG:-<not found>}  ($($FFMPEG -filters 2>/dev/null | grep -c signalstats) signalstats filter)"
-          for d in vid/arm1 vid/arm2 vid/arm3; do
+          for d in vid/arm1-guard vid/arm2-guard vid/arm3-guard vid/arm1 vid/arm2 vid/arm3; do
             f=$(find "$d" -name '*.webm' 2>/dev/null | head -1)
             if [ -z "$f" ]; then echo "$d: NO VIDEO"; continue; fi
             "$FFMPEG" -loglevel info -i "$f" \
