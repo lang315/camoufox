@@ -70,9 +70,16 @@ jobs:
           # Something that actually changes between frames: a still page can
           # legitimately encode to almost nothing, which would be indistinguishable
           # from the empty container this probe is looking for.
+          #
+          # set_content, not a data: URL. As a data: URL the '#' in '#000' opens a
+          # fragment, so everything from there on was cut off, the page had no style
+          # at all, and all three arms filmed the same blank white screen -- luma
+          # 235-236 across 101 frames, identical in every arm. The measurement was
+          # fine; its subject was not.
           PAGE = (
-              "data:text/html,<style>@keyframes s{from{background:#000}to{background:#fff}}"
+              "<style>@keyframes s{from{background:#000}to{background:#fff}}"
               "body{margin:0;height:100vh;animation:s .25s infinite alternate}</style>"
+              "<body></body>"
           )
 
           # exclude_addons: launch_options() otherwise downloads uBlock Origin from
@@ -85,7 +92,7 @@ jobs:
               print('launched', flush=True)
               ctx = browser.new_context(record_video_dir=str(out), viewport={"width": 640, "height": 480})
               page = ctx.new_page()
-              page.goto(PAGE)
+              page.set_content(PAGE)
               print('navigated', flush=True)
               time.sleep(3)
               ctx.close()
@@ -154,7 +161,7 @@ jobs:
           if not vals:
               print(f"{d.name}: no luma samples"); raise SystemExit
           lo, hi = min(vals), max(vals)
-          verdict = "CONTENT (luma swings)" if hi - lo > 20 else "BLANK-ish (flat luma)"
+          verdict = "CONTENT (luma swings)" if hi - lo > 20 else "FLAT (no animation captured)"
           print(f"{d.name}: {len(vals)} frames  luma min={lo:.1f} max={hi:.1f} "
                 f"spread={hi-lo:.1f}  -> {verdict}")
           PY2
