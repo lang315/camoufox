@@ -31,26 +31,45 @@ DISPLAYFD_READ_TIMEOUT_S = 10.0
 DEFAULT_SCREEN = "1x1x24"
 SCREEN_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_SIZE"
 
-# The Composite extension, ENABLED by default (Xvfb's `+extension COMPOSITE`).
+# The Composite extension, disabled by default (Xvfb's `-extension COMPOSITE`).
 #
-# It was briefly disabled by default on the theory that #93 (no video under
-# headless="virtual") had been a juggler bug since fixed, making Composite
-# "no longer good for anything". Measured on a beta.29 linux build, that is
-# wrong -- Composite is still required for video capture:
+# This was briefly enabled by default on the theory that #93 (no video under
+# headless="virtual") was caused by disabling it. It was not: #93 was a juggler
+# bug, fixed by capturing the screencast from the compositor instead of from
+# libwebrtc's X11 window capturer. Both states were measured before that fix:
 #
-#   headless=True, no Xvfb            -> 60007 byte .webm   (works)
-#   headless="virtual", Composite off ->   110 byte .webm   (empty container)
-#   headless="virtual", Composite ON  -> 54494 byte .webm   (works)
+#   composite off, record_video_dir  -> a valid .webm of 24 pure-white frames
+#   composite ON,  record_video_dir  -> browser dies with SIGSEGV, no video
+#   composite ON,  no recording      -> fine
 #
-# The headless baseline is what makes this conclusive: record_video itself is
-# fine, so the empty file is specific to a virtual display without Composite.
-# Screen size is NOT a factor -- CAMOUFOX_VIRTUAL_DISPLAY_SIZE=1920x1080x24
-# produced the same 110 bytes as the 1x1 default, so #458's stated mechanism
-# (a 1x1 root clamping the window) is not what breaks it.
+# The segfault was inside the X11 capturer, which the browser no longer uses, so
+# enabling Composite is no longer dangerous -- but it is also no longer good for
+# anything, since recording never touches X11 window capture now. Leave it off
+# (Camoufox's long-standing default) and keep the escape hatch:
+# CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=1 enables it.
 #
-# The old SIGSEGV that motivated disabling Composite is gone: the ON case above
-# records cleanly. Default it back on, and keep the escape hatch:
-# CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=0 disables it.
+# efb0a09 flipped this default back on, because on a beta.29 build Composite off
+# produced a 110-byte empty container while on produced 54494 bytes. That was a
+# real measurement and it is the reason this comment is longer than it should be.
+# It no longer reproduces. Re-measured on 152.0.4-beta.31 (build 34998440365,
+# run 35013493631) using smoke.yml's own #93/#458 guard scenario -- 800x600,
+# static "hello world", two seconds -- so the numbers sit on the same axis as
+# efb0a09's:
+#
+#                                      efb0a09 (beta.29)   here (beta.31)
+#   headless=True, no Xvfb                    60007            57891
+#   headless="virtual", Composite off           110            44957
+#   headless="virtual", Composite on          54494            58069
+#
+# Two of the three rows agree within a few percent, which is what makes the third
+# readable: only the Composite-off cell moved, from an empty container to a real
+# recording. On a second page animating black to white at 4 Hz, Composite off
+# records a mean-luma spread of 220 out of 255 -- identical to the no-Xvfb
+# control -- so it captures the page rather than a blank screen.
+#
+# Whatever fixed it landed between beta.29 and beta.31; this was not measured
+# per-commit, so which change is unidentified. What is measured is that on the
+# browser this tree builds, a virtual display records video with Composite off.
 COMPOSITE_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE"
 
 
@@ -81,7 +100,7 @@ class VirtualDisplay:
         self.debug = debug
         self.screen = screen or _resolve_screen()
         if composite is None:
-            composite = os.environ.get(COMPOSITE_ENV_VAR, "1").strip() not in ("0", "false")
+            composite = os.environ.get(COMPOSITE_ENV_VAR, "0").strip() in ("1", "true")
         self.composite = composite
         self.proc: Optional[subprocess.Popen] = None
         self._display: Optional[int] = None
