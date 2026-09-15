@@ -1,0 +1,103 @@
+name: Composite probe
+
+# Re-measures the one thing PR #128 left open: whether the X Composite extension
+# is still required for video capture under headless="virtual".
+#
+# Two tables disagree. efb0a09 (2026-08-25, beta.29) measured Composite off
+# producing a 110-byte empty container and Composite on a 54 KB working video,
+# and re-enabled it. Upstream's ci/tribal-rules.yml says the opposite -- that
+# #93 was a Juggler bug fixed by capturing from the compositor, so Composite is
+# neither dangerous nor useful -- and its own text says those numbers were taken
+# BEFORE that fix. This runs the fork's three-row table on a current binary.
+#
+# Arm 1 is the control that makes the other two readable: with no virtual
+# display at all, a non-trivial .webm proves record_video works in this
+# environment, so a 110-byte container in arm 2 is about Composite rather than
+# about recording being broken.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build run id holding CamoufoxBuilds-linux-x86_64"
+        required: true
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pip install -e pythonlib 'playwright<1.63'
+
+      - name: Fetch the binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
+            -n CamoufoxBuilds-linux-x86_64 -D build
+          find build -maxdepth 2 -name '*.zip' -exec unzip -q {} -d build/x \;
+          BIN=$(find build -name 'camoufox' -type f | head -1)
+          echo "CAMOUFOX_BIN=$BIN" >> "$GITHUB_ENV"
+          echo "binary: $BIN"
+          chmod +x "$BIN"
+
+      - name: Write the probe
+        run: |
+          cat > probe.py <<'PY'
+          import os, sys, pathlib, time
+          from camoufox.sync_api import Camoufox
+
+          mode = sys.argv[1]                      # "off" | "virtual"
+          out = pathlib.Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
+          headless = True if mode == "off" else "virtual"
+
+          # Something that actually changes between frames: a still page can
+          # legitimately encode to almost nothing, which would be indistinguishable
+          # from the empty container this probe is looking for.
+          PAGE = (
+              "data:text/html,<style>@keyframes s{from{background:#000}to{background:#fff}}"
+              "body{margin:0;height:100vh;animation:s .25s infinite alternate}</style>"
+          )
+
+          with Camoufox(headless=headless, executable_path=os.environ["CAMOUFOX_BIN"]) as browser:
+              ctx = browser.new_context(record_video_dir=str(out), viewport={"width": 640, "height": 480})
+              page = ctx.new_page()
+              page.goto(PAGE)
+              time.sleep(3)
+              ctx.close()
+              browser.close()
+
+          vids = sorted(out.glob("*.webm"))
+          for v in vids:
+              print(f"RESULT {mode} composite={os.environ.get('CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE','unset')} "
+                    f"bytes={v.stat().st_size} file={v.name}")
+          if not vids:
+              print(f"RESULT {mode} composite={os.environ.get('CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE','unset')} bytes=0 file=NONE")
+          PY
+
+      - name: "Arm 1 — headless=True, no Xvfb (control: does recording work at all)"
+        continue-on-error: true
+        run: python probe.py off vid/arm1
+
+      - name: "Arm 2 — headless=virtual, Composite OFF"
+        continue-on-error: true
+        env:
+          CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE: "0"
+        run: python probe.py virtual vid/arm2
+
+      - name: "Arm 3 — headless=virtual, Composite ON"
+        continue-on-error: true
+        env:
+          CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE: "1"
+        run: python probe.py virtual vid/arm3
+
+      - name: Table
+        if: always()
+        run: |
+          echo "=== video sizes ==="
+          find vid -name '*.webm' -printf '%s bytes  %p\n' | sort -n || true
