@@ -53,6 +53,7 @@ jobs:
           cat > probe.py <<'PY'
           import os, sys, pathlib, time
           from camoufox.sync_api import Camoufox
+          from camoufox.addons import DefaultAddons
 
           mode = sys.argv[1]                      # "off" | "virtual"
           out = pathlib.Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
@@ -66,10 +67,18 @@ jobs:
               "body{margin:0;height:100vh;animation:s .25s infinite alternate}</style>"
           )
 
-          with Camoufox(headless=headless, executable_path=os.environ["CAMOUFOX_BIN"]) as browser:
+          # exclude_addons: launch_options() otherwise downloads uBlock Origin from
+          # addons.mozilla.org on every launch (#110). The first attempt at this probe
+          # sat in arm 1 for over an hour with no output, and an addon fetch is the
+          # one network call in this path. Nothing here needs an ad blocker.
+          print('launching:', headless, flush=True)
+          with Camoufox(headless=headless, executable_path=os.environ["CAMOUFOX_BIN"],
+                        exclude_addons=list(DefaultAddons)) as browser:
+              print('launched', flush=True)
               ctx = browser.new_context(record_video_dir=str(out), viewport={"width": 640, "height": 480})
               page = ctx.new_page()
               page.goto(PAGE)
+              print('navigated', flush=True)
               time.sleep(3)
               ctx.close()
               browser.close()
@@ -82,17 +91,20 @@ jobs:
               print(f"RESULT {mode} composite={os.environ.get('CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE','unset')} bytes=0 file=NONE")
           PY
 
-      - name: "Arm 1 — headless=True, no Xvfb (control: does recording work at all)"
+      - timeout-minutes: 6
+        name: "Arm 1 — headless=True, no Xvfb (control: does recording work at all)"
         continue-on-error: true
         run: python probe.py off vid/arm1
 
-      - name: "Arm 2 — headless=virtual, Composite OFF"
+      - timeout-minutes: 6
+        name: "Arm 2 — headless=virtual, Composite OFF"
         continue-on-error: true
         env:
           CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE: "0"
         run: python probe.py virtual vid/arm2
 
-      - name: "Arm 3 — headless=virtual, Composite ON"
+      - timeout-minutes: 6
+        name: "Arm 3 — headless=virtual, Composite ON"
         continue-on-error: true
         env:
           CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE: "1"
