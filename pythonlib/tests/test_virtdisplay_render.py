@@ -55,10 +55,11 @@ def _args_pairs(args):
 # frames under headless='virtual' with COMPOSITE off and a 1x1 root, which
 # tests/async/test_video.py covers end-to-end with a live browser.
 #
-# Composite is back on by default because measurement showed it is still required
-# for video capture (see virtdisplay.py). Screen size stays upstream's 1x1, which
-# the same measurement exonerated. What is pinned here is the default plus the
-# escape hatches in both directions.
+# So the defaults are upstream's again, and what is worth pinning here is that
+# the escape hatches still work -- a caller who does want a real framebuffer to
+# draw into must be able to ask for one. The default returned to off after the
+# beta.29 measurement behind efb0a09 failed to reproduce on beta.31: see the
+# table in virtdisplay.py, measured with smoke.yml's own guard scenario.
 # ---------------------------------------------------------------------------
 
 def _screen_geometry(args):
@@ -68,22 +69,18 @@ def _screen_geometry(args):
     return int(w), int(h)
 
 
-def test_composite_is_on_by_default_and_can_be_disabled(monkeypatch):
-    # Measured on a beta.29 linux build: with Composite off, record_video under
-    # headless="virtual" produces a 110-byte empty .webm; with it on, 54494
-    # bytes. Plain headless=True yields 60007, so record_video itself is fine --
-    # the empty file is specific to a virtual display without Composite.
+def test_composite_is_off_by_default_and_can_be_enabled(monkeypatch):
     monkeypatch.delenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", raising=False)
-    assert ("+extension", "COMPOSITE") in _args_pairs(VirtualDisplay().xvfb_args)
-
-    monkeypatch.setenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", "0")
     assert ("-extension", "COMPOSITE") in _args_pairs(VirtualDisplay().xvfb_args)
+
+    monkeypatch.setenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", "1")
+    assert ("+extension", "COMPOSITE") in _args_pairs(VirtualDisplay().xvfb_args)
 
 
 def test_composite_argument_overrides_the_environment(monkeypatch):
-    monkeypatch.setenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", "1")
-    pairs = _args_pairs(VirtualDisplay(composite=False).xvfb_args)
-    assert ("-extension", "COMPOSITE") in pairs
+    monkeypatch.setenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", "0")
+    pairs = _args_pairs(VirtualDisplay(composite=True).xvfb_args)
+    assert ("+extension", "COMPOSITE") in pairs
 
 
 def test_xvfb_screen_size_is_overridable(monkeypatch):
