@@ -1,0 +1,62 @@
+name: system-ui guard probe
+
+# Not for merge. PR #128's Patch guards job is 15/16, failing on
+# tests/patches/system-ui-font-spoofing.py (the macos arm; the windows arm
+# passes). The guard predates the merge -- b7f6c8d, 2026-05-09, present in
+# main and in the merge base -- but until this merge the fork had no pipeline
+# that ran it, so "it fails now" does not say whether the merge broke it.
+#
+# This runs the same guard against two binaries on one runner: the build of
+# PR #128, and the last linux build of main before the merge. Same font
+# universe, same xvfb, same Playwright -- so the only difference between the
+# two columns is the browser.
+on: pull_request
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pip install -e pythonlib 'playwright<1.63'
+
+      - name: Fetch both binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -x
+          for pair in "merged:34998440365" "premerge:34658266360"; do
+            name="${pair%%:*}"; run="${pair##*:}"
+            gh run download "$run" --repo "${{ github.repository }}" \
+              -n CamoufoxBuilds-linux-x86_64 -D "dl-$name"
+            find "dl-$name" -name '*.zip' -exec unzip -q {} -d "bin-$name" \;
+            bin=$(find "bin-$name" -name 'camoufox' -type f | head -1)
+            chmod +x "$bin"
+            echo "${name}_bin=$bin" >> "$GITHUB_ENV"
+            echo "$name -> $bin"
+          done
+
+      - name: Guard against the MERGED build (PR #128)
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo "::group::merged"
+          CAMOUFOX_EXECUTABLE_PATH="$merged_bin" PYTHONPATH="$PWD/pythonlib" \
+            xvfb-run -a python3 tests/patches/system-ui-font-spoofing.py; echo "EXIT=$?"
+          echo "::endgroup::"
+
+      - name: Guard against the PRE-MERGE build (main 6db7103)
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          echo "::group::premerge"
+          CAMOUFOX_EXECUTABLE_PATH="$premerge_bin" PYTHONPATH="$PWD/pythonlib" \
+            xvfb-run -a python3 tests/patches/system-ui-font-spoofing.py; echo "EXIT=$?"
+          echo "::endgroup::"
