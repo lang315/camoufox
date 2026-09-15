@@ -35,6 +35,10 @@ def host(screen_cons):
     with tempfile.TemporaryDirectory() as cache, (
         mock.patch.object(utils, "INSTALL_DIR", Path(cache))
     ), mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
+        # launch_options guards get_screen_cons() with has_display(), so stubbing
+        # only the former left the result depending on the ambient display.
+        mock.patch.object(utils, "has_display", lambda env: True)
+    ), (
         mock.patch.object(utils, "installed_verstr", lambda: "150.0.2")
     ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"), (
         # executable_path stays None here, so validate_config()'s
