@@ -128,27 +128,30 @@ jobs:
       # upstream's own table describes Composite off producing "a valid .webm of
       # 24 pure-white frames", and a flat-colour video encodes to a few KB either
       # way. The probe page alternates black and white at 4 Hz, so a correct
-      # recording has frames whose mean luma differs; a blank one does not.
+      # recording has frames whose mean luma swings across the range; a blank one
+      # sits at one value. ffmpeg's signalstats reports that per frame directly --
+      # no decoder in the job, and no guessing from PNG sizes, which compress a
+      # solid black frame and a solid white one to nearly the same bytes.
       - name: Do the videos contain the page, or a blank screen?
         if: always()
         run: |
-          FFMPEG=$(python -c "from playwright._impl._driver import compute_driver_executable; import pathlib,sys; print(next(pathlib.Path(compute_driver_executable()[0]).parent.parent.parent.rglob('ffmpeg-linux')))" 2>/dev/null || echo ffmpeg)
-          echo "ffmpeg: $FFMPEG"
+          FFMPEG=$(find ~/.cache/ms-playwright -name 'ffmpeg-linux' -type f | head -1)
+          echo "ffmpeg: ${FFMPEG:-<not found>}"
           for d in vid/arm1 vid/arm2 vid/arm3; do
-            f=$(find "$d" -name '*.webm' | head -1) || true
-            [ -z "$f" ] && { echo "$d: no video"; continue; }
-            rm -rf "$d/frames"; mkdir -p "$d/frames"
-            "$FFMPEG" -loglevel error -i "$f" -vf fps=4 "$d/frames/%03d.png" || true
-            python - "$d" <<'PY2'
-          import sys, pathlib, struct, zlib
+            f=$(find "$d" -name '*.webm' 2>/dev/null | head -1)
+            if [ -z "$f" ]; then echo "$d: NO VIDEO"; continue; fi
+            "$FFMPEG" -loglevel info -i "$f" \
+              -vf signalstats,metadata=print:key=lavfi.signalstats.YAVG \
+              -f null - 2>&1 | grep -o 'YAVG=[0-9.]*' | cut -d= -f2 > "$d/yavg.txt" || true
+            python3 - "$d" <<'PY2'
+          import sys, pathlib
           d = pathlib.Path(sys.argv[1])
-          frames = sorted((d/"frames").glob("*.png"))
-          # Mean luma per frame without a decoder dependency: PNG palette-free RGB
-          # is not worth parsing by hand, so use the file size of each frame as a
-          # proxy for content and the count for whether anything decoded at all.
-          sizes = [f.stat().st_size for f in frames]
-          uniq = len(set(sizes))
-          print(f"{d.name}: {len(frames)} frames, {uniq} distinct frame sizes, "
-                f"min={min(sizes) if sizes else 0} max={max(sizes) if sizes else 0}")
+          vals = [float(x) for x in (d/"yavg.txt").read_text().split()]
+          if not vals:
+              print(f"{d.name}: no luma samples"); raise SystemExit
+          lo, hi = min(vals), max(vals)
+          verdict = "CONTENT (luma swings)" if hi - lo > 20 else "BLANK-ish (flat luma)"
+          print(f"{d.name}: {len(vals)} frames  luma min={lo:.1f} max={hi:.1f} "
+                f"spread={hi-lo:.1f}  -> {verdict}")
           PY2
           done
