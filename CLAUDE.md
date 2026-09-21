@@ -419,9 +419,16 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   context's list, consulted by `FindGenericFamilies` before the fontconfig loop
   and by `AddGenericFonts` on the DWrite/CoreText path. **Measured** on Linux
   (arm (n2): 215/215/215 becomes 215/305/280 with one `generic-map` line per
-  generic). `system-ui` (`generic=7`) is asked for in **no** run of that round,
-  so that row is unmeasured, and a generic under a list now yields one family
-  where upstream gave up to three.
+  generic). `system-ui` (`generic=7`) went unmeasured that round and was
+  broken by it (#131): the table step answered it with the sans row and
+  returned before the #599 hook ran, on Linux as well, because
+  `gfxFcPlatformFontList::AddGenericFonts` delegates `system-ui` to the base
+  class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
+  Segoe UI for `Win32`, only if the list allows it). **Measured** on Linux by
+  probe run 35591973853 on build 35586323562. The guard's Windows arm cannot
+  discriminate, since Segoe UI is also the sans row's first choice there. A
+  generic under a list still yields one family where upstream gave up to
+  three.
 - **`gfxFontGroup::GetDefaultFont`'s scope and shared-list walk, plus
   `GetDefaultFontLocked`'s two last resorts (#88).** What is **measured** is
   that a refusing context never reaches `GetDefaultFont` at all (arm (h3), shape
