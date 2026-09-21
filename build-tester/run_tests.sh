@@ -58,12 +58,21 @@ PIP=".venv/bin/pip"
 
 echo "==> Installing camoufox from local source + playwright..."
 $PIP uninstall -y cloverlabs-camoufox >/dev/null 2>&1 || true
-# Pin exactly: requirements.txt explains that 1.58+ breaks this juggler's
-# protocol schema, so every context creation fails and the suite reports
-# 0/0 Grade F -- which reads as a spoofing regression but is harness drift.
-# This line used to install whatever `playwright` resolved to, which is
-# exactly how that false regression gets in.
-$PIP install -q -e ../pythonlib 'playwright==1.55.0'
+# Cap, do not pin, and keep it identical to requirements.txt -- this script and
+# ci.run_build_tester must not answer differently about what is under test.
+#
+# This was `playwright==1.55.0`, because 1.58+ sent a Browser.setDefaultViewport
+# this juggler's protocol schema rejected: every context creation failed and the
+# suite reported 0/0 Grade F, which reads as a spoofing regression but was
+# harness drift. That measurement was taken on camoufox-152.0.4-beta.25, which
+# predates 2b662a8 ("Support Playwright 1.61+"); the schema now accepts the
+# drifted shape, so the reason no longer describes the browser this installs
+# against. Re-measured on 152.0.4-beta.31 (build 34936850063, macOS arm64), four
+# runs, two per version: 1.55.0 scored 1062 and 1062 of 1070, 1.62.0 scored 1061
+# and 1062, Grade A throughout, the same eight canvasPerturbation checks failing
+# in both. The one-point gap is a cross-profile screen-uniqueness draw, not the
+# version: the second run of each arm has it agreeing.
+$PIP install -q -e ../pythonlib 'playwright<1.63'
 
 echo "==> Running build tester..."
 # The suite launches headful so the WebGL checks have a real GL context --
