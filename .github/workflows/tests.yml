@@ -152,6 +152,19 @@ jobs:
         # still gets the full browser suite, but against the published build its
         # users are running, which takes a minute instead of seventy.
         run: |
+          # Fork (lang315/camoufox#127): never fetch. `camoufox fetch` resolves
+          # releases from pythonlib/camoufox/repos.yml, whose first entry is
+          # daijro/camoufox, so on any other repository the fetch path grades a
+          # driver-only pull request against upstream's browser -- none of the
+          # fork's patches, and a green about the wrong binary. Building is
+          # cheap when the compiled half is unchanged: the prebuilt cache in the
+          # build job is keyed on native inputs, and a pull request restores
+          # main's.
+          if [ "${{ github.repository }}" != "daijro/camoufox" ]; then
+            echo "browser_changed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Not daijro/camoufox -- building, because fetch would test upstream's release."
+            exit 0
+          fi
           if [ "${{ github.event_name }}" != "pull_request" ]; then
             echo "browser_changed=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Not a pull request -- building, which also refreshes the shared ccache."
