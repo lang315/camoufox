@@ -107,3 +107,10 @@ checks-bundle.js
 
 .rehearse/
 *.rej
+# Auto-update harness scratch space (evidence, fetched suites, build logs)
+.harness-work/
+
+# CI scratch space (results, junit, the sealed sundial report). Never
+# committed: this is where a stealth run's output lands, and an evidence
+# file in a public repository is permanent.
+.ci-work/

@@ -7729,8 +7729,13 @@ jobs:
           assert vids, "no .webm produced under headless='virtual'"
           size = os.path.getsize(vids[0])
           print(f"video: {vids[0]} {size} bytes")
-          # Composite off produced a 110-byte empty container; on, ~54KB. 10K
-          # separates them by a wide margin without pinning an exact size.
+          # A working recording of this page is tens of KB; a broken one is an
+          # empty container of ~110 bytes. 10K separates them by a wide margin
+          # without pinning an exact size. Measured on 152.0.4-beta.31 (run
+          # 35013493631) with this exact scenario: 57891 bytes with no virtual
+          # display, 44957 with one and Composite off, 58069 with it on -- so
+          # this guard now runs against the default it is meant to protect,
+          # which is Composite off.
           assert size > 10_000, (
               f"video is {size} bytes -- an empty container. Composite is most likely "
               "off; see the measurement table in pythonlib/camoufox/virtdisplay.py"
