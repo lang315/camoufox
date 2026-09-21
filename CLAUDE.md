@@ -80,6 +80,8 @@ fine and are not yours to fix; just don't add a new one.
 
 Low-level equivalents: `make patch ./patches/x.patch`, `make unpatch ./patches/x.patch`, `make workspace ./patches/x.patch`, `make revert` (reset to `unpatched` tag), `make diff` (diff against `first-checkpoint`). The source dir is a git repo with `unpatched` / `first-checkpoint` / `checkpoint` tags used by these targets.
 
+`make workspace ./patches/x.patch` is unsafe when a LATER patch also edits that patch's files (e.g. `font-list-spoofing.patch`): it wrongly reports the patch as "not applied", moves the `first-checkpoint` tag onto the full stack, and re-applies with fuzz, duplicating hunks. Rebuild the tree at the patch's own position instead — reset to `unpatched`, apply patches 1..N in `scripts/patch.py`'s order, checkpoint, then edit — and prove the baseline by regenerating the unedited patch byte-for-byte before editing (#131).
+
 ## Repository layout (the parts that require cross-file understanding)
 
 - **`patches/`** — the diffs applied to Firefox source. This is where browser behavior is changed.
@@ -419,9 +421,22 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   context's list, consulted by `FindGenericFamilies` before the fontconfig loop
   and by `AddGenericFonts` on the DWrite/CoreText path. **Measured** on Linux
   (arm (n2): 215/215/215 becomes 215/305/280 with one `generic-map` line per
-  generic). `system-ui` (`generic=7`) is asked for in **no** run of that round,
-  so that row is unmeasured, and a generic under a list now yields one family
-  where upstream gave up to three.
+  generic). `system-ui` (`generic=7`) went unmeasured that round and was
+  broken by it (#131): the table step answered it with the sans row and
+  returned before the #599 hook ran, on Linux as well, because
+  `gfxFcPlatformFontList::AddGenericFonts` delegates `system-ui` to the base
+  class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
+  Segoe UI for `Win32`, only if the list allows it). The step keys off the
+  launch-level `navigator.platform` (`MaskConfig`), not a context's own
+  platform; in the supported one-OS-per-launch setup, a context whose OS
+  differs from the launch's is refused by the launch mask anyway, so nothing
+  leaks. **Measured** on Linux by probe run 35591973853 on build 35586323562.
+  The guard's Windows arm cannot discriminate, since Segoe UI is also the
+  sans row's first choice there. The proof is the `CAMOU-FL generic-map ...
+  step=system-ui` log line, not the guard's widths — on the Linux bundle
+  `Sans` also measures 648, so the guard's macOS arm cannot see a leak to
+  `Sans` either. A generic under a list still yields one family where
+  upstream gave up to three.
 - **`gfxFontGroup::GetDefaultFont`'s scope and shared-list walk, plus
   `GetDefaultFontLocked`'s two last resorts (#88).** What is **measured** is
   that a refusing context never reaches `GetDefaultFont` at all (arm (h3), shape
