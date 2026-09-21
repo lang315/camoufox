@@ -422,7 +422,7 @@ index e055cda927..d615fb35ce 100644
    void GetSampleLangForGroup(nsAtom* aLanguage, nsACString& aLangStr);
  
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 71ada3b01e..b5907abe76 100644
+index 71ada3b01e..69fd109d11 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -32,6 +32,7 @@
@@ -996,7 +996,7 @@ index 71ada3b01e..b5907abe76 100644
      ResolveGenericFontNames(aFontVisibilityProvider, aGenericType, aPrefLang,
                              prefFonts);
      mLangGroupPrefFonts[aPrefLang][index].reset(prefFonts);
-@@ -2449,6 +2825,46 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2449,6 +2825,90 @@ void gfxPlatformFontList::AddGenericFonts(
    // langGroup ==> prefLang
    eFontPrefLang prefLang = GetFontPrefLangFor(langGroup);
  
@@ -1015,6 +1015,50 @@ index 71ada3b01e..b5907abe76 100644
 +    const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
 +    if (camouCtx != 0 &&
 +        mozilla::dom::FontListManager::HasFontList(camouCtx)) {
++      // Camoufox (#131): system-ui first asks for the family the system-ui
++      // hook (system-ui-font-spoofing.patch, GetSystemUIFontFamilies) names
++      // for the spoofed OS. Without this step the table below answered
++      // system-ui with the sans-serif row's first allowed family -- "Helvetica
++      // Neue" under a macOS list -- and returned before
++      // GetPrefFontsLangGroupLocked could reach that hook, so the #599 spoof
++      // never ran for a context with a font list. On Linux too:
++      // gfxFcPlatformFontList::AddGenericFonts delegates system-ui here.
++      //
++      // Only the two spoofed platforms get a step. For any other platform the
++      // hook falls through to the host's own UI font, and resolving that here
++      // would put a host family name into a per-context generic. The mapping
++      // duplicates the hook's two lines on purpose: a shared helper would
++      // couple two patches that apply independently.
++      if (aGenericType == StyleGenericFontFamily::SystemUi) {
++        const char* camouSysFamily = nullptr;
++        if (auto platform = MaskConfig::GetString("navigator.platform");
++            platform) {
++          if (*platform == "MacIntel") {
++            camouSysFamily = "Helvetica";
++          } else if (*platform == "Win32") {
++            camouSysFamily = "Segoe UI";
++          }
++        }
++        nsAutoCString camouSysKey;
++        if (camouSysFamily &&
++            CamouIsFamilyAllowed(aFontVisibilityProvider,
++                                 nsDependentCString(camouSysFamily),
++                                 &camouSysKey)) {
++          AutoTArray<FamilyAndGeneric, 1> camouSysFamilies;
++          if (FindAndAddFamiliesLocked(aFontVisibilityProvider,
++                                       StyleGenericFontFamily::None,
++                                       camouSysKey, &camouSysFamilies,
++                                       FindFamiliesFlags(0)) &&
++              !camouSysFamilies.IsEmpty()) {
++            LOG_FONTLIST(
++                ("CAMOU-FL generic-map ctx=%u generic=%d step=system-ui key=%s",
++                 camouCtx, int(aGenericType), camouSysKey.get()));
++            aFamilyList.AppendElement(
++                FamilyAndGeneric(camouSysFamilies[0].mFamily, aGenericType));
++            return;
++          }
++        }
++      }
 +      nsAutoCString camouKey, camouStep;
 +      bool camouAnswered = false;
 +      if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
@@ -1043,7 +1087,7 @@ index 71ada3b01e..b5907abe76 100644
    // lookup pref fonts
    PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
                                                          aGenericType, prefLang);
-@@ -2456,6 +2872,25 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2456,6 +2916,25 @@ void gfxPlatformFontList::AddGenericFonts(
    if (!prefFonts->IsEmpty()) {
      aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
      for (auto& f : *prefFonts) {
@@ -1069,7 +1113,7 @@ index 71ada3b01e..b5907abe76 100644
        aFamilyList.AppendElement(FamilyAndGeneric(f, aGenericType));
      }
    }
-@@ -2724,14 +3159,80 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
+@@ -2724,14 +3203,80 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
    if (!family.IsNull()) {
      return family;
    }
