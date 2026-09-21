@@ -1,0 +1,119 @@
+name: video matrix probe (#136)
+
+# Not for merge. Settles #136 on ONE binary: does record_video under
+# headless="virtual" need the X11 Composite extension, and does that depend on
+# the Playwright version?
+#
+# Mechanism under test, read from code: Playwright <=1.57 records video by
+# calling Browser.setVideoRecordingOptions, which reaches Juggler's
+# PageTarget._startVideoRecording -> the native screencast recorder with no
+# headless check, i.e. libwebrtc's X11 window capturer under Xvfb. Playwright
+# >=1.58 records through Page.startScreencast, which switches to compositor
+# snapshots whenever the browser is not headless, so Composite should not matter.
+#
+# Same binary for every cell: build 35586323562 (fix/131-system-ui-step @5b0e698,
+# whose patches/additions/settings equal main d50e01e).
+#
+# Per Playwright version: a headless=True control (proves that version records at
+# all), then headless="virtual" with Composite off and on. Two pages per arm:
+# smoke.yml's exact guard page (size comparable to smoke's 110-byte red and to
+# efb0a09's table) and a 4 Hz black/white page whose frame luma separates a real
+# recording from a blank one.
+on: pull_request
+
+env:
+  BUILD_RUN_ID: "35586323562"
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        pw: ["1.55.0", "1.62.0"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y xvfb ffmpeg
+      - run: pip install -e pythonlib "playwright==${{ matrix.pw }}"
+      - run: python -m playwright install ffmpeg
+      - name: Fetch the binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" -n CamoufoxBuilds-linux-x86_64 -D dl
+          find dl -name '*.zip' -exec unzip -q {} -d bin \;
+          BIN=$(find bin -name camoufox -type f | head -1); chmod +x "$BIN"
+          echo "CAMOUFOX_BIN=$BIN" >> "$GITHUB_ENV"; echo "binary: $BIN"
+          python -c "import importlib.metadata as m; print('playwright', m.version('playwright'))"
+
+      - name: Write the probe
+        run: |
+          cat > probe.py <<'PY'
+          import os, sys, glob, time
+          from camoufox.sync_api import Camoufox
+          from camoufox.addons import DefaultAddons
+
+          arm, page_kind, out = sys.argv[1], sys.argv[2], sys.argv[3]
+          os.makedirs(out, exist_ok=True)
+          headless = True if arm == "headless" else "virtual"
+          GUARD = "data:text/html,<h1 style='font-size:200px'>hello world</h1>"
+          ANIM = ("<style>@keyframes s{from{background:#000}to{background:#fff}}"
+                  "body{margin:0;height:100vh;animation:s .25s infinite alternate}</style><body></body>")
+          print(f"launch arm={arm} page={page_kind} composite={os.environ.get('CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE','unset')}", flush=True)
+          # smoke.yml's call shape: browser.new_page(record_video_dir=..., viewport 800x600).
+          with Camoufox(headless=headless, executable_path=os.environ["CAMOUFOX_BIN"],
+                        ff_version=152, i_know_what_im_doing=True,
+                        exclude_addons=list(DefaultAddons)) as b:
+              p = b.new_page(record_video_dir=out, viewport={"width": 800, "height": 600})
+              if page_kind == "guard":
+                  p.goto(GUARD)
+              else:
+                  p.set_content(ANIM)
+              p.wait_for_timeout(2000)
+              p.close()
+          vids = glob.glob(out + "/*.webm")
+          size = os.path.getsize(vids[0]) if vids else 0
+          print(f"RESULT pw={os.environ['PW']} arm={arm} page={page_kind} bytes={size}", flush=True)
+          PY
+
+      - name: Arms
+        timeout-minutes: 20
+        env:
+          PW: ${{ matrix.pw }}
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set +e
+          run() { # arm composite page
+            if [ "$1" = headless ]; then
+              timeout 240 python probe.py headless "$3" "vid/headless-$3" || echo "ARM-EXIT headless $3 $?"
+            else
+              CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE="$2" timeout 240 python probe.py "virtual-c$2" "$3" "vid/virtual-c$2-$3" || echo "ARM-EXIT virtual-c$2 $3 $?"
+            fi
+          }
+          for page in guard anim; do
+            run headless - $page
+            run virtual 0 $page
+            run virtual 1 $page
+          done
+          echo "arms done"
+
+      - name: Table
+        if: always()
+        run: |
+          echo "=== pw ${{ matrix.pw }}: bytes and frame luma ==="
+          for d in vid/*; do
+            f=$(find "$d" -name '*.webm' | head -1)
+            if [ -z "$f" ]; then echo "$(basename $d): NO VIDEO"; continue; fi
+            size=$(stat -c %s "$f")
+            vals=$(ffmpeg -loglevel info -i "$f" -vf signalstats,metadata=print:key=lavfi.signalstats.YAVG -f null - 2>&1 | grep -o 'YAVG=[0-9.]*' | cut -d= -f2)
+            n=$(echo "$vals" | grep -c . || true)
+            if [ "$n" -gt 0 ]; then
+              mm=$(echo "$vals" | sort -n | sed -n '1p;$p' | tr '\n' ' ')
+              echo "$(basename $d): bytes=$size frames=$n luma(min max)=$mm"
+            else
+              echo "$(basename $d): bytes=$size frames=0 (no decodable frames)"
+            fi
+          done
