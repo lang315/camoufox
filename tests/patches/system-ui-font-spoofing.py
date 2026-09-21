@@ -87,6 +87,13 @@ async def test_os(target_os: str) -> bool:
 
     if system_ui_w == expected_w:
         print(f"  PASS: system-ui resolves to {expected_family}")
+        if widths["sans-serif"] == expected_w:
+            # sans-serif lands on the same face, so this arm cannot tell the
+            # system-ui hook from the generic sans-serif row answering both.
+            # #131: the windows arm passed for exactly that reason while the
+            # hook never ran. Only an arm where the two differ proves the hook.
+            print("  NOTE: sans-serif resolves to the same face -- this arm "
+                  "does not distinguish the system-ui hook from the sans row")
         return True
 
     if system_ui_w == baseline:
