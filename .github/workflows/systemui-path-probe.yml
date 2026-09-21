@@ -1,0 +1,57 @@
+name: system-ui path probe (#131)
+
+# Not for merge. Which code path answers `system-ui` under a per-context font
+# list? The #92 table step in gfxPlatformFontList::AddGenericFonts logs
+# `CAMOU-FL generic-map ... generic=<int(aGenericType)>`; system-ui is 7. The Fc
+# FindGenericFamilies site logs its mapped serif/sans/mono generic instead, so
+# a generic=7 line can only come from the base-class table step.
+on: pull_request
+
+env:
+  BUILD_RUN_ID: "34998440365"   # PR #128 tree, linux-x86_64; artifact expires 2026-09-29
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - run: pip install -e pythonlib 'playwright<1.63'
+
+      - name: Fetch the binary
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download "$BUILD_RUN_ID" --repo "${{ github.repository }}" \
+            -n CamoufoxBuilds-linux-x86_64 -D dl
+          find dl -name '*.zip' -exec unzip -q {} -d bin \;
+          BIN=$(find bin -name camoufox -type f | head -1); chmod +x "$BIN"
+          echo "CAMOUFOX_BIN=$BIN" >> "$GITHUB_ENV"; echo "binary: $BIN"
+
+      - name: Guard, with the fontlist module logged
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          # Same options smoke.yml uses and justifies: %PID per process, append
+          # so a recycled pid cannot truncate, sync so lines are not reordered.
+          MOZ_LOG: "fontlist:4,timestamp,sync,append"
+          MOZ_LOG_FILE: ${{ runner.temp }}/camou-fontlog/cfx%PID
+        run: |
+          mkdir -p "$RUNNER_TEMP/camou-fontlog"
+          CAMOUFOX_EXECUTABLE_PATH="$CAMOUFOX_BIN" PYTHONPATH="$PWD/pythonlib" \
+            xvfb-run -a python3 tests/patches/system-ui-font-spoofing.py; echo "EXIT=$?"
+
+      - name: Which site answered system-ui?
+        if: always()
+        run: |
+          L="$RUNNER_TEMP/camou-fontlog"
+          echo "=== control: every generic-map line (NONE here means the capture is broken, not a finding) ==="
+          grep -h "CAMOU-FL generic-map" "$L"/cfx* 2>/dev/null \
+            | sed 's/^.*CAMOU-FL/CAMOU-FL/;s/ctx=[0-9]*/ctx=N/' | sort | uniq -c || echo NONE
+          echo "=== generic=7 (system-ui) lines ==="
+          grep -h "CAMOU-FL generic-map" "$L"/cfx* 2>/dev/null | grep " generic=7 " \
+            | sed 's/^.*CAMOU-FL/CAMOU-FL/' | sort | uniq -c || echo NONE
