@@ -56,20 +56,24 @@ rules:
       attribute: SCREEN_ENV_VAR
       equals: CAMOUFOX_VIRTUAL_DISPLAY_SIZE
 
-  - id: composite-extension-off
-    title: The X Composite extension stays disabled by default
+  - id: composite-extension-on
+    title: The X Composite extension stays enabled by default
     check: automated
     evidence:
-      - "issue #93: no video under headless='virtual'"
+      - "lang315/camoufox#136: probe run 35622975837, one binary (build 35586323562)"
       - "pythonlib/camoufox/virtdisplay.py: the measurement table"
+      - "issue #93: no video under headless='virtual'"
     rationale: >-
-      Briefly enabled on the theory that disabling it caused #93. It did not --
-      #93 was a Juggler bug, fixed by capturing the screencast from the
-      compositor instead of libwebrtc's X11 window capturer. Measured at the
-      time: Composite on + record_video_dir crashed the browser with SIGSEGV
-      inside the X11 capturer. That capturer is gone, so enabling it is no
-      longer dangerous, but it is no longer useful either. Off is the
-      long-standing default and there is now no reason to move.
+      (Fork: reverses upstream's composite-extension-off.) The compositor fix for
+      #93 covers only Page.startScreencast, which Playwright >=1.58 uses.
+      Playwright <=1.57 records through Browser.setVideoRecordingOptions, which
+      still reaches libwebrtc's X11 window capturer, and under Xvfb that capturer
+      delivers no frames without Composite. pythonlib allows both
+      (playwright<1.63). Measured on one binary: Playwright 1.55 with Composite
+      off records a 110-byte file with no frames; with Composite on, 54370 bytes.
+      Playwright 1.62 records either way. Composite on crashed in neither
+      version, so the SIGSEGV that once motivated turning it off does not
+      reproduce on beta.31.
     expect:
       module: camoufox.virtdisplay
       attribute: COMPOSITE_ENV_VAR

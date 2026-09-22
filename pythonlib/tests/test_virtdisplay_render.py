@@ -55,11 +55,12 @@ def _args_pairs(args):
 # frames under headless='virtual' with COMPOSITE off and a 1x1 root, which
 # tests/async/test_video.py covers end-to-end with a live browser.
 #
-# So the defaults are upstream's again, and what is worth pinning here is that
-# the escape hatches still work -- a caller who does want a real framebuffer to
-# draw into must be able to ask for one. The default returned to off after the
-# beta.29 measurement behind efb0a09 failed to reproduce on beta.31: see the
-# table in virtdisplay.py, measured with smoke.yml's own guard scenario.
+# The compositor fix covers only the Page.startScreencast path, which Playwright
+# >=1.58 uses. Playwright <=1.57 records through Browser.setVideoRecordingOptions,
+# which still reaches the X11 window capturer, and that needs COMPOSITE (#136,
+# measured on one binary in virtdisplay.py's table). So COMPOSITE is on by
+# default; the screen size stays upstream's 1x1. What is pinned here is that
+# default plus the escape hatches in both directions.
 # ---------------------------------------------------------------------------
 
 def _screen_geometry(args):
@@ -69,12 +70,14 @@ def _screen_geometry(args):
     return int(w), int(h)
 
 
-def test_composite_is_off_by_default_and_can_be_enabled(monkeypatch):
+def test_composite_is_on_by_default_and_can_be_disabled(monkeypatch):
+    # #136: Playwright <=1.57 records video through the native X11 window
+    # capturer, which delivers no frames under Xvfb without Composite.
     monkeypatch.delenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", raising=False)
-    assert ("-extension", "COMPOSITE") in _args_pairs(VirtualDisplay().xvfb_args)
-
-    monkeypatch.setenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", "1")
     assert ("+extension", "COMPOSITE") in _args_pairs(VirtualDisplay().xvfb_args)
+
+    monkeypatch.setenv("CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", "0")
+    assert ("-extension", "COMPOSITE") in _args_pairs(VirtualDisplay().xvfb_args)
 
 
 def test_composite_argument_overrides_the_environment(monkeypatch):
