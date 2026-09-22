@@ -23,7 +23,7 @@
 
 # Sponsors
 
-<details open>
+<details open id="sponsors">
 <summary>View/Collapse All</summary>
 
 ## Premium
@@ -67,6 +67,20 @@
      <strong>Want to support Camoufox?</strong><br>
      Just use my promo code <strong><code>CAMOUFOX</code></strong> — it gets you a <strong>30% discount</strong> and supports the developer at the same time.<br>
      <strong><a href="https://node-proxy.com">Get started at node-proxy.com →</a></strong>
+    </td>
+  </tr>
+  <tr>
+    <td width="25%" align="center" valign="middle">
+      <a href="https://byteful.com/?utm_source=github&utm_medium=github-sponsor&utm_campaign=camoufox_github_website_sponsor" target="_blank">
+        <img width="380" alt="byteful" src="https://github.com/user-attachments/assets/33ae9e58-7c6d-44e9-a898-8baa1987df3b"/>
+      </a>
+    </td>
+    <td valign="middle">
+      <a href="https://byteful.com/?utm_source=github&utm_medium=github-sponsor&utm_campaign=camoufox_github_website_sponsor">Byteful</a> is a UK-based web data infrastructure platform that provides ethically sourced residential, mobile, static residential (ISP) and datacenter proxies alongside API-first tools for web scraping, data collection, and AI-driven automation.
+
+Processing tens of billions of requests per month for thousands of customers, Byteful powers browser-based AI agents, automation systems, and data workflows. It is a member of the Internet Watch Foundation and the Ethical Web Data Collection Initiative.
+
+Get 10% off Byteful Residential Bandwidth with the code: CAMOUFOX10
     </td>
   </tr>
   <tr>
