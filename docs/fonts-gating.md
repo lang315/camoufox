@@ -113,11 +113,16 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   returned before the #599 hook ran, on Linux as well, because
   `gfxFcPlatformFontList::AddGenericFonts` delegates `system-ui` to the base
   class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
-  Segoe UI for `Win32`, only if the list allows it). The step keys off the
-  launch-level `navigator.platform` (`MaskConfig`), not a context's own
-  platform; in the supported one-OS-per-launch setup, a context whose OS
-  differs from the launch's is refused by the launch mask anyway, so nothing
-  leaks. **Measured** on Linux by probe run 35591973853 on build 35586323562.
+  Segoe UI for `Win32`, only if the list allows it). The step asks the
+  context's own `navigator.platform` (`NavigatorManager::GetPlatform`) first
+  and the launch's (`MaskConfig`) second (#138), which only matters when the
+  launch's `fonts` admit more than one OS; under a one-OS launch mask a
+  context whose OS differs from the launch's is refused either way.
+  **Measured** on Linux by probe run 35591973853 on build 35586323562, and
+  the context-first read by probe run 35698448037: a macOS context in a
+  Windows launch logs `step=system-ui key=helvetica` on build 35696007399
+  against `step=row key=helvetica neue` on build 35586323562
+  (`fix/131-system-ui-step` @ `5b0e698`, browser inputs equal to main's).
   The guard's Windows arm cannot discriminate, since Segoe UI is also the
   sans row's first choice there. The proof is the `CAMOU-FL generic-map ...
   step=system-ui` log line, not the guard's widths — on the Linux bundle
