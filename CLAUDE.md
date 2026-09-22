@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Camoufox is an anti-detect fork of Firefox for web scraping and automation. This repo is **not the Firefox source** — it is a *build system* that fetches upstream Firefox, applies a stack of patches + code additions, and produces a hardened, fingerprint-spoofing browser. The distinguishing design choice is that fingerprint spoofing happens at the **C++/Juggler implementation level**, not via injected JavaScript, so it is invisible to page-side inspection.
 
-The actual Firefox tree lives in `camoufox-<version>-<release>/` (e.g. `camoufox-150.0.2-beta.25/`), created by the build. That directory is generated — never edit it directly to make lasting changes; changes there are captured as patches (see "Making patches" below).
+The actual Firefox tree lives in `camoufox-<version>-<release>/` (e.g. `camoufox-152.0.4-beta.31/`), created by the build. That directory is generated — never edit it directly to make lasting changes; changes there are captured as patches (see "Working with patches" below).
 
 `upstream.sh` pins `version` / `release`, and is sourced+exported by the `Makefile`, so those variables flow into every script.
 
@@ -49,7 +49,7 @@ Packaging: `make package-linux|package-macos|package-windows arch=<arch>` (wraps
 
 ## Working with patches (the core workflow)
 
-Almost all browser-behavior changes are `patches/*.patch` (~49 patches: `fingerprint-injection.patch`, `webgl-spoofing.patch`, `navigator-spoofing.patch`, `webrtc-ip-spoofing.patch`, the `playwright/` and `librewolf/` and `ghostery/` subdirs, etc.). Do not hand-edit patch files.
+Almost all browser-behavior changes are `patches/*.patch` (~60 patches: `fingerprint-injection.patch`, `webgl-spoofing.patch`, `navigator-spoofing.patch`, `webrtc-ip-spoofing.patch`, the `playwright/` and `librewolf/` and `ghostery/` subdirs, etc.). Do not hand-edit patch files.
 
 Use the developer UI instead:
 
@@ -93,6 +93,8 @@ Low-level equivalents: `make patch ./patches/x.patch`, `make unpatch ./patches/x
 - **`pythonlib/`** — the `camoufox` PyPI package: the Playwright-compatible Python interface that generates + injects fingerprints via BrowserForge and launches the binary. `fingerprint-presets-v150.json` holds real scraped fingerprints. This is the user-facing API; the browser binary is the backend.
 - **`jsonvv/`** — JSON-with-validation format library used for `camoucfg.jvv` (config schema).
 - **`legacy/launcher/`** — Go launcher binary.
+- **`goapi/`** — pure-Go launcher and Juggler-protocol client (no Python, Node or
+  playwright-go); CI is `goapi.yml`.
 - **`assets/`** — `base.mozconfig` and other build inputs.
 
 ## Testing
@@ -133,6 +135,10 @@ PR can merge; the workflow is `.github/workflows/tests.yml`.
   ```bash
   make tests                # or: python3 -m ci.run_playwright --binary ...
   ```
+- **`smoke.yml`** — dispatch-only, never on a PR; runs against an existing build:
+  `gh workflow run smoke.yml --repo <fork> -f run_id=<build run id>` (the run must
+  hold `CamoufoxBuilds-linux-x86_64`). The font arms and the Playwright 1.55 video
+  guard live here.
 - **`native-tests/`** — leaks, context lifetime, and the repo's own conventions.
 - **`pythonlib/`**, **`service-tester/`** — the Python package and service layer.
 - **stealth grade** — `ci/run_sundial.py` reports a letter grade and a count.
@@ -146,8 +152,8 @@ from upstream belongs in `ci/skiplist.yml` with a stated reason.
 
 ## Verifying spoofing claims (learned the hard way)
 
-Seven failures from the #44 fonts work, each of which produced green CI and a
-wrong conclusion. They generalise; read them before asserting that a spoof is
+Lessons from the #44 fonts work and after, most of which produced green CI and
+a wrong conclusion. They generalise; read them before asserting that a spoof is
 safe, complete, or unreachable.
 
 **1. Never assert a safety bound you have not read the code for.**
@@ -187,8 +193,8 @@ macOS. State what a guard cannot see, next to what it proves.
 
 **4. A reference is only a control if it is guaranteed to differ.**
 This one cost more than the other three combined. Six times in the #44 fonts
-work an arm was scored against a reference that could equal the value under
-test, and every time the result looked like a finding:
+work, and once since, an arm was scored against a reference that could equal
+the value under test, and every time the result looked like a finding:
 
 - CSS `@font-face` compared against `document.fonts` keyed by bare family name,
   while `FontFace.family` serialises *with* quotes, so every face read `error`.
@@ -220,7 +226,7 @@ test, and every time the result looked like a finding:
 The general form: **a cross-thread, cross-process, cross-world or cross-context
 reference is not a control unless something establishes that the two sides are
 comparable.** Before trusting a red or a green, state what would produce it
-*wrongly* and show that did not happen. Three of the six were caught only by
+*wrongly* and show that did not happen. Three of the #44 six were caught only by
 contradiction with a fact already known to be true — not by the result looking
 wrong.
 
@@ -232,51 +238,20 @@ four hops, each failing silently to 0. `CamouIsFontAllowed` treats context 0 as
 consults the launch-level `fonts` key: that question is answered separately by
 `MaskedFontListBlocks` / `MaskConfig::IsFontAllowed`, at the sites that carry a
 `FontVisibilityProvider`. So a failed context id is not caught further down —
-nothing re-asks the question this gate could not answer. Two separate hops of
-that chain have already been found failing
-(`OffscreenCanvas::GetDocument()` off-main-thread; #83 turned out to be a cache,
-not a hop). Fixing individual hops does not close the class — but the class is
-narrower than this paragraph first read (#105, smoke run 34698688879 on build
-34578327006, arm `(ctx105)`). Five sites ask this gate with no
-`MaskedFontListBlocks` beside it — `LookupInSharedFaceNameList`
-(`gfxPlatformFontList.cpp:1127`), both `GetFontList` branches (`:1409`, `:1427`),
-`GetFontFamilyList` (`:1450`) and `CommonFontFallback`'s non-shared branch
-(`:1713`) — and under a launch mask none of them can serve a masked family to a
-page: the face-name one is skipped by its caller (`gfxUserFontSet.cpp:463-469`
-refuses `local()` outright when `MaskedFontListAppliesTo`), `GetFontList` is
-reached only by the chrome font enumerator, and `GetFontFamilyList` and the
-non-shared branch are dormant while `gfx.e10s.font-list.shared` is true (default
-`true`, `StaticPrefList.yaml:7513-7516`, `mirror: once`, overridden nowhere in
-`settings/`, `additions/`, `pythonlib/` or `assets/`). Every *other* live lookup
-site pairs the gate with `MaskedFontListBlocks`, which answers from the document's
-`FontVisibilityProvider` and never from the context id, and asks *first* —
-`CamouIsFamilyAllowed` is `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)` —
-so the fail-open gate is never reached for a masked family. Measured on the
-codepoint-fallback path, U+1F600 → Twemoji Mozilla under a mac launch list, on the
-Linux bundle conf: a bare `new_context()` and a persistent context (userContextId 0
-per `TargetRegistry.js:1152`; its own `CAMOU-FL pref-fallback ctx=0` line is
-consistent with that, though a `ctx=0` line cannot distinguish a genuine id 0 from
-a hop that failed to it) both drew a missing glyph (checksum 524399160, against
-4262204629 unmasked), the browser's own system-fallback line read
-`(textrun-systemfallback-global) … match: [<none>]` — so `CommonFontFallback` ran
-and found nothing — and no `CAMOU-FL gate` line for Twemoji appeared under the
-mask; the unmasked launch showed this gate answering `ctx=0 hasList=0 key=twemoji
-mozilla allowed=1`, attributable to the emoji pref-list population at
-`camouUnfiltered(0)` (the only forced-0 scope on that path; the line carries no
-call-site tag), which is the fail-open doing what that scope intends. What a
-listless or misresolved context loses is only its own per-context list, and
-context 0 cannot carry one because chrome documents share id 0 — denying at 0
-would mask the browser's own UI. What `(ctx105)` cannot see: the macOS conf, where
-Apple Color Emoji serves U+1F600 legitimately and would mask a Twemoji leak; and,
-because the gate line has no call-site tag, whether `CommonFontFallback`'s own gate
-was reached — that half rests on the caller reading above. A pixel "tofu floor"
-across codepoints does not exist — a missing glyph is a hexbox carrying its own
-codepoint's digits (`gfxFontMissingGlyphs.cpp:492-510`) — so refusal is read from
-the browser's fallback and gate lines, not from pixels. The check that
-generalises: before calling a fail-open gate a leak, enumerate every gate above it
-and which one asks first — a short-circuited pair, or a caller that refuses the
-whole lookup, can make the fail-open unreachable for the case you care about, and
-a bare "the gate allows everything" reading will not show you either.
+nothing re-asks the question this gate could not answer. The class is narrower
+than that reads (#105): every live lookup site asks `MaskedFontListBlocks`
+*first*, and the five sites that do not are refused by their caller, reached
+only by chrome, or dormant while `gfx.e10s.font-list.shared` is true — so what a
+misresolved context loses is only its own per-context list (measured on the
+codepoint-fallback path, by reading the callers elsewhere). Refusal is read from
+the browser's fallback and gate lines, never from pixels: a missing glyph is a
+hexbox carrying its own codepoint's digits. The check that generalises: before
+calling a fail-open gate a leak, enumerate every gate above it and which one
+asks first — a short-circuited pair, or a caller that refuses the whole lookup,
+can make the fail-open unreachable for the case you care about, and a bare "the
+gate allows everything" reading will not show you either. The five sites, their
+line numbers and the `(ctx105)` measurement are in
+[`docs/fonts-gating.md`](docs/fonts-gating.md).
 
 **6. Read the state back before you name it.**
 Three times in one day of the #44 work, a specific detail was asserted without
@@ -382,101 +357,23 @@ on run 34665134880 j2 reported, then `(cmap95)` was triaged `UNEXPECTED RED`,
 and the step still went red. The shape recurs — check for it whenever adding a
 check.
 
-**Font read paths known to be ungated** (as of the #44 review; check before
-assuming a font change is complete): `SystemFindFontForChar` /
-`GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
-worker + `OffscreenCanvas` (`GetDocument()` is null off-main-thread, so the
-context id falls to 0); `LookupLocalFont` / `LookupInFaceNameLists` (matched by
-full/PostScript name, not family key).
-
-`fix/44-fonts-h2` (PR #84) closed four of those entries: codepoint fallback
-through `CommonFontFallback` and `GlobalFontFallback`, which
-`SystemFindFontForChar` reaches — smoke arm (f); the CSS `@font-face` path,
-gated in `FontFaceImpl::SetStatus`, which `FontFaceSet::InsertRuleFontFace`
-reaches during style flush — arm (e); the worker and `OffscreenCanvas` context
-id, given a real value from `WorkerPrivate` — arm (g); and face-name lookup
-through `LookupInSharedFaceNameList` — arm (h).
-
-The `@font-face` entry is closed **in the shape arm (e) measures**, not by a
-scope — `InsertRuleFontFace` still carries no `AutoFontListContext`, per lesson
-2 above. What backs it is smoke run 34213805428, where the same three CSS rules
-got opposite per-context `FontFace.status` answers: the mac context reported
-`Segoe UI` error and `Helvetica Neue` loaded, the win context the reverse, both
-matching arm (b)'s per-context ground truth. The arm's own discriminator in that
-run named the defect a quoted family key rather than a missing context scope.
-Treat any different shape as unmeasured.
-
-PR #93 gated the two fallback caches by reading — `mCodepointsWithNoFonts` per
-context, and the U+FFFD `mReplacementCharFallbackFamily` hit — and removed the
-`@font-face` gate for faces that carry a `url()` source (#80).
-
-Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
-"gated and measured" and "gated by reading" matters for each:
-
-- **The pref-font memo read path (#94).** `GetPrefFontsLangGroupLocked`
-  populates under `AutoFontListContext ctx(0)`, so the memo's per-context
-  contents no longer depend on who missed first; the launch mask still applies
-  at population. Both consumers filter at read.
-  `WhichPrefFontSupportsChar` is **measured** on Linux (smoke arm (n1), run
-  34544934746: the probe moves from Tinos's own 33 to its own floor 43 with
-  `pref-fallback ctx=6 key=tinos allowed=0`). `AddGenericFonts`' half is
-  **gated by reading only** — on the runner it is reached for `system-ui` and
-  `x-math` alone.
-- **Generic family to family map under a per-context list (#92).**
-  `CamouGenericCandidate` resolves an ordered table intersected with the
-  context's list, consulted by `FindGenericFamilies` before the fontconfig loop
-  and by `AddGenericFonts` on the DWrite/CoreText path. **Measured** on Linux
-  (arm (n2): 215/215/215 becomes 215/305/280 with one `generic-map` line per
-  generic). `system-ui` (`generic=7`) went unmeasured that round and was
-  broken by it (#131): the table step answered it with the sans row and
-  returned before the #599 hook ran, on Linux as well, because
-  `gfxFcPlatformFontList::AddGenericFonts` delegates `system-ui` to the base
-  class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
-  Segoe UI for `Win32`, only if the list allows it). The step keys off the
-  launch-level `navigator.platform` (`MaskConfig`), not a context's own
-  platform; in the supported one-OS-per-launch setup, a context whose OS
-  differs from the launch's is refused by the launch mask anyway, so nothing
-  leaks. **Measured** on Linux by probe run 35591973853 on build 35586323562.
-  The guard's Windows arm cannot discriminate, since Segoe UI is also the
-  sans row's first choice there. The proof is the `CAMOU-FL generic-map ...
-  step=system-ui` log line, not the guard's widths — on the Linux bundle
-  `Sans` also measures 648, so the guard's macOS arm cannot see a leak to
-  `Sans` either. A generic under a list still yields one family where
-  upstream gave up to three.
-- **`gfxFontGroup::GetDefaultFont`'s scope and shared-list walk, plus
-  `GetDefaultFontLocked`'s two last resorts (#88).** What is **measured** is
-  that a refusing context never reaches `GetDefaultFont` at all (arm (h3), shape
-  B: no `default` line for the context, `generic-map` naming three in-list
-  families). The gated walks themselves are **reasoned from the code**:
-  `default` and `default-unfiltered` both read 0 run-wide.
-- **`FontFaceLoadStatus` for non-local faces (#91).** **Measured**, three
-  observables: the 404 face goes `loaded` to `error`, the control stays `loaded`
-  at 1920, and `/nope.ttf` joins the fetched-path list.
-
-Every gate-approved last-resort walk now has an **unfiltered tail**: if the walk
-finds nothing it returns the unfiltered family upstream would have returned and
-logs `CAMOU-FL default-unfiltered`. That line therefore fires only on fail-open,
-so **zero is the healthy count** and a non-zero one is a finding. The tail is
-deliberate: a gate that finds nothing must not turn `family.IsNull()` into a
-release-build null dereference at `gfxTextRun.cpp:2207-2221`.
-`GetFontFamilyList`'s existing unfiltered refill is the precedent.
-
-Still ungated after round 3: `CoreTextFontList::FindSystemFontFamily`'s return
-on the macOS system-font path; the DWrite non-shared substitution branch and the
-non-shared `LookupInFaceNameLists` / `CommonFontFallback` `else` branches, all
-dormant while `gfx.e10s.font-list.shared` is true; `LookupLocalFont` on the
-macOS and Windows platform font lists, which a Linux guard cannot see; and the
-**context-0 fail-open** for the per-context half only — the launch mask reaches
-context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
-the Linux bundle conf, and at the remaining live sites by reading the callers
-(lesson 5). The macOS host
-is unmeasured entirely. #82 is closed by measurement on Linux — arm (n4) GREEN
-on run 34544934746 against a RED on run 34544937587, a build differing by one
-statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
-bundle, so it rests on one arm.
+**Font read paths: what is gated, measured, or still open.** The ledger — what
+PR #84, PR #93, round 3 and #131 closed, whether by measurement or by reading,
+and what is still ungated — is [`docs/fonts-gating.md`](docs/fonts-gating.md).
+Read it before assuming a font change is complete. One rule from it applies to
+every log: `CAMOU-FL default-unfiltered` fires only on fail-open, so **zero is
+the healthy count** and a non-zero one is a finding.
 
 ## Constraints when editing this repo
 
 - The `camoufox-*/` source directory is regenerated — persist changes as patches, never as edits committed to that tree.
 - Keep the `Makefile` diff clean against `main` unless a change genuinely belongs there — dependency setup lives in `scripts/install-deps.sh`, not the Makefile.
 - Every PR must be tied to a GitHub issue and pass the full pipeline (see `CONTRIBUTING.md` and `ci/README.md`).
+- `gh` here resolves to upstream `daijro/camoufox` and 403s on writes: pass
+  `--repo lang315/camoufox` on every call.
+- `gh run view --log` truncates long (smoke) logs with no marker; read a job with
+  `gh api --allow-escape-sequences repos/<fork>/actions/jobs/<job-id>/logs`.
+- On any repo but `daijro/camoufox`, `tests.yml` always builds, never fetches.
+  The browser cache is keyed on compiled inputs only (`ci/browser_inputs.py`), so a
+  change that misses them, Juggler JS included, restores main's browser in ~1 min.
+- NEVER poll a backgrounded job (`sleep`/`ps`/`pgrep`/`top`) — do other work or end your reply and you will be woken with its output.

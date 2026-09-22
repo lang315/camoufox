@@ -980,7 +980,8 @@ def measure(exe, families, camou_config, per_context_list, headful, timeout=6000
             # about:blank first, and playwright runs init scripts on every
             # navigation, so a script registered earlier would spend its
             # one-shot setFontList on about:blank and the measured document
-            # would have no list at all (CLAUDE.md lesson 4, last bullet).
+            # would have no list at all (CLAUDE.md lesson 4, the bullet on the
+            # second init-script invocation).
             if per_context_list is not None:
                 ctx.add_init_script(INIT_JS % json.dumps(",".join(per_context_list)))
             page.goto(url, timeout=timeout)
