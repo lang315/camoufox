@@ -49,7 +49,7 @@ MEASURE_TEXT_JS = """(() => {
     }
 
     // Named fonts — direct lookup via FindAndAddFamiliesLocked
-    for (const name of ['Helvetica', 'Segoe UI', 'Sans']) {
+    for (const name of ['Helvetica', 'Helvetica Neue', 'Segoe UI', 'Sans']) {
         ctx.font = '72px "' + name + '", monospace';
         results[name] = ctx.measureText(testStr).width;
     }
@@ -109,6 +109,83 @@ async def test_os(target_os: str) -> bool:
     return False
 
 
+# #138: a macOS context inside a Windows launch. The launch's fonts admit both
+# OSes, so only the context's own list decides. The list holds "Helvetica Neue"
+# on purpose: it heads the #92 sans row, so a system-ui step that asked the
+# launch's platform (Win32 -> "Segoe UI", refused by this list) falls to the
+# row and lands there instead of on "Helvetica".
+MIXED_OS_CONTEXT_FONTS = ["Helvetica", "Helvetica Neue", "Menlo"]
+
+
+async def test_mixed_os_context(max_attempts: int = 15) -> bool:
+    from camoufox.async_api import AsyncCamoufox
+    from camoufox.fingerprints import generate_context_fingerprint, get_random_preset
+
+    for _ in range(max_attempts):
+        launch_fp = generate_context_fingerprint(preset=get_random_preset(os="windows"))
+        mac_fp = generate_context_fingerprint(
+            preset=get_random_preset(os="macos"),
+            config_overrides={"fonts": MIXED_OS_CONTEXT_FONTS},
+        )
+        launch_fonts = sorted(set(launch_fp["config"].get("fonts", [])) | set(MIXED_OS_CONTEXT_FONTS))
+        try:
+            async with AsyncCamoufox(
+                fingerprint_preset=launch_fp["preset"],
+                os="windows",
+                fonts=launch_fonts,
+                headless=True,
+            ) as browser:
+                bare = await (await browser.new_context()).new_page()
+                launch_platform = await bare.evaluate("navigator.platform")
+                context = await browser.new_context(**mac_fp["context_options"])
+                await context.add_init_script(mac_fp["init_script"])
+                page = await context.new_page()
+                await page.goto("about:blank")
+                platform = await page.evaluate("navigator.platform")
+                result = await page.evaluate(MEASURE_TEXT_JS)
+            break
+        except ValueError as e:
+            if "WebGL" in str(e):
+                continue
+            raise
+    else:
+        raise RuntimeError(f"Could not find a valid preset after {max_attempts} attempts")
+
+    widths = result["widths"]
+    baseline = result["baseline"]
+    print(f"  launch navigator.platform:  {launch_platform}")
+    print(f"  context navigator.platform: {platform}")
+    for name, w in widths.items():
+        tag = " (baseline)" if w == baseline else ""
+        print(f"    {name:20s}  {w}{tag}")
+
+    if launch_platform != "Win32" or platform != "MacIntel":
+        print("  FAIL: the launch or the context did not take its platform -- "
+              "this arm measures nothing")
+        return False
+
+    helvetica, neue = widths["Helvetica"], widths["Helvetica Neue"]
+    if helvetica == baseline:
+        print("  FAIL: Helvetica not available as a named font -- this arm "
+              "measures nothing")
+        return False
+    if helvetica == neue:
+        print("  FAIL: Helvetica and Helvetica Neue measure the same -- this arm "
+              "cannot tell the context's platform from the sans row")
+        return False
+
+    if widths["system-ui"] == helvetica:
+        print("  PASS: system-ui follows the context's platform (Helvetica)")
+        return True
+    if widths["system-ui"] == neue:
+        print("  FAIL: system-ui fell to the sans row (Helvetica Neue) -- the "
+              "launch's platform picked the family (#138)")
+        return False
+    print(f"  FAIL: system-ui width {widths['system-ui']} matches neither Helvetica "
+          f"({helvetica}) nor Helvetica Neue ({neue})")
+    return False
+
+
 async def main() -> int:
     all_passed = True
     for target_os in ["macos", "windows"]:
@@ -116,6 +193,10 @@ async def main() -> int:
         passed = await test_os(target_os)
         if not passed:
             all_passed = False
+
+    print("\n=== macos context in a windows launch (#138) ===")
+    if not await test_mixed_os_context():
+        all_passed = False
 
     print()
     return 0 if all_passed else 1
