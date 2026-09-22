@@ -176,12 +176,13 @@ index 0000000000..63d43f3b86
 \ No newline at end of file
 diff --git a/dom/base/RoverfoxStorageManager.cpp b/dom/base/RoverfoxStorageManager.cpp
 new file mode 100644
-index 0000000000..1f8b3a08f6
+index 0000000000..369fe21c55
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.cpp
-@@ -0,0 +1,182 @@
+@@ -0,0 +1,208 @@
 +#include "RoverfoxStorageManager.h"
 +#include "mozilla/Preferences.h"
++#include "nsIPrefBranch.h"
 +#include "nsXULAppAPI.h"
 +#include "mozilla/dom/ContentChild.h"
 +#include "nsThreadUtils.h"
@@ -189,10 +190,18 @@ index 0000000000..1f8b3a08f6
 +namespace mozilla {
 +namespace dom {
 +
++static constexpr auto kPrefPrefix = "roverfox.s."_ns;
++
 +/* static */ nsTHashMap<nsCStringHashKey, nsCString>&
 +RoverfoxStorageManager::GetLocalCache() {
 +  static nsTHashMap<nsCStringHashKey, nsCString> sCache;
 +  return sCache;
++}
++
++/* static */ nsTHashSet<nsCString>&
++RoverfoxStorageManager::GetMissCache() {
++  static nsTHashSet<nsCString> sMisses;
++  return sMisses;
 +}
 +
 +/* static */ mozilla::Mutex&
@@ -203,18 +212,55 @@ index 0000000000..1f8b3a08f6
 +
 +/* static */ nsCString
 +RoverfoxStorageManager::MakePrefName(const nsAString& key) {
-+  nsAutoCString prefName("roverfox.s.");
++  nsAutoCString prefName(kPrefPrefix);
 +  AppendUTF16toUTF8(key, prefName);
 +  return nsCString(prefName);
 +}
 +
 +/* static */ void
++RoverfoxStorageManager::OnPrefChanged(const char* aPref, void* aClosure) {
++  MOZ_ASSERT(NS_IsMainThread());
++  nsAutoCString value;
++  Preferences::GetCString(aPref, value, PrefValueKind::Default);
++  nsDependentCString prefName(aPref);
++  MutexAutoLock lock(GetLocalCacheMutex());
++  GetMissCache().Remove(prefName);
++  if (!value.IsEmpty()) {
++    GetLocalCache().InsertOrUpdate(prefName, nsCString(value));
++  }
++}
++
++/* static */ void
++RoverfoxStorageManager::InitPrefMirror() {
++  MOZ_ASSERT(NS_IsMainThread());
++  static bool sDone = false;
++  if (sDone) {
++    return;
++  }
++  nsIPrefBranch* root = Preferences::GetRootBranch();
++  if (!root) {
++    return;
++  }
++  sDone = true;
++  nsTArray<nsCString> names;
++  root->GetChildList(kPrefPrefix.get(), names);
++  for (const auto& name : names) {
++    OnPrefChanged(name.get(), nullptr);
++  }
++  Preferences::RegisterPrefixCallback(OnPrefChanged, kPrefPrefix);
++}
++
++/* static */ void
 +RoverfoxStorageManager::SetPrefValue(const nsCString& prefName,
 +                                      const nsCString& value) {
++  if (NS_IsMainThread()) {
++    InitPrefMirror();
++  }
 +  // Always store locally for immediate reads in this process
 +  {
 +    MutexAutoLock lock(GetLocalCacheMutex());
 +    GetLocalCache().InsertOrUpdate(prefName, nsCString(value));
++    GetMissCache().Remove(prefName);
 +  }
 +  // Sync to parent for cross-process availability
 +  if (XRE_IsParentProcess()) {
@@ -237,6 +283,51 @@ index 0000000000..1f8b3a08f6
 +  }
 +}
 +
++/* static */ bool
++RoverfoxStorageManager::Lookup(const nsCString& prefName,
++                               nsACString& outValue) {
++  {
++    MutexAutoLock lock(GetLocalCacheMutex());
++    if (auto entry = GetLocalCache().Lookup(prefName)) {
++      outValue = entry.Data();
++      if (!outValue.IsEmpty()) {
++        return true;
++      }
++    }
++    // Off the main thread the cache is all there is: libpref's hash table
++    // asserts main thread, and the mirror keeps the cache complete.
++    if (!NS_IsMainThread() || GetMissCache().Contains(prefName)) {
++      return false;
++    }
++  }
++  InitPrefMirror();
++  Preferences::GetCString(prefName.get(), outValue, PrefValueKind::Default);
++  if (!outValue.IsEmpty()) {
++    MutexAutoLock lock(GetLocalCacheMutex());
++    GetLocalCache().InsertOrUpdate(prefName, nsCString(outValue));
++    return true;
++  }
++  // Sync IPC read from parent: a value Put by another content process whose
++  // PreferenceUpdate has not landed here yet. A miss is remembered so the
++  // round trip is paid once per key, not once per lookup; the prefix
++  // callback forgets it when the update arrives.
++  if (!XRE_IsParentProcess()) {
++    ContentChild* cc = ContentChild::GetSingleton();
++    if (cc) {
++      nsAutoCString fetched;
++      cc->SendRoverfoxStorageGet(prefName, &fetched);
++      MutexAutoLock lock(GetLocalCacheMutex());
++      if (!fetched.IsEmpty()) {
++        GetLocalCache().InsertOrUpdate(prefName, nsCString(fetched));
++        outValue = fetched;
++        return true;
++      }
++      GetMissCache().Insert(prefName);
++    }
++  }
++  return false;
++}
++
 +/* static */ void
 +RoverfoxStorageManager::PutUint(const nsAString& key, uint32_t value) {
 +  nsCString prefName = MakePrefName(key);
@@ -247,31 +338,8 @@ index 0000000000..1f8b3a08f6
 +
 +/* static */ bool
 +RoverfoxStorageManager::GetUint(const nsAString& key, uint32_t& outValue) {
-+  nsCString prefName = MakePrefName(key);
 +  nsAutoCString strValue;
-+  // Check local cache first (immediate reads for values set in this process)
-+  {
-+    MutexAutoLock lock(GetLocalCacheMutex());
-+    if (auto entry = GetLocalCache().Lookup(prefName)) {
-+      strValue = entry.Data();
-+    }
-+  }
-+  // Fall back to Preferences (values synced from other processes)
-+  if (strValue.IsEmpty()) {
-+    Preferences::GetCString(prefName.get(), strValue, PrefValueKind::Default);
-+  }
-+  // Sync IPC read from parent (cross-process fallback for workers)
-+  if (strValue.IsEmpty() && !XRE_IsParentProcess() && NS_IsMainThread()) {
-+    ContentChild* cc = ContentChild::GetSingleton();
-+    if (cc) {
-+      cc->SendRoverfoxStorageGet(prefName, &strValue);
-+      if (!strValue.IsEmpty()) {
-+        MutexAutoLock lock(GetLocalCacheMutex());
-+        GetLocalCache().InsertOrUpdate(prefName, nsCString(strValue));
-+      }
-+    }
-+  }
-+  if (!strValue.IsEmpty()) {
++  if (Lookup(MakePrefName(key), strValue)) {
 +    nsresult parseRv;
 +    int64_t parsed = strValue.ToInteger64(&parseRv);
 +    if (NS_SUCCEEDED(parseRv) && parsed >= 0) {
@@ -291,29 +359,8 @@ index 0000000000..1f8b3a08f6
 +
 +/* static */ bool
 +RoverfoxStorageManager::GetBool(const nsAString& key, bool& outValue) {
-+  nsCString prefName = MakePrefName(key);
 +  nsAutoCString strValue;
-+  {
-+    MutexAutoLock lock(GetLocalCacheMutex());
-+    if (auto entry = GetLocalCache().Lookup(prefName)) {
-+      strValue = entry.Data();
-+    }
-+  }
-+  if (strValue.IsEmpty()) {
-+    Preferences::GetCString(prefName.get(), strValue, PrefValueKind::Default);
-+  }
-+  // Sync IPC read from parent (cross-process fallback for workers)
-+  if (strValue.IsEmpty() && !XRE_IsParentProcess() && NS_IsMainThread()) {
-+    ContentChild* cc = ContentChild::GetSingleton();
-+    if (cc) {
-+      cc->SendRoverfoxStorageGet(prefName, &strValue);
-+      if (!strValue.IsEmpty()) {
-+        MutexAutoLock lock(GetLocalCacheMutex());
-+        GetLocalCache().InsertOrUpdate(prefName, nsCString(strValue));
-+      }
-+    }
-+  }
-+  if (!strValue.IsEmpty()) {
++  if (Lookup(MakePrefName(key), strValue)) {
 +    outValue = strValue.EqualsLiteral("1");
 +    return true;
 +  }
@@ -331,29 +378,8 @@ index 0000000000..1f8b3a08f6
 +
 +/* static */ bool
 +RoverfoxStorageManager::GetString(const nsAString& key, nsAString& outValue) {
-+  nsCString prefName = MakePrefName(key);
 +  nsAutoCString utf8Value;
-+  {
-+    MutexAutoLock lock(GetLocalCacheMutex());
-+    if (auto entry = GetLocalCache().Lookup(prefName)) {
-+      utf8Value = entry.Data();
-+    }
-+  }
-+  if (utf8Value.IsEmpty()) {
-+    Preferences::GetCString(prefName.get(), utf8Value, PrefValueKind::Default);
-+  }
-+  // Sync IPC read from parent (cross-process fallback for workers)
-+  if (utf8Value.IsEmpty() && !XRE_IsParentProcess() && NS_IsMainThread()) {
-+    ContentChild* cc = ContentChild::GetSingleton();
-+    if (cc) {
-+      cc->SendRoverfoxStorageGet(prefName, &utf8Value);
-+      if (!utf8Value.IsEmpty()) {
-+        MutexAutoLock lock(GetLocalCacheMutex());
-+        GetLocalCache().InsertOrUpdate(prefName, nsCString(utf8Value));
-+      }
-+    }
-+  }
-+  if (!utf8Value.IsEmpty()) {
++  if (Lookup(MakePrefName(key), utf8Value)) {
 +    CopyUTF8toUTF16(utf8Value, outValue);
 +    return true;
 +  }
@@ -364,15 +390,16 @@ index 0000000000..1f8b3a08f6
 +}  // namespace mozilla
 diff --git a/dom/base/RoverfoxStorageManager.h b/dom/base/RoverfoxStorageManager.h
 new file mode 100644
-index 0000000000..4a2dac8e8f
+index 0000000000..129ff21e8f
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.h
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,50 @@
 +#ifndef mozilla_dom_RoverfoxStorageManager_h
 +#define mozilla_dom_RoverfoxStorageManager_h
 +
 +#include "nsString.h"
 +#include "nsTHashMap.h"
++#include "nsTHashSet.h"
 +#include "nsHashKeys.h"
 +#include "mozilla/Mutex.h"
 +
@@ -383,6 +410,11 @@ index 0000000000..4a2dac8e8f
 +// Write-through: values stored locally (immediate reads) and sent to parent
 +// process via IPDL (cross-process sync via Preferences API).
 +// Keys prefixed with "roverfox.s." to avoid conflicts.
++//
++// libpref's hash table is main-thread only, so the local cache is the only
++// thing a worker thread reads. InitPrefMirror() keeps it complete: it copies
++// every roverfox.s.* pref in on the main thread and registers a prefix
++// callback so later PreferenceUpdates land in the cache too.
 +class RoverfoxStorageManager {
 + public:
 +  static void PutUint(const nsAString& key, uint32_t value);
@@ -392,10 +424,19 @@ index 0000000000..4a2dac8e8f
 +  static void PutString(const nsAString& key, const nsAString& value);
 +  static bool GetString(const nsAString& key, nsAString& outValue);
 +
++  // Main thread only. Idempotent. Called from ContentChild::InitXPCOM so the
++  // mirror is live before any worker can ask; the main-thread paths also call
++  // it lazily so the parent process gets one.
++  static void InitPrefMirror();
++
 + private:
 +  static nsCString MakePrefName(const nsAString& key);
 +  static void SetPrefValue(const nsCString& prefName, const nsCString& value);
++  static bool Lookup(const nsCString& prefName, nsACString& outValue);
++  static void OnPrefChanged(const char* aPref, void* aClosure);
 +  static nsTHashMap<nsCStringHashKey, nsCString>& GetLocalCache();
++  // Keys the parent answered empty for. Guarded by GetLocalCacheMutex().
++  static nsTHashSet<nsCString>& GetMissCache();
 +  static mozilla::Mutex& GetLocalCacheMutex();
 +};
 +
@@ -556,6 +597,29 @@ index 7234240711..df84b793dc 100644
  bool OffscreenCanvas::IsChrome() const {
    if (NS_IsMainThread()) {
      nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetRelevantGlobal());
+diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
+index c851ccb66a..bb6206f067 100644
+--- a/dom/ipc/ContentChild.cpp
++++ b/dom/ipc/ContentChild.cpp
+@@ -79,6 +79,7 @@
+ #include "mozilla/dom/PushNotifier.h"
+ #include "mozilla/dom/RemoteWorkerDebuggerManagerChild.h"
+ #include "mozilla/dom/RemoteWorkerService.h"
++#include "mozilla/dom/RoverfoxStorageManager.h"
+ #include "mozilla/dom/ScreenOrientation.h"
+ #include "mozilla/dom/ServiceWorkerManager.h"
+ #include "mozilla/dom/SessionStorageManager.h"
+@@ -1475,6 +1476,10 @@ void ContentChild::InitXPCOM(
+   Preferences::RegisterCallbackAndCall(&OnFissionBlocklistPrefChange,
+                                        kFissionOmitBlockListValues);
+ 
++  // Camoufox: worker threads read the storage cache only, so fill it before
++  // any worker can start.
++  RoverfoxStorageManager::InitPrefMirror();
++
+   // Set the dynamic scalar definitions for this process.
+   TelemetryIPC::AddDynamicScalarDefinitions(aXPCOMInit.dynamicScalarDefs());
+ }
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
 index 77f35801a0..454ef6f4e7 100644
 --- a/dom/webidl/Window.webidl
@@ -834,7 +898,7 @@ index 25022d4b5b..fe65662b77 100644
        // We can NOT assert that TEXT_IS_8BIT is false in aFlags here,
        // because this might be an 8bit-only word from a 16-bit textrun,
 diff --git a/gfx/thebes/gfxHarfBuzzShaper.cpp b/gfx/thebes/gfxHarfBuzzShaper.cpp
-index e41408f51c..ffa0bd4caf 100644
+index e41408f51c..448fcd58fd 100644
 --- a/gfx/thebes/gfxHarfBuzzShaper.cpp
 +++ b/gfx/thebes/gfxHarfBuzzShaper.cpp
 @@ -16,6 +16,10 @@
@@ -899,7 +963,7 @@ index e41408f51c..ffa0bd4caf 100644
    if (isRightToLeft) {
      hb_buffer_reverse(mBuffer);
    }
-@@ -1770,3 +1804,4 @@ nsresult gfxHarfBuzzShaper::SetGlyphsFromRun(gfxShapedText* aShapedText,
+@@ -1770,3 +1818,4 @@ nsresult gfxHarfBuzzShaper::SetGlyphsFromRun(gfxShapedText* aShapedText,
  
    return NS_OK;
  }
