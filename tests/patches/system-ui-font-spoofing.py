@@ -166,11 +166,13 @@ async def test_mixed_os_context(max_attempts: int = 15) -> bool:
 
     helvetica, neue = widths["Helvetica"], widths["Helvetica Neue"]
     if helvetica == baseline:
-        print("  SKIP: Helvetica not available as a named font")
-        return True
+        print("  FAIL: Helvetica not available as a named font -- this arm "
+              "measures nothing")
+        return False
     if helvetica == neue:
-        print("  NOTE: Helvetica and Helvetica Neue measure the same -- this arm "
+        print("  FAIL: Helvetica and Helvetica Neue measure the same -- this arm "
               "cannot tell the context's platform from the sans row")
+        return False
 
     if widths["system-ui"] == helvetica:
         print("  PASS: system-ui follows the context's platform (Helvetica)")
