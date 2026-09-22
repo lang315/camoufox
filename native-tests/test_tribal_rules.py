@@ -116,29 +116,30 @@ def test_a_nonsense_override_is_rejected_rather_than_silently_ignored(monkeypatc
         virtdisplay._resolve_screen()
 
 
-def test_composite_extension_is_off_by_default():
+def test_composite_extension_is_on_by_default(monkeypatch):
     from camoufox import virtdisplay
 
     assert virtdisplay.COMPOSITE_ENV_VAR == "CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE", explain(
-        "composite-extension-off"
+        "composite-extension-on"
     )
+    monkeypatch.delenv(virtdisplay.COMPOSITE_ENV_VAR, raising=False)
     args = [str(a) for a in virtdisplay.VirtualDisplay().xvfb_args]
     # The flag is a pair: "-extension COMPOSITE" disables, "+extension" enables.
     # Asserting on the pair, not on the word, is the difference between checking
     # the setting and checking that the word is still spelled the same.
     assert "COMPOSITE" in args, "Xvfb no longer configures the Composite extension at all"
-    assert args[args.index("COMPOSITE") - 1] == "-extension", (
-        "Xvfb now starts with Composite ENABLED." + explain("composite-extension-off")
+    assert args[args.index("COMPOSITE") - 1] == "+extension", (
+        "Xvfb now starts with Composite DISABLED." + explain("composite-extension-on")
     )
 
 
-def test_composite_can_still_be_turned_on(monkeypatch):
+def test_composite_can_still_be_turned_off(monkeypatch):
     from camoufox import virtdisplay
 
-    monkeypatch.setenv(virtdisplay.COMPOSITE_ENV_VAR, "1")
+    monkeypatch.setenv(virtdisplay.COMPOSITE_ENV_VAR, "0")
     args = [str(a) for a in virtdisplay.VirtualDisplay().xvfb_args]
-    assert args[args.index("COMPOSITE") - 1] == "+extension", (
-        "the Composite escape hatch no longer works." + explain("composite-extension-off")
+    assert args[args.index("COMPOSITE") - 1] == "-extension", (
+        "the Composite escape hatch no longer works." + explain("composite-extension-on")
     )
 
 

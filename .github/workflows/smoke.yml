@@ -7731,11 +7731,12 @@ jobs:
           print(f"video: {vids[0]} {size} bytes")
           # A working recording of this page is tens of KB; a broken one is an
           # empty container of ~110 bytes. 10K separates them by a wide margin
-          # without pinning an exact size. Measured on 152.0.4-beta.31 (run
-          # 35013493631) with this exact scenario: 57891 bytes with no virtual
-          # display, 44957 with one and Composite off, 58069 with it on -- so
-          # this guard now runs against the default it is meant to protect,
-          # which is Composite off.
+          # without pinning an exact size. The playwright==1.55.0 pin above is
+          # what makes this a guard: <=1.57 records through the native X11
+          # window capturer, the only path that needs Composite (#136). On one
+          # binary (probe run 35622975837) it read 110 bytes with Composite off
+          # and 54370 with it on; Playwright 1.62 records either way, so a newer
+          # pin here would stop guarding anything.
           assert size > 10_000, (
               f"video is {size} bytes -- an empty container. Composite is most likely "
               "off; see the measurement table in pythonlib/camoufox/virtdisplay.py"
