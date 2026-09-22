@@ -31,45 +31,36 @@ DISPLAYFD_READ_TIMEOUT_S = 10.0
 DEFAULT_SCREEN = "1x1x24"
 SCREEN_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_SIZE"
 
-# The Composite extension, disabled by default (Xvfb's `-extension COMPOSITE`).
+# The Composite extension, ENABLED by default (Xvfb's `+extension COMPOSITE`).
 #
-# This was briefly enabled by default on the theory that #93 (no video under
-# headless="virtual") was caused by disabling it. It was not: #93 was a juggler
-# bug, fixed by capturing the screencast from the compositor instead of from
-# libwebrtc's X11 window capturer. Both states were measured before that fix:
+# Juggler has two video paths, and which one runs depends on the Playwright
+# version, not on the browser:
 #
-#   composite off, record_video_dir  -> a valid .webm of 24 pure-white frames
-#   composite ON,  record_video_dir  -> browser dies with SIGSEGV, no video
-#   composite ON,  no recording      -> fine
+#   Playwright <=1.57: record_video_dir -> Browser.setVideoRecordingOptions ->
+#     PageTarget._startVideoRecording (additions/juggler/TargetRegistry.js) ->
+#     the native screencast recorder, with no headless check. Under Xvfb that is
+#     libwebrtc's X11 window capturer, which delivers no frames without
+#     Composite.
+#   Playwright >=1.58: record_video_dir -> Page.startScreencast, which takes
+#     compositor snapshots whenever the browser is not headless. Composite is
+#     irrelevant there.
 #
-# The segfault was inside the X11 capturer, which the browser no longer uses, so
-# enabling Composite is no longer dangerous -- but it is also no longer good for
-# anything, since recording never touches X11 window capture now. Leave it off
-# (Camoufox's long-standing default) and keep the escape hatch:
-# CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=1 enables it.
+# pythonlib allows both (`playwright<1.63`), so Composite has to be on. Measured
+# on ONE binary (build 35586323562, 152.0.4-beta.31; probe run 35622975837, #136),
+# smoke.yml's guard page, bytes of the recorded .webm:
 #
-# efb0a09 flipped this default back on, because on a beta.29 build Composite off
-# produced a 110-byte empty container while on produced 54494 bytes. That was a
-# real measurement and it is the reason this comment is longer than it should be.
-# It no longer reproduces. Re-measured on 152.0.4-beta.31 (build 34998440365,
-# run 35013493631) using smoke.yml's own #93/#458 guard scenario -- 800x600,
-# static "hello world", two seconds -- so the numbers sit on the same axis as
-# efb0a09's:
+#                                         Playwright 1.55.0   Playwright 1.62.0
+#   headless=True, no Xvfb (control)             48680              58375
+#   headless="virtual", Composite off              110 (0 frames)   59716
+#   headless="virtual", Composite on             54370              60326
 #
-#                                      efb0a09 (beta.29)   here (beta.31)
-#   headless=True, no Xvfb                    60007            57891
-#   headless="virtual", Composite off           110            44957
-#   headless="virtual", Composite on          54494            58069
+# A 4 Hz black/white page confirmed each non-empty cell holds real frames (mean
+# luma swinging ~16-235), and Composite on crashed in neither version.
 #
-# Two of the three rows agree within a few percent, which is what makes the third
-# readable: only the Composite-off cell moved, from an empty container to a real
-# recording. On a second page animating black to white at 4 Hz, Composite off
-# records a mean-luma spread of 220 out of 255 -- identical to the no-Xvfb
-# control -- so it captures the page rather than a blank screen.
-#
-# Whatever fixed it landed between beta.29 and beta.31; this was not measured
-# per-commit, so which change is unidentified. What is measured is that on the
-# browser this tree builds, a virtual display records video with Composite off.
+# History, so the next reader does not flip this again: efb0a09 turned it on for
+# exactly this failure; e25a16b turned it off after a probe that ran Playwright
+# 1.62 -- the path that never needed it -- and read the result as a browser fix.
+# Escape hatch: CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=0 disables it.
 COMPOSITE_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE"
 
 
@@ -100,7 +91,7 @@ class VirtualDisplay:
         self.debug = debug
         self.screen = screen or _resolve_screen()
         if composite is None:
-            composite = os.environ.get(COMPOSITE_ENV_VAR, "0").strip() in ("1", "true")
+            composite = os.environ.get(COMPOSITE_ENV_VAR, "1").strip() not in ("0", "false")
         self.composite = composite
         self.proc: Optional[subprocess.Popen] = None
         self._display: Optional[int] = None
