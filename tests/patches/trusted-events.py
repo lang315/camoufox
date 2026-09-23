@@ -9,9 +9,12 @@ out `isTrusted: false` without patches/trusted-automation-events.patch. The same
 actions also skipped the user-interacted flag that :user-valid selects on.
 
 The reference this test measures against is not a hard-coded expectation: it is
-a genuine widget-driven selection, produced by focusing a <select> and pressing
-ArrowDown, which goes through HTMLSelectElement::UserFinishedInteracting. The
-events select_option produces must be byte-identical to it.
+a genuine widget-driven selection, produced by focusing a <select> and typing
+the first letter of another option. Type-ahead goes through
+HTMLSelectElement::UserFinishedInteracting on every platform. ArrowDown, the
+earlier reference, does not on macOS: there it opens the menu instead of
+changing the value, so the reference produced nothing and the arm measured
+nothing. The events select_option produces must be byte-identical to it.
 
 Run against a specific build:
     CAMOUFOX_EXECUTABLE_PATH=/path/to/camoufox-bin python tests/patches/trusted-events.py
@@ -134,7 +137,7 @@ async def main() -> int:
 
         # --- the reference: a genuine widget-driven selection ---
         await page.focus("#selKey")
-        await page.keyboard.press("ArrowDown")
+        await page.keyboard.press("b")
         reference = shape(await rec.drain(), "input", "change")
         _check(results, "reference produced trusted input+change",
                [(e["type"], e["trusted"]) for e in reference],
@@ -197,7 +200,7 @@ async def main() -> int:
                 ("click", "PointerEvent", True)])
 
         # --- the flag :user-valid selects on ---
-        for selector, how in (("#selKey", "ArrowDown (reference)"),
+        for selector, how in (("#selKey", "type-ahead (reference)"),
                               ("#selOpt", "select_option"),
                               ("#date", "fill"),
                               ("#file", "set_input_files")):
