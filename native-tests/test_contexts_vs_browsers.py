@@ -219,20 +219,55 @@ async def test_closing_one_context_does_not_disturb_another(binary):
     )
 
 
-async def test_two_browsers_get_different_fingerprints(binary):
+# A hash of a canvas readback. Every launch draws its own 32-bit canvas:seed
+# (pythonlib/camoufox/utils.py), so two launches differ here even when they draw
+# the same preset. The seven PROBES above are coarse -- Win32, 2560x1440, 8
+# cores, UTC, en-US is a common draw -- and two launches matched on all of them
+# on PR #152 (run 35823906083).
+CANVAS_HASH = """(() => {
+  const c = document.createElement('canvas'); c.width = 200; c.height = 50;
+  const x = c.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 200, 0);
+  g.addColorStop(0, '#f60'); g.addColorStop(1, '#069');
+  x.fillStyle = g; x.fillRect(0, 0, 200, 50);
+  x.fillStyle = '#fff'; x.font = '18px serif'; x.fillText('Camoufox 149', 10, 30);
+  const s = c.toDataURL();
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h;
+})()"""
+
+
+async def _launch_probe(binary, **launch) -> dict:
     from camoufox.async_api import AsyncCamoufox
 
-    async def one() -> dict:
-        async with AsyncCamoufox(executable_path=str(binary), headless=True,
-                                 i_know_what_im_doing=True) as browser:
-            context, page = await open_page(browser)
-            values = await probe(page)
-            await context.close()
-            return values
+    async with AsyncCamoufox(executable_path=str(binary), headless=True,
+                             i_know_what_im_doing=True, **launch) as browser:
+        context, page = await open_page(browser)
+        values = await probe(page)
+        values["canvas"] = await page.evaluate(CANVAS_HASH)
+        await context.close()
+        return values
 
-    a, b = await asyncio.gather(one(), one())
-    differing = [k for k in PROBES if a.get(k) != b.get(k)]
+
+async def test_two_browsers_get_different_fingerprints(binary):
+    a, b = await asyncio.gather(_launch_probe(binary), _launch_probe(binary))
+    differing = [k for k in [*PROBES, "canvas"] if a.get(k) != b.get(k)]
     assert differing, f"two separate browser launches produced an identical fingerprint: {a}"
+
+
+async def test_two_browsers_on_one_preset_still_differ(binary):
+    """The per-launch seeds are what separate two launches that drew the same
+    preset. With the preset pinned, the coarse probes agree by construction,
+    so this is the canvas seed's contract alone."""
+    from camoufox.fingerprints import get_random_preset
+
+    preset = get_random_preset(os="windows")
+    a, b = await asyncio.gather(_launch_probe(binary, fingerprint_preset=preset, os="windows"),
+                                _launch_probe(binary, fingerprint_preset=preset, os="windows"))
+    same = [k for k in PROBES if a.get(k) == b.get(k)]
+    assert a["canvas"] != b["canvas"], (
+        f"two launches on one preset drew the same canvas; coarse probes equal: {same}")
 
 
 async def test_a_context_survives_its_sibling_browser(binary):
