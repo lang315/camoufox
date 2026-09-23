@@ -185,7 +185,7 @@ All patches share `RoverfoxStorageManager`, a thread-safe C++ key-value store ke
 
 This 3-tier architecture ensures per-context values are available in all processes — the main page's content process, worker content processes, and the parent process itself.
 
-That holds for values stored through `RoverfoxStorageManager` (seeds, timezone). It does not hold for the font list and the speech-voice list, which live in per-process statics while only their "disabled" flag goes through this storage, so a context's later pages in other processes never receive them (#149).
+That holds for values stored through `RoverfoxStorageManager` (seeds, timezone). The font list and the speech-voice list are the exception: they live in per-process statics, and each process installs them through the context's own init script. Their "already called" flag is therefore per process too. When it went through this storage, it hid the setter from every later process, and a context's later pages never received their lists (#149, fixed; `tests/patches/context-list-every-process.py`).
 
 ### Cross-Process Storage (`cross-process-storage.patch`)
 

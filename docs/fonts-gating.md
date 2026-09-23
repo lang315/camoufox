@@ -213,15 +213,18 @@ read only at `gfxTextRun.cpp:2213`, after the gated pass and the logged
 `default-unfiltered` tail have both failed. The probe counts these lines apart,
 as "startup".
 
-**A context's list reaches only its first content process (#149).** This was
-found here but is not macOS-specific. `setFontList` stores the list in a
-per-process static, and its "disabled" flag goes through
+**A context's list reached only its first content process (#149, fixed).**
+This was found here but is not macOS-specific. `setFontList` stores the list in a
+per-process static, while its "already called" flag went through
 `RoverfoxStorageManager` to every process. So a later page of the same context,
-which Fission puts in a new process, never gets the list and is answered by
-the launch mask. Measured with six pages of one context: the first refuses a
-family that only the launch list holds, and the other five render it. Voices
-have the same shape. Every guard above reads one page per context, so none of
-them can see this.
+which Fission puts in a new process, never got the list and was answered by the
+launch mask. Measured with six pages of one context: the first refused a family
+that only the launch list holds, and the other five rendered it. Voices had the
+same shape. The flag is now per process for both setters.
+`tests/patches/context-list-every-process.py` guards it: every page of one
+context, across two origins, must refuse a family that only the launch holds.
+It was red on main's browser and is green on the fix, both on Linux CI. Every
+other guard reads one page per context, so none of them can see this.
 
 What this cannot see: native Windows (`gfxDWriteFontList`), a headful session,
 and CoreText's `FindSystemFontFamily` separately from arm (c), which reads its
