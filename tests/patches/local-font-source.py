@@ -17,6 +17,8 @@ render at all.
   alias face -> local("ArialMT")       yes       loaded
   local() of Georgia (launch only)     no        error
   local() of Comic Sans MS (no list)   no        error
+  CSS @font-face alias -> Arial        yes       loaded
+  CSS @font-face local() of Georgia    no        error
 
 Every row's status must also agree with its render.
 """
@@ -37,9 +39,15 @@ ROWS = [
     ("Georgia", 'local("Georgia")', False),
     ("Comic Sans MS", 'local("Comic Sans MS"), local("ComicSansMS")', False),
 ]
+# The same gate through a CSS @font-face rule, the InsertRuleFontFace path that
+# FontFaceSet::Load/Check do not scope (CLAUDE.md lesson 2).
+CSS_ROWS = [
+    ("CssArialAlias", ALLOWED, True),
+    ("CssGeorgia", 'local("Georgia")', False),
+]
 CONTROL = ["Georgia", "Comic Sans MS"]
 
-JS = r"""async ([rows, control]) => {
+JS = r"""async ([rows, control, cssRows]) => {
   const s = 'mmmmmmmmmmlliWWQ@#';
   const c = document.createElement('canvas').getContext('2d');
   const w = (f) => { c.font = '72px ' + f; return c.measureText(s).width; };
@@ -52,6 +60,14 @@ JS = r"""async ([rows, control]) => {
   const refused = (fam) => w(`"${fam}", ${a}`) === w(a) && w(`"${fam}", ${b}`) === w(b);
   const out = { valid: true, control: {}, rows: {} };
   for (const fam of control) out.control[fam] = rendered(fam);
+  const st = document.createElement('style');
+  st.textContent = cssRows.map(([f, src]) => `@font-face { font-family: "${f}"; src: ${src}; }`).join('\n');
+  document.head.appendChild(st);
+  for (const [fam] of cssRows) {
+    const sp = document.createElement('span');
+    sp.style.fontFamily = `"${fam}", serif`; sp.textContent = s;
+    document.body.appendChild(sp); void sp.offsetWidth;
+  }
   for (const [fam, src] of rows) {
     const ff = new FontFace(fam, src);
     document.fonts.add(ff);
@@ -59,7 +75,12 @@ JS = r"""async ([rows, control]) => {
     out.rows[fam] = { status: ff.status };
   }
   await document.fonts.ready;
-  for (const [fam] of rows) {
+  for (const r of document.fonts) {
+    const fam = r.family.replace(/"/g, '');
+    if (cssRows.some(([f]) => f === fam)) out.rows[fam] = { status: r.status };
+  }
+  for (const [fam] of [...rows, ...cssRows]) {
+    out.rows[fam] = out.rows[fam] || { status: 'missing' };
     out.rows[fam].rendered = rendered(fam);
     out.rows[fam].refused = refused(fam);
   }
@@ -101,13 +122,14 @@ async def main() -> int:
                 await ctx_b.add_init_script(fp_b["init_script"])
                 page_b = await ctx_b.new_page()
                 await page_b.goto(url)
-                control = await page_b.evaluate(JS, [[], CONTROL])
+                control = await page_b.evaluate(JS, [[], CONTROL, []])
 
                 ctx_a = await browser.new_context(**fp_a["context_options"])
                 await ctx_a.add_init_script(fp_a["init_script"])
                 page_a = await ctx_a.new_page()
                 await page_a.goto(url)
-                result = await page_a.evaluate(JS, [[[f, s] for f, s, _ in ROWS], []])
+                result = await page_a.evaluate(JS, [[[f, s] for f, s, _ in ROWS], [],
+                                                     [[f, s] for f, s, _ in CSS_ROWS]])
             break
         except ValueError as e:
             if "WebGL" in str(e):
@@ -126,7 +148,7 @@ async def main() -> int:
         return 1
 
     ok = True
-    for fam, _src, must_render in ROWS:
+    for fam, _src, must_render in ROWS + CSS_ROWS:
         r = result["rows"][fam]
         print(f"  {fam:16s} {r}")
         if must_render and not (r["rendered"] and r["status"] == "loaded"):
