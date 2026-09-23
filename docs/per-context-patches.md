@@ -185,6 +185,8 @@ All patches share `RoverfoxStorageManager`, a thread-safe C++ key-value store ke
 
 This 3-tier architecture ensures per-context values are available in all processes — the main page's content process, worker content processes, and the parent process itself.
 
+That holds for values stored through `RoverfoxStorageManager` (seeds, timezone). It does not hold for the font list and the speech-voice list, which live in per-process statics while only their "disabled" flag goes through this storage, so a context's later pages in other processes never receive them (#149).
+
 ### Cross-Process Storage (`cross-process-storage.patch`)
 
 Firefox runs content in separate processes (Fission). Without special handling, `RoverfoxStorageManager`'s in-process HashMap would be empty in worker processes. The `cross-process-storage.patch` solves this with three components:
