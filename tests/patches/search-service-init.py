@@ -59,8 +59,10 @@ ADDED_ENGINE_RE = re.compile(r'"#addEngineToStore: Adding engine:" "([^"]*)"')
 def resolve_binary(argv: List[str]) -> Optional[Path]:
     if "--binary" in argv:
         return Path(argv[argv.index("--binary") + 1]).resolve()
-    if os.environ.get("CAMOUFOX_BINARY"):
-        return Path(os.environ["CAMOUFOX_BINARY"]).resolve()
+    # ci.run_patch_guards hands the binary over as CAMOUFOX_EXECUTABLE_PATH.
+    env = os.environ.get("CAMOUFOX_EXECUTABLE_PATH") or os.environ.get("CAMOUFOX_BINARY")
+    if env:
+        return Path(env).resolve()
     matches = sorted(REPO_ROOT.glob("camoufox-*/obj-*/dist/bin/camoufox-bin"))
     return matches[-1] if matches else None
 
