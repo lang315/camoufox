@@ -22,10 +22,10 @@ PART 1: HOST PATHS, one launch per spoofed OS
       lines from before the process received any list are reported apart, as
       "startup" (InitFontList's last-resort default).
 
-Each page is measured on http and on file. The two are not the same
-measurement: on file the page runs in a content process that never received
-the context's list (part 2), so its rows describe the launch-level mask. The
-per-process summary line says which one applied.
+Each page is measured on http and on file. On builds before the #149 fix
+the two were not the same measurement: the file page ran in a content process
+that never received the context's list, so its rows described the launch-level
+mask. The per-process summary line (set / hasList) says which one applied.
 
 PART 2: IS THE CONTEXT'S LIST IN EVERY PROCESS THAT RENDERS ITS PAGES?
 ----------------------------------------------------------------------
