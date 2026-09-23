@@ -626,7 +626,7 @@ jobs:
           #         gfxPlatformFontList::FindAndAddFamiliesLocked) -- so only
           #         both being right means the context is coherent;
           #     (d) a BARE FontFace agrees too: `new FontFace(f,
-          #         'local(f)').status` read straight off the object, never
+          #         'local(f)')`, loaded and then its .status read, never
           #         added to document.fonts. (c) only covers read paths that
           #         go THROUGH a FontFaceSet entry point, which is where the
           #         AutoFontListContext lives; a bare FontFace has none above
@@ -1014,7 +1014,7 @@ jobs:
           # Two DIFFERENT impossible families: both must fall back to the same
           # default face, so equal widths. If they ever differ, width comparison
           # has stopped meaning "did this family resolve".
-          JS = """(families) => {
+          JS = """async (families) => {
             const c = document.createElement('canvas').getContext('2d');
             const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
             const w = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
@@ -1022,14 +1022,22 @@ jobs:
             const measure = {}, fontfaces = {}, status = {};
             for (const f of families) measure[f] = (w(f) !== absentW);
             measure['__impossible__'] = (w('__NoSuchFamily__12345') !== absentW);
-            // Bare FontFace objects, read BEFORE anything is handed to
-            // document.fonts: no FontFaceSet entry point sits above this read,
-            // so nothing but FontFace::Status() itself can scope the context.
-            const bare = (f) => new FontFace(f, 'local("' + f + '")').status;
-            for (const f of families) status[f] = bare(f);
-            status['__impossible__'] = bare('__NoSuchFamily__12345');
+            // Bare FontFace objects, never handed to document.fonts: no
+            // FontFaceSet entry point sits above this read, so only
+            // FontFace::Load() scopes the context. Since #150 the status is
+            // the one the real local() load stores -- 'unloaded' until
+            // load() runs, as in stock Firefox -- so load each face first.
+            const bare = async (f) => {
+              const ff = new FontFace(f, 'local("' + f + '")');
+              try { await ff.load(); } catch (e) {}
+              return ff.status;
+            };
+            for (const f of families) status[f] = await bare(f);
+            status['__impossible__'] = await bare('__NoSuchFamily__12345');
             for (const f of families) {
-              document.fonts.add(new FontFace(f, 'local("' + f + '")'));
+              const ff = new FontFace(f, 'local("' + f + '")');
+              document.fonts.add(ff);
+              try { await ff.load(); } catch (e) {}
               fontfaces[f] = document.fonts.check('12px "' + f + '"');
             }
             return {measure: measure, fontfaces: fontfaces, status: status,
@@ -1095,7 +1103,7 @@ jobs:
           # the face can be a mac or lin family and a win-only sweep would name
           # nothing.
           FALLBACK_CANDS = sorted(set(FONTS["win"]) | set(FONTS["mac"]) | set(FONTS["lin"]))
-          NAMING_JS = """([cands, probes]) => {
+          NAMING_JS = """async ([cands, probes]) => {
             const c = document.createElement('canvas').getContext('2d');
             const s = 'mmmmmmmmmmlliWWWWWWW@#$%^&*()_+';
             const wf = (f) => { c.font = '72px "' + f + '", monospace'; return c.measureText(s).width; };
@@ -1104,23 +1112,29 @@ jobs:
             // collapses. A bare FontFace resolves synchronously in this fork
             // and never touches the canvas, so it cannot be fooled by two
             // faces sharing an advance -- it is arm (d)'s read, reused here.
-            const st = (f) => { try { return new FontFace(f, 'local("' + f + '")').status; }
-                                catch (e) { return 'exception'; } };
+            // Loaded first: since #150 a local() face's status is the real
+            // load's, 'unloaded' until load() runs.
+            const st = async (f) => {
+              let ff;
+              try { ff = new FontFace(f, 'local("' + f + '")'); } catch (e) { return 'exception'; }
+              try { await ff.load(); } catch (e) {}
+              return ff.status;
+            };
             const absentMono = wf('__CamouAbsentRef__0002');
             const absentBare = wb('__CamouAbsentRef__0002');
             const refValid = (absentBare !== absentMono);
             const src = refValid ? 'width' : 'FontFace.status';
-            const isPresent = (f) => refValid ? (wf(f) === wb(f)) : (st(f) === 'loaded');
+            const isPresent = async (f) => refValid ? (wf(f) === wb(f)) : ((await st(f)) === 'loaded');
             const present = {};
-            for (const f of probes) present[f] = isPresent(f);
+            for (const f of probes) present[f] = await isPresent(f);
             const named = [];
             for (const f of cands) {
               if (wf(f) !== absentMono) continue;   // not at the fallback advance
-              if (!isPresent(f)) continue;          // refused, so not the fallback face
+              if (!(await isPresent(f))) continue;  // refused, so not the fallback face
               named.push(f);
             }
             return {absentMono: absentMono, absentBare: absentBare, refValid: refValid,
-                    presentSource: src, absentStatus: st('__CamouAbsentRef__0002'),
+                    presentSource: src, absentStatus: await st('__CamouAbsentRef__0002'),
                     present: present, named: named};
           }"""
 
@@ -2689,6 +2703,9 @@ jobs:
             document.head.appendChild(sheet);
             document.body.offsetHeight;
             await document.fonts.ready;
+            // Since #150 a rule's local() face loads for real, and only when
+            // asked: 'unloaded' until then, as in stock Firefox. Ask.
+            for (const f of document.fonts) { try { await f.load(); } catch (e) {} }
             const out = {};
             const rawFamilies = [];
             for (const f of document.fonts) {
@@ -2701,6 +2718,7 @@ jobs:
 
             const jsFace = new FontFace('Calibri', 'local(Calibri)');
             document.fonts.add(jsFace);
+            try { await jsFace.load(); } catch (e) {}
             document.body.offsetHeight;
             await document.fonts.ready;
 
