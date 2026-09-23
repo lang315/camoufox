@@ -85,7 +85,7 @@ Conclusion: no further C++ device-faking patches are warranted. Two low-value **
 | 7 | WebRTC `getCapabilities` codec / SDP / fmtp | missing | **P1** | M–L | C++ patch (canonical per-OS SDP profile) |
 | 8 | CSS media features (gamut/HDR/prefers-\*/forced-colors) | partial | **P1** | M | FPP `+CSS*` + CAMOU keys |
 | 9 | DOMRect / `getClientRects` sub-pixel geometry | missing | **P1** | M | C++ patch (RFP-rounding or seed noise) |
-| 10 | WebGL `readPixels` pixel-readback noise | partial (stub) | **P1** | M | C++ patch — wire existing TODO |
+| 10 | WebGL `readPixels` pixel-readback noise | **landed** (`93f0d3d`) | **P1** | M | C++ patch — see "Landed" above |
 | 11 | Keyboard layout (`KeyboardEvent.code/key`) | missing | **P1** | S | FPP `+KeyboardEvents` |
 | 12 | Math fdlibm (trig LSB) | missing | **P1** | S | pref (`use_fdlibm_for_sin_cos_tan`) |
 | 13 | SpeechSynthesis voices ↔ OS/UA consistency | partial (no OS binding) | **P1** | M | bind `voices` CAMOU key to OS profile + goapi field |
@@ -174,7 +174,7 @@ Conclusion: no further C++ device-faking patches are warranted. Two low-value **
 - **OSS:** Tor/RFP rounds rects to integer CSS px; Brave farbles; BotBrowser `--bot-config-noise-client-rects`/`-text-rects`; gologin/multilogin expose a "Client Rects" toggle.
 - **Mechanism:** **C++ patch** on `DOMRect` output — RFP-style integer rounding or deterministic per-`fonts:spacing_seed` noise. Note this rounds *position/size* only; it does **not** fix glyph *shape* (see #14).
 
-### 10. WebGL `readPixels` pixel-readback noise — PARTIAL (confirmed stub)
+### 10. WebGL `readPixels` pixel-readback noise — LANDED (`93f0d3d`, see "Landed" above; the status line below is the pre-landing record)
 - **API:** `WebGLRenderingContext.readPixels()`, WebGL2 `getBufferSubData()/copyBufferSubData()`, `toDataURL()/toBlob()` on a GL-backed canvas.
 - **Status:** `patches/canvas-spoofing.patch:469` carries `// TODO(canvas-spoofing P3): wire ReadPixels perturbation`; `:497` `MOZ_ASSERT(false, "canvas-spoofing P3 stub: ReadPixels not yet wired")`. A rendered-3D pixel hash is **stable/real** and cross-checkable against both the spoofed renderer string and WebGPU, in **both main and worker contexts** (the worker 2D path is already covered at `canvas-spoofing.patch:402-433`, but GL readback is not).
 - **OSS:** Brave farbles `readPixels`/`getBufferSubData`/`copyBufferSubData` per session+eTLD+1; BotBrowser `--bot-config-noise-webgl-image`; gologin separates "WebGL Image" from "WebGL Metadata".
