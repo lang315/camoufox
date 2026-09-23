@@ -91,7 +91,10 @@ async def main() -> int:
     for name in ("a.html", "b.html"):
         Path(site, name).write_text("<!doctype html><meta charset=utf-8><body></body>")
     port = serve(site)
-    logdir = Path(tempfile.mkdtemp(prefix="guard149-log-"))
+    # Not /tmp: the Linux content sandbox gives content processes their own
+    # view of it, so their per-process logs would not land where this reads.
+    logdir = Path(tempfile.mkdtemp(prefix="guard149-log-",
+                                   dir=Path(__file__).resolve().parents[2] / ".ci-work"))
     os.environ["MOZ_LOG"] = "fontlist:4,sync,append"
     os.environ["MOZ_LOG_FILE"] = str(logdir / "cfx%PID")
 
@@ -142,6 +145,8 @@ async def main() -> int:
             ok = False
 
     procs = context_processes(logdir, "/a.html")
+    files = sorted(f.name for f in logdir.glob("cfx*"))
+    print(f"  log files: {len(files)} ({sum(n.startswith('cfx-child') for n in files)} content) in {logdir}")
     if len(procs) != 1:
         print(f"  FAIL: expected one context id behind /a.html, found {sorted(procs)}")
         return 1
