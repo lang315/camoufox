@@ -17,9 +17,12 @@ How this guard measures it:
     render there, or a refusal in A proves nothing.
   * A opens pages on two origins and a second same-origin page. Every one must
     refuse Georgia.
-  * The fontlist log must show A's pages in at least two content processes, or
-    the run could not have seen the bug. Each of those processes must have
-    installed A's list (a "CAMOU-FL set ctx=A" line).
+  * The parent's ProcessIsolation log must show A's two origins isolated
+    apart, so they ran in different content processes; otherwise the run could
+    not have seen the bug. It is read from the parent because the parent is
+    unsandboxed. On Linux the content processes' own log files are not a
+    process count: the guard-only run on main saw one file while its pages
+    plainly ran in several.
   * getVoices() must return the same count on every page of A, when the host has
     voices at all.
 
@@ -96,7 +99,7 @@ async def main() -> int:
     work = Path(__file__).resolve().parents[2] / ".ci-work"
     work.mkdir(exist_ok=True)
     logdir = Path(tempfile.mkdtemp(prefix="guard149-log-", dir=work))
-    os.environ["MOZ_LOG"] = "fontlist:4,sync,append"
+    os.environ["MOZ_LOG"] = "fontlist:4,ProcessIsolation:4,sync,append"
     os.environ["MOZ_LOG_FILE"] = str(logdir / "cfx%PID")
 
     for _ in range(15):
@@ -146,20 +149,25 @@ async def main() -> int:
             ok = False
 
     procs = context_processes(logdir, "/a.html")
-    files = sorted(f.name for f in logdir.glob("cfx*"))
-    print(f"  log files: {len(files)} ({sum(n.startswith('cfx-child') for n in files)} content) in {logdir}")
     if len(procs) != 1:
         print(f"  FAIL: expected one context id behind /a.html, found {sorted(procs)}")
         return 1
     ctx, texts = next(iter(procs.items()))
-    installed = [bool(re.search(rf"CAMOU-FL set ctx={ctx} ", t)) for t in texts]
-    print(f"  context A is ctx={ctx}, rendered in {len(texts)} content process(es), "
-          f"list installed in {sum(installed)}")
-    if len(texts) < 2:
-        print("  FAIL: every page shared one process, so this run cannot see #149")
-        ok = False
-    elif not all(installed):
-        print("  FAIL: a process rendered context A without installing its list (#149)")
+    installed = sum(bool(re.search(rf"CAMOU-FL set ctx={ctx} ", t)) for t in texts)
+    print(f"  context A is ctx={ctx}; content logs that carry it: {len(texts)}, "
+          f"with its list installed: {installed} (informational)")
+
+    parent = "".join(f.read_text(errors="replace") for f in logdir.glob("cfx-main*"))
+    isolated = {}
+    for behavior, host, suffix in re.findall(
+            rf"Using IsolationBehavior (\w+) for http://(127\.0\.0\.1|localhost):{port}(\S*)", parent):
+        if f"userContextId={ctx}" in suffix:
+            isolated.setdefault(host, set()).add(behavior)
+    print(f"  parent isolation for context A: { {h: sorted(b) for h, b in isolated.items()} }")
+    if set(isolated) != {"127.0.0.1", "localhost"} or any(
+            b & {"Parent", "Anywhere"} for b in isolated.values()):
+        print("  FAIL: the parent log does not show A's two origins isolated apart, so this "
+              "run cannot see #149")
         ok = False
 
     counts = {r["voices"] for _, r in rows}
