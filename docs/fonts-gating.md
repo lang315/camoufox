@@ -156,7 +156,74 @@ macOS and Windows platform font lists, which a Linux guard cannot see; and the
 context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
 the Linux bundle conf, and at the remaining live sites by reading the callers
 (lesson 5, above). The macOS host
-is unmeasured entirely. #82 is closed by measurement on Linux — arm (n4) GREEN
+was unmeasured until #148; see "macOS host (#148)" below. #82 is closed by measurement on Linux — arm (n4) GREEN
 on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
+
+## macOS host (#148)
+
+Measured on a native macOS arm64 host against build run 35799717143 (`main` at
+`b8763a2`, whose compiled inputs equal `6e1a9f8`). The build is the packaged
+app, so the font universe is the one that ships: the host's fonts plus the
+bundled windows and linux sets. Headless. Probe:
+`build-tester/scripts/probe_macos_font_paths.py`.
+
+Each family is measured under two fallbacks that are checked to differ on the
+page. A family that renders measures the same under both, and a refused one
+tracks its fallback. A positive control that does not render voids its arm.
+
+**Which mask a row measured.** The http page ran in the process that received
+the context's list (`set=1`, every lookup `hasList=1`), so those rows measure
+the per-context gate. The file page ran in a process that never received it
+(`set=0`, every lookup `hasList=0`), so those rows measure the launch mask only.
+That split is #149, below.
+
+| Arm | Probe | windows spoof | linux spoof | macos spoof |
+|---|---|---|---|---|
+| a | `Optima`, a host font on the mac list only, not bundled | refused | refused | renders (forced onto the list as the control) |
+| a' | `JetBrains Mono`, user-installed, on no list | refused | refused | refused |
+| b | `local()` by full and PostScript name, and bundled Arial | all error | all error | all error |
+| c | `system-ui`, http page | Segoe UI, but equal to `sans-serif`, so it cannot tell the hook from the row | the `sans-serif` face | Helvetica (952.92), distinct from `sans-serif` (947.83) |
+| d | codepoint fallback, from `sys-fallback` / `global-fallback` lines | none resolved off the list | none resolved off the list | none resolved off the list |
+| e | `allowed=1` for a family off the context's list | 0 | 0 | 0 |
+
+`CAMOU-FL default-unfiltered` read 0 in every run. Arms (a), (a'), (b), (d) and
+(e) read the same on the file page, under the launch mask.
+
+Arm (c) is the first macOS-host reading of the #131/#138 `system-ui` step. The
+mac row is the discriminating one: `system-ui` lands on Helvetica, and
+`sans-serif` lands elsewhere. The windows row is equal to `sans-serif` on this
+host too, which is the ambiguity `tests/patches/system-ui-font-spoofing.py`
+already notes.
+
+**`LookupLocalFont` on macOS is unreachable from content under a mask, not
+gated.** `font-hijacker.patch` keeps upstream's refusal of every `local()`
+source while a mask applies, so the lookup never runs. The cost is a tell:
+`local()` fails even for a face the page renders by family name, while stock
+Firefox Developer Edition 157 on the same host loads `local("Arial")`,
+`local("Optima Regular")` and `local("JetBrainsMono-Regular")`. That is #150,
+and it is inherited from upstream.
+
+**The context-0 Helvetica line at process start is not a leak.**
+`InitFontList` calls `GetDefaultFontLocked(nullptr, ...)`. On macOS that asks
+CoreText for the user UI font, Helvetica, with no provider, so the per-context
+gate answers at context 0. The entry this produces, `mDefaultFontEntry`, is
+read only at `gfxTextRun.cpp:2213`, after the gated pass and the logged
+`default-unfiltered` tail have both failed. The probe counts these lines apart,
+as "startup".
+
+**A context's list reaches only its first content process (#149).** This was
+found here but is not macOS-specific. `setFontList` stores the list in a
+per-process static, and its "disabled" flag goes through
+`RoverfoxStorageManager` to every process. So a later page of the same context,
+which Fission puts in a new process, never gets the list and is answered by
+the launch mask. Measured with six pages of one context: the first refuses a
+family that only the launch list holds, and the other five render it. Voices
+have the same shape. Every guard above reads one page per context, so none of
+them can see this.
+
+What this cannot see: native Windows (`gfxDWriteFontList`), a headful session,
+and CoreText's `FindSystemFontFamily` separately from arm (c), which reads its
+result only through `system-ui`.
+
