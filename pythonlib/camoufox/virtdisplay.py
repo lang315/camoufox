@@ -14,7 +14,13 @@ from camoufox.exceptions import (
 from camoufox.pkgman import OS_NAME
 
 # Safe timeout for Xvfb writing display num, prevents infinite hang.
-DISPLAYFD_READ_TIMEOUT_S = 10.0
+#
+# 30 s, not 10 s (#157). The first Xvfb on a fresh machine is slow and its
+# time varies widely. Six fresh ubuntu-24.04 runners measured 603, 983, 2620,
+# 4603, 5150 and 8434 ms for their first launch, then 25-39 ms for every
+# launch after it. One CI run missed the old 10 s bound outright. A hung Xvfb
+# still fails, just later.
+DISPLAYFD_READ_TIMEOUT_S = 30.0
 
 # Xvfb screen geometry for headless="virtual".
 #

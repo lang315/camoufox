@@ -99,9 +99,12 @@ rules:
     check: automated
     evidence:
       - "commit 8f9ff07: 'so a hung Xvfb fails fast instead of blocking forever'"
+      - "#157: first launch on six fresh ubuntu-24.04 runners took 603-8434 ms, later launches 25-39 ms; one CI run exceeded 10 s"
     rationale: >-
       A hung Xvfb with no timeout blocks the launch forever, at 0% CPU, with no
-      diagnostic. Ten seconds is the agreed bound.
+      diagnostic. The bound is 30 seconds. It was 10 until #157 measured a
+      cold first launch at up to 8.4 s, and a CI run missed 10 s outright. A
+      bound a healthy cold start can exceed fails a user's first launch.
     expect:
       module: camoufox.virtdisplay
       attribute: DISPLAYFD_READ_TIMEOUT_S
