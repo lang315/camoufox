@@ -11,6 +11,7 @@ resolve ──┬─ static ────────── tribal rules, skiplis
           └─ build ──┬─ playwright × 6 shards        (conformance + our own)
                      ├─ skiplist audit ───── every skip must still fail
                      ├─ native ───────────── leaks, contexts         (ours)
+                     ├─ e2e ──────────────── user journeys, 3 entry points (e2e/)
                      ├─ patch guards ─────── one per spoofing patch
                      ├─ build-tester ─────── 8 fingerprint profiles
                      └─ sundial ──────────── stealth grade  (off: see below)

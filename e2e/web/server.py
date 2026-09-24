@@ -52,6 +52,7 @@ class Site:
             s.daemon_threads = True
         self.port1, self.port2 = (s.server_address[1] for s in self.servers)
         self.stun_port = 0
+        self.markers = {"windows": [], "macos": [], "linux": []}  # set by the suite (oracle A)
 
     def start(self) -> "Site":
         for s in self.servers:
@@ -140,6 +141,8 @@ def _handler(site: Site):
                                   [("Content-Disposition", 'attachment; filename="file.bin"')])
             if route == "/tone.wav":
                 return self._send(200, _tone(), "audio/wav")
+            if route == "/fp-markers.json":
+                return self._send(200, json.dumps(site.markers), "application/json")
             if route == "/sw-probe":
                 return self._send(200, "from-network", "text/plain")
             if route.startswith("/shop"):

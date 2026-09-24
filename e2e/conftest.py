@@ -107,8 +107,10 @@ def stun():
 @pytest.fixture(scope="session")
 def site(stun):
     from web.server import Site
+    from oracle.docs import font_markers
     s = Site()
     s.stun_port = stun.port
+    s.markers = font_markers()
     s.start()
     yield s
     s.stop()
@@ -130,6 +132,14 @@ def socks_proxy():
     p.stop()
 
 
+@pytest.fixture(scope="session")
+def socks_proxy_noauth():
+    from web.proxy import Proxy
+    p = Proxy("socks5")
+    yield p
+    p.stop()
+
+
 @pytest.fixture
 def drv(request, binary):
     from drivers import make
@@ -144,6 +154,20 @@ def ref():
     d = RefDriver()
     yield d
     d.close_all()
+
+
+@pytest.fixture
+def check(request):
+    from util import Checks
+    return Checks(request.node.nodeid)
+
+
+def pytest_collection_modifyitems(items):
+    import known
+    for item in items:
+        issue = known.for_raise(item.nodeid)
+        if issue:
+            item.add_marker(pytest.mark.xfail(raises=RuntimeError, strict=True, reason=f"known finding #{issue}"))
 
 
 def pytest_sessionfinish(session):

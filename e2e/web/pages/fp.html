@@ -12,16 +12,19 @@ function tzAgree() {
   const derived = Math.round((d.getTime() - d.getSeconds() * 1000 - d.getMilliseconds() - wall) / 60000);
   return {tz, offset: d.getTimezoneOffset(), derived};
 }
-function fonts() {
-  // Real OSes' default families. Rendered = same width under two fallbacks whose widths differ.
-  const MARKERS = {windows: ["Segoe UI", "Calibri", "Consolas", "Tahoma"], macos: ["Helvetica Neue", "Menlo", "Avenir", "Geneva"],
-    linux: ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Cantarell"]};
+async function fonts() {
+  // Families only one OS's font list has (the test derives them from the package's own output).
+  // Rendered = the same width under two fallbacks whose widths differ.
+  const MARKERS = await (await fetch("/fp-markers.json")).json();
   const x = document.createElement("canvas").getContext("2d"), text = "mmmmmmmmmmlli1WQ@#";
   const w = f => { x.font = `32px ${f}`; return x.measureText(text).width; };
   const floors = {mono: w("monospace"), serif: w("serif")};
   const rendered = {};
   for (const [os, list] of Object.entries(MARKERS)) rendered[os] = list.filter(f => w(`"${f}", monospace`) === w(`"${f}", serif`));
-  return {floors, valid: floors.mono !== floors.serif, rendered};
+  const run = (s, f) => { x.font = `32px ${f}`; return x.measureText(s).width; };
+  const mono = {i: run("iiiiiiiiii", "monospace"), m: run("mmmmmmmmmm", "monospace")};
+  const sans = {i: run("iiiiiiiiii", "sans-serif"), m: run("mmmmmmmmmm", "sans-serif")};
+  return {floors, valid: floors.mono !== floors.serif, rendered, mono, sans};
 }
 function webgl() {
   const gl = document.createElement("canvas").getContext("webgl");
@@ -50,7 +53,7 @@ const reply = (target, send) => new Promise(ok => { target.onmessage = e => ok(e
   const r = {main: snap(), intl: Intl.DateTimeFormat().resolvedOptions().locale, tz: tzAgree(), webdriver: navigator.webdriver,
     screen: {w: screen.width, h: screen.height, aw: screen.availWidth, ah: screen.availHeight, iw: innerWidth, ih: innerHeight,
              ow: outerWidth, oh: outerHeight, dpr: devicePixelRatio},
-    fonts: fonts(), webgl: webgl(), canvas: canvasHash(),
+    fonts: await fonts(), webgl: webgl(), canvas: canvasHash(),
     voices: typeof speechSynthesis === "undefined" ? null : (await voices()).map(v => ({name: v.name, uri: v.voiceURI}))};
   const w = new Worker("/fp-worker.js");
   r.dedicated = await reply(w, () => w.postMessage(0));

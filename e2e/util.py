@@ -12,12 +12,24 @@ import psutil
 
 
 class Checks:
-    """Collect failures so one failing step does not hide the steps after it."""
+    """Collect failures so one failing step does not hide the steps after it.
+    A check that matches a filed finding (known.py) reports KNOWN instead."""
 
-    def __init__(self) -> None:
+    def __init__(self, nodeid: str = "") -> None:
+        self.nodeid = nodeid
         self.failed: List[str] = []
 
     def __call__(self, ok: Any, what: str) -> bool:
+        import known
+
+        k = known.for_check(self.nodeid, what)
+        if k and not ok:
+            print(f"KNOWN #{k[0]} {what}", flush=True)
+            return False
+        if k and ok and k[1]:
+            print(f"FIXED? #{k[0]} {what}", flush=True)
+            self.failed.append(f"{what} now passes; is #{k[0]} fixed? remove it from e2e/known.py")
+            return True
         print(f"{'ok  ' if ok else 'FAIL'} {what}", flush=True)
         if not ok:
             self.failed.append(what)
