@@ -1,0 +1,67 @@
+<!doctype html><meta charset="utf-8"><title>Fingerprint</title><div id="out"></div>
+<script>
+// Everything an ordinary page can read about the browser, computed by the page itself.
+const snap = () => ({ua: navigator.userAgent, platform: navigator.platform, language: navigator.language,
+  languages: [...navigator.languages], cores: navigator.hardwareConcurrency,
+  tz: Intl.DateTimeFormat().resolvedOptions().timeZone});
+function tzAgree() {
+  const d = new Date(), tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const p = Object.fromEntries(new Intl.DateTimeFormat("en-US", {timeZone: tz, hourCycle: "h23", year: "numeric",
+    month: "numeric", day: "numeric", hour: "numeric", minute: "numeric"}).formatToParts(d).map(x => [x.type, x.value]));
+  const wall = Date.UTC(+p.year, p.month - 1, +p.day, +p.hour, +p.minute);
+  const derived = Math.round((d.getTime() - d.getSeconds() * 1000 - d.getMilliseconds() - wall) / 60000);
+  return {tz, offset: d.getTimezoneOffset(), derived};
+}
+function fonts() {
+  // Real OSes' default families. Rendered = same width under two fallbacks whose widths differ.
+  const MARKERS = {windows: ["Segoe UI", "Calibri", "Consolas", "Tahoma"], macos: ["Helvetica Neue", "Menlo", "Avenir", "Geneva"],
+    linux: ["DejaVu Sans", "Liberation Sans", "Ubuntu", "Cantarell"]};
+  const x = document.createElement("canvas").getContext("2d"), text = "mmmmmmmmmmlli1WQ@#";
+  const w = f => { x.font = `32px ${f}`; return x.measureText(text).width; };
+  const floors = {mono: w("monospace"), serif: w("serif")};
+  const rendered = {};
+  for (const [os, list] of Object.entries(MARKERS)) rendered[os] = list.filter(f => w(`"${f}", monospace`) === w(`"${f}", serif`));
+  return {floors, valid: floors.mono !== floors.serif, rendered};
+}
+function webgl() {
+  const gl = document.createElement("canvas").getContext("webgl");
+  if (!gl) return null;
+  const ext = gl.getExtension("WEBGL_debug_renderer_info");
+  return {vendor: gl.getParameter(ext ? ext.UNMASKED_VENDOR_WEBGL : gl.VENDOR),
+          renderer: gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)};
+}
+function canvasHash() {
+  const c = document.createElement("canvas"); c.width = 220; c.height = 30;
+  const x = c.getContext("2d");
+  x.textBaseline = "top"; x.font = "16px Arial"; x.fillStyle = "#f60"; x.fillRect(100, 1, 62, 20);
+  x.fillStyle = "#069"; x.fillText("Camoufox e2e, \u{1F603}", 2, 2);
+  const s = c.toDataURL(); let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h;
+}
+const voices = () => new Promise(ok => {
+  const v = speechSynthesis.getVoices();
+  if (v.length) return ok(v);
+  speechSynthesis.onvoiceschanged = () => ok(speechSynthesis.getVoices());
+  setTimeout(() => ok(speechSynthesis.getVoices()), 2000);
+});
+const reply = (target, send) => new Promise(ok => { target.onmessage = e => ok(e.data); send(); setTimeout(() => ok(null), 4000); });
+(async () => {
+  const r = {main: snap(), intl: Intl.DateTimeFormat().resolvedOptions().locale, tz: tzAgree(), webdriver: navigator.webdriver,
+    screen: {w: screen.width, h: screen.height, aw: screen.availWidth, ah: screen.availHeight, iw: innerWidth, ih: innerHeight,
+             ow: outerWidth, oh: outerHeight, dpr: devicePixelRatio},
+    fonts: fonts(), webgl: webgl(), canvas: canvasHash(),
+    voices: typeof speechSynthesis === "undefined" ? null : (await voices()).map(v => ({name: v.name, uri: v.voiceURI}))};
+  const w = new Worker("/fp-worker.js");
+  r.dedicated = await reply(w, () => w.postMessage(0));
+  try { const s = new SharedWorker("/fp-worker.js"); r.shared = await reply(s.port, () => s.port.start()); }
+  catch (e) { r.shared = "error: " + e.name; }
+  try {
+    await navigator.serviceWorker.register("/sw.js", {scope: "/"});
+    const reg = await navigator.serviceWorker.ready;
+    r.service = await reply(navigator.serviceWorker, () => reg.active.postMessage("snap"));
+  } catch (e) { r.service = "error: " + e.name; }
+  const out = document.getElementById("out");
+  out.textContent = JSON.stringify(r); out.dataset.done = "1";
+})();
+</script>

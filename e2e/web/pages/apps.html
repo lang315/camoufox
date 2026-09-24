@@ -1,0 +1,81 @@
+<!doctype html><meta charset="utf-8"><title>Apps</title>
+<canvas id="c" width="64" height="64"></canvas><canvas id="blank" width="64" height="64"></canvas>
+<canvas id="g" width="64" height="64"></canvas>
+<video id="v" muted playsinline></video><audio id="a"></audio>
+<button id="clip">Copy</button><div id="out"></div>
+<script>
+const $ = id => document.getElementById(id);
+const r = {};
+const within = (ms, p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
+async function t(name, fn) {
+  try { r[name] = await within(8000, fn()); } catch (e) { r[name] = "error: " + ((e && e.name) || e); }
+}
+const sum = cv => cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data.reduce((a, b) => a + b, 0);
+let autoDone = false, clipDone = false;
+function finish() {
+  if (autoDone && clipDone) { $("out").textContent = JSON.stringify(r); $("out").dataset.done = "1"; }
+}
+async function run() {
+  await t("websocket", () => new Promise((ok, no) => {
+    const w = new WebSocket(`ws://${location.host}/ws`);
+    w.onopen = () => w.send("ping");
+    w.onmessage = e => { ok(e.data === "ping"); w.close(); };
+    w.onerror = () => no(new Error("ws error"));
+  }));
+  await t("indexeddb", () => new Promise((ok, no) => {
+    const q = indexedDB.open("e2e", 1);
+    q.onupgradeneeded = () => q.result.createObjectStore("s");
+    q.onerror = () => no(q.error);
+    q.onsuccess = () => {
+      const tx = q.result.transaction("s", "readwrite");
+      tx.objectStore("s").put("v", "k");
+      tx.oncomplete = () => { const g = q.result.transaction("s").objectStore("s").get("k"); g.onsuccess = () => ok(g.result === "v"); };
+    };
+  }));
+  await t("serviceworker", async () => {
+    await navigator.serviceWorker.register("/sw.js", {scope: "/"});
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller)
+      await new Promise(ok => navigator.serviceWorker.addEventListener("controllerchange", ok, {once: true}));
+    return (await (await fetch("/sw-probe")).text()) === "from-sw";
+  });
+  await t("canvas", async () => {
+    const x = $("c").getContext("2d");
+    x.fillStyle = "#c00"; x.fillRect(8, 8, 48, 48); x.font = "20px serif"; x.fillText("Hi", 10, 30);
+    return sum($("c")) !== sum($("blank"));
+  });
+  await t("webgl", async () => {
+    const gl = $("g").getContext("webgl");
+    if (!gl) return "no context";
+    gl.clearColor(0, 0.5, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    return px[1] > 100 && px[3] === 255;
+  });
+  await t("audio", () => new Promise((ok, no) => {
+    const a = $("a"); a.onloadedmetadata = () => ok(a.duration > 0.4); a.onerror = () => no(a.error); a.src = "/tone.wav";
+  }));
+  await t("video", async () => {
+    const cv = $("c"), x = cv.getContext("2d");
+    const tick = setInterval(() => { x.fillStyle = `hsl(${Date.now() % 360},80%,50%)`; x.fillRect(0, 0, 64, 64); }, 50);
+    const rec = new MediaRecorder(cv.captureStream(20)); const chunks = [];
+    rec.ondataavailable = e => chunks.push(e.data); rec.start();
+    await new Promise(ok => setTimeout(ok, 800));
+    const stopped = new Promise(ok => rec.onstop = ok); rec.stop(); await stopped; clearInterval(tick);
+    const v = $("v");
+    const meta = new Promise((ok, no) => { v.onloadedmetadata = ok; v.onerror = () => no(v.error); });
+    v.src = URL.createObjectURL(new Blob(chunks, {type: rec.mimeType})); await meta;
+    return v.videoWidth === 64;
+  });
+  await t("webaudio", async () => {
+    const ac = new OfflineAudioContext(1, 4410, 44100); const o = ac.createOscillator();
+    o.connect(ac.destination); o.start();
+    return (await ac.startRendering()).getChannelData(0).some(s => s !== 0);
+  });
+  await t("geolocation", () => new Promise(ok =>
+    navigator.geolocation.getCurrentPosition(() => ok("position"), e => ok("error " + e.code), {timeout: 3000})));
+  autoDone = true; finish();
+}
+$("clip").onclick = () => t("clipboard", () => navigator.clipboard.writeText("e2e").then(() => true))
+  .then(() => { clipDone = true; finish(); });
+run();
+</script>
