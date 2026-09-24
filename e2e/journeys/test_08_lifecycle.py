@@ -1,6 +1,8 @@
 """Journey 8: long sessions, many contexts, and a browser that dies under you."""
 
+import threading
 import time
+import urllib.request
 
 import psutil
 import pytest
@@ -11,8 +13,8 @@ pytestmark = pytest.mark.slow
 PAGES = ["/login", "/shop", "/upload", "/download", "/fp"]
 
 
-def test_fifty_contexts_in_a_row(drv, site):
-    b = drv.launch()
+def fifty_contexts(driver, site):
+    b = driver.launch()
     for i in range(50):
         c = b.new_context()
         p = c.new_page()
@@ -21,12 +23,33 @@ def test_fifty_contexts_in_a_row(drv, site):
         try:
             p.goto(site.url("/login"))
         except Exception as e:
-            # Says which side stalled: did the request reach the server at all?
-            raise AssertionError(f"context {i}: goto failed after {time.monotonic() - t0:.1f}s; "
-                                 f"server received {len(site.seen('/login')) - asked} /login request(s): {e}") from e
+            # Which side stalled: did the request reach the server, does the server
+            # still answer, and does a fresh page in a fresh context get through?
+            with urllib.request.urlopen(site.url("/login"), timeout=10) as r:
+                server = r.status
+            retry = "ok"
+            try:
+                c2 = b.new_context()
+                c2.new_page().goto(site.url("/login"))
+            except Exception as e2:
+                retry = f"also failed: {str(e2)[:80]}"
+            raise AssertionError(
+                f"{driver.name} context {i}: goto failed after {time.monotonic() - t0:.1f}s; server received "
+                f"{len(site.seen('/login')) - asked} /login request(s); server answers a direct GET with {server}; "
+                f"a fresh context: {retry}; threads alive {threading.active_count()}: {e}") from e
         assert p.eval("document.title") == "Sign in", f"context {i}"
         c.close()
     b.close()
+
+
+def test_fifty_contexts_in_a_row(drv, site):
+    fifty_contexts(drv, site)
+
+
+def test_fifty_contexts_in_a_row_reference(ref, site):
+    """Oracle B for the test above: if Playwright's own Firefox stalls too, the
+    cause is the environment or this site, not Camoufox."""
+    fifty_contexts(ref, site)
 
 
 @pytest.mark.timeout(0)
