@@ -16,7 +16,14 @@ def test_fifty_contexts_in_a_row(drv, site):
     for i in range(50):
         c = b.new_context()
         p = c.new_page()
-        p.goto(site.url("/login"))
+        asked = len(site.seen("/login"))
+        t0 = time.monotonic()
+        try:
+            p.goto(site.url("/login"))
+        except Exception as e:
+            # Says which side stalled: did the request reach the server at all?
+            raise AssertionError(f"context {i}: goto failed after {time.monotonic() - t0:.1f}s; "
+                                 f"server received {len(site.seen('/login')) - asked} /login request(s): {e}") from e
         assert p.eval("document.title") == "Sign in", f"context {i}"
         c.close()
     b.close()
