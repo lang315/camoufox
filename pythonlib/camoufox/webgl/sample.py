@@ -11,6 +11,21 @@ from camoufox.pkgman import OS_ARCH_MATRIX
 DB_PATH = Path(__file__).parent / 'webgl_data.db'
 
 
+def has_webgl(os: str, vendor: str, renderer: str) -> bool:
+    """Whether sample_webgl(os, vendor, renderer) can answer, instead of raising."""
+    if os not in OS_ARCH_MATRIX:
+        return False
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            f'SELECT {os} FROM webgl_fingerprints WHERE vendor = ? AND renderer = ?',  # nosec
+            (vendor, renderer),
+        ).fetchone()
+    finally:
+        conn.close()
+    return bool(row and row[0] > 0)
+
+
 def sample_webgl(
     os: str, vendor: Optional[str] = None, renderer: Optional[str] = None
 ) -> Dict[str, str]:

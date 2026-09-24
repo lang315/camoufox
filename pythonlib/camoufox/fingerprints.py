@@ -16,6 +16,7 @@ from browserforge.fingerprints import (
 from camoufox.ip import valid_ipv6
 from camoufox.pkgman import load_yaml
 from camoufox.webgl import sample_webgl
+from camoufox.webgl.sample import has_webgl
 
 # Load the browserforge.yaml file
 BROWSERFORGE_DATA = load_yaml('browserforge.yml')
@@ -800,6 +801,17 @@ _OS_TO_PRESET_KEY = {
 }
 
 
+_PRESET_KEY_TO_WEBGL_OS = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}
+
+
+def _webgl_samplable(preset_key: str, preset: Dict) -> bool:
+    webgl = preset.get('webgl') or {}
+    vendor, renderer = webgl.get('unmaskedVendor'), webgl.get('unmaskedRenderer')
+    if not (vendor and renderer):
+        return True  # nothing pinned; sample_webgl draws its own pair
+    return has_webgl(_PRESET_KEY_TO_WEBGL_OS.get(preset_key, preset_key), vendor, renderer)
+
+
 def get_random_preset(
     os: Optional[str] = None,
     ff_version: Optional[Any] = None,
@@ -823,10 +835,13 @@ def get_random_preset(
     else:
         os_keys = all_os_keys
 
-    # Collect all matching presets
+    # Collect all matching presets. A preset whose WebGL pair the database cannot
+    # sample would make launch_options raise, so it is never drawn (#169).
     candidates: List[Dict] = []
     for key in os_keys:
-        candidates.extend(presets.get('presets', {}).get(key, []))
+        candidates.extend(
+            p for p in presets.get('presets', {}).get(key, []) if _webgl_samplable(key, p)
+        )
 
     if not candidates:
         return None
