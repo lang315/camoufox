@@ -150,8 +150,7 @@ release-build null dereference at `gfxTextRun.cpp:2207-2221`.
 Still ungated after round 3: `CoreTextFontList::FindSystemFontFamily`'s return
 on the macOS system-font path; the DWrite non-shared substitution branch and the
 non-shared `LookupInFaceNameLists` / `CommonFontFallback` `else` branches, all
-dormant while `gfx.e10s.font-list.shared` is true; `LookupLocalFont` on the
-macOS and Windows platform font lists, which a Linux guard cannot see; and the
+dormant while `gfx.e10s.font-list.shared` is true; and the
 **context-0 fail-open** for the per-context half only — the launch mask reaches
 context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
 the Linux bundle conf, and at the remaining live sites by reading the callers
@@ -183,7 +182,7 @@ That split is #149, below.
 |---|---|---|---|---|
 | a | `Optima`, a host font on the mac list only, not bundled | refused | refused | renders (forced onto the list as the control) |
 | a' | `JetBrains Mono`, user-installed, on no list | refused | refused | refused |
-| b | `local()` by full and PostScript name, and bundled Arial | all error | all error | all error |
+| b | `local()` by full and PostScript name, and bundled Arial (before #150; see below) | all error | all error | all error |
 | c | `system-ui`, http page | Segoe UI, but equal to `sans-serif`, so it cannot tell the hook from the row | the `sans-serif` face | Helvetica (952.92), distinct from `sans-serif` (947.83) |
 | d | codepoint fallback, from `sys-fallback` / `global-fallback` lines | none resolved off the list | none resolved off the list | none resolved off the list |
 | e | `allowed=1` for a family off the context's list | 0 | 0 | 0 |
@@ -197,13 +196,33 @@ mac row is the discriminating one: `system-ui` lands on Helvetica, and
 host too, which is the ambiguity `tests/patches/system-ui-font-spoofing.py`
 already notes.
 
-**`LookupLocalFont` on macOS is unreachable from content under a mask, not
-gated.** `font-hijacker.patch` keeps upstream's refusal of every `local()`
-source while a mask applies, so the lookup never runs. The cost is a tell:
-`local()` fails even for a face the page renders by family name, while stock
-Firefox Developer Edition 157 on the same host loads `local("Arial")`,
-`local("Optima Regular")` and `local("JetBrainsMono-Regular")`. That is #150,
-and it is inherited from upstream.
+**`src: local()` now follows the font-family gate (#150).** Until #150 every
+`local()` source failed under a mask: `gfxUserFontSet` skipped `LookupLocalFont`
+whenever `MaskedFontListAppliesTo` held, and a `local()`-only face took its
+`FontFace.status` from its declared family name. So the table's row (b) above
+read "all error", and a face named after an allowed family read `loaded` while
+nothing rendered. Stock Firefox Developer Edition 157 on the same host loads
+them all. Both were tells.
+
+The lookup now runs, and each platform answers through the same family gate
+as `font-family`:
+
+- **macOS:** `CoreTextFontList::LookupLocalFont` resolves the matched face's
+  family through `FindFamily`, which carries the launch mask and the
+  per-context list. Measured on build run 35846659754.
+  - Arial loads under a Windows spoof and is refused under a Linux one.
+  - Optima loads only under a mac spoof that lists it.
+  - A user-installed family on no list is refused under every spoof.
+  - Status agrees with render on every row.
+- **Linux and Windows:** the shared face-name list, `LookupInSharedFaceNameList`,
+  gates the matched face's family with `CamouIsFamilyAllowed`, which asks both
+  halves. Linux is measured by `tests/patches/local-font-source.py`, red on
+  main and green on the fix, and by smoke arms (d), (e) and (h) on run
+  35952837490. Windows is gated by reading only.
+
+`tests/patches/local-font-source.py` guards all of it. It covers both the
+`FontFace` and the CSS `@font-face` rule paths, and it fails when a status
+disagrees with what renders.
 
 **The context-0 Helvetica line at process start is not a leak.**
 `InitFontList` calls `GetDefaultFontLocked(nullptr, ...)`. On macOS that asks
