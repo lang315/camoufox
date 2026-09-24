@@ -165,9 +165,10 @@ def check(request):
 def pytest_collection_modifyitems(items):
     import known
     for item in items:
-        issue = known.for_raise(item.nodeid)
-        if issue:
-            item.add_marker(pytest.mark.xfail(raises=RuntimeError, strict=True, reason=f"known finding #{issue}"))
+        k = known.for_raise(item.nodeid)
+        if k:
+            issue, exc, strict = k
+            item.add_marker(pytest.mark.xfail(raises=exc, strict=strict, reason=f"known finding #{issue}"))
 
 
 def pytest_sessionfinish(session):
