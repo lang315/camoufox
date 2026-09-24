@@ -85,6 +85,9 @@ class GoBrowser:
     def new_context(self) -> "GoCtx":
         return GoCtx(self.d, self.d.rpc("browser.new_context", self.h))
 
+    def new_identity_context(self):
+        pytest.skip("go: no per-context identity API")
+
     def close(self) -> None:
         self.d.rpc("browser.close", self.h)
 

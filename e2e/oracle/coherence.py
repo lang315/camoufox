@@ -99,6 +99,15 @@ def fonts_measurable(fp, req, os_name) -> Result:
     return fp["fonts"]["valid"], f"fallback floors monospace={f['mono']} serif={f['serif']} (equal floors = INVALID)"
 
 
+def monospace_is_monospace(fp, req, os_name) -> Result:
+    # Intrinsic: a monospace face gives "iiiiiiiiii" and "mmmmmmmmmm" one width.
+    # In-page control: sans-serif must tell them apart, or the measurement cannot.
+    mono, sans = fp["fonts"]["mono"], fp["fonts"]["sans"]
+    if sans["i"] == sans["m"]:
+        return None, f"sans-serif i/m widths equal ({sans}); the measurement cannot discriminate"
+    return mono["i"] == mono["m"], f"monospace i={mono['i']} m={mono['m']}; sans-serif i={sans['i']} m={sans['m']}"
+
+
 def fonts_own_os(fp, req, os_name) -> Result:
     if os_name is None or not fp["fonts"]["valid"]:
         return None, "no os requested or floors INVALID"
@@ -182,6 +191,10 @@ def _m_floors(fp, req, o):
     fp["fonts"]["valid"] = False
 
 
+def _m_mono(fp, req, o):
+    fp["fonts"]["mono"]["m"] = fp["fonts"]["mono"]["i"] + 10
+
+
 def _m_own_fonts(fp, req, o):
     fp["fonts"]["rendered"][o] = []
 
@@ -212,6 +225,7 @@ RULES: List[Tuple[Callable, Callable]] = [
     (webdriver_false, _m_webdriver),
     (workers_agree, _m_workers),
     (fonts_measurable, _m_floors),
+    (monospace_is_monospace, _m_mono),
     (fonts_own_os, _m_own_fonts),
     (fonts_no_foreign_os, _m_foreign_fonts),
     (webgl_no_foreign_os, _m_webgl),

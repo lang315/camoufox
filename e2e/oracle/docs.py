@@ -27,3 +27,16 @@ def cite(key: str) -> str:
     text = (REPO / path).read_text(encoding="utf-8")
     assert quote in text, f"oracle A: {path} no longer says {quote!r}; re-derive this expectation"
     return f"{path}: {quote!r}"
+
+
+def font_markers() -> dict:
+    """Families exactly one OS's font universe contains, from the package's own
+    shipped per-OS lists (camoufox/fonts.json). A family two OSes share, such as
+    Tahoma on Windows and macOS, can never be a marker."""
+    import json
+
+    import camoufox
+
+    raw = json.loads((Path(camoufox.__file__).parent / "fonts.json").read_text(encoding="utf-8"))
+    lists = {"windows": set(raw["win"]), "macos": set(raw["mac"]), "linux": set(raw["lin"])}
+    return {o: sorted(lists[o] - set().union(*(lists[x] for x in lists if x != o))) for o in lists}

@@ -74,11 +74,17 @@ class PwCtx:
 
 
 class PwBrowser:
-    def __init__(self, browser, new_context) -> None:
-        self.b, self._new_context = browser, new_context
+    def __init__(self, browser, identity_context=None) -> None:
+        self.b, self._identity_context = browser, identity_context
 
     def new_context(self) -> PwCtx:
-        return PwCtx(self._new_context(self.b))
+        return PwCtx(self.b.new_context())
+
+    def new_identity_context(self) -> PwCtx:
+        """camoufox.sync_api.NewContext: a context with its own fingerprint (pkg only)."""
+        if self._identity_context is None:
+            pytest.skip("no per-context identity API on this entry point")
+        return PwCtx(self._identity_context(self.b))
 
     def close(self) -> None:
         self.b.close()
@@ -101,7 +107,8 @@ class _Base:
 
 
 class PkgDriver(_Base):
-    """camoufox.sync_api: NewBrowser, then NewContext for each context, as documented."""
+    """camoufox.sync_api.NewBrowser; plain contexts are what `Camoufox()` +
+    `browser.new_page()` gives, and new_identity_context() is NewContext."""
 
     name = "pkg"
 
@@ -133,7 +140,7 @@ class PwDriver(_Base):
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
                   config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
         opts = launch_options(**{k: v for k, v in kw.items() if v is not None})
-        b = PwBrowser(playwright().firefox.launch(**opts), lambda br: br.new_context())
+        b = PwBrowser(playwright().firefox.launch(**opts))
         self.browsers.append(b)
         return b
 
@@ -158,6 +165,6 @@ class RefDriver(_Base):
         if self.version is None:
             self.version = browser.version
             print(f"oracle-B: playwright-firefox {self.version}", flush=True)
-        b = PwBrowser(browser, lambda br: br.new_context())
+        b = PwBrowser(browser)
         self.browsers.append(b)
         return b

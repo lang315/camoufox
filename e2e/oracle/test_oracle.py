@@ -18,7 +18,8 @@ FP = {
     "shared": dict(SNAP),
     "service": "error: TypeError",
     "fonts": {"floors": {"mono": 400.0, "serif": 350.0}, "valid": True,
-              "rendered": {"windows": ["Segoe UI"], "macos": [], "linux": []}},
+              "rendered": {"windows": ["Segoe UI"], "macos": [], "linux": []},
+              "mono": {"i": 193.0, "m": 193.0}, "sans": {"i": 71.0, "m": 267.0}},
     "webgl": {"vendor": "Google Inc. (NVIDIA)", "renderer": "ANGLE (NVIDIA, GeForce Direct3D11 vs_5_0 ps_5_0)"},
     "voices": [{"name": "Microsoft David", "uri": "urn:moz-tts:sapi:Microsoft David"}],
     "canvas": 123,
@@ -45,3 +46,38 @@ def test_foreign_fonts_are_caught():
 
 def test_rule_without_os_is_not_applicable():
     assert coherence.os_is_requested(FP, REQ, None)[0] is None
+
+
+def test_proportional_monospace_is_caught():
+    fp = copy.deepcopy(FP)
+    fp["fonts"]["mono"] = {"i": 71.67, "m": 267.17}
+    assert coherence.monospace_is_monospace(fp, REQ, "windows")[0] is False
+
+
+def test_font_markers_are_exclusive():
+    m = docs.font_markers()
+    assert all(m.values()), m
+    for a in m:
+        for b in m:
+            assert a == b or not set(m[a]) & set(m[b])
+
+
+def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
+    import known
+    from util import Checks
+
+    monkeypatch.setattr(known, "HOST", "Darwin")
+    node = "journeys/test_02_fingerprint.py::test_fingerprint_is_coherent[pw-windows]"
+    red = Checks(node)
+    red(False, "monospace_is_monospace: monospace i=71 m=267")
+    assert red.failed == []
+    fixed = Checks(node)
+    fixed(True, "monospace_is_monospace: monospace i=193 m=193")
+    assert fixed.failed and "#162" in fixed.failed[0]
+    other = Checks(node)
+    other(False, "ua_matches_header: js=a header=b")
+    assert other.failed == ["ua_matches_header: js=a header=b"]
+    monkeypatch.setattr(known, "HOST", "Linux")
+    unmeasured = Checks(node)
+    unmeasured(False, "monospace_is_monospace: monospace i=71 m=267")
+    assert unmeasured.failed, "a host nobody measured must fail loudly"

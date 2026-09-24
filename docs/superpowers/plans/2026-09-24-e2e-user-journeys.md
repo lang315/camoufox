@@ -2973,7 +2973,7 @@ jobs:
 
 ### Task 9: Full run, PR, docs
 
-- [ ] **Step 1: Full local run on macOS** against the release binary: `cd e2e && python3 -m pytest --binary $BIN -v -s 2>&1 | tee $SP/e2e-mac.txt`. Record pass/fail/skip counts and every finding.
+- [ ] **Step 1: Full local run on macOS** against the release binary: `cd e2e && python3 -m pytest --binary=$BIN -v -s 2>&1 | tee $SP/e2e-mac.txt`. Record pass/fail/skip counts and every finding.
 - [ ] **Step 2: Open an issue** ("e2e: black-box user-journey suite") with `--repo lang315/camoufox`, and push the branch.
 - [ ] **Step 3: Open the PR** with the evidence: the local tally, the triaged findings, and the CI run. Wait for the checks, and merge without `--auto`.
 - [ ] **Step 4: Dispatch `e2e.yml`** with `release=v152.0.4-beta.31-fork.1` for the three-OS result, and record it on the issue.
