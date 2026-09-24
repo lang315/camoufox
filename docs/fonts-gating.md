@@ -218,7 +218,8 @@ as `font-family`:
   gates the matched face's family with `CamouIsFamilyAllowed`, which asks both
   halves. Linux is measured by `tests/patches/local-font-source.py`, red on
   main and green on the fix, and by smoke arms (d), (e) and (h) on run
-  35952837490. Windows is gated by reading only.
+  35952837490. Native Windows is measured by the same guard, which PASSes on
+  every row (see "Native Windows after #149 and #150" below).
 
 `tests/patches/local-font-source.py` guards all of it. It covers both the
 `FontFace` and the CSS `@font-face` rule paths, and it fails when a status
@@ -248,4 +249,22 @@ other guard reads one page per context, so none of them can see this.
 What this cannot see: native Windows (`gfxDWriteFontList`), a headful session,
 and CoreText's `FindSystemFontFamily` separately from arm (c), which reads its
 result only through `system-ui`.
+
+## Native Windows after #149 and #150
+
+Measured on the user's Windows build PC: Windows 10.0.19045, native Python
+3.12.14, Playwright 1.55.0, headless. The build is build.yml run 35968080353,
+of `main` at `6fd3130`. Its `BuildID` is `20260924072039` and its `xul.dll`
+SHA-256 starts `899ECA649CBA961F`. On Windows the win-list families (Arial,
+Georgia, Comic Sans MS) are the host's own fonts, so these rows go through
+`gfxDWriteFontList` and its shared face-name list, not through a bundle.
+
+| Check | Result |
+|---|---|
+| `tests/patches/local-font-source.py` (#150) | PASS. Arial and an alias load and render, a CSS alias loads and renders, and Georgia (launch only), Comic Sans MS (no list) and a CSS rule on Georgia are refused. Status agrees with render on every row. |
+| `tests/patches/context-list-every-process.py` (#149) | PASS. Three pages of one context on two origins all refuse Georgia; the parent isolates both origins as `WebContent`, and all three content logs installed the list. `getVoices()` reads 50 on every page. |
+| `build-tester/scripts/probe_windows_fonts.py` (#87) | 11 of 11 `pass`, `leaked` and `unmeasured` empty. The family-name half matches #87 (absent 817.8834, bare 1261.35, 84 host-only families collapsed). The codepoint half matches too: U+05EF 26.0167 bare, 21.18 and 21.12 under the two masks. |
+
+Neither fix regressed the #87 Windows readings, and the DWrite face-name path
+that #150 opened is gated as the code reads.
 
