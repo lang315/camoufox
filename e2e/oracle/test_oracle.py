@@ -67,17 +67,17 @@ def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     from util import Checks
 
     monkeypatch.setattr(known, "HOST", "Darwin")
-    node = "journeys/test_02_fingerprint.py::test_fingerprint_is_coherent[pw-windows]"
+    node = "journeys/test_03_network.py::test_webrtc_does_not_reveal_lan_address[pw]"
     red = Checks(node)
-    red(False, "monospace_is_monospace: monospace i=71 m=267")
+    red(False, "no LAN address ['10.0.0.2'] in candidates or SDP")
     assert red.failed == []
-    fixed = Checks(node)
-    fixed(True, "monospace_is_monospace: monospace i=193 m=193")
-    assert fixed.failed and "#162" in fixed.failed[0]
+    fixed = Checks(node)  # #163 is strict
+    fixed(True, "no LAN address ['10.0.0.2'] in candidates or SDP")
+    assert fixed.failed and "#163" in fixed.failed[0]
     other = Checks(node)
-    other(False, "ua_matches_header: js=a header=b")
-    assert other.failed == ["ua_matches_header: js=a header=b"]
-    monkeypatch.setattr(known, "HOST", "Linux")
+    other(False, "the STUN server was asked")
+    assert other.failed == ["the STUN server was asked"]
+    monkeypatch.setattr(known, "HOST", "Windows")
     unmeasured = Checks(node)
-    unmeasured(False, "monospace_is_monospace: monospace i=71 m=267")
+    unmeasured(False, "no LAN address ['10.0.0.2'] in candidates or SDP")
     assert unmeasured.failed, "a host nobody measured must fail loudly"
