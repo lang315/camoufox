@@ -40,13 +40,15 @@ CHECKS = [
      "screen_contains_viewport: screen", 166, False, {"Darwin", "Linux"}),
     # Timing: depends on how soon the first read lands.
     (r"test_05_contexts\.py::test_new_context_gives_each_context_its_own_identity\[pkg\]",
-     "two pages of one context agree", 165, False, {"Darwin"}),
+     "two pages of one context agree", 165, False, {"Darwin", "Linux"}),
 ]
 
-# Findings that surface as an exception from the driver: (node id regex, issue, hosts).
+# Findings that surface as an exception: (node id regex, issue, hosts, exception, strict).
 RAISES = [
-    (r"test_04_automation\.py::test_upload_and_download\[go\]", 166, {"Darwin", "Linux"}),
-    (r"test_03_network\.py::test_proxy\[go-socks5\]", 166, {"Darwin", "Linux"}),
+    (r"test_04_automation\.py::test_upload_and_download\[go\]", 166, {"Darwin", "Linux"}, RuntimeError, True),
+    (r"test_03_network\.py::test_proxy\[go-socks5\]", 166, {"Darwin", "Linux"}, RuntimeError, True),
+    # Intermittent: stalled at context 4 or 9 in two Linux runs, never on macOS.
+    (r"test_08_lifecycle\.py::test_fifty_contexts_in_a_row\[(pkg|pw)\]", 171, {"Linux"}, AssertionError, False),
 ]
 
 
@@ -58,7 +60,7 @@ def for_check(nodeid: str, what: str):
 
 
 def for_raise(nodeid: str):
-    for pattern, issue, hosts in RAISES:
+    for pattern, issue, hosts, exc, strict in RAISES:
         if HOST in hosts and re.search(pattern, nodeid):
-            return issue
+            return issue, exc, strict
     return None

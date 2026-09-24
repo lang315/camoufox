@@ -25,6 +25,7 @@ def fifty_contexts(driver, site):
         except Exception as e:
             # Which side stalled: did the request reach the server, does the server
             # still answer, and does a fresh page in a fresh context get through?
+            received = len(site.seen("/login")) - asked  # before the retries below add theirs
             with urllib.request.urlopen(site.url("/login"), timeout=10) as r:
                 server = r.status
             retry = "ok"
@@ -35,7 +36,7 @@ def fifty_contexts(driver, site):
                 retry = f"also failed: {str(e2)[:80]}"
             raise AssertionError(
                 f"{driver.name} context {i}: goto failed after {time.monotonic() - t0:.1f}s; server received "
-                f"{len(site.seen('/login')) - asked} /login request(s); server answers a direct GET with {server}; "
+                f"{received} /login request(s) for it; server answers a direct GET with {server}; "
                 f"a fresh context: {retry}; threads alive {threading.active_count()}: {e}") from e
         assert p.eval("document.title") == "Sign in", f"context {i}"
         c.close()
