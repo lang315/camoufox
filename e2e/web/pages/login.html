@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>Sign in</title>
+<form id="f" method="post" action="/login" novalidate>
+  <label>User <input id="user" name="user" autocomplete="off"></label>
+  <label>Password <input id="pass" name="pass" type="password"></label>
+  <input type="hidden" name="trusted" id="trusted">
+  <button id="go" type="submit">Sign in</button>
+</form>
+<p id="err"></p>
+<script>
+const events = [];
+for (const t of ["keydown", "keyup", "mousedown", "mouseup", "click"]) addEventListener(t, e => events.push(e.isTrusted), true);
+const err = document.getElementById("err");
+if (location.search.includes("err=1")) err.textContent = "Wrong user or password";
+document.getElementById("f").addEventListener("submit", e => {
+  const user = document.getElementById("user").value, pass = document.getElementById("pass").value;
+  if (!user || !pass) { e.preventDefault(); err.textContent = "Both fields are required"; return; }
+  document.getElementById("trusted").value = JSON.stringify({n: events.length, all: events.every(Boolean)});
+});
+</script>

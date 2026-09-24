@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>Upload</title>
+<input type="file" id="file"><button id="send">Send</button><div id="out"></div>
+<script>
+document.getElementById("send").onclick = async () => {
+  const fd = new FormData();
+  fd.append("f", document.getElementById("file").files[0]);
+  const r = await fetch("/upload", {method: "POST", body: fd});
+  const out = document.getElementById("out");
+  out.textContent = await r.text(); out.dataset.done = "1";
+};
+</script>
