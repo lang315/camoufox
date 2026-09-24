@@ -21,6 +21,7 @@ function render() {
   }
   $("app").innerHTML = `<h1>Items</h1><div id="list"></div>`;
   shown = 0; more();
+  while (document.body.scrollHeight <= innerHeight + 200) more();  // a real feed fills the window first
 }
 addEventListener("scroll", () => { if ($("list") && innerHeight + scrollY >= document.body.scrollHeight - 50) more(); });
 document.addEventListener("click", e => {

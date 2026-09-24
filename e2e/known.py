@@ -16,15 +16,20 @@ HOST = platform.system()
 CHECKS = [
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent\[(pkg|pw|go)-(windows|linux)\]"
      r"|locale_option_reaches_navigator_and_intl\[(pkg|pw)\])",
-     "monospace_is_monospace: monospace ", 162, True, {"Darwin"}),
+     # 0 of 8 README-path launches were monospaced per spoof, but one full-suite
+     # run drew a preset that was: rare passes, so not strict.
+     "monospace_is_monospace: monospace ", 162, False, {"Darwin"}),
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw|go)-linux\]",
-     "fonts_measurable: fallback floors", 162, True, {"Darwin"}),
+     "fonts_measurable: fallback floors", 162, False, {"Darwin"}),
     (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
      "no LAN address", 163, True, {"Darwin"}),
     (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
      "the configured WebRTC IP appears", 163, True, {"Darwin"}),
     # Depends on which presets the launch and the context draw: intermittent, so not strict.
     (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
+     "screen_contains_viewport: screen", 164, False, {"Darwin"}),
+    # Bare Playwright's default 1280x720 viewport against a spoofed screen narrower than 1280.
+    (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[pw-",
      "screen_contains_viewport: screen", 164, False, {"Darwin"}),
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[go",
      "screen_contains_viewport: screen", 166, False, {"Darwin"}),
