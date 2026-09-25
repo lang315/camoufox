@@ -24,7 +24,7 @@ def report(check, fp, req, os_name):
             print(f"n/a  {name}: {detail}")
             continue
         check(ok, f"{name}: {detail}")
-        check(red, f"{name}: its negative control went red (else VACUOUS)")
+        check(red, f"{name}: its negative control went red (else VACUOUS)", ledger=False)
 
 
 @pytest.mark.parametrize("os_name", ["windows", "macos", "linux"])

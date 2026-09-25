@@ -81,3 +81,18 @@ def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     unmeasured = Checks(node)
     unmeasured(False, "no LAN address ['10.0.0.2'] in candidates or SDP")
     assert unmeasured.failed, "a host nobody measured must fail loudly"
+
+
+def test_a_negative_control_is_never_matched_against_the_ledger(monkeypatch):
+    # The #166 voices entry's prefix also matched its always-green control, which then
+    # read as "FIXED?" (e2e run 36124566821).
+    import known
+    from util import Checks
+
+    monkeypatch.setattr(known, "HOST", "Windows")
+    node = "journeys/test_02_fingerprint.py::test_fingerprint_is_coherent[go-linux]"
+    c = Checks(node)
+    c(True, "voices_no_foreign_os: its negative control went red (else VACUOUS)", ledger=False)
+    assert c.failed == []
+    c(False, "voices_no_foreign_os: its negative control went red (else VACUOUS)", ledger=False)
+    assert c.failed, "a control that did not go red fails even under a ledgered check"

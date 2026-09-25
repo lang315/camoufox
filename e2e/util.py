@@ -19,10 +19,11 @@ class Checks:
         self.nodeid = nodeid
         self.failed: List[str] = []
 
-    def __call__(self, ok: Any, what: str) -> bool:
+    def __call__(self, ok: Any, what: str, ledger: bool = True) -> bool:
+        """ledger=False for a check on the suite itself (a negative control), which no finding excuses."""
         import known
 
-        k = known.for_check(self.nodeid, what)
+        k = known.for_check(self.nodeid, what) if ledger else None
         if k and not ok:
             print(f"KNOWN #{k[0]} {what}", flush=True)
             return False
