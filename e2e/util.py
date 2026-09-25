@@ -71,8 +71,8 @@ def wait_out(page, timeout: float = 60) -> Any:
         try:
             where = page.eval("(() => { const o = document.getElementById('out'); "
                               "return [location.href, document.readyState, o ? o.dataset.progress || 'no progress' : 'no #out']; })()")
-        except Exception as e:
-            where = f"page did not answer: {str(e)[:120]}"
+        except Exception as err:
+            where = f"page did not answer: {str(err)[:120]}"
         raise TimeoutError(f"page never published #out in {timeout:.0f}s; page state {where}; {e}") from None
 
 

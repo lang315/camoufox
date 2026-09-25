@@ -42,7 +42,7 @@ class GoDriver:
         self.browsers = []
 
     def _start(self) -> None:
-        self.proc = subprocess.Popen([str(build())], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+        self.proc = subprocess.Popen([str(build())], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, encoding="utf-8", bufsize=1)
         self.replies: "queue.Queue[str]" = queue.Queue()
         out = self.proc.stdout
 
