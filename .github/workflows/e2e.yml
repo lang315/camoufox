@@ -75,6 +75,7 @@ jobs:
         shell: bash
         working-directory: e2e
         run: |
-          args=($E2E_BROWSER --soak-seconds "${{ inputs.soak_seconds }}" -v -rA)
+          # Per-test timeout, as ci/run_e2e.py sets on the gate: one hung test must not hold the job.
+          args=($E2E_BROWSER --soak-seconds "${{ inputs.soak_seconds }}" -v -rA --timeout 900)
           if [ -n "${E2E_LIVE:-}" ]; then args+=(-m "live or not live"); fi
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest "${args[@]}"; else python -m pytest "${args[@]}"; fi
