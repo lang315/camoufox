@@ -77,5 +77,8 @@ const step = s => { document.getElementById("out").dataset.progress = `${s}@${Ma
   step("service-done");
   const out = document.getElementById("out");
   out.textContent = JSON.stringify(r); out.dataset.done = "1";
-})();
+})().catch(e => {  // a step that throws says so, instead of leaving the page silent at its last marker
+  const out = document.getElementById("out");
+  out.dataset.progress += `; threw ${e && e.name}: ${e && e.message}`;
+});
 </script>
