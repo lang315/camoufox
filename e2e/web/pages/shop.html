@@ -1,0 +1,35 @@
+<!doctype html><meta charset="utf-8"><title>Shop</title>
+<nav id="menu" style="padding:8px;background:#eee">Menu <a id="cart-link" href="/shop/cart" hidden>Cart</a></nav>
+<main id="app"></main>
+<script>
+const cart = [];
+let shown = 0;
+const $ = id => document.getElementById(id);
+$("menu").addEventListener("mouseenter", () => { $("cart-link").hidden = false; });
+function more() {
+  for (let i = 0; i < 10; i++, shown++) {
+    const d = document.createElement("div");
+    d.className = "item"; d.style.height = "120px";
+    d.innerHTML = `Item ${shown} <button class="add" data-id="${shown}">Add</button>`;
+    $("list").append(d);
+  }
+}
+function render() {
+  if (location.pathname === "/shop/cart") {
+    $("app").innerHTML = `<h1>Cart</h1><ul id="cart">${cart.map(i => `<li>Item ${i}</li>`).join("")}</ul>`;
+    return;
+  }
+  $("app").innerHTML = `<h1>Items</h1><div id="list"></div>`;
+  shown = 0; more();
+  while (document.body.scrollHeight <= innerHeight + 200) more();  // a real feed fills the window first
+}
+addEventListener("scroll", () => { if ($("list") && innerHeight + scrollY >= document.body.scrollHeight - 50) more(); });
+document.addEventListener("click", e => {
+  const add = e.target.closest(".add");
+  if (add) { cart.push(+add.dataset.id); add.textContent = "Added"; }
+  const link = e.target.closest("#cart-link");
+  if (link) { e.preventDefault(); history.pushState({}, "", link.href); render(); }
+});
+addEventListener("popstate", render);
+render();
+</script>
