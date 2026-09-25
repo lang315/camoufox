@@ -833,7 +833,9 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - uses: actions/setup-go@v5
         with:
-          go-version-file: goapi/go.mod
+          # 1.23 like every other workflow here: go1.22.x links binaries without
+          # LC_UUID, which dyld on macOS 26 refuses to load (e2e run 36078088130).
+          go-version: "1.23"
           cache-dependency-path: goapi/go.sum
       - run: pip install -e 'pythonlib[geoip]'
       # Oracle B compares behaviour with Playwright's own Firefox.
