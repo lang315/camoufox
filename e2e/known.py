@@ -42,9 +42,10 @@ CHECKS = [
     # Depends on which presets the launch and the context draw: intermittent, so not strict.
     (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
      "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux", "Windows"}),
-    # Bare Playwright's default 1280x720 viewport against a spoofed screen narrower than 1280.
+    # Bare Playwright's default 1280x720 viewport against a spoofed screen or window smaller
+    # than it (Linux gate run 36131893534: outer 960x525 inner 1280x720).
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[pw-",
-     "screen_contains_viewport: screen", 164, False, {"Darwin"}),
+     "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux"}),
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[go",
      "screen_contains_viewport: screen", 166, False, {"Darwin", "Linux", "Windows"}),
     # Timing: depends on how soon the first read lands.
