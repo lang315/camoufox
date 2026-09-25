@@ -1,0 +1,78 @@
+# End-to-end user journeys on the three desktop OSes, against a build or a
+# release. Dispatch only: macOS and Windows runners cost more minutes, and a
+# Linux result is no evidence about either (CLAUDE.md lessons 3 and 8).
+name: e2e (three OSes)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Fork release tag to test (e.g. v152.0.4-beta.31-fork.1)"
+        required: false
+      run_id:
+        description: "Or: a build.yml run id holding CamoufoxBuilds-<target> artifacts"
+        required: false
+      live:
+        description: "Also run the real-site journey"
+        type: boolean
+        default: false
+      soak_seconds:
+        description: "Soak length per driver"
+        default: "200"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  e2e:
+    name: e2e (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: linux-x86_64 }
+          - { os: macos-26, target: macos-arm64 }
+          - { os: windows-2025, target: windows-x86_64 }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: goapi/go.mod
+          cache-dependency-path: goapi/go.sum
+      - name: Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends xvfb libgtk-3-0 libasound2t64 libdbus-glib-1-2 \
+            libx11-xcb1 libxcb-shm0 libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxtst6 libpci3
+      - run: pip install -r ci/requirements.txt -e "pythonlib[geoip]"
+      - run: python -m playwright install firefox
+      - name: Which browser
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
+              -n "CamoufoxBuilds-${{ matrix.target }}" -D .ci-work/artifact
+            zip="$(ls .ci-work/artifact/*.zip | head -1)"
+            echo "E2E_BROWSER=--zip=$zip" >> "$GITHUB_ENV"
+          elif [ -n "${{ inputs.release }}" ]; then
+            echo "E2E_BROWSER=--release=${{ inputs.release }}" >> "$GITHUB_ENV"
+          else
+            echo "::error::pass release or run_id"; exit 1
+          fi
+          if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
+      - name: Run
+        shell: bash
+        working-directory: e2e
+        run: |
+          args=($E2E_BROWSER --soak-seconds "${{ inputs.soak_seconds }}" -v -rA)
+          if [ -n "${E2E_LIVE:-}" ]; then args+=(-m "live or not live"); fi
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest "${args[@]}"; else python -m pytest "${args[@]}"; fi

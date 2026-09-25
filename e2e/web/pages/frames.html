@@ -1,0 +1,24 @@
+<!doctype html><meta charset="utf-8"><title>Frames</title>
+<iframe id="child" src="{{O2}}/child.html" width="300" height="80"></iframe>
+<button id="pop">Open popup</button><button id="dialogs">Dialogs</button><div id="out"></div>
+<script>
+const r = {};
+const out = document.getElementById("out");
+function done() {
+  if (r.childPong && r.popup && r.dialogs) { out.textContent = JSON.stringify(r); out.dataset.done = "1"; }
+}
+addEventListener("message", e => {
+  if (e.data.kind === "child") {
+    r.child = {origin: e.origin, sees: e.data.origin};
+    document.getElementById("child").contentWindow.postMessage("pong", e.origin);
+  }
+  if (e.data.kind === "child-pong") r.childPong = true;
+  if (e.data.kind === "popup") r.popup = {origin: e.origin, hasOpener: e.data.hasOpener};
+  done();
+});
+document.getElementById("pop").onclick = () => window.open("{{O2}}/popup.html", "_blank", "width=400,height=300");
+document.getElementById("dialogs").onclick = () => {
+  r.dialogs = {alert: alert("hello") === undefined, confirm: confirm("continue?"), prompt: prompt("name?", "default")};
+  done();
+};
+</script>

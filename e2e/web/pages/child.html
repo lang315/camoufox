@@ -1,0 +1,5 @@
+<!doctype html><meta charset="utf-8"><title>Child</title><p>cross-origin child</p>
+<script>
+parent.postMessage({kind: "child", origin: location.origin}, "*");
+addEventListener("message", e => { if (e.data === "pong") parent.postMessage({kind: "child-pong"}, "*"); });
+</script>

@@ -1,0 +1,19 @@
+<!doctype html><meta charset="utf-8"><title>WebRTC</title><div id="out"></div>
+<script>
+(async () => {
+  const stun = new URLSearchParams(location.search).get("stun");
+  const pc = new RTCPeerConnection({iceServers: [{urls: `stun:${stun}`}]});
+  const cands = [];
+  let finished = false;
+  function finish() {
+    if (finished) return; finished = true;
+    const out = document.getElementById("out");
+    out.textContent = JSON.stringify({candidates: cands, sdp: pc.localDescription ? pc.localDescription.sdp : ""});
+    out.dataset.done = "1";
+  }
+  pc.createDataChannel("d");
+  pc.onicecandidate = e => { if (e.candidate) cands.push(e.candidate.candidate); else finish(); };
+  await pc.setLocalDescription(await pc.createOffer());
+  setTimeout(finish, 8000);
+})();
+</script>

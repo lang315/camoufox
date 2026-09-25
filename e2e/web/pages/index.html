@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>E2E home</title>
+<p>Local test site. <a href="/login">Sign in</a> · <a href="/shop">Shop</a></p>
+<button id="peek">What can this page see?</button><div id="out"></div>
+<script>
+// Reports, from the page's own world, whether a global set by automation is visible.
+document.getElementById("peek").onclick = () => {
+  const out = document.getElementById("out");
+  out.textContent = JSON.stringify({probe: typeof window.__e2e_probe, attr: document.documentElement.dataset.fromEval || null});
+  out.dataset.done = "1";
+};
+</script>
