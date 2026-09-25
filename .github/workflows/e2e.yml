@@ -31,9 +31,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, target: linux-x86_64 }
-          - { os: macos-26, target: macos-arm64 }
-          - { os: windows-2025, target: windows-x86_64 }
+          - { os: ubuntu-24.04, target: linux-x86_64, asset: lin.x86_64 }
+          - { os: macos-26, target: macos-arm64, asset: mac.arm64 }
+          - { os: windows-2025, target: windows-x86_64, asset: win.x86_64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     steps:
@@ -66,14 +66,25 @@ jobs:
             zip="$(ls .ci-work/artifact/*.zip | head -1)"
             echo "E2E_BROWSER=--zip=$zip" >> "$GITHUB_ENV"
           elif [ -n "${{ inputs.release }}" ]; then
+            # A release need not carry every platform (fork.1 has no Linux build);
+            # that leg has nothing to test, which is a notice, not a failure.
+            asset="$(gh release view "${{ inputs.release }}" --repo "${{ github.repository }}" --json assets \
+              -q '.assets[].name' | grep -E -- '-${{ matrix.asset }}\.zip$' || true)"
+            if [ -z "$asset" ]; then
+              echo "::notice::release ${{ inputs.release }} has no ${{ matrix.asset }} build; nothing to test on this leg"
+              echo "E2E_SKIP=1" >> "$GITHUB_ENV"
+            fi
             echo "E2E_BROWSER=--release=${{ inputs.release }}" >> "$GITHUB_ENV"
           else
             echo "::error::pass release or run_id"; exit 1
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
       - name: Run
+        if: env.E2E_SKIP != '1'
         shell: bash
         working-directory: e2e
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           # Per-test timeout, as ci/run_e2e.py sets on the gate: one hung test must not hold the job.
           args=($E2E_BROWSER --soak-seconds "${{ inputs.soak_seconds }}" -v -rA --timeout 900)
