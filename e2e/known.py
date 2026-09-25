@@ -21,18 +21,24 @@ CHECKS = [
      "monospace_is_monospace: monospace ", 162, False, {"Darwin"}),
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw|go)-linux\]",
      "fonts_measurable: fallback floors", 162, False, {"Darwin"}),
+    # Windows host (run 36094067838): the package and bare Playwright collapse under the
+    # macos and linux spoofs; the windows spoof is fine.
+    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw)-(macos|linux)\]",
+     "monospace_is_monospace: monospace ", 162, True, {"Windows"}),
+    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw)-linux\]",
+     "fonts_measurable: fallback floors", 162, True, {"Windows"}),
     # Linux host (CI run 36038692790): only goapi collapses the generics, under every spoof.
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-",
      "monospace_is_monospace: monospace ", 162, True, {"Linux"}),
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-",
      "fonts_measurable: fallback floors", 162, True, {"Linux"}),
     (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
-     "no LAN address", 163, True, {"Darwin", "Linux"}),
+     "no LAN address", 163, True, {"Darwin", "Linux", "Windows"}),
     (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
-     "the configured WebRTC IP appears", 163, True, {"Darwin", "Linux"}),
+     "the configured WebRTC IP appears", 163, True, {"Darwin", "Linux", "Windows"}),
     # Depends on which presets the launch and the context draw: intermittent, so not strict.
     (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
-     "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux"}),
+     "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux", "Windows"}),
     # Bare Playwright's default 1280x720 viewport against a spoofed screen narrower than 1280.
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[pw-",
      "screen_contains_viewport: screen", 164, False, {"Darwin"}),
@@ -45,8 +51,8 @@ CHECKS = [
 
 # Findings that surface as an exception: (node id regex, issue, hosts, exception, strict).
 RAISES = [
-    (r"test_04_automation\.py::test_upload_and_download\[go\]", 166, {"Darwin", "Linux"}, RuntimeError, True),
-    (r"test_03_network\.py::test_proxy\[go-socks5\]", 166, {"Darwin", "Linux"}, RuntimeError, True),
+    (r"test_04_automation\.py::test_upload_and_download\[go\]", 166, {"Darwin", "Linux", "Windows"}, RuntimeError, True),
+    (r"test_03_network\.py::test_proxy\[go-socks5\]", 166, {"Darwin", "Linux", "Windows"}, RuntimeError, True),
     # Intermittent: stalled at context 4 or 9 in two Linux runs, never on macOS.
     (r"test_08_lifecycle\.py::test_fifty_contexts_in_a_row\[(pkg|pw)\]", 171, {"Linux"}, AssertionError, False),
 ]

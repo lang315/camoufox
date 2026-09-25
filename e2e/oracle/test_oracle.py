@@ -77,7 +77,7 @@ def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     other = Checks(node)
     other(False, "the STUN server was asked")
     assert other.failed == ["the STUN server was asked"]
-    monkeypatch.setattr(known, "HOST", "Windows")
+    monkeypatch.setattr(known, "HOST", "Plan9")  # a host nobody has measured
     unmeasured = Checks(node)
     unmeasured(False, "no LAN address ['10.0.0.2'] in candidates or SDP")
     assert unmeasured.failed, "a host nobody measured must fail loudly"
