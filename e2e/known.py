@@ -21,12 +21,15 @@ CHECKS = [
      "monospace_is_monospace: monospace ", 162, False, {"Darwin"}),
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw|go)-linux\]",
      "fonts_measurable: fallback floors", 162, False, {"Darwin"}),
-    # Windows host (run 36094067838): the package and bare Playwright collapse under the
+    # Windows host (runs 36094067838, 36114027483): every driver collapses under the
     # macos and linux spoofs; the windows spoof is fine.
-    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw)-(macos|linux)\]",
+    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw|go)-(macos|linux)\]",
      "monospace_is_monospace: monospace ", 162, True, {"Windows"}),
-    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw)-linux\]",
+    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[(pkg|pw|go)-linux\]",
      "fonts_measurable: fallback floors", 162, True, {"Windows"}),
+    # Windows host (run 36114027483): goapi's linux spoof exposes the host's Microsoft voices.
+    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-linux\]",
+     "voices_no_foreign_os: ", 166, True, {"Windows"}),
     # Linux host (CI run 36038692790): only goapi collapses the generics, under every spoof.
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-",
      "monospace_is_monospace: monospace ", 162, True, {"Linux"}),
@@ -43,7 +46,7 @@ CHECKS = [
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[pw-",
      "screen_contains_viewport: screen", 164, False, {"Darwin"}),
     (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[go",
-     "screen_contains_viewport: screen", 166, False, {"Darwin", "Linux"}),
+     "screen_contains_viewport: screen", 166, False, {"Darwin", "Linux", "Windows"}),
     # Timing: depends on how soon the first read lands.
     (r"test_05_contexts\.py::test_new_context_gives_each_context_its_own_identity\[pkg\]",
      "two pages of one context agree", 165, False, {"Darwin", "Linux"}),
