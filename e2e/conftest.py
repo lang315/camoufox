@@ -56,7 +56,10 @@ def _fetch_release(tag: str) -> Path:
     plat = PLATFORM_ASSET[(platform.system(), platform.machine())]
     with urllib.request.urlopen(f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}", timeout=30) as r:
         rel = json.load(r)
-    asset = next(a for a in rel["assets"] if a["name"].endswith(f"-{plat}.zip"))
+    asset = next((a for a in rel["assets"] if a["name"].endswith(f"-{plat}.zip")), None)
+    if asset is None:
+        pytest.exit(f"release {tag} has no {plat} build (it has: {[a['name'] for a in rel['assets']]}); "
+                    "test a build run's artifact with --zip instead", 2)
     zp = WORK / "release" / tag / asset["name"]
     zp.parent.mkdir(parents=True, exist_ok=True)
     if not zp.exists():
