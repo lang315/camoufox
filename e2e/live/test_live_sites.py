@@ -80,9 +80,30 @@ def test_pixelscan(page):
     assert m, "no verdict on the page"
 
 
-def test_cloudflare_challenge(page):
-    goto(page, "https://www.scrapingcourse.com/cloudflare-challenge")
-    assert poll(page, r"You bypassed the Cloudflare challenge", 40), "the Cloudflare challenge was not passed"
+CLOUDFLARE = "https://www.scrapingcourse.com/cloudflare-challenge"
+PASSED_CF = r"You bypassed the Cloudflare challenge"
+
+
+def test_cloudflare_challenge(page, ref):
+    # Cloudflare also judges the IP: a datacenter runner can be refused whatever
+    # the browser. Oracle B, bracketed, as for Google below.
+    def reference():
+        rb = ref.launch(headless=False)
+        try:
+            p = rb.new_context().new_page()
+            goto(p, CLOUDFLARE)
+            return bool(poll(p, PASSED_CF, 40))
+        finally:
+            rb.close()
+
+    before = reference()
+    goto(page, CLOUDFLARE)
+    ours = bool(poll(page, PASSED_CF, 40))
+    after = reference()
+    print(f"cloudflare passed: reference-before={before} camoufox={ours} reference-after={after}")
+    if not ours and not (before and after):
+        pytest.skip("the reference browser did not pass from this IP either")
+    assert ours, "Camoufox failed the challenge between two reference passes"
 
 
 def google_blocked(page) -> bool:

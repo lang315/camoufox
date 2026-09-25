@@ -19,10 +19,11 @@ class Checks:
         self.nodeid = nodeid
         self.failed: List[str] = []
 
-    def __call__(self, ok: Any, what: str) -> bool:
+    def __call__(self, ok: Any, what: str, ledger: bool = True) -> bool:
+        """ledger=False for a check on the suite itself (a negative control), which no finding excuses."""
         import known
 
-        k = known.for_check(self.nodeid, what)
+        k = known.for_check(self.nodeid, what) if ledger else None
         if k and not ok:
             print(f"KNOWN #{k[0]} {what}", flush=True)
             return False
@@ -50,20 +51,30 @@ OUT_JS = (
 
 def wait_for(page, js: str, timeout: float = 15) -> Any:
     end = time.monotonic() + timeout
+    last_error = None
     while True:
         try:
             value = page.eval(js)
-        except Exception:  # navigation in flight destroys the context; try again
-            value = None
+        except Exception as e:  # navigation in flight destroys the context; try again
+            value, last_error = None, e
         if value:
             return value
         if time.monotonic() > end:
-            raise TimeoutError(f"timed out waiting for {js}")
+            why = f"; last error: {str(last_error)[:300]}" if last_error else ""
+            raise TimeoutError(f"timed out waiting for {js}{why}")
         time.sleep(0.2)
 
 
-def wait_out(page, timeout: float = 30) -> Any:
-    return json.loads(wait_for(page, OUT_JS, timeout))
+def wait_out(page, timeout: float = 60) -> Any:
+    try:
+        return json.loads(wait_for(page, OUT_JS, timeout))
+    except TimeoutError as e:
+        try:
+            where = page.eval("(() => { const o = document.getElementById('out'); "
+                              "return [location.href, document.readyState, o ? o.dataset.progress || 'no progress' : 'no #out']; })()")
+        except Exception as err:
+            where = f"page did not answer: {str(err)[:120]}"
+        raise TimeoutError(f"page never published #out in {timeout:.0f}s; page state {where}; {e}") from None
 
 
 def header(req: dict, name: str) -> Optional[str]:

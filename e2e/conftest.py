@@ -54,9 +54,19 @@ def _unpack(zp: Path) -> Path:
 
 def _fetch_release(tag: str) -> Path:
     plat = PLATFORM_ASSET[(platform.system(), platform.machine())]
-    with urllib.request.urlopen(f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}", timeout=30) as r:
-        rel = json.load(r)
-    asset = next(a for a in rel["assets"] if a["name"].endswith(f"-{plat}.zip"))
+    req = urllib.request.Request(f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}")
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:  # unauthenticated calls share a 60/hour limit per IP, which CI runners exhaust
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            rel = json.load(r)
+    except OSError as e:
+        pytest.exit(f"cannot read release {tag} from {RELEASE_REPO}: {e}", 2)
+    asset = next((a for a in rel["assets"] if a["name"].endswith(f"-{plat}.zip")), None)
+    if asset is None:
+        pytest.exit(f"release {tag} has no {plat} build (it has: {[a['name'] for a in rel['assets']]}); "
+                    "test a build run's artifact with --zip instead", 2)
     zp = WORK / "release" / tag / asset["name"]
     zp.parent.mkdir(parents=True, exist_ok=True)
     if not zp.exists():

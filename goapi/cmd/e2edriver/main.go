@@ -91,6 +91,17 @@ func main() {
 	}
 }
 
+// handle returns the object behind h as T, or an error naming the handle (a
+// restarted driver has none of the old ones).
+func handle[T any](s *state, h string) (T, error) {
+	v, ok := s.get(h).(T)
+	if !ok {
+		var zero T
+		return zero, fmt.Errorf("no %T handle %q", zero, h)
+	}
+	return v, nil
+}
+
 func (s *state) page(h string) (*camoufox.Page, error) {
 	p, ok := s.get(h).(*camoufox.Page)
 	if !ok {
@@ -125,23 +136,40 @@ func (s *state) do(ctx context.Context, r request) (any, error) {
 		}
 		return s.put("b", b), nil
 	case "browser.close":
-		return nil, s.get(r.H).(*camoufox.Browser).Close()
+		b, err := handle[*camoufox.Browser](s, r.H)
+		if err != nil {
+			return nil, err
+		}
+		return nil, b.Close()
 	case "browser.new_context":
-		c, err := s.get(r.H).(*camoufox.Browser).NewContext(ctx)
+		b, err := handle[*camoufox.Browser](s, r.H)
+		if err != nil {
+			return nil, err
+		}
+		c, err := b.NewContext(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return s.put("c", c), nil
 	case "ctx.new_page":
-		p, err := s.get(r.H).(*camoufox.BrowserContext).NewPage(ctx)
+		bc, err := handle[*camoufox.BrowserContext](s, r.H)
+		if err != nil {
+			return nil, err
+		}
+		p, err := bc.NewPage(ctx)
 		if err != nil {
 			return nil, err
 		}
 		return s.put("p", p), nil
-	case "ctx.cookies":
-		return s.get(r.H).(*camoufox.BrowserContext).Cookies(ctx)
-	case "ctx.close":
-		return nil, s.get(r.H).(*camoufox.BrowserContext).Close(ctx)
+	case "ctx.cookies", "ctx.close":
+		bc, err := handle[*camoufox.BrowserContext](s, r.H)
+		if err != nil {
+			return nil, err
+		}
+		if r.Op == "ctx.cookies" {
+			return bc.Cookies(ctx)
+		}
+		return nil, bc.Close(ctx)
 	}
 
 	p, err := s.page(r.H)
@@ -170,7 +198,10 @@ func (s *state) do(ctx context.Context, r request) (any, error) {
 		}
 		return nil, el.SetInputFiles(ctx, []string{a.Path})
 	case "page.download":
-		bc := s.get(a.Ctx).(*camoufox.BrowserContext)
+		bc, err := handle[*camoufox.BrowserContext](s, a.Ctx)
+		if err != nil {
+			return nil, err
+		}
 		dir, err := os.MkdirTemp("", "e2e-download")
 		if err != nil {
 			return nil, err
