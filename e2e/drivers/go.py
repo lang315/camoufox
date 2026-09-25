@@ -5,14 +5,19 @@ from __future__ import annotations
 import base64
 import json
 import os
+import queue
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
 EXE = REPO / ".ci-work" / ("e2edriver.exe" if os.name == "nt" else "e2edriver")
+# Longer than e2edriver's own 90 s per-request context, so a reply that does come
+# always arrives first. A driver that answers nothing by then is wedged.
+RPC_TIMEOUT_S = 120
 _built = False
 
 
@@ -36,14 +41,32 @@ class GoDriver:
         self.n = 0
         self.browsers = []
 
+    def _start(self) -> None:
+        self.proc = subprocess.Popen([str(build())], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+        self.replies: "queue.Queue[str]" = queue.Queue()
+        out = self.proc.stdout
+
+        def pump():  # a reader thread, so a wedged driver times out instead of hanging the run
+            for line in out:
+                self.replies.put(line)
+            self.replies.put("")
+
+        threading.Thread(target=pump, daemon=True).start()
+
     def rpc(self, op: str, h: str = "", **args):
         if self.proc is None:
-            self.proc = subprocess.Popen([str(build())], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, bufsize=1)
+            self._start()
         self.n += 1
-        self.proc.stdin.write(json.dumps({"id": self.n, "op": op, "h": h, "args": args}) + "\n")
-        self.proc.stdin.flush()
-        line = self.proc.stdout.readline()
+        try:
+            self.proc.stdin.write(json.dumps({"id": self.n, "op": op, "h": h, "args": args}) + "\n")
+            self.proc.stdin.flush()
+            line = self.replies.get(timeout=RPC_TIMEOUT_S)
+        except (queue.Empty, OSError) as e:
+            self.proc.kill()
+            self.proc = None
+            raise RuntimeError(f"go {op}: e2edriver gave no reply in {RPC_TIMEOUT_S}s ({type(e).__name__}); killed it") from e
         if not line:
+            self.proc = None
             raise RuntimeError("e2edriver exited")
         reply = json.loads(line)
         if reply.get("error"):
