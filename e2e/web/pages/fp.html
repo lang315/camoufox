@@ -51,16 +51,22 @@ const voices = () => new Promise(ok => {
 const reply = (target, send) => new Promise(ok => { target.onmessage = e => ok(e.data); send(); setTimeout(() => ok(null), 4000); });
 // Every wait is bounded: a page that never publishes #out hides which API stalled.
 const within = (ms, p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
+// Progress marker: the last step reached, so a page that never finishes says where it stopped.
+const step = s => { document.getElementById("out").dataset.progress = `${s}@${Math.round(performance.now())}ms`; };
 (async () => {
+  step("start");
   const r = {main: snap(), intl: Intl.DateTimeFormat().resolvedOptions().locale, tz: tzAgree(), webdriver: navigator.webdriver,
     screen: {w: screen.width, h: screen.height, aw: screen.availWidth, ah: screen.availHeight, iw: innerWidth, ih: innerHeight,
              ow: outerWidth, oh: outerHeight, dpr: devicePixelRatio},
-    fonts: await within(10000, fonts()), webgl: webgl(), canvas: canvasHash(),
+    fonts: await within(10000, (step("fonts"), fonts())), webgl: webgl(), canvas: canvasHash(),
     voices: typeof speechSynthesis === "undefined" ? null : (await within(5000, voices()).catch(() => [])).map(v => ({name: v.name, uri: v.voiceURI}))};
+  step("main-done");
   const w = new Worker("/fp-worker.js");
   r.dedicated = await reply(w, () => w.postMessage(0));
+  step("dedicated-done");
   try { const s = new SharedWorker("/fp-worker.js"); r.shared = await reply(s.port, () => s.port.start()); }
   catch (e) { r.shared = "error: " + e.name; }
+  step("shared-done");
   try {
     r.service = await within(6000, (async () => {
       await navigator.serviceWorker.register("/sw.js", {scope: "/"});
@@ -68,6 +74,7 @@ const within = (ms, p) => Promise.race([p, new Promise((_, no) => setTimeout(() 
       return reply(navigator.serviceWorker, () => reg.active.postMessage("snap"));
     })());
   } catch (e) { r.service = "error: " + (e.message === "timeout" ? "timeout" : e.name); }
+  step("service-done");
   const out = document.getElementById("out");
   out.textContent = JSON.stringify(r); out.dataset.done = "1";
 })();
