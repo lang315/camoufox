@@ -74,10 +74,6 @@ rejects (also verified). Dry-run with the invocation the build actually uses:
 patch -p1 --forward -l --binary --dry-run < patches/your.patch
 ```
 
-Note also that several patches on `main` carry pre-existing off-by-one hunk headers in
-their LAST hunk (`webgl-spoofing`, `font-hijacker`, `font-list-spoofing`). They apply
-fine and are not yours to fix; just don't add a new one.
-
 Low-level equivalents: `make patch ./patches/x.patch`, `make unpatch ./patches/x.patch`, `make workspace ./patches/x.patch`, `make revert` (reset to `unpatched` tag), `make diff` (diff against `first-checkpoint`). The source dir is a git repo with `unpatched` / `first-checkpoint` / `checkpoint` tags used by these targets.
 
 `make workspace ./patches/x.patch` is unsafe when a LATER patch also edits that patch's files (e.g. `font-list-spoofing.patch`): it wrongly reports the patch as "not applied", moves the `first-checkpoint` tag onto the full stack, and re-applies with fuzz, duplicating hunks. Rebuild the tree at the patch's own position instead — reset to `unpatched`, apply patches 1..N in `scripts/patch.py`'s order, checkpoint, then edit — and prove the baseline by regenerating the unedited patch byte-for-byte before editing (#131).
@@ -140,6 +136,14 @@ PR can merge; the workflow is `.github/workflows/tests.yml`.
   hold `CamoufoxBuilds-linux-x86_64`). The font arms and the Playwright 1.55 video
   guard live here.
 - **`native-tests/`** — leaks, context lifetime, and the repo's own conventions.
+- **`e2e/`** — user journeys through the package, bare Playwright and goapi,
+  against local pages (`live` marker: real sites, dispatch only). Expectations
+  come from quoted docs, Playwright's own Firefox, or coherence rules with a
+  negative control; filed findings are in `e2e/known.py`, scoped per host.
+  ```bash
+  python3 -m ci.run_e2e --binary /path/to/camoufox-bin      # what CI runs
+  gh workflow run e2e.yml --repo <fork> -f release=<tag>    # Linux/macOS/Windows
+  ```
 - **`pythonlib/`**, **`service-tester/`** — the Python package and service layer.
 - **stealth grade** — `ci/run_sundial.py` reports a letter grade and a count.
   Its per-vector detail never leaves that module, because this repo is public.
@@ -303,59 +307,26 @@ The rule: before a font measurement is evidence, say which font universe it was
 taken in, and check that it is the one the product ships.
 
 **9. A log is not a measurement until you know which binary produced it.**
-The #95/#97/#44 pass published three claims that a single readback overturned,
-and all three had the same shape: a number was correct, and what it was a
-number *about* was assumed.
+Three published claims in the #95/#97/#44 pass were each overturned by a single
+readback, and all had one shape: the number was right and what it was *about* was
+assumed. A checksum "moved under this patch" when the earlier run had consumed a
+build of a different branch carrying two other PRs' browser code; a control that
+showed the *probe* was comparable across runs was offered as if it showed the
+*binaries* differed only by the patch; and an independence argument read as being
+about a build without an unmerged patch that every run in fact carried.
 
-- **The "absent reference moved" finding was not this patch's.** An earlier
-  revision of PR #98's body reported the probe's absent-family checksum moving
-  `2482840822 → 1610098690` and offered a mechanism for it. The earlier figure
-  came from run 34477369394, which consumed build **34432908522** — a build of
-  #93's own branch at `163ee251`, already carrying all of #93's patch work. PR
-  #96 landed between that build and this branch's base and changed fallback
-  gating (`font-hijacker.patch`, `font-list-spoofing.patch`), and the branch adds
-  #95 on top, so the delta was two PRs of browser code presented as one patch's.
-  A proper control (`main` build 34658266360 vs the branch build 34578327006,
-  both smoke runs on the same smoke.yml commit) reads `1610098690` on **both**.
-  The reference does not move under *this* patch — #96 is the only remaining
-  candidate for what did — and
-  the mechanism offered was an explanation invented for a movement this patch
-  never caused, which is exactly how several lessons above were earned.
-- **The stated control did not control what the sentence needed.** The defence
-  offered was that `helvetica_neue` read `2304685864` in both runs. That is a
-  real control and it is not nothing — it shows the **probe** is comparable
-  across the two runs. It says nothing about whether the two **binaries** differ
-  only by the patch under test. Lesson 4 says a reference must be guaranteed to
-  differ; this is its other half: a reference must also be guaranteed to be
-  *about the same thing*. State which of the two a control establishes.
-- **All four #44 runs ran on a build carrying an unmerged patch.** PR #100's
-  independence argument read as a forward-looking hypothetical about a build
-  without #95 when every run already had it (`gh run download "34578327006"`,
-  branch `fix/95-cmap-unicode-ucs4`). The argument survived on its merits, but
-  it rested on an implied provenance that was false.
+- **Resolve every run id to its build, and that build's branch, before quoting it.**
+- **Say which comparability a control establishes** — the probe's, or the
+  binaries'. Lesson 4 says a reference must be guaranteed to differ; this is its
+  other half: it must also be guaranteed to be about the same thing.
+- **Grep the arms you did not change.** The highest-value finding in that review
+  came out of logs already on disk.
 
-Two standing steps, both cheap, both of which would have caught all three before
-they reached a PR body: **resolve every run id to its build, and that build's
-branch**, before quoting the run; and **grep the arms you did not change**, since
-the highest-value finding in that review came out of logs already sitting on disk.
-
-*Corollary to 9, about guards.* The fix for "this arm has no assert" was an
-inline `assert` placed where the values were computed (`a9f1682`, smoke.yml
-line 1474) — with arm j2 at line 5794 of the same step. On the control build it **would have** raised
-before j2 could report, erasing j2's U+FFFD global-fallback reading — the one
-thing a control run against a patch-less build exists to capture. That is a
-deduction from the code (`geneva == absent` on that build, so `_dead` is
-non-empty), not an observation: the only smoke run ever dispatched on
-`a9f1682`, 34665048721, was cancelled at step 4 once the layout was checked, and
-the assert never executed in CI. It is the same defect the #44 headline arm had been fixed
-for **earlier in the same batch** (`3c49ff7`, "let the known-red #44 arm report
-without erasing the run"). In a long single-step guard, a failing check must be
-*registered* (`tripwires.append`, triaged at the end of the step) and never
-asserted in place; an assert mid-step is a decision that every arm below it is
-worth less than an early exit. The deferred form is **measured**, not reasoned:
-on run 34665134880 j2 reported, then `(cmap95)` was triaged `UNEXPECTED RED`,
-and the step still went red. The shape recurs — check for it whenever adding a
-check.
+*Corollary, about guards.* In a long single-step guard, register a failing check
+(`tripwires.append`, triaged at the end of the step) and never assert in place: an
+inline assert decides that every arm below it is worth less than an early exit,
+and on a control build it erases exactly the readings the control run exists to
+capture. The shape recurs — check for it whenever adding a check.
 
 **Font read paths: what is gated, measured, or still open.** The ledger — what
 PR #84, PR #93, round 3 and #131 closed, whether by measurement or by reading,
