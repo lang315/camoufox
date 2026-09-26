@@ -11,6 +11,9 @@ until the fix is determined. Each fix is proven by the ledger entry that
 records the bug: the entry is removed and the check goes green, with the same
 check's negative control still going red.
 
+It also replaces the maintainer's former name and personal email with `Lãng`
+across the fork's git history (W0).
+
 ## Non-goals
 
 - New spoofing surfaces. This is repair work on the documented paths, not new
@@ -47,9 +50,103 @@ lesson 6).
 
 ## Design
 
-Five workstreams, each one PR tied to its issue(s). W2 and W3 need no browser
+Six workstreams (W0-W5), each one PR tied to its issue(s). W2 and W3 need no browser
 build. W1 is a single browser build, with all its fixes landing together to
 share the ~40-95 min loop. W4 is measurement that feeds W5.
+
+### W0. Identity scrub: replace the former name and the personal email with "Lãng"
+
+**Measured on 2026-09-26, from all 1,289 commits reachable from every ref:**
+
+| Identity (author or committer) | Occurrences |
+|---|---|
+| former name + personal Gmail address | 928 |
+| former name + GitHub noreply address (GitHub web merges) | 57 |
+| `Lãng` + personal Gmail address | 2 |
+| `Lãng <30039912+lang315@users.noreply.github.com>` (target, already in use) | 39 |
+
+Scope of those numbers:
+- **Commits:** 561 commits carry one of the first three identities, from
+  e1b227c (2026-05-12) to 53b88db.
+- **Tracked files and commit messages:** no tracked file and no commit message
+  contains the name or the email.
+- **Signatures:** 95 of those commits are signed (mostly GitHub web merges).
+- **Refs:** 18 remote branches and 2 tags contain them.
+- **Git config:** global git config is already `Lãng` +
+  `30039912+lang315@users.noreply.github.com`. New commits are clean, so the
+  work is only the history.
+
+**Target identity:** `Lãng <30039912+lang315@users.noreply.github.com>`, for
+author, committer and tagger. It keeps the commits linked to the GitHub account
+without publishing an address. This document names neither the former name
+nor the address, for the same reason.
+
+**What a rewrite changes, stated up front, because it is irreversible once
+pushed:**
+
+- **Every commit from e1b227c onward gets a new sha**, on every branch and both
+  fork tags (including `v152.0.4-beta.31-fork.1`, which the e2e suite fetches
+  releases by). Upstream `daijro` history before e1b227c is untouched, so its
+  shas and the merge-base with upstream stay the same.
+- **About 105 sha references in 32 tracked files will point at commits that no
+  longer exist on any branch.** These are in CLAUDE.md, `docs/fonts-gating.md`,
+  specs and plans, and `.github/workflows/smoke.yml` (9). Issue and PR bodies,
+  and Actions run records (`head_sha`), keep the old shas; they cannot be
+  rewritten. CLAUDE.md lesson 9 ("resolve every run id to its build, and that
+  build's branch") depends on those shas resolving.
+- **The 95 signatures are lost:** the rewritten commits show as unverified.
+- **GitHub will keep the old commits reachable anyway.** Each of the fork's ~104
+  PRs has a read-only `refs/pull/<n>/head` that a push cannot touch, so old
+  shas and their identities stay viewable by URL. Removing them needs a GitHub
+  Support request for cached views and PR refs. Existing clones keep the old
+  history.
+- **The email has already been public.** It has been in 928 public commit
+  identities since May 2026. A rewrite stops new exposure; it cannot recall
+  copies already scraped or cloned.
+
+**Procedure** (done on a fresh mirror clone, never on the working checkout):
+
+1. **Freeze.** No open PRs, no running workflows, and every local branch
+   pushed or deliberately dropped. Record `git show-ref` for heads and tags.
+2. **Backup.** Keep `git bundle create camoufox-pre-scrub.bundle --all` offline,
+   outside the repo and outside any synced folder. It still holds the old
+   identity, so it is never uploaded.
+3. **Rewrite.** Run `git filter-repo --mailmap <file>` with three lines mapping
+   each old identity to the target. filter-repo rewrites authors, committers and
+   tags, and writes `.git/filter-repo/commit-map` (old sha → new sha).
+4. **Verify before any push:**
+   - `git log --all --format='%an <%ae>%n%cn <%ce>' | sort -u` shows no old
+     identity.
+   - Commit messages and tracked files: a grep for the old name (with and
+     without diacritics) and the address is 0. The patterns live only in the
+     offline mailmap, never in the repo.
+   - `git rev-list --count --all` still equals 1,289.
+   - `git diff <old main> <new main>` in tree terms is empty (same tree
+     hashes: `git rev-parse old^{tree} new^{tree}`).
+   - The upstream commits' shas are unchanged.
+5. **Keep old references resolvable.** Commit the changed part of `commit-map`
+   as `docs/history-rewrite-2026-09.md`. The file holds only shas, no identity.
+   Then rewrite the ~105 in-repo sha references through it with a script (not by
+   hand), and grep for any 7-40 hex token that no longer resolves.
+6. **Push.** This is the irreversible step, and it needs the maintainer's
+   explicit go-ahead at that moment. Push `refs/heads/*` and `refs/tags/*` with
+   `--force` (not `--mirror`, which would try to push `refs/pull/*`). Move the
+   release tag and confirm the release still lists its assets.
+7. **After the push:**
+   - The `e2e.yml` dispatch against `v152.0.4-beta.31-fork.1` still fetches
+     and runs.
+   - `gh run list` shows new runs on the new shas.
+   - Local checkouts re-clone.
+   - Enable GitHub's "Keep my email addresses private" and "Block command line
+     pushes that expose my email" (a platform setting, so no repo code is
+     needed).
+   - File the Support request for PR refs and cached views, if the maintainer
+     wants those gone too.
+
+**W0 verification:** the four checks in step 4 are pasted with their output
+into the W0 PR, which carries the `docs/history-rewrite-2026-09.md` map and the
+updated references. The PR merges before the force-push, so the push is the only
+step left.
 
 ### W1. Browser (patches + Juggler): #163, #162 (C++), #166.3
 
@@ -240,6 +337,9 @@ any code.
 
 ## Order
 
+0. W0 first, while no PR is open. Every workstream after it then branches from
+   the rewritten history and cites new shas. Doing it later would strand
+   whatever branches were open at the time.
 1. W2 and W3 in parallel: no build, both fast loops. W3's
    `CAMOUFOX_NO_GENERIC_PREFS` flag must land before W1 is measured, because W1's
    macOS and Windows evidence depends on it.
@@ -265,6 +365,7 @@ any code.
 
 | Workstream | Offline | Browser |
 |---|---|---|
+| W0 | identity, message, count and tree checks (step 4) | e2e dispatch against the moved release tag |
 | W1 | patch dry-run; `tests/patches` guard RED on main build | e2e dispatch on W1 build (with and without B); gate |
 | W2 | `go test ./...` (new tests red first) | e2e dispatch on fork.1 release |
 | W3 | pythonlib tests (new tests red first) | e2e dispatch on fork.1 release; gate |
