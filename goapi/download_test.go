@@ -99,4 +99,9 @@ func TestDownloadOnDownload(t *testing.T) {
 	if err := dl.Wait(waitCtx); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
+
+	body, err := os.ReadFile(dl.Path())
+	if err != nil || string(body) != "download content" {
+		t.Fatalf("ReadFile(Path()=%q) = %q, %v; want the served body", dl.Path(), body, err)
+	}
 }
