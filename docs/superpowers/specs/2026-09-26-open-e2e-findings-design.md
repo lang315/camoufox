@@ -143,10 +143,14 @@ pushed:**
    - File the Support request for PR refs and cached views, if the maintainer
      wants those gone too.
 
-**W0 verification:** the four checks in step 4 are pasted with their output
-into the W0 PR, which carries the `docs/history-rewrite-2026-09.md` map and the
-updated references. The PR merges before the force-push, so the push is the only
-step left.
+**W0 verification:** a PR cannot carry W0, because its base would be the old
+`main`. So:
+- **Before the rewrite:** this spec and its plan land on `main` first, so they
+  are rewritten with everything else.
+- **In the rewrite:** the map and reference-update commit is made on the
+  rewritten `main` in the mirror clone. It is pushed in the same force-push.
+- **Evidence:** the four checks from step 4 and the post-push checks are posted,
+  with their output, to a tracking issue for W0.
 
 ### W1. Browser (patches + Juggler): #163, #162 (C++), #166.3
 
