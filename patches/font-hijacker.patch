@@ -314,11 +314,68 @@ index a9f68b0563..d3dede3ae0 100644
 +
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
+diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
+index bc4d586b41..8e9b668899 100644
+--- a/layout/style/FontFace.cpp
++++ b/layout/style/FontFace.cpp
+@@ -13,13 +13,18 @@
+ #include "mozilla/ServoStyleSet.h"
+ #include "mozilla/ServoUtils.h"
+ #include "mozilla/StaticPrefs_layout.h"
++#include "mozilla/dom/BrowsingContext.h"
+ #include "mozilla/dom/CSSFontFaceRule.h"
+ #include "mozilla/dom/FontFaceBinding.h"
+ #include "mozilla/dom/FontFaceImpl.h"
+ #include "mozilla/dom/FontFaceSet.h"
++#include "mozilla/dom/FontListManager.h"
+ #include "mozilla/dom/Promise.h"
+ #include "mozilla/dom/TypedArray.h"
+ #include "mozilla/dom/UnionTypes.h"
++#include "nsIGlobalObject.h"
++#include "nsPIDOMWindow.h"
++#include "nsPIDOMWindowInlines.h"
+ #include "nsStyleUtil.h"
+ 
+ namespace mozilla::dom {
+@@ -239,6 +244,21 @@ void FontFace::SetSizeAdjust(const nsACString& aValue, ErrorResult& aRv) {
+   mImpl->SetSizeAdjust(aValue, aRv);
+ }
+ 
++// Camoufox: the user context this FontFace belongs to, or 0 when it has no
++// inner window (a worker global, or a detached document). Derived the way
++// FontFaceSet.cpp derives it for its own entry points.
++static uint32_t CamouFontListContextId(nsIGlobalObject* aGlobal) {
++  if (!aGlobal) {
++    return 0;
++  }
++  nsPIDOMWindowInner* inner = aGlobal->GetAsInnerWindow();
++  if (!inner) {
++    return 0;
++  }
++  BrowsingContext* bc = inner->GetBrowsingContext();
++  return bc ? bc->OriginAttributesRef().mUserContextId : 0;
++}
++
+ FontFaceLoadStatus FontFace::Status() { return mImpl->Status(); }
+ 
+ Promise* FontFace::Load(ErrorResult& aRv) {
+@@ -249,6 +269,11 @@ Promise* FontFace::Load(ErrorResult& aRv) {
+     return nullptr;
+   }
+ 
++  // A local() source is looked up synchronously inside mImpl->Load(), and the
++  // family gate it passes through reads the context from this thread. Nothing
++  // else scopes one for a bare FontFace, so scope it here (#44, #150).
++  AutoFontListContext autoFontListCtx(
++      CamouFontListContextId(GetParentObject()));
+   mImpl->Load();
+   mImpl->UpdateOwnerKeepAlive();
+   return mLoaded;
 diff --git a/layout/style/moz.build b/layout/style/moz.build
-index 4b89cbf319..57690f6e1b 100644
+index f00e44a912..7822c39e04 100644
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
-@@ -369,3 +369,6 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
+@@ -371,3 +371,6 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
          "ServoStyleConsts.h",
          inputs=["/servo/ports/geckolib", "/servo/components/style"],
      )
