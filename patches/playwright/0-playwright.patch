@@ -93,15 +93,18 @@ index 3bc36691ce..dbd3d465f6 100644
  browser/chrome/browser/content/activity-stream/data/content/tippytop/favicons/allegro-pl.ico
  browser/defaults/settings/main/search-config-icons/96327a73-c433-5eb4-a16d-b090cadfb80b
 diff --git a/browser/installer/package-manifest.in b/browser/installer/package-manifest.in
-index 46725ca049..8aa34cf7cc 100644
+index 46725ca049..ebc541b4f5 100644
 --- a/browser/installer/package-manifest.in
 +++ b/browser/installer/package-manifest.in
-@@ -197,6 +197,9 @@
+@@ -197,6 +197,12 @@
  @RESPATH@/chrome/remote.manifest
  #endif
  
 +@RESPATH@/chrome/juggler@JAREXT@
 +@RESPATH@/chrome/juggler.manifest
++
++@RESPATH@/chrome/camoufox@JAREXT@
++@RESPATH@/chrome/camoufox.manifest
 +
  ; Modules
  @RESPATH@/browser/modules/*
@@ -297,10 +300,10 @@ index 1fa976de8a..69f04ccd90 100644
  }
  
 diff --git a/docshell/base/nsDocShell.cpp b/docshell/base/nsDocShell.cpp
-index 6fe906d343..16703bcea9 100644
+index 6fe906d343..d276ca29fd 100644
 --- a/docshell/base/nsDocShell.cpp
 +++ b/docshell/base/nsDocShell.cpp
-@@ -15,6 +15,12 @@
+@@ -15,6 +15,21 @@
  #  include <unistd.h>  // for getpid()
  #endif
  
@@ -309,11 +312,20 @@ index 6fe906d343..16703bcea9 100644
 +#endif /* JS_HAS_INTL_API && !MOZ_SYSTEM_ICU */
 +
 +#include "js/LocaleSensitive.h"
++#include "mozilla/dom/TimezoneManager.h"
++#include "mozilla/dom/AudioFingerprintManager.h"
++#include "mozilla/dom/CanvasSeedManager.h"
++#include "mozilla/dom/FontListManager.h"
++#include "mozilla/dom/NavigatorManager.h"
++#include "mozilla/dom/ScreenDimensionManager.h"
++#include "mozilla/dom/SpeechVoicesManager.h"
++#include "mozilla/dom/WebGLParamsManager.h"
++#include "mozilla/dom/WebRTCIPManager.h"
 +
  #include "nsDeviceContext.h"
  #include "mozilla/Attributes.h"
  #include "mozilla/AutoRestore.h"
-@@ -64,6 +70,8 @@
+@@ -64,6 +79,8 @@
  #include "mozilla/dom/DocGroup.h"
  #include "mozilla/dom/Element.h"
  #include "mozilla/dom/FragmentDirective.h"
@@ -322,7 +334,7 @@ index 6fe906d343..16703bcea9 100644
  #include "mozilla/dom/HTMLAnchorElement.h"
  #include "mozilla/dom/HTMLIFrameElement.h"
  #include "mozilla/dom/Navigation.h"
-@@ -96,6 +104,7 @@
+@@ -96,6 +113,7 @@
  #include "mozilla/dom/DocumentBinding.h"
  #include "mozilla/glean/DocshellMetrics.h"
  #include "mozilla/ipc/ProtocolUtils.h"
@@ -330,7 +342,7 @@ index 6fe906d343..16703bcea9 100644
  #include "mozilla/net/DocumentChannel.h"
  #include "mozilla/net/DocumentChannelChild.h"
  #include "mozilla/net/ParentChannelWrapper.h"
-@@ -120,6 +129,7 @@
+@@ -120,6 +138,7 @@
  #include "nsIDocumentViewer.h"
  #include "mozilla/dom/Document.h"
  #include "nsHTMLDocument.h"
@@ -338,7 +350,7 @@ index 6fe906d343..16703bcea9 100644
  #include "nsIDocumentLoaderFactory.h"
  #include "nsIDOMWindow.h"
  #include "nsIEditingSession.h"
-@@ -216,6 +226,7 @@
+@@ -216,6 +235,7 @@
  #include "nsGlobalWindowInner.h"
  #include "nsGlobalWindowOuter.h"
  #include "nsJSEnvironment.h"
@@ -346,7 +358,7 @@ index 6fe906d343..16703bcea9 100644
  #include "nsNetCID.h"
  #include "nsNetUtil.h"
  #include "nsObjectLoadingContent.h"
-@@ -356,6 +367,14 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext,
+@@ -356,6 +376,14 @@ nsDocShell::nsDocShell(BrowsingContext* aBrowsingContext,
        mAllowDNSPrefetch(true),
        mAllowWindowControl(true),
        mCSSErrorReportingEnabled(false),
@@ -361,7 +373,7 @@ index 6fe906d343..16703bcea9 100644
        mAllowAuth(mItemType == typeContent),
        mAllowKeywordFixup(false),
        mDisableMetaRefreshWhenInactive(false),
-@@ -2978,6 +2997,232 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
+@@ -2978,6 +3006,265 @@ nsDocShell::GetMessageManager(ContentFrameMessageManager** aMessageManager) {
    return NS_OK;
  }
  
@@ -494,6 +506,39 @@ index 6fe906d343..16703bcea9 100644
 +}
 +
 +NS_IMETHODIMP
++nsDocShell::DisableSpoofSetters() {
++  // Camoufox (#57): the spoofing setters self-destruct when CALLED, so every
++  // field a config leaves unset keeps its setter on window -- all of them in
++  // a context that runs no init script at all, which a page identifies the
++  // browser with in one line. Juggler calls this straight after the init-script
++  // loop, the last moment any of them is legitimately needed.
++  //
++  // These write the same per-userContextId disabled flags the WebIDL Func
++  // guards already read, so no guard has to change.
++  if (!mBrowsingContext) {
++    return NS_OK;
++  }
++  const uint32_t id = mBrowsingContext->OriginAttributesRef().mUserContextId;
++
++  mozilla::dom::AudioFingerprintManager::DisableFunction(id);
++  mozilla::dom::CanvasSeedManager::DisableFunction(id);
++  mozilla::dom::FontListManager::DisableFunction(id);
++  mozilla::dom::SpeechVoicesManager::DisableFunction(id);
++  mozilla::dom::TimezoneManager::DisableFunction(id);
++  mozilla::dom::WebGLParamsManager::DisableRendererFunction(id);
++  mozilla::dom::WebGLParamsManager::DisableVendorFunction(id);
++  mozilla::dom::WebRTCIPManager::DisableIPv4Function(id);
++  mozilla::dom::WebRTCIPManager::DisableIPv6Function(id);
++  mozilla::dom::NavigatorManager::DisablePlatformFunction(id);
++  mozilla::dom::NavigatorManager::DisableOscpuFunction(id);
++  mozilla::dom::NavigatorManager::DisableHwcFunction(id);
++  mozilla::dom::NavigatorManager::DisableUaFunction(id);
++  mozilla::dom::ScreenDimensionManager::DisableDimensionsFunction(id);
++  mozilla::dom::ScreenDimensionManager::DisableColorDepthFunction(id);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
 +nsDocShell::GetFileInputInterceptionEnabled(bool* aEnabled) {
 +  MOZ_ASSERT(aEnabled);
 +  *aEnabled = GetRootDocShell()->mFileInputInterceptionEnabled;
@@ -594,7 +639,7 @@ index 6fe906d343..16703bcea9 100644
  NS_IMETHODIMP
  nsDocShell::GetIsNavigating(bool* aOut) {
    *aOut = mIsNavigating;
-@@ -4671,7 +4916,7 @@ nsDocShell::GetVisibility(bool* aVisibility) {
+@@ -4671,7 +4958,7 @@ nsDocShell::GetVisibility(bool* aVisibility) {
  }
  
  void nsDocShell::ActivenessMaybeChanged() {
@@ -603,7 +648,7 @@ index 6fe906d343..16703bcea9 100644
    if (RefPtr<PresShell> presShell = GetPresShell()) {
      presShell->ActivenessMaybeChanged();
    }
-@@ -7688,6 +7933,12 @@ nsresult nsDocShell::PerformRetargeting(nsDocShellLoadState* aLoadState) {
+@@ -7688,6 +7975,12 @@ nsresult nsDocShell::PerformRetargeting(nsDocShellLoadState* aLoadState) {
                       true,  // aForceNoOpener
                       getter_AddRefs(newBC));
        MOZ_ASSERT(!newBC);
@@ -616,7 +661,7 @@ index 6fe906d343..16703bcea9 100644
        return rv;
      }
  
-@@ -8881,6 +9132,9 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
+@@ -8881,6 +9174,9 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
    // before calling Stop() below.
    Document* document = GetDocument();
    uint32_t flags = 0;
@@ -626,7 +671,7 @@ index 6fe906d343..16703bcea9 100644
    if (document && !document->CanSavePresentation(nullptr, flags, true)) {
      // This forces some flags into the WindowGlobalParent's mBFCacheStatus,
      // which we'll then use in CanonicalBrowsingContext::AllowedInBFCache,
-@@ -8956,6 +9210,16 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
+@@ -8956,6 +9252,16 @@ nsresult nsDocShell::InternalLoad(nsDocShellLoadState* aLoadState,
    attrs.SetFirstPartyDomain(isTopLevelDoc, aLoadState->URI());
  
    nsCOMPtr<nsIRequest> req;
@@ -643,7 +688,7 @@ index 6fe906d343..16703bcea9 100644
    rv = DoURILoad(aLoadState, aCacheKey, getter_AddRefs(req));
  
    if (NS_SUCCEEDED(rv)) {
-@@ -12067,6 +12331,9 @@ class OnLinkClickEvent : public CancelableRunnable, public SupportsWeakPtr {
+@@ -12067,6 +12373,9 @@ class OnLinkClickEvent : public CancelableRunnable, public SupportsWeakPtr {
        mHandler->OnLinkClickSync(mContent, mLoadState, mNoOpenerImplied,
                                  mTriggeringPrincipal);
      }
@@ -653,7 +698,7 @@ index 6fe906d343..16703bcea9 100644
      return NS_OK;
    }
  
-@@ -12138,6 +12405,11 @@ nsresult nsDocShell::OnFormSubmit(HTMLFormElement* aForm,
+@@ -12138,6 +12447,11 @@ nsresult nsDocShell::OnFormSubmit(HTMLFormElement* aForm,
      return OnLinkClickSync(aForm, aLoadState, false, aForm->NodePrincipal());
    }
  
@@ -665,7 +710,7 @@ index 6fe906d343..16703bcea9 100644
    auto result = OnLinkClickWithLoadState(aForm, aLoadState, false,
                                           aForm->NodePrincipal());
    if (result.isErr()) {
-@@ -12276,6 +12548,8 @@ nsresult nsDocShell::OnLinkClick(
+@@ -12276,6 +12590,8 @@ nsresult nsDocShell::OnLinkClick(
        ownerDoc->GetScriptTrackingFlags());
    loadState->SetHistoryBehavior(NavigationHistoryBehavior::Auto);
  
@@ -738,7 +783,7 @@ index c3fcd2985a..5d9a683361 100644
    bool mAllowKeywordFixup : 1;
    bool mDisableMetaRefreshWhenInactive : 1;
 diff --git a/docshell/base/nsIDocShell.idl b/docshell/base/nsIDocShell.idl
-index db0721841d..12d05dfcaf 100644
+index db0721841d..bb15b4fe12 100644
 --- a/docshell/base/nsIDocShell.idl
 +++ b/docshell/base/nsIDocShell.idl
 @@ -43,6 +43,7 @@ interface nsIURI;
@@ -749,7 +794,7 @@ index db0721841d..12d05dfcaf 100644
  interface nsIEditor;
  interface nsIEditingSession;
  interface nsIInputStream;
-@@ -692,6 +693,45 @@ interface nsIDocShell : nsIDocShellTreeItem
+@@ -692,6 +693,53 @@ interface nsIDocShell : nsIDocShellTreeItem
     */
    void synchronizeLayoutHistoryState();
  
@@ -766,6 +811,14 @@ index db0721841d..12d05dfcaf 100644
 +  attribute AString languageOverride;
 +
 +  boolean overrideTimezone(in AString timezoneId);
++
++  /**
++   * Camoufox: hide every spoofing setter from this docShell's user
++   * context. Chrome-only, so it adds nothing to window -- juggler calls
++   * it after running init scripts, which is the only moment the setters
++   * are still needed (#57).
++   */
++  void disableSpoofSetters();
 +
 +  cenum ReducedMotionOverride : 8 {
 +    REDUCED_MOTION_OVERRIDE_REDUCE,
@@ -2988,14 +3041,15 @@ index 755d82f483..b5d98b5d41 100644
    }
  
 diff --git a/toolkit/toolkit.mozbuild b/toolkit/toolkit.mozbuild
-index f3c59b0856..70bf13928f 100644
+index f3c59b0856..52a0b6cfc2 100644
 --- a/toolkit/toolkit.mozbuild
 +++ b/toolkit/toolkit.mozbuild
-@@ -154,6 +154,7 @@ if CONFIG["ENABLE_WEBDRIVER"]:
+@@ -154,6 +154,8 @@ if CONFIG["ENABLE_WEBDRIVER"]:
          "/remote",
          "/testing/firefox-ui",
          "/testing/marionette",
 +        "/juggler",
++        "/observer",
          "/toolkit/components/telemetry/tests/marionette",
      ]
  
