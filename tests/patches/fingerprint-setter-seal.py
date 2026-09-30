@@ -68,6 +68,7 @@ SETTERS = [
     "setAudioFingerprintSeed",
     "setSpeechVoices",
     "setTimezone",
+    "setCanvasSeed",
 ]
 
 # The page reports from its own world. `visible` is what a `for...in` sweep
