@@ -18,7 +18,9 @@ from .utils import (
     async_attach_vd,
     attach_no_viewport_default,
     attach_desktop_only_warning,
+    attach_launch_fonts,
     attach_stock_media_defaults,
+    warn_fonts_excluded_by_launch,
     launch_options,
     STOCK_MEDIA_DEFAULTS,
     spoofs_window_dimensions,
@@ -182,6 +184,7 @@ async def _launch(
     browser = await playwright.firefox.launch(**from_options)
     if no_viewport_default:
         attach_no_viewport_default(browser)
+    attach_launch_fonts(browser, from_options)
     attach_stock_media_defaults(browser)
     attach_desktop_only_warning(browser)
     return await async_attach_vd(browser, virtual_display)
@@ -246,6 +249,8 @@ async def AsyncNewContext(
     if geolocation:
         opts['geolocation'] = geolocation
         opts.setdefault('permissions', ['geolocation'])
+
+    warn_fonts_excluded_by_launch(browser, fp['config'].get('fonts'))
 
     context = await browser.new_context(**opts)
     await context.add_init_script(fp['init_script'])

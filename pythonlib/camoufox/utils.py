@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Union
 
 import numpy as np
 import orjson
+from platformdirs import user_cache_dir
 from typing_extensions import TypeAlias
 from ua_parser import user_agent_parser
 
@@ -21,6 +22,7 @@ from .exceptions import (
     InvalidOS,
     InvalidPropertyType,
     NonFirefoxFingerprint,
+    NotWritableError,
 )
 from .fingerprints import Screen, from_fpgen, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_hardware_concurrency, identity_salt, identity_seed, fix_screen_no_taskbar, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, raise_screen_to_modern_floor, set_media_devices_defaults, WINDOWS_11_MARKER_FONTS
 from . import coherence
@@ -184,6 +186,36 @@ def _generate_fontconfig(
             f.write(conf_content)
 
     return runtime_conf
+
+
+def _check_writable_dirs(env: Optional[Dict[str, Union[str, float, bool]]] = None) -> None:
+    """
+    Pre-flight check: raises NotWritableError if HOME or the platform cache
+    dir (platformdirs.user_cache_dir("camoufox")) is not writable.
+
+    Camoufox needs to write to both at launch (glxtest, fontconfig, profile
+    creation). On a read-only filesystem, the browser subprocess silently
+    hangs for ~180s instead of failing; this catches it before spawning.
+    See: https://github.com/daijro/camoufox/issues/572
+    """
+    home = str((env or environ).get('HOME') or os.path.expanduser('~'))
+    cache_dir = user_cache_dir("camoufox")
+
+    for label, target in (('HOME', home), ('cache directory', cache_dir)):
+        existing = target
+        while not os.path.exists(existing):
+            parent = os.path.dirname(existing)
+            if parent == existing:
+                break
+            existing = parent
+        if not os.access(existing, os.W_OK):
+            raise NotWritableError(
+                f"Camoufox needs write access to the {label} ('{target}'), but "
+                f"'{existing}' is not writable. Launching would otherwise hang for "
+                "several minutes instead of failing clearly. Make the directory "
+                "writable, or set the HOME environment variable to a writable "
+                "directory before launching."
+            )
 
 
 def warn_if_executable_predates_playwright(path: Optional[Path]) -> None:
@@ -751,6 +783,59 @@ STOCK_MEDIA_DEFAULTS = {
 }
 
 
+def _launch_config(from_options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """The CAMOU_CONFIG a launch_options() dict carries, reassembled from its chunks."""
+    env = (from_options or {}).get('env') or {}
+    chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
+    try:
+        return orjson.loads(''.join(v for _, v in sorted(chunks))) if chunks else {}
+    except orjson.JSONDecodeError:
+        return {}
+
+
+def attach_launch_fonts(target: Any, from_options: Optional[Dict[str, Any]]) -> Any:
+    """
+    Record the launch-level font list on the browser so NewContext can warn when
+    a context asks for fonts the launch config already excluded.
+
+    The launch font list becomes a process-wide whitelist: gfxPlatformFontList's
+    constructor writes it to font.system.whitelist, and ApplyWhitelist() then
+    DELETES every other family from mFontFamilies. A per-context setFontList()
+    can only narrow what is left, so a family the launch config dropped can
+    never be added back by a context (#44).
+    """
+    cfg = _launch_config(from_options)
+    fonts = cfg.get('fonts')
+    if fonts:
+        try:
+            target._camoufox_launch_fonts = frozenset(fonts)
+        except AttributeError:
+            pass  # a Playwright object that does not accept attributes
+    return target
+
+
+def warn_fonts_excluded_by_launch(browser: Any, context_fonts: Optional[List[str]]) -> None:
+    """Warn when a context's fonts cannot appear because the launch whitelist dropped them."""
+    launch_fonts = getattr(browser, '_camoufox_launch_fonts', None)
+    if not launch_fonts or not context_fonts:
+        return
+    missing = sorted(set(context_fonts) - launch_fonts)
+    if not missing:
+        return
+    shown = ', '.join(missing[:5]) + (f", and {len(missing) - 5} more" if len(missing) > 5 else '')
+    warnings.warn(
+        f"{len(missing)} of this context's fonts cannot be rendered because the "
+        f"browser was launched with a different font set: {shown}. "
+        "The launch-level font list becomes a process-wide whitelist and every "
+        "other family is dropped from the font list entirely, so a per-context "
+        "setFontList() can only narrow it, never restore a family (#44). "
+        "Launch one browser per OS, or pass the same os= at launch, if the "
+        "context's fonts matter.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 def attach_stock_media_defaults(target: Any) -> Any:
     """Default new_page()/new_context() to the host's own media features.
 
@@ -1047,6 +1132,9 @@ def launch_options(
             Additional Firefox launch options.
     """
     ensure_browser_profile_dir(env)
+    # A read-only HOME / cache dir makes the browser hang for ~180s instead of
+    # failing (#572); fail here, with a message.
+    _check_writable_dirs(env)
 
     # Build the config
     if config is None:
@@ -1165,7 +1253,11 @@ def launch_options(
     # `headless` and "is there a display to probe" are separate questions: passing
     # `headless or has_display(env)` made a headful run on a real display look like a
     # headless one to get_screen_cons(), which then skipped the bound entirely.
-    screen_cons = screen or (get_screen_cons(headless) if has_display(env) else None)
+    # A self-spawned Xvfb is not a monitor: its (degenerate) size must not bound
+    # the identity (#242).
+    screen_cons = screen or (
+        get_screen_cons(headless) if has_display(env) and not virtual_display else None
+    )
 
     if not _used_preset and fingerprint is None:
         # Default: synthetic generation via fpgen (infinite unique fingerprints)

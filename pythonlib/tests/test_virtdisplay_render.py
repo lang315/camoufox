@@ -13,7 +13,7 @@ Tests for the headless='virtual' rendering/fingerprint bugs (#93, #458, #242).
 The Xvfb process itself only exists on Linux (see test_virtdisplay.py), but
 all of it is verifiable without spawning one: #93/#458 are static
 properties of VirtualDisplay().xvfb_args, and #242 is pure logic in
-utils.get_screen_cons / utils._real_display_present that we exercise with a
+utils.get_screen_cons and the launch_options call site that we exercise with a
 monkeypatched camoufox.display.largest_display(). Those run on any platform.
 
 Run with:
@@ -110,83 +110,52 @@ FAKE_TINY_MONITOR = SimpleNamespace(width=1, height=1)
 FAKE_REAL_MONITOR = SimpleNamespace(width=2560, height=1440)
 
 
-def test_real_display_present_true_for_preexisting_display():
-    # A real host DISPLAY, no virtual_display spawned by us.
-    env = {"DISPLAY": ":0"}
-    assert utils._real_display_present(env, None) is True
-
-
-def test_real_display_present_false_for_self_spawned_virtual_display():
-    # headless='virtual' just set DISPLAY to point at our own Xvfb.
-    env = {"DISPLAY": ":99"}
-    assert utils._real_display_present(env, ":99") is False
-
-
-def test_real_display_present_false_on_linux_when_no_display_at_all(monkeypatch):
-    # DISPLAY / WAYLAND_DISPLAY only exist on Linux, so an empty env means "no
-    # session" there and nothing at all anywhere else -- hence the OS pin.
-    monkeypatch.setattr(display, "OS_NAME", "lin")
-    env: dict = {}
-    assert utils._real_display_present(env, None) is False
-
-
-def test_real_display_present_true_off_linux_without_display(monkeypatch):
-    # Windows and macOS always have a desktop session; keying off DISPLAY alone
-    # skipped the screen constraint entirely on those platforms.
-    monkeypatch.setattr(display, "OS_NAME", "mac")
-    assert utils._real_display_present({}, None) is True
-
-
-def test_get_screen_cons_headless_false_skips_monitor_query(monkeypatch):
+def test_get_screen_cons_headless_skips_monitor_query(monkeypatch):
     called = []
     monkeypatch.setattr(utils, "largest_display", lambda: called.append(1) or FAKE_REAL_MONITOR)
-    assert utils.get_screen_cons(False) is None
+    assert utils.get_screen_cons(True) is None
     assert called == []  # never even queried
 
 
-def test_get_screen_cons_queries_monitors_when_flag_true(monkeypatch):
+def test_get_screen_cons_queries_monitors_when_headful(monkeypatch):
     monkeypatch.setattr(utils, "largest_display", lambda: FAKE_REAL_MONITOR)
-    screen = utils.get_screen_cons(True)
+    screen = utils.get_screen_cons(False)
     assert screen is not None
     assert screen.max_width == 2560
     assert screen.max_height == 1440
 
 
+def _record_screen_bounds(monkeypatch):
+    bounds = []
+    real = utils.generate_fingerprint
+    monkeypatch.setattr(
+        utils, "generate_fingerprint", lambda **kw: bounds.append(kw.get("screen")) or real(**kw)
+    )
+    return bounds
+
+
 def test_virtual_headless_does_not_derive_screen_from_self_spawned_xvfb(monkeypatch):
     """
-    End-to-end reproduction of #242's call-site expression: with a
-    self-spawned virtual display, the (possibly degenerate, e.g. 1x1) Xvfb
-    monitor must never reach get_screen_cons.
+    #242 end to end: with a self-spawned virtual display, the (possibly
+    degenerate, e.g. 1x1) Xvfb monitor must never reach the identity's bounds.
     """
+    monkeypatch.setattr(utils, "has_display", lambda env: True)
     monkeypatch.setattr(utils, "largest_display", lambda: FAKE_TINY_MONITOR)
-
-    headless = False  # AsyncNewBrowser/NewBrowser sets this after spawning Xvfb
-    env = {"DISPLAY": ":99"}  # set by launch_options() for headless='virtual'
-    virtual_display = ":99"
-
-    flag = utils._should_constrain_to_host_display(headless, env, virtual_display)
-    result = utils.get_screen_cons(flag)
-
-    assert result is None, (
-        "a self-spawned Xvfb must not feed its (possibly degenerate) "
-        "resolution into Screen constraints (#242)"
+    bounds = _record_screen_bounds(monkeypatch)
+    # AsyncNewBrowser/NewBrowser pass headless=False once Xvfb is spawned.
+    utils.launch_options(
+        headless=False, os="linux", virtual_display=":99", i_know_what_im_doing=True
     )
+    assert bounds == [None], "a self-spawned Xvfb must not bound the identity (#242)"
 
 
 def test_real_headful_still_derives_screen_from_real_monitor(monkeypatch):
     """Regression guard: the fix must not break real (non-virtual) headful runs."""
+    monkeypatch.setattr(utils, "has_display", lambda env: True)
     monkeypatch.setattr(utils, "largest_display", lambda: FAKE_REAL_MONITOR)
-
-    headless = False
-    env = {"DISPLAY": ":0"}  # a real, pre-existing host display
-    virtual_display = None  # no Xvfb spawned by us
-
-    flag = utils._should_constrain_to_host_display(headless, env, virtual_display)
-    result = utils.get_screen_cons(flag)
-
-    assert result is not None
-    assert result.max_width == 2560
-    assert result.max_height == 1440
+    bounds = _record_screen_bounds(monkeypatch)
+    utils.launch_options(headless=False, os="linux", i_know_what_im_doing=True)
+    assert bounds and bounds[0].max_width == 2560 and bounds[0].max_height == 1440
 
 
 # ---------------------------------------------------------------------------
@@ -197,18 +166,12 @@ def test_real_headful_still_derives_screen_from_real_monitor(monkeypatch):
 def test_live_xvfb_reports_configured_screen_size():
     """
     Confirms the actual spawned Xvfb honors the 1920x1080 -screen arg (not
-    just that we asked for it) and that get_screen_cons correctly ignores it
-    once it's wired up as our own virtual_display.
+    just that we asked for it).
     """
     vd = VirtualDisplay()
     try:
         display = vd.get()
         assert display.startswith(":")
 
-        env = {"DISPLAY": display}
-        # Simulate what launch_options() does for headless='virtual'.
-        assert utils._real_display_present(env, display) is False
-        flag = utils._should_constrain_to_host_display(False, env, display)
-        assert utils.get_screen_cons(flag) is None
     finally:
         vd.kill()

@@ -36,7 +36,7 @@ _MUST_VARY = ("uniqueAudio", "uniqueTimezones")
 # Values that follow the device rather than the context. fonts, screens, voices
 # and WebGL are drawn from a pool of real devices, and three draws from a pool
 # of a dozen collide regularly -- the birthday paradox, not a leak. The canvas
-# is rendered, not noised (ci/tribal-rules.yml: canvas-is-not-noised), so it
+# is rendered, not noised upstream (a fork divergence, see ci/tribal-rules.yml), so it
 # follows the fonts and GPU the same way. Counted and reported, never fatal.
 _MAY_COLLIDE = ("uniqueCanvas", "uniqueFonts", "uniqueScreens", "uniqueVoices", "uniqueWebGL")
 
