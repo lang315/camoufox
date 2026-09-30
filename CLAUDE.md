@@ -9,7 +9,7 @@ The repository rules are in `AGENTS.md`. Everything below is specific to this fo
 The build system is designed for **Linux**, and `multibuild.py` cross-compiles
 Windows from it. **macOS is not cross-compiled** — `.github/workflows/build.yml`
 runs the macOS legs natively on `macos-26` runners, because FF150 hard-requires
-the macOS 26 SDK (`mac_sdk_min_version()` is 26.2 and `widget/cocoa/nsCocoaWindow.mm`
+the macOS 26 SDK (`mac_sdk_min_version()` is 26.5 on FF156 (26.2 on FF152) and `widget/cocoa/nsCocoaWindow.mm`
 uses `NSGlassEffectView`; a macos-15 runner fails with `use of undeclared
 identifier 'NSGlassEffectView'`). That SDK is universal, so the macOS x86_64 leg
 cross-compiles on the arm64 runner. `make setup-macos-sdk` downloads the SDK only
