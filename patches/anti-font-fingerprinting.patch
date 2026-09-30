@@ -242,10 +242,10 @@ index 0000000000..c172727062
 +}  // namespace mozilla
 diff --git a/dom/base/RoverfoxStorageManager.h b/dom/base/RoverfoxStorageManager.h
 new file mode 100644
-index 0000000000..92dbb8aa07
+index 0000000000..68773c6730
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.h
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,46 @@
 +#ifndef mozilla_dom_RoverfoxStorageManager_h
 +#define mozilla_dom_RoverfoxStorageManager_h
 +
@@ -274,12 +274,15 @@ index 0000000000..92dbb8aa07
 +  // A put reached this process's prefs: copy it into the local cache (main
 +  // thread only), which is all a worker thread reads.
 +  static void MirrorPref(const nsACString& aPrefName);
++  // Main thread only, idempotent. Called from ContentChild::InitXPCOM so the
++  // mirror is live before any worker can read; the main-thread paths also
++  // call it lazily.
++  static void EnsureMirror();
 +
 + private:
 +  static nsCString MakePrefName(const nsAString& key);
 +  static void SetPrefValue(const nsCString& prefName, const nsCString& value);
 +  static void ReadValue(const nsCString& prefName, nsACString& outValue);
-+  static void EnsureMirror();
 +  static nsTHashSet<nsCString>& GetMissCache();
 +  static nsTHashMap<nsCStringHashKey, nsCString>& GetLocalCache();
 +  static mozilla::Mutex& GetLocalCacheMutex();
@@ -350,6 +353,29 @@ index 345455c14e..f46f13ebf6 100644
  bool OffscreenCanvas::IsChrome() const {
    if (NS_IsMainThread()) {
      nsCOMPtr<nsPIDOMWindowInner> win = do_QueryInterface(GetRelevantGlobal());
+diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
+index 44726e08c4..697d9290a6 100644
+--- a/dom/ipc/ContentChild.cpp
++++ b/dom/ipc/ContentChild.cpp
+@@ -81,6 +81,7 @@
+ #include "mozilla/dom/PushNotifier.h"
+ #include "mozilla/dom/RemoteWorkerDebuggerManagerChild.h"
+ #include "mozilla/dom/RemoteWorkerService.h"
++#include "mozilla/dom/RoverfoxStorageManager.h"
+ #include "mozilla/dom/ScreenOrientation.h"
+ #include "mozilla/dom/ServiceWorkerManager.h"
+ #include "mozilla/dom/SessionStorageManager.h"
+@@ -1444,6 +1445,10 @@ void ContentChild::InitXPCOM(
+   Preferences::RegisterCallbackAndCall(&OnFissionBlocklistPrefChange,
+                                        kFissionOmitBlockListValues);
+ 
++  // Camoufox: worker threads read the storage cache only, so fill it before
++  // any worker can start.
++  RoverfoxStorageManager::EnsureMirror();
++
+   // Set the dynamic scalar definitions for this process.
+   TelemetryIPC::AddDynamicScalarDefinitions(aXPCOMInit.dynamicScalarDefs());
+ }
 diff --git a/dom/workers/WorkerPrivate.h b/dom/workers/WorkerPrivate.h
 index b38f31f547..2321f5acd5 100644
 --- a/dom/workers/WorkerPrivate.h
