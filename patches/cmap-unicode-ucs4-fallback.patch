@@ -1,11 +1,8 @@
 diff --git a/gfx/thebes/gfxFontUtils.cpp b/gfx/thebes/gfxFontUtils.cpp
-index 415a16baec..39557d0be8 100644
+index e4e2d989e7..7c6f9f3d0f 100644
 --- a/gfx/thebes/gfxFontUtils.cpp
 +++ b/gfx/thebes/gfxFontUtils.cpp
-@@ -418,14 +418,39 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
-      ((p) == PLATFORM_ID_UNICODE && ((e) != EncodingIDUVSForUnicodePlatform)))
- #else
- #  define acceptableFormat4(p, e, k)                                 \
+@@ -420,8 +420,33 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
      (((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDMicrosoft) || \
       ((p) == PLATFORM_ID_UNICODE))
  
@@ -40,7 +37,4 @@ index 415a16baec..39557d0be8 100644
 +      (e) != EncodingIDUVSForUnicodePlatform && !(k)))
  #endif
  
- #define acceptablePlatform(p) \
-   ((p) == PLATFORM_ID_UNICODE || (p) == PLATFORM_ID_MICROSOFT)
- #define isSymbol(p, e) ((p) == PLATFORM_ID_MICROSOFT && (e) == EncodingIDSymbol)
- #define isUVSEncoding(p, e) \
+ #ifndef MOZ_ENABLE_FREETYPE
