@@ -38,23 +38,16 @@ type MediaDecodeInfo struct {
 // absent.
 type Config struct {
 	// navigator.*
-	NavigatorUserAgent            string   `json:"navigator.userAgent,omitempty"`
-	NavigatorDoNotTrack           string   `json:"navigator.doNotTrack,omitempty"`
-	NavigatorAppCodeName          string   `json:"navigator.appCodeName,omitempty"`
-	NavigatorAppName              string   `json:"navigator.appName,omitempty"`
-	NavigatorAppVersion           string   `json:"navigator.appVersion,omitempty"`
-	NavigatorOscpu                string   `json:"navigator.oscpu,omitempty"`
-	NavigatorLanguage             string   `json:"navigator.language,omitempty"`
-	NavigatorLanguages            []string `json:"navigator.languages,omitempty"`
-	NavigatorPlatform             string   `json:"navigator.platform,omitempty"`
-	NavigatorHardwareConcurrency  *uint32  `json:"navigator.hardwareConcurrency,omitempty"`
-	NavigatorProduct              string   `json:"navigator.product,omitempty"`
-	NavigatorProductSub           string   `json:"navigator.productSub,omitempty"`
-	NavigatorMaxTouchPoints       *uint32  `json:"navigator.maxTouchPoints,omitempty"`
-	NavigatorCookieEnabled        *bool    `json:"navigator.cookieEnabled,omitempty"`
-	NavigatorGlobalPrivacyControl *bool    `json:"navigator.globalPrivacyControl,omitempty"`
-	NavigatorBuildID              string   `json:"navigator.buildID,omitempty"`
-	NavigatorOnLine               *bool    `json:"navigator.onLine,omitempty"`
+	NavigatorUserAgent            string  `json:"navigator.userAgent,omitempty"`
+	NavigatorDoNotTrack           string  `json:"navigator.doNotTrack,omitempty"`
+	NavigatorAppVersion           string  `json:"navigator.appVersion,omitempty"`
+	NavigatorOscpu                string  `json:"navigator.oscpu,omitempty"`
+	NavigatorLanguage             string  `json:"navigator.language,omitempty"`
+	NavigatorPlatform             string  `json:"navigator.platform,omitempty"`
+	NavigatorHardwareConcurrency  *uint32 `json:"navigator.hardwareConcurrency,omitempty"`
+	NavigatorMaxTouchPoints       *uint32 `json:"navigator.maxTouchPoints,omitempty"`
+	NavigatorGlobalPrivacyControl *bool   `json:"navigator.globalPrivacyControl,omitempty"`
+	NavigatorBuildID              string  `json:"navigator.buildID,omitempty"`
 
 	// screen.*
 	ScreenAvailHeight *uint32  `json:"screen.availHeight,omitempty"`
@@ -73,24 +66,19 @@ type Config struct {
 	ScreenOrientationAngle *uint32 `json:"screen:orientationAngle,omitempty"`
 
 	// window.*
-	WindowScrollMinX        *int32   `json:"window.scrollMinX,omitempty"`
-	WindowScrollMinY        *int32   `json:"window.scrollMinY,omitempty"`
-	WindowScrollMaxX        *int32   `json:"window.scrollMaxX,omitempty"`
-	WindowScrollMaxY        *int32   `json:"window.scrollMaxY,omitempty"`
-	WindowOuterHeight       *uint32  `json:"window.outerHeight,omitempty"`
-	WindowOuterWidth        *uint32  `json:"window.outerWidth,omitempty"`
-	WindowInnerHeight       *uint32  `json:"window.innerHeight,omitempty"`
-	WindowInnerWidth        *uint32  `json:"window.innerWidth,omitempty"`
-	WindowScreenX           *int32   `json:"window.screenX,omitempty"`
-	WindowScreenY           *int32   `json:"window.screenY,omitempty"`
-	WindowHistoryLength     *uint32  `json:"window.history.length,omitempty"`
-	WindowDevicePixelRatio  *float64 `json:"window.devicePixelRatio,omitempty"`
+	WindowScrollMinX       *int32   `json:"window.scrollMinX,omitempty"`
+	WindowScrollMinY       *int32   `json:"window.scrollMinY,omitempty"`
+	WindowScrollMaxX       *int32   `json:"window.scrollMaxX,omitempty"`
+	WindowScrollMaxY       *int32   `json:"window.scrollMaxY,omitempty"`
+	WindowOuterHeight      *uint32  `json:"window.outerHeight,omitempty"`
+	WindowOuterWidth       *uint32  `json:"window.outerWidth,omitempty"`
+	WindowInnerHeight      *uint32  `json:"window.innerHeight,omitempty"`
+	WindowInnerWidth       *uint32  `json:"window.innerWidth,omitempty"`
+	WindowScreenX          *int32   `json:"window.screenX,omitempty"`
+	WindowScreenY          *int32   `json:"window.screenY,omitempty"`
+	WindowDevicePixelRatio *float64 `json:"window.devicePixelRatio,omitempty"`
 
 	// document.body.*
-	DocumentBodyClientWidth  *uint32 `json:"document.body.clientWidth,omitempty"`
-	DocumentBodyClientHeight *uint32 `json:"document.body.clientHeight,omitempty"`
-	DocumentBodyClientTop    *uint32 `json:"document.body.clientTop,omitempty"`
-	DocumentBodyClientLeft   *uint32 `json:"document.body.clientLeft,omitempty"`
 
 	// headers.*
 	HeadersUserAgent      string `json:"headers.User-Agent,omitempty"`
@@ -103,19 +91,12 @@ type Config struct {
 	WebRTCLocalIPv4 string `json:"webrtc:localipv4,omitempty"`
 	WebRTCLocalIPv6 string `json:"webrtc:localipv6,omitempty"`
 
-	PDFViewerEnabled *bool `json:"pdfViewerEnabled,omitempty"`
-
 	// battery:*
-	BatteryCharging        *bool    `json:"battery:charging,omitempty"`
-	BatteryChargingTime    *float64 `json:"battery:chargingTime,omitempty"`
-	BatteryDischargingTime *float64 `json:"battery:dischargingTime,omitempty"`
-	BatteryLevel           *float64 `json:"battery:level,omitempty"`
 
 	// fonts / voices
-	Fonts            []string `json:"fonts,omitempty"`
-	FontsSpacingSeed *uint32  `json:"fonts:spacing_seed,omitempty"`
-	AudioSeed        *uint32  `json:"audio:seed,omitempty"`
-	CanvasSeed       *uint32  `json:"canvas:seed,omitempty"`
+	Fonts      []string `json:"fonts,omitempty"`
+	AudioSeed  *uint32  `json:"audio:seed,omitempty"`
+	CanvasSeed *uint32  `json:"canvas:seed,omitempty"`
 
 	// geolocation / locale
 	GeolocationLatitude  *float64 `json:"geolocation:latitude,omitempty"`
@@ -139,38 +120,40 @@ type Config struct {
 	AudioContextMaxChannelCount *uint32  `json:"AudioContext:maxChannelCount,omitempty"`
 
 	// webGl:* / webGl2:*
-	WebGLRenderer                            string                 `json:"webGl:renderer,omitempty"`
-	WebGLVendor                              string                 `json:"webGl:vendor,omitempty"`
-	WebGLSupportedExtensions                 []string               `json:"webGl:supportedExtensions,omitempty"`
-	WebGL2SupportedExtensions                []string               `json:"webGl2:supportedExtensions,omitempty"`
-	WebGLParameters                          map[string]any         `json:"webGl:parameters,omitempty"`
-	WebGLParametersBlockIfNotDefined         *bool                  `json:"webGl:parameters:blockIfNotDefined,omitempty"`
-	WebGL2Parameters                         map[string]any         `json:"webGl2:parameters,omitempty"`
-	WebGL2ParametersBlockIfNotDefined        *bool                  `json:"webGl2:parameters:blockIfNotDefined,omitempty"`
-	WebGLShaderPrecisionFormats              map[string]any         `json:"webGl:shaderPrecisionFormats,omitempty"`
-	WebGLShaderPrecisionFormatsBlockIfNotDef *bool                  `json:"webGl:shaderPrecisionFormats:blockIfNotDefined,omitempty"`
-	WebGL2ShaderPrecisionFormats             map[string]any         `json:"webGl2:shaderPrecisionFormats,omitempty"`
-	WebGL2ShaderPrecisionFormatsBlockIfNoDef *bool                  `json:"webGl2:shaderPrecisionFormats:blockIfNotDefined,omitempty"`
-	WebGLContextAttributes                   map[string]any         `json:"webGl:contextAttributes,omitempty"`
-	WebGL2ContextAttributes                  map[string]any         `json:"webGl2:contextAttributes,omitempty"`
+	WebGLRenderer                            string         `json:"webGl:renderer,omitempty"`
+	WebGLVendor                              string         `json:"webGl:vendor,omitempty"`
+	WebGLSupportedExtensions                 []string       `json:"webGl:supportedExtensions,omitempty"`
+	WebGL2SupportedExtensions                []string       `json:"webGl2:supportedExtensions,omitempty"`
+	WebGLParameters                          map[string]any `json:"webGl:parameters,omitempty"`
+	WebGL2Parameters                         map[string]any `json:"webGl2:parameters,omitempty"`
+	WebGLShaderPrecisionFormats              map[string]any `json:"webGl:shaderPrecisionFormats,omitempty"`
+	WebGLShaderPrecisionFormatsBlockIfNotDef *bool          `json:"webGl:shaderPrecisionFormats:blockIfNotDefined,omitempty"`
+	WebGL2ShaderPrecisionFormats             map[string]any `json:"webGl2:shaderPrecisionFormats,omitempty"`
+	WebGL2ShaderPrecisionFormatsBlockIfNoDef *bool          `json:"webGl2:shaderPrecisionFormats:blockIfNotDefined,omitempty"`
+	WebGLContextAttributes                   map[string]any `json:"webGl:contextAttributes,omitempty"`
+	WebGL2ContextAttributes                  map[string]any `json:"webGl2:contextAttributes,omitempty"`
 
 	// canvas:*
-	CanvasAAOffset      *int32   `json:"canvas:aaOffset,omitempty"`
-	CanvasAACapOffset   *bool    `json:"canvas:aaCapOffset,omitempty"`
 	CanvasNoiseDensity  *float64 `json:"canvas:noiseDensity,omitempty"`
 	CanvasNoiseStrength *uint32  `json:"canvas:noiseStrength,omitempty"`
 
 	// voices:*
-	Voices                              []Voice  `json:"voices,omitempty"`
-	VoicesBlockIfNotDefined             *bool    `json:"voices:blockIfNotDefined,omitempty"`
-	VoicesFakeCompletion                *bool    `json:"voices:fakeCompletion,omitempty"`
-	VoicesFakeCompletionCharsPerSecond  *float64 `json:"voices:fakeCompletion:charsPerSecond,omitempty"`
+	Voices                  []Voice `json:"voices,omitempty"`
+	VoicesBlockIfNotDefined *bool   `json:"voices:blockIfNotDefined,omitempty"`
 
 	// mediaDevices:*
-	MediaDevicesMicros   *uint32 `json:"mediaDevices:micros,omitempty"`
-	MediaDevicesWebcams  *uint32 `json:"mediaDevices:webcams,omitempty"`
-	MediaDevicesSpeakers *uint32 `json:"mediaDevices:speakers,omitempty"`
-	MediaDevicesEnabled  *bool   `json:"mediaDevices:enabled,omitempty"`
+	MediaDevicesMicros           *uint32  `json:"mediaDevices:micros,omitempty"`
+	MediaDevicesWebcams          *uint32  `json:"mediaDevices:webcams,omitempty"`
+	MediaDevicesSpeakers         *uint32  `json:"mediaDevices:speakers,omitempty"`
+	MediaDevicesEnabled          *bool    `json:"mediaDevices:enabled,omitempty"`
+	MediaDevicesMicrophoneLabels []string `json:"mediaDevices:microphoneLabels,omitempty"`
+	MediaDevicesMicrophoneGroups []string `json:"mediaDevices:microphoneGroups,omitempty"`
+	MediaDevicesWebcamLabels     []string `json:"mediaDevices:webcamLabels,omitempty"`
+	MediaDevicesWebcamGroups     []string `json:"mediaDevices:webcamGroups,omitempty"`
+	MediaDevicesSpeakerLabels    []string `json:"mediaDevices:speakerLabels,omitempty"`
+	MediaDevicesSpeakerGroups    []string `json:"mediaDevices:speakerGroups,omitempty"`
+
+	InstantAnimations *bool `json:"instantAnimations,omitempty"`
 
 	// mediaCapabilities:* — per-OS codec matrix so canPlayType /
 	// MediaSource.isTypeSupported / mediaCapabilities.decodingInfo don't leak
@@ -189,7 +172,6 @@ type Config struct {
 	AllowMainWorld   *bool    `json:"allowMainWorld,omitempty"`
 	ForceScopeAccess *bool    `json:"forceScopeAccess,omitempty"`
 	DisableTheming   *bool    `json:"disableTheming,omitempty"`
-	MemorySaver      *bool    `json:"memorysaver,omitempty"`
 	Addons           []string `json:"addons,omitempty"`
 	CertificatePaths []string `json:"certificatePaths,omitempty"`
 	Certificates     []string `json:"certificates,omitempty"`
@@ -199,7 +181,6 @@ type Config struct {
 	// TestProducerSchemaDrift failed on main and goapi.yml was red for every
 	// PR -- which would make the guard added alongside it unreadable.
 	// Kept in its own block so gofmt does not realign the one above.
-	DisableInstantAnimations *bool `json:"disableInstantAnimations,omitempty"`
 	// Arrived with the beta.29 sync (upstream d5d7713 added the
 	// allow_addon_new_tab launch option), so this branch introduced the drift
 	// it fixes here.

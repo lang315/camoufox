@@ -255,7 +255,7 @@ jobs:
           from playwright.sync_api import sync_playwright
 
           # Every Camoufox window.setXxx(); keep in step with dom/webidl/Window.webidl.
-          NAMES = ["setFontSpacingSeed","setAudioFingerprintSeed","setCanvasSeed","setTimezone",
+          NAMES = ["setAudioFingerprintSeed","setCanvasSeed","setTimezone",
                    "setScreenDimensions","setScreenColorDepth","setNavigatorPlatform",
                    "setNavigatorOscpu","setNavigatorUserAgent",
                    "setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",
@@ -1381,7 +1381,7 @@ jobs:
                         # script in this same run, so if it is present here and
                         # setFontList is not, the difference is specific rather
                         # than systemic (#83).
-                        'setters: ["setFontSpacingSeed","setAudioFingerprintSeed",'
+                        'setters: ["setAudioFingerprintSeed",'
                         '"setCanvasSeed","setTimezone","setScreenDimensions",'
                         '"setScreenColorDepth","setNavigatorPlatform","setNavigatorOscpu",'
                         '"setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",'
