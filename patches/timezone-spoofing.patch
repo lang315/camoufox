@@ -135,10 +135,10 @@ index 0000000000..888303c315
 +
 +#endif  // mozilla_dom_TimezoneManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index c1b1fbf7e6..ee5d0b9149 100644
+index 88f6b8f9d2..3854865d77 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -290,6 +290,7 @@ EXPORTS.mozilla.dom += [
+@@ -291,6 +291,7 @@ EXPORTS.mozilla.dom += [
      "TimeoutBudgetManager.h",
      "TimeoutHandler.h",
      "TimeoutManager.h",
@@ -146,7 +146,7 @@ index c1b1fbf7e6..ee5d0b9149 100644
      "TreeIterator.h",
      "TreeOrderedArray.h",
      "TreeOrderedArrayInlines.h",
-@@ -518,6 +519,7 @@ UNIFIED_SOURCES += [
+@@ -520,6 +521,7 @@ UNIFIED_SOURCES += [
      "TimeoutExecutor.cpp",
      "TimeoutHandler.cpp",
      "TimeoutManager.cpp",
@@ -155,19 +155,19 @@ index c1b1fbf7e6..ee5d0b9149 100644
      "UIDirectionManager.cpp",
      "UserActivation.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index ef345fa7ea..fe3cdaebd5 100644
+index 99b39b74ac..592920a004 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -247,6 +247,8 @@
- #include "nsICookieService.h"
+@@ -248,6 +248,8 @@
  #include "nsID.h"
  #include "nsIDOMStorageManager.h"
+ #include "CanvasSeedManager.h"
 +#include "TimezoneManager.h"
 +#include "js/Date.h"
  #include "nsDocShell.h"
  #include "mozilla/OriginAttributes.h"
  #include "nsIDOMXULControlElement.h"
-@@ -7765,6 +7767,50 @@ IntlUtils* nsGlobalWindowInner::GetIntlUtils(ErrorResult& aError) {
+@@ -7766,6 +7768,50 @@ IntlUtils* nsGlobalWindowInner::GetIntlUtils(ErrorResult& aError) {
    return mIntlUtils;
  }
  
@@ -219,12 +219,12 @@ index ef345fa7ea..fe3cdaebd5 100644
    MOZ_ASSERT(aSharedWorker);
    MOZ_ASSERT(!mSharedWorkers.Contains(aSharedWorker));
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index d6826ed802..a9d8fb50ba 100644
+index 8707d4a5ba..eb7ea9f668 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -685,6 +685,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
- 
-   mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
+@@ -688,6 +688,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+   // Canvas pixel perturbation seed for privacy-preserving canvas readback
+   void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
  
 +  void SetTimezone(const nsAString& timezone, mozilla::ErrorResult& aRv);
 +
@@ -308,7 +308,7 @@ index 2da511a657..3b4f16cd41 100644
    MOZ_ASSERT(NS_IsMainThread());
  
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index e4db344794..c2c6eb41b8 100644
+index 006ae5fabf..b989267c65 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
 @@ -955,6 +955,12 @@ partial interface Window {
