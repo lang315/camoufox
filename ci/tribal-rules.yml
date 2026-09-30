@@ -207,22 +207,11 @@ rules:
       only effect is to become detectable is not a feature, so the manager,
       the window setter, the shaper hook and the config key are gone.
 
-  - id: canvas-is-not-noised
-    title: The canvas is rendered, not noised, and there is no canvas seed
-    check: automated
-    evidence:
-      - "PR #528 (e4528a2): 'Disable Canvas Noise' -- removed the canvas noise patch"
-      - "issue #721: canvas:seed declared and passed through, but nothing consumed it"
-      - "24 profiles across 3 runs on v152.0.4-beta.30: canvas 16 distinct of 24, audio 24 of 24"
-    rationale: >-
-      No stock Firefox perturbs its canvas output, so noise is itself a tell:
-      a page that renders the same image twice and gets two answers has found
-      a spoofing browser. A context's canvas therefore follows what really
-      determines it on a real machine, the GPU and the fonts, and two contexts
-      that share those share a canvas. That is why build-tester counts canvas
-      collisions with the device-level values and does not gate on them. The
-      launchers generated a canvas:seed for three releases after the patch
-      that read it was gone; it is not generated or declared any more.
+  # Fork divergence (lang315/camoufox): upstream's rule `canvas-is-not-noised`
+  # (canvas rendered, not noised, no canvas seed; PR #528, e4528a2 disabled canvas
+  # noise) is deliberately NOT carried here. The fork re-added canvas noise in
+  # e1b227c (patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
+  # so the rule and its native test were removed rather than left red.
 
   - id: canvas-fingerprint-is-hashed-not-truncated
     title: The canvas check hashes pixels, not a prefix of the data URL

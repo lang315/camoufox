@@ -1,7 +1,7 @@
 """
-Regression coverage for daijro/camoufox#328: fonts:spacing_seed, audio:seed and
-canvas:seed were re-randomized on every launch, with no way to pin them for a
-reproducible fingerprint.
+Regression coverage for daijro/camoufox#328: audio:seed and canvas:seed were
+re-randomized on every launch, with no way to pin them. Pinning goes through
+the `config` dict; the glyph-spacing seed no longer exists (D2).
 
 * from_preset() (fingerprints.py ~314-317) had *no* parameter through which a
   caller could supply these seeds -- it always overwrote them with a fresh
@@ -42,29 +42,10 @@ MINIMAL_PRESET = {
 }
 
 
-# --- from_preset(): the actually-broken piece -------------------------------
+# --- from_preset(): audio:seed is drawn per identity ------------------------
 
-def test_from_preset_pins_seeds_when_given():
-    config = from_preset(MINIMAL_PRESET, fonts_spacing_seed=111, audio_seed=222, canvas_seed=333)
-    assert config['fonts:spacing_seed'] == 111
-    assert config['audio:seed'] == 222
-    assert config['canvas:seed'] == 333
-
-
-def test_from_preset_still_randomizes_when_unset():
-    # Default behavior (no pinning) must be unchanged: two calls get different seeds.
-    config_a = from_preset(MINIMAL_PRESET)
-    config_b = from_preset(MINIMAL_PRESET)
-    assert config_a['fonts:spacing_seed'] != config_b['fonts:spacing_seed']
-    assert config_a['audio:seed'] != config_b['audio:seed']
-    assert config_a['canvas:seed'] != config_b['canvas:seed']
-
-
-def test_from_preset_partial_pin_still_randomizes_the_rest():
-    config = from_preset(MINIMAL_PRESET, fonts_spacing_seed=999)
-    assert config['fonts:spacing_seed'] == 999
-    assert config['audio:seed'] != 999
-    assert config['canvas:seed'] != 999
+def test_from_preset_draws_a_fresh_audio_seed_each_call():
+    assert from_preset(MINIMAL_PRESET)['audio:seed'] != from_preset(MINIMAL_PRESET)['audio:seed']
 
 
 # --- launch_options(): already correct, locked in as a regression guard -----
@@ -93,7 +74,7 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
     monkeypatch.setattr(utils, 'installed_verstr', lambda: '150.0.2')
 
     result = launch_options(
-        config={'fonts:spacing_seed': 111222, 'audio:seed': 333444, 'canvas:seed': 555666},
+        config={'audio:seed': 333444, 'canvas:seed': 555666},
         headless=True,
         os='linux',
         exclude_addons=[DefaultAddons.UBO],  # skip network addon download
@@ -107,6 +88,5 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
     )
     cfg = json.loads(''.join(v for _, v in camou_chunks))
 
-    assert cfg['fonts:spacing_seed'] == 111222
     assert cfg['audio:seed'] == 333444
     assert cfg['canvas:seed'] == 555666

@@ -571,19 +571,6 @@ def test_no_glyph_spacing_seed_anywhere():
         )
 
 
-def test_no_canvas_seed_is_declared_or_sent():
-    """Nothing in the browser reads a canvas seed, so neither launcher sends one."""
-    declared = {
-        entry["property"]
-        for entry in json.loads((REPO_ROOT / "settings" / "properties.json").read_text())
-    }
-    assert not {k for k in declared if k.startswith("canvas:")}, explain("canvas-is-not-noised")
-    for launcher in ("pythonlib/camoufox/fingerprints.py", "typescript/src/fingerprints.ts"):
-        assert "setCanvasSeed" not in (REPO_ROOT / launcher).read_text(encoding="utf-8"), (
-            f"{launcher} still calls setCanvasSeed" + explain("canvas-is-not-noised")
-        )
-
-
 def test_the_canvas_check_hashes_pixels_rather_than_a_data_url_prefix():
     """A truncated data URL is mostly PNG header, not image.
 
