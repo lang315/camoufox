@@ -24,12 +24,13 @@ from .exceptions import (
     NonFirefoxFingerprint,
     NotWritableError,
 )
-from .fingerprints import Screen, from_fpgen, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_hardware_concurrency, identity_salt, identity_seed, fix_screen_no_taskbar, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, raise_screen_to_modern_floor, set_media_devices_defaults, WINDOWS_11_MARKER_FONTS
+from .fingerprints import Screen, from_fpgen, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, _generate_random_voice_subset, fix_navigator_arch, fix_hardware_concurrency, identity_salt, identity_seed, fix_screen_no_taskbar, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, raise_screen_to_modern_floor, resample_screen_for_dpr1, set_media_devices_defaults, WINDOWS_11_MARKER_FONTS
 from . import coherence
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
 import warnings
+from random import Random
 
 from .pkgman import (
     INSTALL_DIR,
@@ -1234,6 +1235,8 @@ def launch_options(
 
     # Generate a fingerprint
     _used_preset = False
+    # The dpr a preset's screen dimensions are CSS pixels FOR; from_preset drops it.
+    _source_dpr: Optional[float] = None
     if fingerprint is not None:
         # User passed a custom fingerprint
         if not i_know_what_im_doing:
@@ -1247,6 +1250,7 @@ def launch_options(
         if preset:
             merge_into(config, from_preset(preset, ff_version_str, salt=_identity_salt))
             _used_preset = True
+            _source_dpr = preset.get('screen', {}).get('devicePixelRatio')
 
     # Bound the geometry to the real display. BrowserForge only honours this when
     # its pool has a match, so it is re-applied after generation as well.
@@ -1299,6 +1303,14 @@ def launch_options(
         # in, so it does not cover this.
         if not _used_preset:
             raise_screen_to_modern_floor(config)
+        # Headless has no display, so Firefox reports dpr=1 whatever dpr the
+        # preset's screen was recorded for. Swap in a screen real devices report
+        # AT dpr=1 (8c0f03c). Before the clamps below, which only shrink.
+        if headless and screen is None:
+            resample_screen_for_dpr1(
+                config, target_os, _source_dpr, ff_version_str,
+                rng=Random(identity_seed(config, _identity_salt)),
+            )
         # Headful on a real monitor only: this bound exists so the window fits
         # the screen it is drawn on. headless has no window to overflow, and
         # headless='virtual' reaches here as headless=False (see async_api) with
