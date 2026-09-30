@@ -6,6 +6,9 @@ keeps a short lesson 5; the first section below is its full text, which is what
 code comments citing "CLAUDE.md lesson 5" (smoke.yml, probe_windows_fonts.py)
 lean on.
 
+> **Line numbers below are beta.31 (Firefox 152).** The tree is now Firefox 156
+> (beta.32) and they have not been re-measured; re-anchor before citing one.
+
 ## The per-context gate fails open (lesson 5)
 
 `gfxFontGroup` caches its user context id once in its constructor, through
