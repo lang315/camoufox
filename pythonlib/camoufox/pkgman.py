@@ -2,7 +2,6 @@ import hashlib
 import os
 import platform
 import re
-import shutil
 import sys
 import tempfile
 from dataclasses import dataclass
@@ -129,6 +128,10 @@ def _parse_semver(version: str) -> Tuple[int, ...]:
     Parse a semver string into a comparable tuple
     """
     version = version.lstrip('^~')
+    # A prerelease compares as its release: 0.5.8b1 (PEP 440) and 0.5.8-beta.1
+    # (semver) are both 0.5.8 -- not 0.5.0, which is what splitting on '.'
+    # alone made of them.
+    version = re.split(r'(?<=\d)(?:[-+]|(?:a|b|rc|dev|\.dev|\.post)\d*)', version, maxsplit=1)[0]
     parts = []
     for part in version.split('.'):
         try:
@@ -394,13 +397,6 @@ class Version:
             )
 
     @staticmethod
-    def is_supported_path(path: Path) -> bool:
-        """
-        Check if the version at the given path is supported
-        """
-        return Version.from_path(path) >= VERSION_MIN
-
-    @staticmethod
     def build_minmax() -> Tuple['Version', 'Version']:
         return Version(build=CONSTRAINTS.MIN_VERSION), Version(build=CONSTRAINTS.MAX_VERSION)
 
@@ -588,8 +584,15 @@ class CamoufoxFetcher(GitHubDownloader):
             return None
 
         version = Version(build=match['build'], version=match['version'])
+        # A released library installs exactly the browser it was released with
+        # (browser_pin.py), unless the user explicitly chose something else.
+        from .browser_pin import effective_pin, matches
+
+        pin = effective_pin()
+        if pin and not matches(pin, self.repo_config.name, match['version'], match['build']):
+            return None
         is_prerelease = bool(release and release.get('prerelease')) or version.is_alpha
-        if not self.repo_config.is_version_supported(version, is_prerelease):
+        if not pin and not self.repo_config.is_version_supported(version, is_prerelease):
             return None
 
         digest = asset.get('digest') or ''
@@ -628,31 +631,6 @@ class CamoufoxFetcher(GitHubDownloader):
         """
         rprint(f'Downloading package: {url}')
         return webdl(url, buffer=file)
-
-    def extract_zip(self, zip_file: DownloadBuffer) -> None:
-        """
-        Extract a zip file to the installation directory
-        """
-        rprint(f'Extracting Camoufox: {INSTALL_DIR}')
-        unzip(zip_file, str(INSTALL_DIR))
-
-    @staticmethod
-    def cleanup() -> bool:
-        """
-        Clean up the old installation
-        """
-        if INSTALL_DIR.exists():
-            rprint(f'Cleaning up cache: {INSTALL_DIR}')
-            shutil.rmtree(INSTALL_DIR)
-            return True
-        return False
-
-    def set_version(self) -> None:
-        """
-        Write version.json to INSTALL_DIR
-        """
-        with open(INSTALL_DIR / 'version.json', 'wb') as f:
-            f.write(orjson.dumps({'version': self.version, 'build': self.build}))
 
     def install(self, replace: bool = False) -> None:
         """
@@ -765,6 +743,22 @@ def list_available_versions(
     return versions
 
 
+def _not_installed_message() -> str:
+    """What is missing -- the paired build, a pin, or a channel -- and how to get it."""
+    from .browser_pin import effective_pin
+    from .multiversion import get_default_channel, load_config
+
+    config = load_config()
+    pin = effective_pin(config)
+    pinned = config.get("pinned")
+    channel = config.get("channel") or get_default_channel()
+    if pin:
+        missing = f"{pin.repo_name} {pin.spec}, the browser this camoufox release pairs with,"
+    else:
+        missing = f"{channel}/{pinned}" if pinned else channel
+    return f"{missing} is not installed. Please run `camoufox fetch` to install."
+
+
 def installed_verstr() -> str:
     """
     Get the full version string of the active install
@@ -773,16 +767,13 @@ def installed_verstr() -> str:
 
     active = get_active_path()
     if active is None:
-        from .multiversion import get_default_channel, load_config
+        raise CamoufoxNotInstalled(_not_installed_message())
+    version = Version.from_path(active)
+    if active.parent.parent.name == "browsers":
+        from .browser_pin import warn_if_unpaired
 
-        config = load_config()
-        pinned = config.get("pinned")
-        channel = config.get("channel") or get_default_channel()
-        active_display = f"{channel}/{pinned}" if pinned else channel
-        raise CamoufoxNotInstalled(
-            f"{active_display} is not installed. " f"Please run `camoufox fetch` to install."
-        )
-    return Version.from_path(active).full_string
+        warn_if_unpaired(active.parent.name, version.version or "", version.build)
+    return version.full_string
 
 
 def _root_install_supported() -> bool:
@@ -820,24 +811,18 @@ def camoufox_path(download_if_missing: bool = True) -> Path:
 
     if not os.path.exists(INSTALL_DIR) or not os.listdir(INSTALL_DIR):
         if not download_if_missing:
-            from .multiversion import load_config, get_default_channel
-
-            config = load_config()
-            pinned = config.get("pinned")
-            channel = config.get("channel") or get_default_channel()
-            if pinned:
-                active_display = f"{channel}/{pinned}"
-            else:
-                active_display = channel
-            raise CamoufoxNotInstalled(
-                f"{active_display} is not installed. " f"Please run `camoufox fetch` to install."
-            )
+            raise CamoufoxNotInstalled(_not_installed_message())
 
     elif os.path.exists(INSTALL_DIR) and _root_install_supported():
         return INSTALL_DIR
 
     else:
         if not download_if_missing:
+            from .browser_pin import effective_pin
+
+            # Other builds are installed, but not the one this release pairs with.
+            if effective_pin():
+                raise CamoufoxNotInstalled(_not_installed_message())
             raise UnsupportedVersion("Camoufox executable is outdated.")
 
     CamoufoxFetcher().install()

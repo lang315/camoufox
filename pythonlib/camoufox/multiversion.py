@@ -123,14 +123,6 @@ def latest_per_build(versions: List[Dict]) -> List[Dict]:
     )
 
 
-def get_cached_repo_names() -> List[str]:
-    """
-    Get list of repo names in cache
-    """
-    cache = load_repo_cache()
-    return [r['name'] for r in cache.get('repos', [])]
-
-
 def get_repo_name(github_repo: str) -> str:
     """
     Get display name for a repo from repos.yml, lowercased
@@ -330,6 +322,20 @@ def get_active_path() -> Optional[Path]:
     """
     config = load_config()
     active = config.get('active_version')
+
+    # A released library launches the build it was released with, whatever
+    # happens to be marked active, unless the user explicitly chose otherwise.
+    from .browser_pin import effective_pin, matches
+
+    pin = effective_pin(config)
+    if pin:
+        for inst in list_installed():
+            if matches(pin, inst.repo_name, inst.version.version or '', inst.version.build):
+                if active != inst.relative_path:
+                    config['active_version'] = inst.relative_path
+                    save_config(config)
+                return inst.path
+        return None
 
     if active:
         path = INSTALL_DIR / active

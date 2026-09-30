@@ -6,17 +6,21 @@ to test a specific browser version, so there is one definition of "the tests
 pass", not two.
 
 ```
-resolve ──┬─ static ────────── tribal rules, skiplist, self-tests   (seconds)
-          ├─ pythonlib ─────── the package's own tests               (a minute)
-          └─ build ──┬─ playwright × 6 shards        (conformance + our own)
-                     ├─ skiplist audit ───── every skip must still fail
-                     ├─ native ───────────── leaks, contexts         (ours)
-                     ├─ e2e ──────────────── user journeys, 3 entry points (e2e/)
-                     ├─ patch guards ─────── one per spoofing patch
-                     ├─ build-tester ─────── 8 fingerprint profiles
-                     └─ sundial ──────────── stealth grade  (off: see below)
-                                    │
-                                 summary ──► one comment on the PR
+resolve ── static ─────────────── lint, tribal rules, skiplist, self-tests  (seconds)
+             ├─ typescript ────── type check, lint, vitest, golden parity
+             └─ pythonlib ─────── the package's own tests                   (a minute)
+                  └─ build or fetch ─┬─ patch guards × 3 ─── spoofing, automation, stock parity
+                                     ├─ skiplist audit ───── every skip still fails
+                                     ├─ build-tester ─────── 8 fingerprint profiles
+                                     ├─ e2e ──────────────── user journeys, 3 entry points (e2e/)
+                                     ├─ typescript-browser ─ the npm launcher end to end
+                                     └─ once guards and build-tester pass:
+                                          ├─ playwright × 6 shards   (conformance + our own)
+                                          ├─ native ───────── leaks, contexts, crash recovery
+                                          ├─ sundial ──────── stealth grade
+                                          └─ growth × 7 shards  memory growth, one test per runner
+                                  │
+                               summary ──► one comment on the PR
 ```
 
 ## Which browser, which suite
@@ -261,7 +265,7 @@ isolation itself regresses.
 entry has to claim a test cannot pass in *either* world, or the suite would have
 counted it as a fallback rather than a failure.
 
-Ten tests are deselected outright by [`ci/skiplist.yml`](skiplist.yml), which
+Seventeen tests are deselected outright by [`ci/skiplist.yml`](skiplist.yml), which
 requires a stated reason per entry — `ci/summarize.py` fails the run on an
 unreasoned one.
 
@@ -274,19 +278,23 @@ leaving them bare.
 
 `ci/run_skiplist_audit.py` now runs every entry with the skiplist disabled and
 **fails the build if a skipped test passes**. It is cheap precisely because a
-correct skiplist is short — ten tests, a few seconds — and it is what keeps the
+correct skiplist is short — seventeen tests, a few seconds — and it is what keeps the
 list from drifting back into a place failing tests go to disappear.
 
 ```bash
 python3 -m ci.run_skiplist_audit --binary /path/to/camoufox-bin
 ```
 
-What remains after the audit, 10 tests: two `test_click.py` tests where
-Playwright's stable-position wait races the humanized travel time; six
-client-certificate tests (async and sync) that need the **browser** to present a
-certificate during the TLS handshake — the two that go through the Node driver's
-own request context instead pass, and are not skipped; and the two upstream
-expectations that encode a stock-Firefox quirk, replaced by `tests/camoufox/`.
+What remains, 17 tests: two `test_keyboard.py`
+tests that assert a shifted character arrives without Shift, which Camoufox
+presses as a real keyboard would; six client-certificate tests (async and sync)
+that need the **browser** to present a certificate during the TLS handshake —
+the two that go through the Node driver's own request context instead pass, and
+are not skipped; two upstream expectations that encode a stock-Firefox quirk,
+replaced by `tests/camoufox/`; two popup tests that rely on Playwright
+shipping Firefox's popup blocker off, which Camoufox keeps on; and five layout
+tests that assume headless scrollbars take no width, which Playwright gets by
+hiding them and Camoufox does not do.
 
 That client-certificate split is the audit earning its place. The entry was
 first written as a whole module, because on a local machine all five fail —
@@ -309,6 +317,15 @@ authority for what fails; a local run is a hypothesis.**
   and per-context injection silently degrades to process-global — which passes
   every single-context test there is. It has happened here before (commit
   `d17c887`, "fix screen size leak in contexts").
+- **Crashes.** Kill the browser, the X server, a content process or the driver
+  mid-run, then check that teardown does not hang, nothing leaks, and a fresh
+  launch still works (`test_crash_recovery.py`).
+- **Memory growth.** Drive one mechanism (iframes, canvas readback, WebGL
+  contexts, workers, script compilation, font measurement) N and 4N times and
+  compare the growth: a bounded cost stays flat, a per-iteration leak scales
+  (`test_memory_growth.py`). It takes over half an hour in one process, so CI
+  runs it one test per runner (the `growth` job, `--subset growth --shard i/7`)
+  on every pull request, in the gate.
 - **Settled decisions.** `ci/tribal-rules.yml` lists choices this project already
   made, each with the issue or PR that made it, and
   `native-tests/test_tribal_rules.py` asserts them. A comment explaining a
@@ -527,17 +544,28 @@ Each tier gates the next, so a two-second lint failure never reaches the build:
 
 ```
 0  static    lint, self-tests, settled decisions        seconds
-1  unit      pythonlib                                  ~1 min
+1  unit      pythonlib, typescript                      ~1 min
 2  browser   build  (patches/additions/settings/assets/upstream.sh/Makefile/scripts changed)
-             fetch  (anything else -- driver changes test against the published release)
-3a smoke     patch guards, build-tester                 ~15 min
-3b full      Playwright x2, leaks, stealth              ~40 min
+             fetch  (anything else, when the published release has this tree's browser sources)
+3a smoke     patch guards (spoofing, automation, parity),
+             skiplist audit, build-tester,
+             typescript-browser                         ~15 min
+3b full      Playwright x6, leaks, memory growth x7,
+             stealth                                    ~40 min
 4  gate      the required check
 ```
 
-**Driver-only pull requests never build.** There is nothing new to compile, so
-`fetch-browser` downloads the published release and the browser suites run
-against the build users are actually on — a minute instead of seventy.
+**Driver-only pull requests test the published release, when it matches.**
+There is nothing new to compile, so `fetch-browser` downloads a published
+release and the browser suites run against a build users actually get, in a
+minute instead of seventy. That is only right when the release was built from
+this tree's browser sources. Once a browser change has merged but not been
+built, the guards in the checkout would judge an older browser. So the scope
+step asks `ci.release paired` for the release built from exactly this tree's
+sources, which is the one this tree's library would be paired with (see
+[Releases](#releases)). The job then installs it through the same pin a
+released package carries. When no release matches, it builds instead, and the
+build restores the base branch's cached browser.
 
 **Changing Juggler's JavaScript does not rebuild the browser.** Measured on a
 real build: ccache reported a **98.63%** hit rate, so almost none of those 24
@@ -599,25 +627,115 @@ whole pull request. `ci.run_prepare` runs `setup-minimal` → `dir` →
 text reads as transient. A failed patch hunk or a compile error still fails on
 the first attempt — retrying a broken tree only spends a runner to reach the
 same answer, and a retry loop that swallows a real breakage turns a red build
-into a slow red build.
+into a slow red build. The release workflow (`release.yml`) prepares its tree the same
+way, so a release build gets the same hardening.
 
 > One consequence of `cancel-in-progress`: pushing to a branch cancels its
 > running build. That is right while iterating, but a 70-minute build will not
 > survive a push made 20 minutes in.
 
+## Releases
+
+One workflow, [`release.yml`](../.github/workflows/release.yml), makes every
+release. Every tested merge to `main` is released as a **prerelease**; a
+maintainer promotes one to **stable** by pushing a tag. Each
+library release is paired with exactly one browser build.
+
+```
+merge to main ─► tests ─► plan ─┬─► build-browser ─► publish-browser ─┐
+               (tests.yml,      │   (only if its      v156.0.1-beta.N  │
+                this commit)    │    sources changed)                  ├─► publish-pypi ─► publish-npm ─► tag-library
+                                └─► build-library ─────────────────────┘   0.5.8bN          0.5.8-beta.N    v0.5.8bN
+                                    (only if what it ships changed)        (pip: --pre)     @next
+
+git tag v0.5.8 <tested main commit> && git push origin v0.5.8
+               ─► plan ─► build-library ─► promote-browser ─► publish-pypi ─► publish-npm
+                  (checks)                 paired → stable       0.5.8           0.5.8 @latest
+```
+
+**Only a tested commit is released.** On a push to `main`, `release.yml` calls
+`tests.yml` on the pushed commit and goes on only if it passes; `tests.yml` has no
+push trigger of its own. Every later job checks out that same commit.
+
+**The browser** is built only when the merge changed its sources.
+`ci.browser_inputs.source_digest()` hashes everything the browser is built
+from, except the release number. Every browser release carries a
+`manifest.json` asset with that digest and the commit it was built from; if a
+published release already carries this digest, nothing is built. Otherwise
+`plan` takes the next unused `beta.N`, never below `upstream.sh`'s `release` and
+never reused. Nothing is committed: the tag points at the tested `main` commit,
+and `ci.release set-build` writes the number from the tag into the build's
+working tree, so rebuilding from the tag reproduces the release. The builds are
+attested (`gh attestation verify <file> --repo daijro/camoufox`) and published
+as a GitHub prerelease, never a draft.
+
+Releases cut before manifests existed (up to `v156.0.1-beta.32`) are paired
+the old way: the tag `upstream.sh` names, published (a prerelease counts, a
+draft does not), with no browser source changed since.
+
+**The packages** are built once, in `build-library`, and `publish-pypi` and
+`publish-npm` upload exactly those files: one version spelled for each
+registry, `0.5.8b2` on PyPI and `0.5.8-beta.2` on npm. `pip install camoufox`
+ignores prereleases unless `--pre` is passed, and `npm install
+@camoufox/camoufox` takes `latest`, not `next`. A prerelease is of the version
+in `pyproject.toml` while that version is unreleased, and of the next patch once
+it has shipped. A merge that changes nothing a package ships (`pythonlib/`,
+`typescript/` or the browser it pins) publishes no library prerelease; the last
+published version is found by its tag, `vX.Y.Z` or `vX.Y.ZbN`.
+
+**The pairing.** `ci.release stamp` writes the browser release built from the
+package's own sources into `pythonlib/camoufox/browser-pin.json`, which both
+launchers read. By default, `camoufox fetch` installs exactly that build and a
+launch uses exactly that build, prerelease or not, and whatever else is
+installed or was marked active. A user who explicitly chooses another channel
+or build keeps it, with a warning at launch. `camoufox set --release` goes back
+to the paired build. On `main` the file is `{}`, so a development checkout
+follows its channel as before.
+
+**Promotion** is a `vX.Y.Z` tag, and it is refused unless:
+
+- the tagged commit is on `main`;
+- `All tests passed` succeeded on it;
+- X.Y.Z is newer than every published release;
+- a browser release was built from its sources. Wait for that commit's release
+  run to finish first.
+
+Both packages are then built and checked. The paired browser release becomes
+the stable, latest release, with no rebuild, so users get the binaries that were
+tested; the packages are published at X.Y.Z.
+
+**A failed publish** is retried with *Re-run failed jobs*. Every version and
+tag comes from `plan`, so a re-run publishes the same release.
+
+**Credentials.** None are stored. PyPI and npm both use trusted publishing
+(OIDC): each accepts uploads only from `release.yml` in this repository.
+
 ## Running a piece by hand
 
 ```bash
-python3 -m ci.run_playwright --binary path/to/camoufox-bin
-python3 -m ci.run_playwright --binary path/to/camoufox-bin --shard 3/6
-python3 -m ci.run_native     --subset rules            # no browser needed
-python3 -m ci.run_native     --subset browser --binary path/to/camoufox-bin
-python3 -m ci.run_sundial    --binary path/to/camoufox-bin
-python3 -m ci.summarize      --results-dir .ci-work/results
+python3 -m ci.run_prepare                                # make setup-minimal, dir, mozbootstrap
+python3 -m ci.run_build
+python3 -m ci.run_pythonlib                              # no browser needed
+python3 -m ci.run_typescript                             # no browser needed
+python3 -m ci.run_typescript     --browser path/to/camoufox-bin
+python3 -m ci.run_patch_guards   --binary path/to/camoufox-bin
+python3 -m ci.run_build_tester   --binary path/to/camoufox-bin
+python3 -m ci.run_skiplist_audit --binary path/to/camoufox-bin
+python3 -m ci.run_playwright     --binary path/to/camoufox-bin
+python3 -m ci.run_playwright     --binary path/to/camoufox-bin --shard 3/6
+python3 -m ci.run_native         --subset rules          # no browser needed
+python3 -m ci.run_native         --subset browser --binary path/to/camoufox-bin
+python3 -m ci.run_native         --subset growth  --binary path/to/camoufox-bin
+python3 -m ci.run_native         --subset growth  --binary path/to/camoufox-bin --shard 3/7
+python3 -m ci.run_sundial        --binary path/to/camoufox-bin
+python3 -m ci.summarize          --results-dir .ci-work/results
+python3 -m ci.release            browser-plan            # build a browser, or reuse one
+python3 -m ci.release            paired                  # the release built from this tree
+python3 -m ci.release            lib-plan --channel prerelease
 ```
 
-Each writes one result file to `.ci-work/results/`. `ci/summarize.py` folds the
-shards, decides, and renders the table. A required suite that produced no result
+Each suite runner writes one result file to `.ci-work/results/` (`run_prepare`
+writes none). `ci/summarize.py` folds the shards, decides, and renders the table. A required suite that produced no result
 file is a **failure**, never a skip — otherwise deleting a job would be the
 cheapest way to a green tick.
 
