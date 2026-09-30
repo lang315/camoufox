@@ -1,5 +1,6 @@
 diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
 new file mode 100644
+index 0000000000..191e47ecc0
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
 @@ -0,0 +1,161 @@
@@ -113,7 +114,7 @@ new file mode 100644
 +  if (s == 0) {
 +    s = seed | 1u;
 +  }
-+  // LCG matches FontSpacingSeedManager / gfxHarfBuzzShaper.
++  // LCG (the same LCG the audio/harfbuzz seed paths use).
 +  const uint32_t kThreshold = static_cast<uint32_t>(density * 4294967296.0);
 +  for (size_t i = 0; i < length; ++i) {
 +    if ((i & 3u) == 3u) {
@@ -166,6 +167,7 @@ new file mode 100644
 +} // namespace mozilla
 diff --git a/dom/base/CanvasSeedManager.h b/dom/base/CanvasSeedManager.h
 new file mode 100644
+index 0000000000..4866f7d9a5
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.h
 @@ -0,0 +1,66 @@
@@ -236,9 +238,10 @@ new file mode 100644
 +
 +#endif  // mozilla_dom_CanvasSeedManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
+index e8f35ff5c4..f104f5e03f 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -151,6 +151,7 @@
+@@ -152,6 +152,7 @@ EXPORTS.mozilla.dom += [
      "BodyUtil.h",
      "BorrowedAttrInfo.h",
      "CacheExpirationTime.h",
@@ -246,7 +249,7 @@ diff --git a/dom/base/moz.build b/dom/base/moz.build
      "CCGCScheduler.h",
      "CharacterData.h",
      "CharacterDataBuffer.h",
-@@ -346,6 +347,7 @@
+@@ -357,6 +358,7 @@ UNIFIED_SOURCES += [
      "BodyConsumer.cpp",
      "BodyUtil.cpp",
      "BorrowedAttrInfo.cpp",
@@ -255,24 +258,21 @@ diff --git a/dom/base/moz.build b/dom/base/moz.build
      "CharacterData.cpp",
      "CharacterDataBuffer.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
+index fb3a1f640d..feaaab0feb 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -243,6 +243,7 @@
+@@ -242,6 +242,7 @@
  #include "nsICookieService.h"
  #include "nsID.h"
  #include "nsIDOMStorageManager.h"
 +#include "CanvasSeedManager.h"
- #include "FontSpacingSeedManager.h"
  #include "nsDocShell.h"
  #include "mozilla/OriginAttributes.h"
-@@ -7748,6 +7749,25 @@
-       JS::Rooted<JS::Value> undef(cx, JS::UndefinedValue());
-       JS_SetProperty(cx, global, "setFontSpacingSeed", undef);
-       JS_DeleteProperty(cx, global, "setFontSpacingSeed");
-+    }
-+  }
-+}
-+
+ #include "nsIDOMXULControlElement.h"
+@@ -7803,6 +7804,25 @@ void nsGlobalWindowInner::SetAudioFingerprintSeed(uint32_t seed,
+   }
+ }
+ 
 +void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
 +  uint32_t userContextId = 0;
 +  if (BrowsingContext* bc = GetBrowsingContext()) {
@@ -288,15 +288,20 @@ diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
 +      JS::Rooted<JS::Value> undef(cx, JS::UndefinedValue());
 +      JS_SetProperty(cx, global, "setCanvasSeed", undef);
 +      JS_DeleteProperty(cx, global, "setCanvasSeed");
-     }
-   }
- }
++    }
++  }
++}
++
+ RefPtr<GenericPromise> nsGlobalWindowInner::StorageAccessPermissionChanged(
+     bool aGranted) {
+   // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
+index eec89694f8..d0c76a97b4 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -686,6 +686,9 @@
-   // Font spacing seed for privacy-preserving font fingerprinting
-   void SetFontSpacingSeed(uint32_t seed, mozilla::ErrorResult& aRv);
+@@ -685,6 +685,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+ 
+   mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
  
 +  // Canvas pixel perturbation seed for privacy-preserving canvas readback
 +  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
@@ -304,24 +309,11 @@ diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
    void StoreSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
  
    void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
-diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
---- a/dom/webidl/Window.webidl
-+++ b/dom/webidl/Window.webidl
-@@ -974,4 +974,10 @@
- partial interface Window {
-   [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
-   readonly attribute DocumentPictureInPicture documentPictureInPicture;
-+};
-+
-+// Canvas pixel perturbation seed for privacy-preserving canvas readback
-+partial interface Window {
-+  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
-+  undefined setCanvasSeed(unsigned long seed);
- };
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
+index 0553126dbf..300ec4781c 100644
 --- a/dom/canvas/CanvasRenderingContext2D.cpp
 +++ b/dom/canvas/CanvasRenderingContext2D.cpp
-@@ -58,6 +58,10 @@
+@@ -59,6 +59,11 @@
  #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
  #include "mozilla/dom/DOMMatrix.h"
  #include "mozilla/dom/Document.h"
@@ -329,15 +321,14 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
 +#include "AccessObserver.hpp"
 +#include "mozilla/OriginAttributes.h"
 +#include "prtime.h"
- #include "mozilla/dom/BrowsingContext.h"
++#include "mozilla/dom/BrowsingContext.h"
  #include "mozilla/dom/FontFaceSet.h"
  #include "mozilla/dom/FontFaceSetImpl.h"
-@@ -2257,6 +2261,22 @@
-   UpdateIsOpaque();
- 
+ #include "mozilla/dom/GeneratePlaceholderCanvasData.h"
+@@ -2260,6 +2265,22 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
    return NS_OK;
-+}
-+
+ }
+ 
 +// Resolve the owning Document for canvas seed lookup: html canvas via its
 +// element, offscreen (main-thread) via its owner window. Worker offscreen has
 +// no Document, so this returns null and perturbation becomes a no-op.
@@ -352,10 +343,12 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
 +    }
 +  }
 +  return nullptr;
- }
- 
++}
++
  UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
-@@ -2278,6 +2298,31 @@
+     mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
+     int32_t* out_format, gfx::IntSize* out_imageSize) {
+@@ -2279,6 +2300,31 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
        *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
        *out_imageSize = data->GetSize();
        ret = SurfaceToPackedBGRA(data);
@@ -387,11 +380,10 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
      }
    }
  
-@@ -6751,7 +6796,31 @@
-       UnpremultiplyData(src, srcStride, SurfaceFormat::A8R8G8B8_UINT32, dst,
+@@ -6803,6 +6849,30 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
-+    }
+     }
 +
 +    // Camoufox canvas perturbation on the JS-visible RGBA buffer. No-op when
 +    // seed == 0. Placeholder path already broke out above, so it is untouched.
@@ -409,7 +401,7 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
 +          uctx, std::string(baseDomain.get()),
 +          camoufox::SurfaceId::Canvas,
 +          static_cast<uint64_t>(PR_Now() / 1000));
-     }
++    }
 +    uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
 +    if (seed != 0) {
 +      CanvasSeedManager::Perturb(data, len.value(), seed,
@@ -420,6 +412,7 @@ diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderin
  
    readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
+index 5aaa4279fd..500792ec94 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
 @@ -16,6 +16,10 @@
@@ -433,7 +426,7 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
  #include "gfxCrashReporterUtils.h"
  #include "js/PropertyAndElement.h"  // JS_DefineElement
  #include "js/ScalarType.h"          // js::Scalar::Type
-@@ -5238,6 +5242,33 @@
+@@ -5477,6 +5481,33 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
                range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
                alphaChannelOffset, hasAlphaChannel);
          }
@@ -467,3 +460,17 @@ diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.c
        }
      }
    });
+diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
+index ab1c306617..3bc45920a2 100644
+--- a/dom/webidl/Window.webidl
++++ b/dom/webidl/Window.webidl
+@@ -972,3 +972,9 @@ partial interface Window {
+   [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
+   readonly attribute DocumentPictureInPicture documentPictureInPicture;
+ };
++
++// Canvas pixel perturbation seed for privacy-preserving canvas readback
++partial interface Window {
++  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
++  undefined setCanvasSeed(unsigned long seed);
++};
