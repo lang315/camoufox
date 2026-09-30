@@ -1,16 +1,17 @@
 diff --git a/dom/base/ChromeUtils.cpp b/dom/base/ChromeUtils.cpp
-index 52f0af76ec..2a7a9ae4fc 100644
+index dac837e733..bc91d2cf83 100644
 --- a/dom/base/ChromeUtils.cpp
 +++ b/dom/base/ChromeUtils.cpp
-@@ -5,6 +5,7 @@
+@@ -3,6 +3,8 @@
   * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
  #include "ChromeUtils.h"
 +#include "MaskConfig.hpp"
++#include "AccessObserver.hpp"
  
  #include "JSOracleParent.h"
- #include "ThirdPartyUtil.h"
-@@ -2115,6 +2117,24 @@ bool ChromeUtils::IsDarkBackground(GlobalObject&, Element& aElement) {
+ #include "NonSharedGlobalSyncModuleLoaderScope.h"
+@@ -2717,6 +2719,24 @@ bool ChromeUtils::IsDarkBackground(GlobalObject&, Element& aElement) {
    return nsNativeTheme::IsDarkBackground(f);
  }
  
@@ -35,7 +36,7 @@ index 52f0af76ec..2a7a9ae4fc 100644
  double ChromeUtils::DateNow(GlobalObject&) { return JS_Now() / 1000.0; }
  
  /* static */
-@@ -2141,6 +2161,65 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
+@@ -2748,6 +2768,72 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
    }
  }
  
@@ -98,14 +99,21 @@ index 52f0af76ec..2a7a9ae4fc 100644
 +  aRetVal.Clear();
 +}
 +
++/* static */
++void ChromeUtils::CamouDrainAccessRecords(GlobalObject& aGlobal,
++                                          nsAString& aRetVal) {
++  aRetVal.Assign(NS_ConvertUTF8toUTF16(
++      camoufox::AccessObserver::DrainJSON().c_str()));
++}
++
  /* static */
  bool ChromeUtils::ShouldResistFingerprinting(
      GlobalObject& aGlobal, JSRFPTarget aTarget,
 diff --git a/dom/base/ChromeUtils.h b/dom/base/ChromeUtils.h
-index 138b9c3f80..c7c7ce74bf 100644
+index 8226005acc..e9f1d25e0b 100644
 --- a/dom/base/ChromeUtils.h
 +++ b/dom/base/ChromeUtils.h
-@@ -305,6 +305,10 @@ class ChromeUtils {
+@@ -340,6 +340,10 @@ class ChromeUtils {
  
    static bool IsDarkBackground(GlobalObject&, Element&);
  
@@ -115,8 +123,8 @@ index 138b9c3f80..c7c7ce74bf 100644
 +
    static double DateNow(GlobalObject&);
  
-   static void EnsureJSOracleStarted(GlobalObject&);
-@@ -314,6 +318,20 @@ class ChromeUtils {
+   static double Now(GlobalObject&);
+@@ -351,6 +355,22 @@ class ChromeUtils {
    static void GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
                                                nsTArray<nsCString>& aNames);
  
@@ -134,14 +142,16 @@ index 138b9c3f80..c7c7ce74bf 100644
 +  static void CamouGetStringList(GlobalObject& aGlobal, const nsAString& aVarName,
 +                                 nsTArray<nsString>& aRetVal);
 +
++  static void CamouDrainAccessRecords(GlobalObject& aGlobal, nsAString& aRetVal);
++
    static bool ShouldResistFingerprinting(
        GlobalObject& aGlobal, JSRFPTarget aTarget,
-       const Nullable<uint64_t>& aOverriddenFingerprintingSettings);
+       nsIRFPTargetSetIDL* aOverriddenFingerprintingSettings,
 diff --git a/dom/chrome-webidl/ChromeUtils.webidl b/dom/chrome-webidl/ChromeUtils.webidl
-index 6a99703db1..82415eba19 100644
+index 7434ef25ae..ba5629d41a 100644
 --- a/dom/chrome-webidl/ChromeUtils.webidl
 +++ b/dom/chrome-webidl/ChromeUtils.webidl
-@@ -750,6 +750,13 @@ partial namespace ChromeUtils {
+@@ -926,6 +926,13 @@ partial namespace ChromeUtils {
     */
    boolean isDarkBackground(Element element);
  
@@ -155,7 +165,7 @@ index 6a99703db1..82415eba19 100644
    /**
     * Starts the JSOracle process for ORB JavaScript validation, if it hasn't started already.
     */
-@@ -761,6 +768,31 @@ partial namespace ChromeUtils {
+@@ -937,6 +944,36 @@ partial namespace ChromeUtils {
    [ChromeOnly]
    readonly attribute unsigned long aliveUtilityProcesses;
  
@@ -183,6 +193,11 @@ index 6a99703db1..82415eba19 100644
 +   * Get a list of strings from Camoufox MaskConfig.
 +   */
 +  sequence<DOMString> camouGetStringList(DOMString varName);
++
++  /**
++   * Drain buffered Camoufox fingerprint-access records as a JSON array string.
++   */
++  DOMString camouDrainAccessRecords();
 +
    /**
     * Get a list of all possible Utility process Actor Names ; mostly useful to
