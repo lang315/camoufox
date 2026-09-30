@@ -1,10 +1,10 @@
 diff --git a/browser/base/content/browser-init.js b/browser/base/content/browser-init.js
-index 0aa4baea8e..343691b2f8 100644
+index 2f3f46d8d8..dcf2ce3e53 100644
 --- a/browser/base/content/browser-init.js
 +++ b/browser/base/content/browser-init.js
-@@ -44,6 +44,17 @@ var gSerialDeviceObserver = {
-   },
- };
+@@ -2,6 +2,17 @@
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
  
 +const { AddonManager } = ChromeUtils.importESModule(
 +  "resource://gre/modules/AddonManager.sys.mjs",
@@ -20,7 +20,7 @@ index 0aa4baea8e..343691b2f8 100644
  let _resolveDelayedStartup;
  var delayedStartupPromise = new Promise(resolve => {
    _resolveDelayedStartup = resolve;
-@@ -157,7 +168,7 @@ var gBrowserInit = {
+@@ -119,7 +130,7 @@ var gBrowserInit = {
      updateBookmarkToolbarVisibility();
  
      // Set a sane starting width/height for all resolutions on new profiles.
@@ -29,7 +29,7 @@ index 0aa4baea8e..343691b2f8 100644
        // When the fingerprinting resistance is enabled, making sure that we don't
        // have a maximum window to interfere with generating rounded window dimensions.
        document.documentElement.setAttribute("sizemode", "normal");
-@@ -385,6 +396,22 @@ var gBrowserInit = {
+@@ -344,6 +355,22 @@ var gBrowserInit = {
      // Update UI if browser is under remote control.
      gRemoteControl.updateVisualCue();
  
@@ -52,7 +52,7 @@ index 0aa4baea8e..343691b2f8 100644
      // If we are given a tab to swap in, take care of it before first paint to
      // avoid an about:blank flash.
      let tabToAdopt = this.getTabToAdopt();
-@@ -448,6 +475,33 @@ var gBrowserInit = {
+@@ -407,6 +434,33 @@ var gBrowserInit = {
        }
      }
  
@@ -86,7 +86,7 @@ index 0aa4baea8e..343691b2f8 100644
      // Wait until chrome is painted before executing code not critical to making the window visible
      this._boundDelayedStartup = this._delayedStartup.bind(this);
      window.addEventListener("MozAfterPaint", this._boundDelayedStartup);
-@@ -475,9 +529,181 @@ var gBrowserInit = {
+@@ -435,9 +489,181 @@ var gBrowserInit = {
        }
      }
  
@@ -103,13 +103,13 @@ index 0aa4baea8e..343691b2f8 100644
 +    // caps .browserStack, which caps the content viewport, which makes Juggler's
 +    // awaitViewportDimensions handshake unsatisfiable for any larger viewport.
 +    // That await has no timeout, so it hangs forever (daijro/camoufox#666).
-+    let outerWidth, outerHeight;
-+    if ((outerWidth = ChromeUtils.camouGetInt("window.outerWidth"))) {
-+      window.resizeTo(outerWidth, window.outerHeight);
-+    }
-+    if ((outerHeight = ChromeUtils.camouGetInt("window.outerHeight"))) {
-+      window.resizeTo(window.outerWidth, outerHeight);
-+    }
++    let outerWidth = ChromeUtils.camouGetInt("window.outerWidth");
++    let outerHeight = ChromeUtils.camouGetInt("window.outerHeight");
++    // Resolve both dims, then a single resizeTo. resizeTo is async, so reading
++    // window.outer* back between two calls returns a stale value and reverts a
++    // dimension (#192). Values are already spoofed in C++, so resize is enough.
++    if (outerWidth || outerHeight)
++      window.resizeTo(outerWidth || 1280, outerHeight || 1040);
 +    // The window manager can override that size when it maps the window: GNOME
 +    // mutter auto-maximizes a new window covering >= 80% of the work area
 +    // (org.gnome.mutter auto-maximize). The page would then get the host's
