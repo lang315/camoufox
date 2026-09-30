@@ -58,18 +58,12 @@ type Config struct {
 	ScreenWidth       *uint32  `json:"screen.width,omitempty"`
 	ScreenColorDepth  *uint32  `json:"screen.colorDepth,omitempty"`
 	ScreenPixelDepth  *uint32  `json:"screen.pixelDepth,omitempty"`
-	ScreenPageXOffset *float64 `json:"screen.pageXOffset,omitempty"`
-	ScreenPageYOffset *float64 `json:"screen.pageYOffset,omitempty"`
 	// screen.orientation (#20) — type + angle, kept coherent with the spoofed
 	// screen dimensions so the real host orientation doesn't leak.
 	ScreenOrientation      string  `json:"screen:orientation,omitempty"`
 	ScreenOrientationAngle *uint32 `json:"screen:orientationAngle,omitempty"`
 
 	// window.*
-	WindowScrollMinX       *int32   `json:"window.scrollMinX,omitempty"`
-	WindowScrollMinY       *int32   `json:"window.scrollMinY,omitempty"`
-	WindowScrollMaxX       *int32   `json:"window.scrollMaxX,omitempty"`
-	WindowScrollMaxY       *int32   `json:"window.scrollMaxY,omitempty"`
 	WindowOuterHeight      *uint32  `json:"window.outerHeight,omitempty"`
 	WindowOuterWidth       *uint32  `json:"window.outerWidth,omitempty"`
 	WindowInnerHeight      *uint32  `json:"window.innerHeight,omitempty"`

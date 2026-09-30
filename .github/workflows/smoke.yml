@@ -485,7 +485,7 @@ jobs:
 
       - name: "which setter bindings reached the build (#83 diagnostic)"
         run: |
-          # setFontList is the only one of Camoufox's 14 setters missing from
+          # setFontList is the only one of Camoufox's 15 setters missing from
           # window when an init script runs; setWebGLRenderer uses a Func gate
           # identical line for line, including the RoverfoxStorageManager call,
           # and is present. So the gate logic is not the difference -- check
@@ -1373,10 +1373,10 @@ jobs:
                         'typ: typeof window.setFontList, '
                         'fontProps: Object.getOwnPropertyNames(window).filter('
                         'n => /font/i.test(n)), '
-                        # Which of the 14 setters are reachable from an init
+                        # Which of the 15 setters are reachable from an init
                         # script (main world)? The #57 arm enumerates them with
                         # page.evaluate(), which runs in an isolated world and
-                        # cannot see them either way, so its 0/14 says nothing.
+                        # cannot see them either way, so its 0/15 says nothing.
                         # setNavigatorPlatform demonstrably applies from an init
                         # script in this same run, so if it is present here and
                         # setFontList is not, the difference is specific rather
@@ -1385,7 +1385,8 @@ jobs:
                         '"setCanvasSeed","setTimezone","setScreenDimensions",'
                         '"setScreenColorDepth","setNavigatorPlatform","setNavigatorOscpu",'
                         '"setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",'
-                        '"setFontList","setSpeechVoices","setWebRTCIPv4"]'
+                        '"setFontList","setSpeechVoices","setWebRTCIPv4","setWebRTCIPv6",'
+                        '"setNavigatorUserAgent"]'
                         '.filter(n => typeof window[n] === "function"), '
                         'applied: false, err: null}; '
                         'try { window.setFontList(%s); out.applied = true; } '
