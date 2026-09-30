@@ -7,7 +7,7 @@
 /**
  * The cursor path `humanize=True` moves along.
  *
- * Camoufox used to generate this in C++ (additions/camoucfg/MouseTrajectories.hpp):
+ * Camoufox used to generate this in C++ (a header since removed):
  * a cubic Bezier through two random knots, distorted, then walked with an
  * ease-out and emitted at a flat 10ms cadence. It was replaced by Cursory
  * (cursory/, vendored) because the two differ in what they are imitating. A

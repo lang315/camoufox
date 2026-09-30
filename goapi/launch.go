@@ -353,9 +353,6 @@ func applyGeo(cfg *config.Config, info *proxy.GeoInfo) {
 			cfg.WebRTCIPv4 = info.IP
 		}
 	}
-	if cfg.PDFViewerEnabled == nil {
-		cfg.PDFViewerEnabled = config.Bool(true)
-	}
 }
 
 func (b *Browser) enable(ctx context.Context, userPrefs map[string]any) error {

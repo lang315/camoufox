@@ -75,20 +75,12 @@ func Generate(cfg *config.Config, opts Options) error {
 
 	// Per-launch fingerprint noise seeds (1..2^32-1; 0 is a no-op
 	// signal in the C++ side).
-	if cfg.FontsSpacingSeed == nil {
-		cfg.FontsSpacingSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
-	}
 	if cfg.AudioSeed == nil {
 		cfg.AudioSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
 	}
 	if cfg.CanvasSeed == nil {
 		cfg.CanvasSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
 	}
-	// NOTE: window.history.length is deliberately NOT defaulted. Newer
-	// Camoufox clamps docShell session history to this value, which
-	// disables Page.GoBack/GoForward (see navigation.go). donutbrowser
-	// removes this key for the same reason. Callers may still set it
-	// explicitly via Config.WindowHistoryLength if they accept that.
 
 	// Rendering-consistency default (matches donutbrowser): suppress
 	// OS/theme-dependent chrome styling so canvas/screenshot surfaces do
