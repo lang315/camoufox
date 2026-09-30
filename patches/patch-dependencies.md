@@ -43,7 +43,7 @@ be listed there.
 | `touchscreen-fingerprint-spoofing.patch` | `navigator.maxTouchPoints` |
 | `voice-spoofing.patch` | `voices:*` |
 | `webgl-spoofing.patch` | `webGl:*` |
-| `webrtc-ip-spoofing.patch` | `webrtc:ipv4`, `webrtc:ipv6`, `navigator.platform` |
+| `webrtc-ip-spoofing.patch` | `webrtc_ipv4_disabled_<ctx>` and `webrtc_ipv6_disabled_<ctx>` per-context storage keys (via `RoverfoxStorageManager`, not `MaskConfig`); the `webrtc:ipv4`/`webrtc:ipv6` config keys have no reader yet (#163) |
 
 To regenerate the list: `grep -l 'MaskConfig::' patches/*.patch`.
 
