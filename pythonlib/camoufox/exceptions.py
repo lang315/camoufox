@@ -38,14 +38,6 @@ class UnsupportedOS(Exception):
     ...
 
 
-class UnknownProperty(Exception):
-    """
-    Raised when the property is unknown.
-    """
-
-    ...
-
-
 class InvalidPropertyType(Exception):
     """
     Raised when the property type is invalid.
@@ -57,22 +49,6 @@ class InvalidPropertyType(Exception):
 class InvalidAddonPath(FileNotFoundError):
     """
     Raised when the addon path is invalid.
-    """
-
-    ...
-
-
-class InvalidDebugPort(ValueError):
-    """
-    Raised when the debug port is invalid.
-    """
-
-    ...
-
-
-class MissingDebugPort(ValueError):
-    """
-    Raised when the debug port is missing.
     """
 
     ...
@@ -141,7 +117,7 @@ class UnknownLanguage(InvalidLocale):
 
 class NotInstalledGeoIPExtra(ImportError):
     """
-    Raised when the geoip2 module is not installed.
+    Raised when the maxminddb module is not installed.
     """
 
     ...
@@ -149,7 +125,7 @@ class NotInstalledGeoIPExtra(ImportError):
 
 class NonFirefoxFingerprint(Exception):
     """
-    Raised when a passed Browserforge fingerprint is invalid.
+    Raised when a passed fingerprint is not a Firefox fingerprint.
     """
 
     ...
@@ -215,5 +191,11 @@ class NotWritableError(Exception):
 
 class ProfileDirectoryError(RuntimeError):
     """Raised when Camoufox's required runtime directory cannot be prepared."""
+
+    ...
+
+
+class FpgenModelError(RuntimeError):
+    """Raised when fpgen's pinned model cannot be installed where fpgen reads it."""
 
     ...

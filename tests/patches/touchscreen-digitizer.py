@@ -150,10 +150,12 @@ PROBE_JS = r"""() => {
 def resolve_binary(argv) -> Optional[Path]:
     if "--binary" in argv:
         return Path(argv[argv.index("--binary") + 1]).resolve()
-    # ci.run_patch_guards hands the binary over as CAMOUFOX_EXECUTABLE_PATH.
-    env = os.environ.get("CAMOUFOX_EXECUTABLE_PATH") or os.environ.get("CAMOUFOX_BINARY")
-    if env:
-        return Path(env).resolve()
+    # ci.run_patch_guards passes the binary under test as CAMOUFOX_EXECUTABLE_PATH;
+    # ignoring it made this guard run the newest objdir instead -- after a macOS
+    # cross build, an arm64 Mach-O that cannot execute here ("Exec format error").
+    for var in ("CAMOUFOX_EXECUTABLE_PATH", "CAMOUFOX_BINARY"):
+        if os.environ.get(var):
+            return Path(os.environ[var]).resolve()
     matches = sorted(REPO_ROOT.glob("camoufox-*/obj-*/dist/bin/camoufox-bin"))
     return matches[-1] if matches else None
 

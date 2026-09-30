@@ -237,11 +237,11 @@ def test_version_parsing():
 
 def test_upstream_sh_roundtrip_preserves_comments(tmp_path):
     path = tmp_path / "upstream.sh"
-    path.write_text("# a comment\nversion=152.0.4\nrelease=beta.31\nclosedsrc_rev=1.0.0\n")
+    path.write_text("# a comment\nversion=152.0.4\nrelease=beta.31\nextra=1\n")
     write_upstream_sh({"version": "153.0.4", "release": "beta.32"}, path)
     text = path.read_text()
     assert "# a comment" in text
-    assert "closedsrc_rev=1.0.0" in text
+    assert "extra=1" in text
     assert read_upstream_sh(path)["version"] == "153.0.4"
 
 
@@ -602,7 +602,7 @@ def _cross(**kw):
 
 
 def test_a_shared_per_context_value_is_a_leak():
-    """audio, canvas and timezone are derived per context.
+    """audio and timezone are derived per context.
 
     Two contexts sharing one is the failure this whole suite exists to catch.
     """
@@ -614,19 +614,14 @@ def test_a_shared_per_context_value_is_a_leak():
         assert not out["noise"]
 
 
-def test_canvas_collisions_are_tracked_but_do_not_gate():
-    """Canvas belongs in must-vary and does not hold there yet.
-
-    Measured 16 distinct canvas fingerprints in 24 samples where audio gave
-    24/24 -- so two contexts collide about a third of the time. Gating would
-    fail one run in three for a real, unfixed reason; silence would lose the
-    finding. It gets its own bucket and is reported every run.
-    """
+def test_a_shared_canvas_is_noise_not_a_leak():
+    """The canvas is rendered, not noised (#528), so contexts with the same
+    fonts and GPU draw the same image, as two real machines would."""
     from ci.run_build_tester import uniqueness
 
     out = uniqueness(_cross(uniqueCanvas=2))
-    assert out["low_entropy"] == ["macPerContext.uniqueCanvas (2/3 distinct)"]
-    assert not out["leaks"] and not out["noise"]
+    assert out["noise"] == ["macPerContext.uniqueCanvas (2/3 distinct)"]
+    assert not out["leaks"]
 
 
 def test_a_shared_preset_value_is_noise_not_a_leak():
@@ -956,8 +951,9 @@ def test_required_suites_are_names_a_runner_actually_writes():
 
     producible = {
         "build", "build_tester", "patch_guards", "pythonlib", "sundial",
+        "patch_guards_spoofing", "patch_guards_automation", "patch_guards_parity",
         "native", "native_rules", "native_browser", "native_growth",
-        "playwright", "skiplist_audit", "e2e",
+        "playwright", "skiplist_audit", "typescript", "typescript_browser", "e2e",
     }
     unknown = required - producible
     assert not unknown, (
@@ -1823,8 +1819,9 @@ def test_the_browser_suites_are_required_either_way():
     for changed in ("true", "false"):
         required = _required_suites(changed, "false")
         assert {
-            "pythonlib", "native_rules", "patch_guards", "skiplist_audit",
-            "build_tester", "playwright", "native_browser",
+            "pythonlib", "native_rules", "skiplist_audit", "build_tester",
+            "playwright", "native_browser", "native_growth",
+            "patch_guards_spoofing", "patch_guards_automation", "patch_guards_parity",
         } <= required, changed
 
 
@@ -2265,7 +2262,7 @@ def test_the_native_inputs_cover_everything_that_can_change_the_binary():
     from ci.browser_inputs import BROWSER_DIRS, BROWSER_FILES
 
     text = WORKFLOW.read_text(encoding="utf-8")
-    scope = re.search(r"grep -qE '\^\(([^)]*)\)'", text)
+    scope = re.search(r"sources='\^\(([^)]*)\)'", text)
     assert scope, "the browser_changed grep is gone or was reshaped"
     considered = {
         part.replace("\\", "").rstrip("/") for part in scope.group(1).split("|") if part
@@ -2276,6 +2273,41 @@ def test_the_native_inputs_cover_everything_that_can_change_the_binary():
         f"{sorted(missing)} can change the binary but does not feed the native hash, "
         "so a change there would be served a stale browser"
     )
+
+
+def test_nothing_the_build_runs_is_excluded_from_the_native_hash():
+    """The exclusion list must not contain a script a build can reach.
+
+    NON_NATIVE_SCRIPTS exists so a tool that rewrites pythonlib's data files
+    does not invalidate a 665 MB cached browser and buy an hour of compiling
+    (measured: editing scripts/clean-fingerprint-data.py did exactly that).
+    Excluding a script the build DOES run is the dangerous direction -- the
+    cache would then serve a browser built from different sources, and every
+    suite downstream would pass against it. So each entry is checked against
+    the files a build enters through, rather than trusted.
+    """
+    from ci.browser_inputs import BUILD_ENTRY_POINTS, NON_NATIVE_SCRIPTS, REPO_ROOT
+
+    reachable = ""
+    for entry in BUILD_ENTRY_POINTS:
+        path = REPO_ROOT / entry
+        assert path.is_file(), f"{entry} is gone; the check below proves nothing"
+        reachable += path.read_text(encoding="utf-8", errors="ignore")
+
+    for script in sorted(NON_NATIVE_SCRIPTS):
+        name = pathlib.Path(script).name
+        assert name not in reachable, (
+            f"{script} is referenced from a build entry point but is excluded "
+            "from the native hash -- a change to it would be served a stale browser"
+        )
+
+
+def test_excluded_scripts_exist():
+    """A stale exclusion silently stops excluding anything; say so instead."""
+    from ci.browser_inputs import NON_NATIVE_SCRIPTS, REPO_ROOT
+
+    for script in sorted(NON_NATIVE_SCRIPTS):
+        assert (REPO_ROOT / script).is_file(), f"{script} no longer exists"
 
 
 def test_jar_mn_is_read_not_guessed():
@@ -2549,3 +2581,252 @@ def test_group_timeout_is_shorter_than_the_job_timeout():
     # Four times the slowest healthy invocation measured (296s); below that it
     # starts cutting slow-but-working groups short.
     assert default >= 900
+
+
+# ---------------------------------------------------------------------------
+# build-tester agrees with the identities pythonlib can present
+# ---------------------------------------------------------------------------
+
+
+def test_build_tester_accepts_every_core_count_pythonlib_presents():
+    """A real identity must not fail build-tester's plausibility check.
+
+    build-tester's plausibleHWC list lacked 18 and 22 -- both real (Intel Meteor
+    Lake laptops) and both in the recorded presets -- so a run that drew one of
+    the two Linux presets reporting 22 failed. About one run in eleven, on any
+    pull request. The list follows the data, not the other way round.
+    """
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    source = (repo / "build-tester/src/lib/checks/extended.ts").read_text(encoding="utf-8")
+    block = source[source.index("plausibleHWC"):]
+    listed = re.search(r"const common = \[([^\]]*)\]", block)
+    assert listed, "plausibleHWC's list of common core counts was not found"
+    accepted = {int(n) for n in re.findall(r"\d+", listed.group(1))}
+
+    presented = set()
+    lib = repo / "pythonlib/camoufox"
+    for name in ("fingerprint-presets.json", "fingerprint-presets-v150.json"):
+        data = json.loads((lib / name).read_text(encoding="utf-8"))
+        for rows in data.get("presets", {}).values():
+            for row in rows:
+                hwc = row.get("navigator", {}).get("hardwareConcurrency")
+                if isinstance(hwc, int):
+                    presented.add(hwc)
+    table = re.search(
+        r"^PLAUSIBLE_CORE_COUNTS = \(([^)]*)\)",
+        (lib / "fingerprints.py").read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert table, "PLAUSIBLE_CORE_COUNTS was not found in fingerprints.py"
+    presented |= {int(n) for n in re.findall(r"\d+", table.group(1))}
+
+    missing = sorted(presented - accepted)
+    assert not missing, (
+        f"build-tester's plausibleHWC rejects core counts pythonlib presents: {missing}. "
+        "Add them to the list in build-tester/src/lib/checks/extended.ts."
+    )
+
+
+# ---------------------------------------------------------------------------
+# build-or-fetch: the published release is used only when it matches the tree
+# ---------------------------------------------------------------------------
+
+
+# What the GitHub API says is published, for the fixture below.
+PUBLISHED = [{"tag_name": "v1.0-beta.1", "draft": False, "prerelease": True, "body": ""}]
+
+
+def _scope(repo: pathlib.Path, base: str, releases=None) -> tuple[str, str]:
+    """Run the workflow's own "Does this change the browser?" step in `repo`.
+
+    The step asks `ci.release paired` for the release built from the tree's
+    sources; here it pairs `repo` against `releases` instead of the live API.
+    """
+    import subprocess
+
+    text = WORKFLOW.read_text(encoding="utf-8")
+    # Start at the upstream logic, past the fork's own "never fetch" guard above
+    # it (tests/test_fork_workflow.py covers that one).
+    start = text.index("\n          if [ \"${{ github.event_name }}\" != \"pull_request\" ]")
+    end = text.index("      - name: May the stealth check run?", start)
+    lines = text[start:end].splitlines()[1:]
+    block = "\n".join(line[10:] if line.startswith(" " * 10) else line.strip() for line in lines)
+    block = block.replace("${{ github.event_name }}", "pull_request")
+    block = block.replace("${{ github.event.pull_request.base.sha }}", base)
+    listed = repo.parent / "releases.json"
+    listed.write_text(json.dumps(PUBLISHED if releases is None else releases))
+    assert "python3 -m ci.release paired" in block, "the step no longer asks ci.release for the pairing"
+    block = block.replace(
+        "python3 -m ci.release paired",
+        f"python3 -m ci.release paired --root {repo} --releases {listed}",
+    )
+    out = repo.parent / "out.txt"
+    proc = subprocess.run(
+        ["bash", "-e", "-c", block], cwd=repo, capture_output=True, text=True,
+        env={**os.environ, "GITHUB_OUTPUT": str(out), "PYTHONPATH": str(CI_ROOT.parent)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    return out.read_text().strip(), proc.stdout + proc.stderr
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    import subprocess
+
+    return subprocess.run(
+        ["git", "-c", "user.email=ci@test", "-c", "user.name=ci", *args],
+        cwd=repo, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+
+
+@pytest.fixture
+def release_repo(tmp_path):
+    """A repo whose v1.0-beta.1 tag is the published release, and a main after it."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q", "-b", "main")
+    (repo / "upstream.sh").write_text("version=1.0\nrelease=beta.1\n")
+    (repo / "patches").mkdir()
+    (repo / "patches" / "a.patch").write_text("a\n")
+    (repo / "additions" / "juggler").mkdir(parents=True)
+    (repo / "additions" / "juggler" / "jar.mn").write_text("% content juggler %content/\n")
+    (repo / "typescript").mkdir()
+    (repo / "typescript" / "x.ts").write_text("x\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "release")
+    _git(repo, "tag", "v1.0-beta.1")
+    return repo
+
+
+def test_driver_pr_on_the_released_sources_tests_the_release(release_repo):
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "typescript" / "x.ts").write_text("y\n")
+    _git(release_repo, "commit", "-qam", "driver change")
+    assert "browser_changed=false" in _scope(release_repo, base)[0].splitlines()
+
+
+def test_driver_pr_on_unreleased_browser_sources_builds(release_repo):
+    """#785: main had merged browser patches (#779) that no release carried yet,
+    so a TS-only pull request fetched beta.31 and ran #779's patch guards on it."""
+    (release_repo / "patches" / "a.patch").write_text("merged but unreleased\n")
+    _git(release_repo, "commit", "-qam", "browser change merged to main")
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "typescript" / "x.ts").write_text("y\n")
+    _git(release_repo, "commit", "-qam", "driver change")
+    result, log = _scope(release_repo, base)
+    assert result == "browser_changed=true"
+    assert "patches/a.patch" in log
+
+
+def test_browser_pr_builds(release_repo):
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "patches" / "a.patch").write_text("b\n")
+    _git(release_repo, "commit", "-qam", "browser change")
+    assert _scope(release_repo, base)[0] == "browser_changed=true"
+
+
+def test_unpublished_release_tag_builds(release_repo):
+    _git(release_repo, "tag", "-d", "v1.0-beta.1")
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "typescript" / "x.ts").write_text("y\n")
+    _git(release_repo, "commit", "-qam", "driver change")
+    assert _scope(release_repo, base)[0] == "browser_changed=true"
+
+
+@pytest.mark.parametrize("releases", [[], [{**PUBLISHED[0], "draft": True}]], ids=["missing", "draft"])
+def test_driver_pr_whose_release_is_not_published_builds(release_repo, releases):
+    """A tag alone is not a release: #811 must not pair with a draft or a missing one."""
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "typescript" / "x.ts").write_text("y\n")
+    _git(release_repo, "commit", "-qam", "driver change")
+    assert _scope(release_repo, base, releases)[0] == "browser_changed=true"
+
+
+def test_driver_pr_tests_the_prerelease_of_its_sources_not_the_latest_release(release_repo):
+    """#811: v156.0.1-beta.32 was a prerelease and the fetch took the latest stable
+    release, 152.0.4. The pairing names the prerelease, and the fetch job uses it."""
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "typescript" / "x.ts").write_text("y\n")
+    _git(release_repo, "commit", "-qam", "driver change")
+    stable = {"tag_name": "v0.9-beta.0", "draft": False, "prerelease": False, "body": ""}
+    result, _ = _scope(release_repo, base, PUBLISHED + [stable])
+    assert "browser_changed=false" in result.splitlines()
+    assert "browser_tag=v1.0-beta.1" in (release_repo.parent / "out.txt").read_text()
+    fetch = _jobs()["fetch-browser"]["steps"]
+    assert any("--browser-tag \"${{ needs.resolve.outputs.browser_tag }}\"" in (s.get("run") or "")
+               for s in fetch), "the fetch job no longer installs the paired release"
+
+
+def test_driver_pr_pairs_by_the_source_digest_in_the_release_manifest(release_repo):
+    """A release built by release.yml takes its number from its tag; main's
+    upstream.sh never names it, so the pairing comes from the digest in the
+    release's manifest.json."""
+    from ci.browser_inputs import source_digest
+    from ci.release import manifest
+
+    base = _git(release_repo, "rev-parse", "HEAD")
+    (release_repo / "typescript" / "x.ts").write_text("y\n")
+    _git(release_repo, "commit", "-qam", "driver change")
+    cut = {"tag_name": "v1.0-beta.2", "draft": False, "prerelease": True,
+           "manifest": manifest("v1.0-beta.2", source_digest(release_repo), "0" * 40)}
+    result, _ = _scope(release_repo, base, [cut])
+    assert "browser_changed=false" in result.splitlines()
+    assert "browser_tag=v1.0-beta.2" in (release_repo.parent / "out.txt").read_text()
+
+
+# ---------------------------------------------------------------------------
+# patch guards: every guard runs in exactly one CI leg
+# ---------------------------------------------------------------------------
+
+
+def _jobs() -> dict:
+    import yaml
+
+    return yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+
+
+def test_every_patch_guard_is_in_exactly_one_group():
+    """A guard in no group would never run in CI; one in two would run twice."""
+    from ci.run_patch_guards import GROUPS, guards
+
+    on_disk = {g.stem for g in guards()}
+    assigned = [name for names in GROUPS.values() for name in names]
+    assert not on_disk - set(assigned), (
+        f"guards in no group, so CI never runs them: {sorted(on_disk - set(assigned))}. "
+        "Add each to a group in ci/run_patch_guards.py."
+    )
+    assert not set(assigned) - on_disk, f"grouped but missing: {sorted(set(assigned) - on_disk)}"
+    doubled = sorted({n for n in assigned if assigned.count(n) > 1})
+    assert not doubled, f"guards in more than one group: {doubled}"
+
+
+def test_the_patch_guard_matrix_runs_every_group():
+    from ci.run_patch_guards import GROUPS
+
+    legs = {leg["leg"] for leg in _jobs()["patch-guards"]["strategy"]["matrix"]["include"]}
+    assert legs == set(GROUPS) | {"skiplist"}
+
+
+# ---------------------------------------------------------------------------
+# memory growth: sharded onto pull requests, and gated
+# ---------------------------------------------------------------------------
+
+
+def test_native_shards_split_the_tests_without_overlap():
+    from ci.run_native import parse_shard
+
+    ids = [f"t{i}" for i in range(9)]
+    parts = [ids[i - 1 :: n] for i, n in (parse_shard(f"{k}/4") for k in range(1, 5))]
+    assert sorted(t for part in parts for t in part) == ids
+    with pytest.raises(SystemExit):
+        parse_shard("5/4")
+
+
+def test_memory_growth_runs_on_pull_requests_and_gates_the_merge():
+    jobs = _jobs()
+    growth = jobs["growth"]
+    assert "event_name" not in str(growth.get("if", "")), "growth is limited to some events"
+    shards = growth["strategy"]["matrix"]["shard"]
+    n = len(shards)
+    assert shards == [f"{i}/{n}" for i in range(1, n + 1)]
+    assert "growth" in jobs["gate"]["needs"]
+    assert "growth" in jobs["summary"]["needs"]
