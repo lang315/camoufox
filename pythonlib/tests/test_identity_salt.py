@@ -142,10 +142,10 @@ def test_canvas_seed_override_reaches_the_config_and_the_init_script():
     assert "setCanvasSeed(7)" in context["init_script"]
 
 
-    def test_salt_of_equal_objects_is_equal(self):
-        a = fp.generate_fingerprint(os="windows")
-        assert fp.identity_salt(a) == fp.identity_salt(a)
-        assert fp.identity_salt({"a": 1, "b": 2}) == fp.identity_salt({"b": 2, "a": 1})
+def test_salt_of_equal_objects_is_equal():
+    a = fp.generate_fingerprint(os="windows")
+    assert fp.identity_salt(a) == fp.identity_salt(a)
+    assert fp.identity_salt({"a": 1, "b": 2}) == fp.identity_salt({"b": 2, "a": 1})
 
 
 class TestVoicesFollowLocale:
