@@ -4,8 +4,12 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lang315/camoufox/goapi/pkg/config"
+	"github.com/lang315/camoufox/goapi/pkg/fingerprint"
 )
 
 const (
@@ -242,5 +246,128 @@ func TestShippedFontConfsCarryThePlaceholder(t *testing.T) {
 		if !strings.Contains(string(b), cwdFontsDir) {
 			t.Errorf("%s/fonts.conf lacks %s", osDir, cwdFontsDir)
 		}
+	}
+}
+
+// The runtime conf lives in the cache dir, so a scan dir derived from a
+// relative executable path would resolve against the browser's cwd and the
+// browser would silently lose every bundled font.
+func TestFontconfigEnvAbsolutizesRelativeExecutable(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	bin := filepath.Dir(exe)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(filepath.Dir(bin)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(wd) })
+
+	entry, err := fontconfigEnv("linux", filepath.Join(filepath.Base(bin), "camoufox-bin"), macUA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(confPath(t, entry))
+	dirs := regexp.MustCompile(`<dir>([^<]*)</dir>`).FindAllStringSubmatch(string(b), -1)
+	if len(dirs) == 0 {
+		t.Fatalf("no scan dirs in:\n%s", b)
+	}
+	for _, m := range dirs {
+		if !filepath.IsAbs(m[1]) {
+			t.Errorf("relative scan dir %q", m[1])
+		}
+	}
+}
+
+// launchEnv is the env Launch hands the browser. These run it with a real
+// generated identity so the UA that reaches fontconfigEnv is the one the
+// fingerprint produced, not whatever the caller's config held beforehand.
+func generatedConfig(t *testing.T, targetOS string) *config.Config {
+	t.Helper()
+	cfg := &config.Config{}
+	if err := fingerprint.Generate(cfg, fingerprint.Options{OS: targetOS}); err != nil {
+		t.Fatal(err)
+	}
+	return cfg
+}
+
+func fontconfigEntries(env []string) []string {
+	var out []string
+	for _, e := range env {
+		if strings.HasPrefix(e, "FONTCONFIG_FILE=") {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestLaunchEnvConfinesFontsToTheIdentityOS(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	fontsDir := filepath.Join(filepath.Dir(exe), "fonts")
+	for targetOS, want := range map[string]string{
+		"macos":   "M,LM,MW,LMW",
+		"windows": "W,LW,MW,LMW",
+		"linux":   "L,LM,LW,LMW",
+	} {
+		cfg := generatedConfig(t, targetOS)
+		env, err := launchEnv(&launchConfig{executablePath: exe}, cfg, []string{"CAMOU_CONFIG_1={}"}, "linux")
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries := fontconfigEntries(env)
+		if len(entries) != 1 {
+			t.Fatalf("%s: want one FONTCONFIG_FILE, got %v", targetOS, entries)
+		}
+		if got := strings.Join(scanDirsOf(t, confPath(t, entries[0]), fontsDir), ","); got != want {
+			t.Errorf("%s identity scans %s, want %s", targetOS, got, want)
+		}
+	}
+}
+
+func TestLaunchEnvCallerFontconfigWins(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	lc := &launchConfig{executablePath: exe, env: []string{"FONTCONFIG_FILE=/caller/fonts.conf"}}
+	env, err := launchEnv(lc, generatedConfig(t, "macos"), nil, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fontconfigEntries(env); len(got) != 1 || got[0] != "FONTCONFIG_FILE=/caller/fonts.conf" {
+		t.Errorf("caller's FONTCONFIG_FILE must be the only one, got %v", got)
+	}
+}
+
+func TestLaunchEnvKeepsTheRestOfTheEnv(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	lc := &launchConfig{executablePath: exe, env: []string{"A=1"}, virtualDisplay: ":99"}
+	env, err := launchEnv(lc, generatedConfig(t, "windows"), []string{"CAMOU_CONFIG_1={}"}, "linux")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"A=1", "CAMOU_CONFIG_1={}", "DISPLAY=:99"} {
+		if !slices.Contains(env, want) {
+			t.Errorf("env lost %q: %v", want, env)
+		}
+	}
+}
+
+func TestLaunchEnvOffLinuxHasNoFontconfig(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	env, err := launchEnv(&launchConfig{executablePath: exe}, generatedConfig(t, "macos"), nil, "macos")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fontconfigEntries(env); len(got) != 0 {
+		t.Errorf("non-Linux host got %v", got)
+	}
+}
+
+func TestLaunchEnvFailsOnBrokenBundle(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	if err := os.Remove(filepath.Join(filepath.Dir(exe), "fontconfig", "macos", "fonts.conf")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := launchEnv(&launchConfig{executablePath: exe}, generatedConfig(t, "macos"), nil, "linux"); err == nil {
+		t.Fatal("a bundle without fonts.conf must fail the launch")
 	}
 }
