@@ -231,7 +231,6 @@ rules:
       Not gated, because failing one run in three helps nobody, and not dropped,
       because it is real.
 
-
   # Fork divergence (lang315/camoufox): upstream's rule `canvas-is-not-noised`
   # (canvas rendered, not noised, no canvas seed; PR #528, e4528a2 disabled canvas
   # noise) is deliberately NOT carried here. The fork re-added canvas noise in
