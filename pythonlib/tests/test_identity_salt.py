@@ -95,13 +95,48 @@ class TestPinnedIdentityIsStable:
         assert launch(config={"audio:seed": 9})["audio:seed"] == 9
 
 
-def test_no_canvas_seed_is_generated():
-    """The browser adds no canvas noise (#528), and no patch reads canvas:seed
-    (#721). Generating one only sent the browser a value it ignored."""
-    assert "canvas:seed" not in launch()
-    context = fp.generate_context_fingerprint(os="linux")
-    assert "canvas:seed" not in context["config"]
-    assert "setCanvasSeed" not in context["init_script"]
+class TestCanvasSeed:
+    """The fork keeps canvas noise (patches/canvas-spoofing.patch), seeded per
+    launch and per context. A launcher that drops the seed leaves the noise
+    off, so two browsers on one preset render the same canvas."""
+
+    def test_every_launch_draws_its_own_seed(self):
+        seeds = [launch()["canvas:seed"] for _ in range(40)]
+        assert all(1 <= s <= 0xFFFFFFFF for s in seeds)
+        assert len(set(seeds)) == len(seeds)
+
+    def test_one_preset_still_draws_a_seed_per_launch(self):
+        preset = fp.get_random_preset(os="windows", ff_version="150")
+        if not preset:
+            pytest.skip("no presets bundled")
+        first = launch(os="windows", fingerprint_preset=preset)
+        second = launch(os="windows", fingerprint_preset=preset)
+        assert first["canvas:seed"] != second["canvas:seed"]
+
+    def test_caller_seed_is_kept(self):
+        assert launch(config={"canvas:seed": 9})["canvas:seed"] == 9
+
+    def test_context_fingerprint_seeds_the_canvas_setter(self):
+        context = fp.generate_context_fingerprint(os="linux")
+        seed = context["config"]["canvas:seed"]
+        assert 1 <= seed <= 0xFFFFFFFF
+        assert f"w.setCanvasSeed({seed})" in context["init_script"]
+        other = fp.generate_context_fingerprint(os="linux")
+        assert other["config"]["canvas:seed"] != seed
+
+    def test_context_fingerprint_from_a_preset_is_seeded_too(self):
+        preset = fp.get_random_preset(os="windows", ff_version="150")
+        if not preset:
+            pytest.skip("no presets bundled")
+        context = fp.generate_context_fingerprint(preset=preset)
+        assert f"w.setCanvasSeed({context['config']['canvas:seed']})" in context["init_script"]
+
+
+def test_canvas_seed_override_reaches_the_config_and_the_init_script():
+    context = fp.generate_context_fingerprint(os="linux", config_overrides={"canvas:seed": 7})
+    assert context["config"]["canvas:seed"] == 7
+    assert "setCanvasSeed(7)" in context["init_script"]
+
 
     def test_salt_of_equal_objects_is_equal(self):
         a = fp.generate_fingerprint(os="windows")

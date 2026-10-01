@@ -30,7 +30,7 @@ from .geolocation import geoip_allowed, get_geolocation
 from .ip import Proxy, public_ip, valid_ipv4, valid_ipv6
 from .locales import handle_locales
 import warnings
-from random import Random
+from random import Random, randint
 
 from .pkgman import (
     INSTALL_DIR,
@@ -1488,11 +1488,15 @@ def launch_options(
     # reproduce its audio hash (#442/#765). Never 0 (0 disables the noise). A
     # preset draws its own random seed; it is replaced here too so a pinned
     # preset reproduces it, but a seed the caller set is kept. There is no
-    # canvas seed: the browser adds no canvas noise (#528), and no glyph-spacing
-    # noise either (ci/tribal-rules.yml: no-glyph-spacing-noise).
+    # glyph-spacing noise (ci/tribal-rules.yml: no-glyph-spacing-noise).
     if not _user_set_audio_seed:
         _ident = identity_seed(config, _identity_salt)
         config['audio:seed'] = ((_ident * 2654435761 + 97) & 0xFFFFFFFF) or 1
+
+    # The canvas noise seed is fork-only (patches/canvas-spoofing.patch) and is
+    # drawn per launch, so two launches on one preset still render different
+    # canvases. 0 disables the noise.
+    set_into(config, 'canvas:seed', randint(1, 4_294_967_295))  # nosec
 
     # Set geolocation
     if geoip:
