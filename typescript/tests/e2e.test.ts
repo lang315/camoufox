@@ -144,9 +144,18 @@ function configOf(options: Record<string, any>): Record<string, any> {
 	);
 }
 
+/**
+ * Every launcher draws its own canvas seed per launch (the audio seed follows
+ * the identity, this one deliberately does not), so two launches of one
+ * identity only agree when the seed is pinned through the public option.
+ */
+const CANVAS_SEED = 424242;
+
 function kwargsFor(identity: string): Record<string, any> {
+	const kwargs = structuredClone(IDENTITIES[identity]);
+	kwargs.config = { ...kwargs.config, "canvas:seed": CANVAS_SEED };
 	return {
-		...structuredClone(IDENTITIES[identity]),
+		...kwargs,
 		executable_path: EXECUTABLE,
 		headless: true,
 		i_know_what_im_doing: true,
