@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -131,6 +132,11 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		return nil, err
 	}
 
+	fontconfig, err := fontconfigEnv(config.HostOS(), lc.executablePath, cfg.NavigatorUserAgent)
+	if err != nil {
+		return nil, err
+	}
+
 	// Build the firefox CLI. The Juggler bootstrap requires
 	// --juggler-pipe; --no-remote is recommended so a stale profile
 	// lock cannot redirect commands to an existing instance.
@@ -170,6 +176,12 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		env = append(env, os.Environ()...)
 	}
 	env = append(env, envVars...)
+	// A caller-supplied FONTCONFIG_FILE wins, as in pythonlib's `**env`.
+	if fontconfig != "" && !slices.ContainsFunc(lc.env, func(e string) bool {
+		return strings.HasPrefix(e, "FONTCONFIG_FILE=")
+	}) {
+		env = append(env, fontconfig)
+	}
 	if lc.virtualDisplay != "" {
 		env = append(env,
 			"DISPLAY="+lc.virtualDisplay,
