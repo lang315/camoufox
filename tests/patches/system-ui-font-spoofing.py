@@ -221,15 +221,16 @@ async def test_mixed_os_context(max_attempts: int = 15) -> bool:
     # name does not render here, a missing step=system-ui line says nothing about
     # which platform was asked.
     if widths["Helvetica"] == baseline:
-        failures.append("Helvetica does not resolve in this font universe (rewritten to "
-                        "Arial, which this list admits) -- the step cannot log, so this "
-                        "arm measures nothing")
+        failures.append("Helvetica does not resolve in this font universe (the "
+                        "Helvetica -> Arial rewrite did not produce a rendered family) -- "
+                        "the step cannot log, so this arm measures nothing")
     if len(ctxs) != 1:
         failures.append(f"expected exactly one context id behind {MIXED_OS_URI}, found "
                         f"{sorted(ctxs)} -- the log cannot be attributed to the context")
     elif not steps:
         failures.append("no `CAMOU-FL generic-map ... generic=7` line for the context -- "
-                        "the log module did not capture the step, so this arm measures nothing")
+                        "either the log module did not capture the step or system-ui never "
+                        "reached the generic map (a product regression)")
     else:
         # The verdict. A line `step=system-ui key=helvetica` can only come from
         # the context's own platform (MacIntel): the launch's (Win32) would ask

@@ -1015,9 +1015,11 @@ jobs:
           # `72px "<absent family>", monospace`. That is a verdict only while the
           # reference is GUARANTEED to differ from the family under test, and
           # since B0 put every launch under FONTCONFIG_FILE it is not: the font
-          # universe is the bundle alone, the linux conf aliases monospace to
-          # Cousine, Cousine is lin-only and refused under a win or mac `fonts`
-          # list, and the generic lands on some other bundled face. Run
+          # universe is the bundle alone, and the linux conf's monospace lands on
+          # a bundled face the list may refuse (when run 34471565975 was taken
+          # it aliased monospace to the lin-only Cousine, refused under a win or
+          # mac `fonts` list; it is now DejaVu Sans Mono, refused under a mac
+          # list), so the generic is some other bundled face. Run
           # 34471565975 read `MS Gothic: False` out of that comparison while the
           # SAME launch reported document.fonts.check True, FontFace.status
           # 'loaded', and (CAMOU-FL, ctx=6) `gate ... key=ms gothic allowed=1`.
@@ -3149,13 +3151,14 @@ jobs:
                           f"{expect!r} ({'arm (b) measurement' if fam != 'Tahoma' else 'Tahoma is in both FONTS[mac] and FONTS[win]'})")
 
           # Discriminator: does document.fonts.add(new FontFace(...)) --
-          # the ALREADY-SCOPED path -- resolve "Calibri" (win-only)
+          # the ALREADY-SCOPED path -- resolve "Calibri" (in the win list, not
+          # the mac list; fonts.json also reports it for lin)
           # correctly per context, and does the bare-identifier Tahoma
           # rule (no quotes needed in its source) resolve correctly,
           # where the space-containing (always-quoted) Segoe UI /
           # Helvetica Neue rules do not? The combination tells Task 3
           # which defect this tripwire is actually reporting.
-          js_face_expect = {"mac": "error", "win": "loaded"}  # Calibri is win-only
+          js_face_expect = {"mac": "error", "win": "loaded"}  # Calibri is in the win list, not the mac list
           js_face_correct = all(
               e[label]["jsFaceStatus"] == js_face_expect[label] for label in ("mac", "win"))
           tahoma_bare_correct = all(
@@ -3780,8 +3783,9 @@ jobs:
           # last-resort walk (#88) instead of FindFontForChar exit 7 (#94) and
           # would make a RED here attributable to the wrong issue -- and the
           # tofu floor and the Noto Serif reference could then be the same face,
-          # which trips this arm's own control-invalid branch. Times is mac-only
-          # like Geneva, renders, and is A2's first serif-row family, so the
+          # which trips this arm's own control-invalid branch. Times' face is in
+          # the macOS-only font group like Geneva's, renders, and is A2's first
+          # serif-row family, so the
           # appended `serif` generic resolves to Times as well: mFonts holds a
           # real face, exit 7 is the path under test, and the substitution
           # changes nothing about the attribution argument below, because that
@@ -4022,7 +4026,8 @@ jobs:
           # of its real answer -- not by the generic. That is #92's mechanism.
           #
           # Fixture list ["Menlo", "Helvetica Neue", "Times"]: one family from
-          # each of A2's three rows, all mac-only. Menlo is REQUIRED -- without
+          # each of A2's three rows, all in the macOS-only font group (fonts.json
+          # also reports Times for win and lin). Menlo is REQUIRED -- without
           # a monospace-row family the helper's fallback maps monospace and
           # sans-serif onto the same family and the arm is RED for a reason it
           # cannot show (spec-review I8).
@@ -4059,8 +4064,8 @@ jobs:
           # So each generic is scored against the list member OF ITS OWN KIND,
           # named directly in the same context and run: sans-serif against
           # Helvetica Neue, serif against Times, monospace against Menlo. Those
-          # three are one family from each of A2's three rows, all mac-only, and
-          # the arm ASSERTS their `mmmmm` widths are pairwise distinct before
+          # three are one family from each of A2's three rows, all in the
+          # macOS-only font group, and the arm ASSERTS their `mmmmm` widths are pairwise distinct before
           # scoring anything -- if two collide the arm names the pair and stops.
           # Menlo is REQUIRED for the further reason spec-review I8 gives:
           # without a monospace-row family the helper's fallback maps monospace
@@ -7266,7 +7271,10 @@ jobs:
         #   (1) the context whose os= matches the LAUNCH's spoofed OS resolves
         #       its required marker fonts;
         #   (2) the other two contexts resolve NO markers -- not their own (the
-        #       mask holds) and not anyone else's (no cross-OS leak);
+        #       mask holds) and not anyone else's (no cross-OS leak). Today the
+        #       launch mask and the per-OS font search path BOTH enforce this
+        #       (the other OS's faces are not on the path), so a green here
+        #       cannot tell a broken mask from the path doing the work;
         #   (3) warn_fonts_excluded_by_launch fires for each of those two (the
         #       matching context may or may not fire it -- both sides are random
         #       30-78% samples of the same list, so its set difference can be
