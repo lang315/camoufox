@@ -607,7 +607,7 @@ jobs:
           # must not agree.
           pip install --quiet 'playwright==1.55.0' fonttools
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
-          import glob, json, os
+          import glob, json, os, re, tempfile
           from playwright.sync_api import sync_playwright
 
           # ---- #83/#88 diagnostic capture (Phase D) -------------------------
@@ -1285,6 +1285,49 @@ jobs:
                   if len(parts) >= 2 and parts[-1] == "tab":
                       pids.add(parts[0])
               return pids
+
+          # Two contexts can only share a content process through a remote type
+          # that carries no container. FF156 (ProcessIsolation.cpp,
+          # SharedWebRemoteType) gives every `web` document the type
+          # `web=^userContextId=<N>`, one process pool per container, whatever
+          # dom.ipc.processCount or fission.autostart say; FF152 returned the bare
+          # `web` for all of them. data: documents therefore never shared a
+          # process across contexts (run 36853787702: donor in pid 14819, victim
+          # in pid 14854, same cfx-child file). `file` is a remote type of its own
+          # with no container suffix and dom.ipc.processCount.file=1, so pages
+          # loaded from file: URLs are the way to put two contexts in one process.
+          PAGES_DIR = tempfile.mkdtemp(prefix="smoke-pages-")
+
+          def page_uri(name):
+              path = os.path.join(PAGES_DIR, name + ".html")
+              with open(path, "w", encoding="utf-8") as fh:
+                  fh.write("<!doctype html><meta charset=utf-8><h1>%s</h1>" % name)
+              return "file://" + path
+
+          def docs_share_process(mark, name_a, name_b):
+              """(shared, pids of A's document, pids of B's document).
+
+              Whether two documents ran in ONE content process, read from the
+              browser. Every document's font group logs a `CAMOU-FL group ... uri=`
+              line, and MOZ_LOG prefixes each line with `[Child <pid>:` -- the pid
+              of the process that wrote it. NOT the file name: on Linux the
+              `cfx-child.<n>` file is shared by several content processes (run
+              36853787702: pids 14763, 14819 and 14854 all wrote cfx-child.14753),
+              which is why this reads the pid in the line. `tab_pids()` is only
+              printed; it also counts processes that lay out no document.
+              Wrongly PASSING needs one pid on both documents' group lines without
+              one process, which a pid cannot do; wrongly failing needs the log off,
+              and then both sets are empty and the caller's message prints them.
+              """
+              def pids(name):
+                  out = set()
+                  for ln in camou_fl(mark, "CAMOU-FL group", "/" + name + ".html", limit=None):
+                      m = re.search(r"\[(?:Child|Parent) (\d+):", ln)
+                      if m:
+                          out.add(m.group(1))
+                  return out
+              pa, pb = pids(name_a), pids(name_b)
+              return bool(pa & pb), sorted(pa), sorted(pb)
 
           # bare launch -- no `fonts` key at all, so mFontFamilies holds every
           # bundled family and nothing is deleted from font.system.whitelist.
@@ -4819,7 +4862,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_a)))
                   page_a = ctx_a.new_page()
-                  page_a.goto("data:text/html,<h1>4b-a</h1>")
+                  page_a.goto(page_uri("4b-a"))
                   pids_a = tab_pids()
                   result_a = page_a.evaluate(js)
 
@@ -4828,7 +4871,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                   page_b = ctx_b.new_page()
-                  page_b.goto("data:text/html,<h1>4b-b</h1>")
+                  page_b.goto(page_uri("4b-b"))
                   pids_b = tab_pids()
                   result_b = page_b.evaluate(js)
 
@@ -5093,7 +5136,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_a)))
                   page_a = ctx_a.new_page()
-                  page_a.goto("data:text/html,<h1>i2-a</h1>")
+                  page_a.goto(page_uri("i2-a"))
                   pids_a = tab_pids()
 
                   ctx_b = b.new_context()
@@ -5101,7 +5144,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                   page_b = ctx_b.new_page()
-                  page_b.goto("data:text/html,<h1>i2-b</h1>")
+                  page_b.goto(page_uri("i2-b"))
                   pids_b = tab_pids()
 
                   # Both installs are done, so both clears are spent. Only now
@@ -5122,9 +5165,11 @@ jobs:
           # least likely to be able to score. #83's process table (run
           # 34008395471) shows dom.ipc.processCount=1 alone does not reliably
           # collapse two contexts into one content process.
+          i2_mark = log_mark()
           i2_a, i2_b, i2_pids = two_contexts_installs_first(
               NO_CJK_PROBE, FONTS["win"], JS_4B,
               extra_prefs={"fission.autostart": False})
+          i2_same, i2_pa, i2_pb = docs_share_process(i2_mark, "i2-a", "i2-b")
           i2_a_tofu = i2_a["final"] in i2_a["refs"].values()
           # M4 (from this task's review): a 0.01 tolerance, matching every other
           # comparison the new arms make. The exact `==` inherited from arm (i)
@@ -5181,16 +5226,15 @@ jobs:
                   f"arm (i2)/#81 unmeasured: could not read the content-process table "
                   f"({i2_pids}) -- mCodepointsWithNoFonts is a per-process member, so without "
                   f"the pids this arm cannot tell a working gate from two isolated processes.")
-          elif (i2_pids["after_b"] - i2_pids["after_a"]) or not i2_pids["after_a"]:
-              # C4: arms (j)/(j2)'s exact test, for the reason they give -- a
-              # lingering or preallocated content process makes strict
-              # cardinality false on runs that DID share a process, which is what
-              # run 34322535132 printed here: two identical tab pids, scored
-              # "unmeasured". What is asserted is that B got no NEW tab process.
+          elif not i2_same:
+              # The pid table is only printed: it also counts processes that lay
+              # out no document. What is asserted is that A's and B's documents
+              # were laid out by one process (docs_share_process).
               i2_failures.append(
-                  f"arm (i2)/#81 unmeasured: a new content process appeared for B. Tab pids "
-                  f"were {sorted(i2_pids['after_a'])} after A's navigation and "
-                  f"{sorted(i2_pids['after_b'])} after B's, so A's miss cannot reach B and "
+                  f"arm (i2)/#81 unmeasured: A's and B's documents were laid out by different "
+                  f"content processes (A: {i2_pa or 'no group line'}, B: {i2_pb or 'no group line'}; "
+                  f"tab pids {sorted(i2_pids['after_a'])} after A's navigation and "
+                  f"{sorted(i2_pids['after_b'])} after B's), so A's miss cannot reach B and "
                   f"this arm tests nothing.")
           elif not i2_a_tofu:
               i2_failures.append(
@@ -5441,6 +5485,7 @@ jobs:
               FFFD_DONOR, FFFD_NO_PROBE, JS_4C,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
+          j_same, j_pa, j_pb = docs_share_process(j_mark, "4b-a", "4b-b")
           # Task 4's fallback-observation question, now answerable: which face
           # the donor's U+FFFD fallback actually settled on, from the browser's
           # own log rather than inferred from a width. Three of this arm's five
@@ -5477,16 +5522,16 @@ jobs:
                   f"arm (j)/#82 unmeasured: could not read the content-process table "
                   f"({j_pids}) -- #82's cache is a per-process singleton, so without the pids "
                   f"this arm cannot tell a working gate from two isolated processes.")
-          elif (j_pids["after_b"] - j_pids["after_a"]) or not j_pids["after_a"]:
-              # "No NEW tab pid appeared for B", not set equality: a lingering
-              # about:blank process that exits between the two samples would make
-              # equality false forever and the arm would read "unmeasured" on
-              # every run, including ones that did share a process.
+          elif not j_same:
+              # Not a pid-table comparison: that also counts processes that lay
+              # out no document (docs_share_process).
               j_failures.append(
-                  f"arm (j)/#82 unmeasured: a new content process appeared for B. Tab pids were "
-                  f"{sorted(j_pids['after_a'])} after A and {sorted(j_pids['after_b'])} after "
-                  f"B, so donor and recipient did not share the gfxPlatformFontList singleton "
-                  f"that holds mReplacementCharFallbackFamily. Not a verdict either way.")
+                  f"arm (j)/#82 unmeasured: donor and recipient documents were laid out by "
+                  f"different content processes (A: {j_pa or 'no group line'}, "
+                  f"B: {j_pb or 'no group line'}; tab pids {sorted(j_pids['after_a'])} after A and "
+                  f"{sorted(j_pids['after_b'])} after B), so they did not share the "
+                  f"gfxPlatformFontList singleton that holds mReplacementCharFallbackFamily. "
+                  f"Not a verdict either way.")
           elif "Tahoma" not in fffd_working:
               j_failures.append(
                   f"arm (j)/#82 setup invalid: Tahoma is not among the families that "
@@ -6046,7 +6091,7 @@ jobs:
                           env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
                       ctx_a = b.new_context()
                       page_a = ctx_a.new_page()
-                      page_a.goto("data:text/html,<h1>4b-bare-a</h1>")
+                      page_a.goto(page_uri("4b-bare-a"))
                       pids_a = tab_pids()
                       result_a = page_a.evaluate(js)
 
@@ -6055,7 +6100,7 @@ jobs:
                           'if (typeof window.setFontList === "function") '
                           'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                       page_b = ctx_b.new_page()
-                      page_b.goto("data:text/html,<h1>4b-bare-b</h1>")
+                      page_b.goto(page_uri("4b-bare-b"))
                       pids_b = tab_pids()
                       result_b = page_b.evaluate(js)
 
@@ -6088,6 +6133,7 @@ jobs:
                   FFFD_NO_PROBE, JS_4C,
                   extra_prefs={"gfx.font_rendering.fallback.async": False,
                                "fission.autostart": False})
+              j2_same, j2_pa, j2_pb = docs_share_process(j2_mark, "4b-bare-a", "4b-bare-b")
               # Arm (j)'s fallback observation, for the bare donor. Both of this
               # arm's `setup invalid` branches are statements about what the
               # bare donor resolved; this names the face the browser itself
@@ -6118,13 +6164,14 @@ jobs:
                   j2_failures.append(
                       f"arm (j2)/#82 unmeasured: could not read the content-process table "
                       f"({j2_pids}); #82's cache is a per-process singleton.")
-              elif (j2_pids["after_b"] - j2_pids["after_a"]) or not j2_pids["after_a"]:
-                  # Same "no NEW tab pid" test as arm (j), for the same reason.
+              elif not j2_same:
+                  # Same shared-process reading as arm (j), for the same reason.
                   j2_failures.append(
-                      f"arm (j2)/#82 unmeasured: a new content process appeared for B. Tab pids were "
-                      f"{sorted(j2_pids['after_a'])} after A and {sorted(j2_pids['after_b'])} "
-                      f"after B, so donor and recipient did not share the gfxPlatformFontList "
-                      f"singleton. Not a verdict either way.")
+                      f"arm (j2)/#82 unmeasured: donor and recipient documents were laid out by "
+                      f"different content processes (A: {j2_pa or 'no group line'}, "
+                      f"B: {j2_pb or 'no group line'}; tab pids {sorted(j2_pids['after_a'])} after A "
+                      f"and {sorted(j2_pids['after_b'])} after B), so they did not share the "
+                      f"gfxPlatformFontList singleton. Not a verdict either way.")
               elif abs(j2_a["final"] - j2_floor) < 0.01:
                   # Ordered BEFORE the sig-families check on purpose. When the
                   # donor resolves nothing, families that also lack U+FFFD
@@ -6204,9 +6251,10 @@ jobs:
           #    two_contexts_one_launch forces dom.ipc.processCount=1 and the
           #    pids are ASSERTED equal, not assumed.
           #  * mReplacementCharFallbackFamily is indexed by FontVisibility
-          #    LEVEL. Both pages are same-scheme (data:) content documents, so
-          #    both groups sit at the same level; a mismatch reads an empty slot
-          #    and looks exactly like the pre-#93 report B6 keys on.
+          #    LEVEL. Both pages are same-scheme (file:) content documents, so
+          #    both groups sit at the same level (the donor's and the victim's
+          #    `global-fallback ... level=` lines carry it); a mismatch reads an
+          #    empty slot and looks exactly like the pre-#93 report B6 keys on.
           #  * The victim's own tofu floor and Menlo's U+FFFD width could be
           #    equal, in which case "leaked" and "rendered nothing" are the same
           #    number. Asserted.
@@ -6259,6 +6307,7 @@ jobs:
               N4_DONOR, N4_VICTIM, JS_N4,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
+          n4_same, n4_pa, n4_pb = docs_share_process(n4_mark, "4b-a", "4b-b")
           # Every log read BEFORE the reference launch, for the reason stated in
           # arm (n1)'s log-window note above.
           n4_fl = camou_fl(n4_mark, "CAMOU-FL fontlist", limit=None)
@@ -6345,11 +6394,15 @@ jobs:
               n4_failures.append(
                   f"setup invalid: pgrep failed, so 'same process' could not be "
                   f"asserted: {n4_pids}")
-          elif not (n4_pids["after_a"] & n4_pids["after_b"]):
+          elif not n4_same:
+              # Was `after_a & after_b` non-empty, which any process common to both
+              # samples satisfies (the extension process was in both on FF156
+              # while donor and victim ran in different content processes).
               n4_failures.append(
-                  f"setup invalid: donor and victim rendered in different content "
-                  f"processes, and mReplacementCharFallbackFamily is a per-process "
-                  f"singleton, so nothing could have been shared: {n4_pids}")
+                  f"setup invalid: donor and victim documents were laid out by different "
+                  f"content processes (A: {n4_pa or 'no group line'}, B: {n4_pb or 'no group line'}), "
+                  f"and mReplacementCharFallbackFamily is a per-process singleton, so "
+                  f"nothing could have been shared: {n4_pids}")
           elif abs(n4_ref - n4_b["floor"]) < 0.01:
               n4_failures.append(
                   f"control invalid: {N4_CARRIER}'s U+FFFD width ({n4_ref}) equals "
