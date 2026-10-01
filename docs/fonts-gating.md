@@ -103,7 +103,8 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   at population. Both consumers filter at read.
   `WhichPrefFontSupportsChar` is **measured** on Linux (smoke arm (n1), run
   34544934746: the probe moves from Tinos's own 33 to its own floor 43 with
-  `pref-fallback ctx=6 key=tinos allowed=0`). `AddGenericFonts`' half is
+  `pref-fallback ctx=6 key=tinos allowed=0`; the Linux conf now answers
+  `serif` with Noto Serif first, which arm (n1) reads). `AddGenericFonts`' half is
   **gated by reading only** — on the runner it is reached for `system-ui` and
   `x-math` alone.
 - **Generic family to family map under a per-context list (#92).**
@@ -118,14 +119,22 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
   Segoe UI for `Win32`, only if the list allows it). The step asks the
   context's own `navigator.platform` (`NavigatorManager::GetPlatform`) first
-  and the launch's (`MaskConfig`) second (#138), which only matters when the
-  launch's `fonts` admit more than one OS; under a one-OS launch mask a
-  context whose OS differs from the launch's is refused either way.
+  and the launch's (`MaskConfig`) second (#138). A launch's fontconfig search
+  path holds only the font groups its own OS reads (`utils._generate_fontconfig`,
+  `docs/FONTS.md`), so a context whose OS differs from the launch's never sees
+  that OS's exclusive faces (`Helvetica`, `Helvetica Neue`, `Menlo` and `Times`
+  are all in the macOS-only group, read from `groups.json` in
+  `fonts-bundle-v1`), and the Windows conf rewrites `Helvetica` to `Arial`
+  before the gate. In a Windows launch the macOS context's step therefore logs
+  `step=system-ui key=helvetica` only when its list also admits `Arial` (a
+  face the Windows groups carry); that is read from the code, and the guard's
+  mixed-OS arm is the measurement. It reads that line, not a width.
   **Measured** on Linux by probe run 35591973853 on build 35586323562, and
   the context-first read by probe run 35698448037: a macOS context in a
   Windows launch logs `step=system-ui key=helvetica` on build 35696007399
   against `step=row key=helvetica neue` on build 35586323562
-  (`fix/131-system-ui-step` @ `5b0e698`, browser inputs equal to main's).
+  (`fix/131-system-ui-step` @ `5b0e698`, browser inputs equal to main's), in the
+  whole-bundle search path that preceded per-OS grouping.
   The guard's Windows arm cannot discriminate, since Segoe UI is also the
   sans row's first choice there. The proof is the `CAMOU-FL generic-map ...
   step=system-ui` log line, not the guard's widths — on the Linux bundle
