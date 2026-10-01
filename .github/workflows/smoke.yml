@@ -7429,8 +7429,7 @@ jobs:
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
           import asyncio, os, warnings
           from camoufox.async_api import AsyncCamoufox, AsyncNewContext
-          from camoufox.utils import (_reassemble_camou_config, get_target_os,
-                                       launch_options)
+          from camoufox.utils import _launch_config, get_target_os, launch_options
 
           READ = '''() => {
             const c = document.createElement('canvas');
@@ -7548,8 +7547,8 @@ jobs:
           # -- headline: one launch, no os=, three contexts --------------------
           opts = launch_options(headless=False, executable_path=BIN)
           fontconfig_file = opts['env'].get('FONTCONFIG_FILE', '(unset)')
-          launch_config = _reassemble_camou_config(opts)
-          if launch_config is None:
+          launch_config = _launch_config(opts)
+          if not launch_config:
               invalid.append("launch config did not reassemble from CAMOU_CONFIG_* -- cannot "
                              "read the launch's OS or renderer")
               spoofed_os, launch_renderer = '(unavailable)', None
