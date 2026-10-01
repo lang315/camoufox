@@ -34,8 +34,10 @@ def font_markers() -> dict:
     shipped per-OS lists (camoufox/fonts.json). A family two OSes share, such as
     Tahoma on Windows and macOS, can never be a marker. On Linux the conf also
     aliases stock metric/URW names (Century, Zapf Dingbats), so a foreign marker
-    that conf names would render on a stock Linux Firefox: it is dropped, or the
-    arm goes red for a reason that is not a leak."""
+    that is an alias SOURCE there (a name a page can ask for and fontconfig
+    rewrites to an installed face) renders on a stock Linux Firefox: it is dropped,
+    or the arm goes red for a reason that is not a leak. Names that are only alias
+    targets (Segoe UI, PingFang SC) stay: asking for them reaches nothing."""
     import json
     import re
 
@@ -46,7 +48,7 @@ def font_markers() -> dict:
     conf = (REPO / "bundle/fontconfig/linux/fonts.conf").read_text(encoding="utf-8")
     # fontconfig compares family names case- and space-insensitively.
     key = lambda f: re.sub(r"\s+", "", f).lower()
-    named = {key(f) for f in re.findall(r"<family>\s*([^<]*?)\s*</family>", conf)}
+    named = {key(f) for f in re.findall(r"<alias[^>]*>\s*<family>\s*([^<]*?)\s*</family>", conf)}
     markers = {o: lists[o] - set().union(*(lists[x] for x in lists if x != o)) for o in lists}
     for o in ("windows", "macos"):
         markers[o] = {f for f in markers[o] if key(f) not in named}

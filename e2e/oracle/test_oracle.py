@@ -62,9 +62,12 @@ def test_font_markers_are_exclusive():
             assert a == b or not set(m[a]) & set(m[b])
 
 
-def test_font_markers_skip_names_the_linux_conf_aliases():
+def test_font_markers_skip_alias_sources_but_keep_alias_targets():
     m = docs.font_markers()
+    # Alias sources of fonts.conf render on stock Linux; targets only are not askable aliases.
     assert "Century" not in m["windows"] and "Zapf Dingbats" not in m["macos"]
+    assert "Segoe UI" in m["windows"] and "PingFang SC" in m["macos"]
+    assert len(m["windows"]) > 200 and len(m["macos"]) > 350
 
 
 def test_packaged_locales_reads_loose_and_omni_ja(tmp_path):
