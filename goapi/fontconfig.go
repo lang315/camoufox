@@ -23,6 +23,12 @@ func fontconfigEnv(hostOS, exe, ua string) (string, error) {
 	if hostOS != "linux" {
 		return "", nil
 	}
+	// The runtime conf is read from the cache dir, so every scan dir must be
+	// absolute; pythonlib absolutizes the executable for the same reason.
+	exe, err := filepath.Abs(exe)
+	if err != nil {
+		return "", fmt.Errorf("camoufox: resolve executable path: %w", err)
+	}
 	osDir := uaOSDir(ua, hostOS)
 	bin := filepath.Dir(exe)
 
@@ -79,6 +85,10 @@ func uaOSDir(ua, hostOS string) string {
 // glyph-fallback candidates. The bundle stores each face once, in a group
 // directory named for the OSes that use it, and groups.json's readBy lists the
 // groups each OS reads. Older bundles hold a full copy per OS in fonts/<os>/.
+//
+// Unlike pythonlib, which swallows any groups.json error, an unreadable or
+// corrupt file is an error here: an absent one is an old bundle and falls back
+// to the legacy layout, but a damaged one must not silently widen the scan.
 func fontScanDirs(fontsDir, osDir string) ([]string, error) {
 	var dirs []string
 	osKey := map[string]string{"linux": "lin", "macos": "mac", "windows": "win"}[osDir]
@@ -113,8 +123,8 @@ func fontScanDirs(fontsDir, osDir string) ([]string, error) {
 // content hash so concurrent launches share one file. It must not live in the
 // bundle: that is commonly baked into an image as root and run read-only.
 func writeRuntimeFontconfig(conf string) (string, error) {
-	base := strings.TrimSpace(os.Getenv("XDG_CACHE_HOME"))
-	if base == "" {
+	base := os.Getenv("XDG_CACHE_HOME")
+	if strings.TrimSpace(base) == "" { // platformdirs: blank means unset, anything else is taken as-is
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return "", fmt.Errorf("camoufox: locate cache dir: %w", err)

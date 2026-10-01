@@ -132,11 +132,6 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		return nil, err
 	}
 
-	fontconfig, err := fontconfigEnv(config.HostOS(), lc.executablePath, cfg.NavigatorUserAgent)
-	if err != nil {
-		return nil, err
-	}
-
 	// Build the firefox CLI. The Juggler bootstrap requires
 	// --juggler-pipe; --no-remote is recommended so a stale profile
 	// lock cannot redirect commands to an existing instance.
@@ -167,27 +162,9 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 
 	cmd := exec.CommandContext(ctx, lc.executablePath, args...)
 
-	// Environment: parent env (or user-provided), CAMOU_CONFIG_N,
-	// optional DISPLAY for Xvfb. Firefox preferences are not env
-	// vars; they are handled by the browser's userPrefs facility via
-	// Browser.enable.
-	env := append([]string(nil), lc.env...)
-	if len(env) == 0 {
-		env = append(env, os.Environ()...)
-	}
-	env = append(env, envVars...)
-	// A caller-supplied FONTCONFIG_FILE wins, as in pythonlib's `**env`.
-	if fontconfig != "" && !slices.ContainsFunc(lc.env, func(e string) bool {
-		return strings.HasPrefix(e, "FONTCONFIG_FILE=")
-	}) {
-		env = append(env, fontconfig)
-	}
-	if lc.virtualDisplay != "" {
-		env = append(env,
-			"DISPLAY="+lc.virtualDisplay,
-			"GDK_BACKEND=x11",
-			"MOZ_ENABLE_WAYLAND=0",
-		)
+	env, err := launchEnv(lc, cfg, envVars, config.HostOS())
+	if err != nil {
+		return nil, err
 	}
 	cmd.Env = env
 
@@ -285,6 +262,37 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	}
 	launched = true
 	return b, nil
+}
+
+// launchEnv builds the browser's environment: the caller's env (or the parent's),
+// CAMOU_CONFIG_N, the per-OS fontconfig on Linux and the optional Xvfb display.
+// cfg must be the final config, so the fontconfig follows the generated
+// identity. Firefox preferences are not env vars; they go through the
+// browser's userPrefs facility via Browser.enable.
+func launchEnv(lc *launchConfig, cfg *config.Config, envVars []string, hostOS string) ([]string, error) {
+	fontconfig, err := fontconfigEnv(hostOS, lc.executablePath, cfg.NavigatorUserAgent)
+	if err != nil {
+		return nil, err
+	}
+	env := append([]string(nil), lc.env...)
+	if len(env) == 0 {
+		env = append(env, os.Environ()...)
+	}
+	env = append(env, envVars...)
+	// A caller-supplied FONTCONFIG_FILE wins, as in pythonlib's `**env`.
+	if fontconfig != "" && !slices.ContainsFunc(lc.env, func(e string) bool {
+		return strings.HasPrefix(e, "FONTCONFIG_FILE=")
+	}) {
+		env = append(env, fontconfig)
+	}
+	if lc.virtualDisplay != "" {
+		env = append(env,
+			"DISPLAY="+lc.virtualDisplay,
+			"GDK_BACKEND=x11",
+			"MOZ_ENABLE_WAYLAND=0",
+		)
+	}
+	return env, nil
 }
 
 // applyBrowserProxy issues Browser.setBrowserProxy so the running
