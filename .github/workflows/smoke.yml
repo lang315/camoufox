@@ -95,7 +95,7 @@ jobs:
           # | head -1`. scripts/package.py copytrees the whole
           # bundle/fontconfig directory, so the artifact carries THREE
           # fonts.conf files and `head -1` would pick one by directory order:
-          #   linux/   sans-serif=Arimo  serif=Tinos            monospace=Cousine
+          #   linux/   sans-serif=Noto Sans serif=Noto Serif    monospace=DejaVu Sans Mono
           #   macos/   sans-serif=Helvetica serif=Times         monospace=Menlo
           #   windows/ sans-serif=Arial  serif=Times New Roman  monospace=Consolas
           # All three contain the `<dir prefix="cwd">fonts</dir>` needle, so the
@@ -699,13 +699,17 @@ jobs:
               f"{FONTS_CONF_SRC} does not contain {_needle!r}; the bundle's fonts.conf "
               f"has changed shape and this substitution would silently do nothing.")
           # Identity check, not a path check: all three bundled fonts.conf files
-          # carry the needle above, so only their alias targets tell them apart.
-          # Arimo/Tinos/Cousine appear ONLY in the linux file (verified: grep -c
-          # over the macos and windows files returns 0 for all three).
-          _missing = [f for f in ("Arimo", "Tinos", "Cousine") if f not in _conf]
+          # carry the needle above, so only their generic families tell them apart.
+          # The linux conf resolves serif / monospace / cursive to Noto Serif /
+          # DejaVu Sans Mono / Z003; those names appear ONLY in the linux file
+          # (verified: grep -c over the macos and windows files returns 0 for
+          # all three). Arimo/Tinos/Cousine are no longer a test: they survive
+          # in the linux file as metric-alias targets, so they would pass for
+          # any conf that carries those aliases.
+          _missing = [f for f in ("Noto Serif", "DejaVu Sans Mono", "Z003") if f not in _conf]
           assert not _missing, (
-              f"{FONTS_CONF_SRC} does not alias to {_missing}: this is not the LINUX "
-              f"fonts.conf, and arms (n1), (n2) and (n4) all rest on the Linux aliases. "
+              f"{FONTS_CONF_SRC} does not name {_missing}: this is not the LINUX "
+              f"fonts.conf, and arms (n1), (n2) and (n4) all rest on its generics. "
               f"See the unpack step's -path '*/fontconfig/linux/fonts.conf' pin.")
           _conf = _conf.replace(_needle, "<dir>%s</dir>" % FONTS_DIR)
           FONTCONFIG_FILE = os.path.join(FC_DIR, "fonts.conf")
@@ -843,7 +847,7 @@ jobs:
           # its OWN launch, before PROBES exists: picking it inside the bare
           # launch would leave arm (a) measuring a different probe set from
           # arm (b).
-          MAC_CANDIDATES = ["Optima", "Palatino", "Helvetica"]
+          MAC_CANDIDATES = ["Optima", "Avenir", "Baskerville"]
 
           # One checksum implementation, shared by this precheck and the
           # Geneva discriminator below. Two different faces essentially never
@@ -933,7 +937,7 @@ jobs:
           print(f"  [MAC_ONLY precheck] chosen third MAC_ONLY family: {MAC_THIRD}")
 
           MAC_ONLY = ["Helvetica Neue", "PingFang HK", MAC_THIRD]
-          WIN_ONLY = ["Segoe UI", "Calibri", "MS Gothic"]
+          WIN_ONLY = ["Segoe UI", "Candara", "MS Gothic"]
           PROBES = MAC_ONLY + WIN_ONLY
           # Derived, never written out -- see fc_subst_hits above. The fc memo
           # lowercases its key, and so does the reader, so these are lowercase.
@@ -7299,9 +7303,13 @@ jobs:
             // fonts, invisible under FONTCONFIG_FILE; Menlo/Consolas are the
             // mac/win monospace aliases; Monaco is monospaced at 600/1000em
             // next to Menlo's 602 and collapses to the same width at 72px.
-            // PingFang HK (855/755) replaced it. Cambria is NOT in
-            // _ESSENTIAL_FONTS_WINDOWS, so it is in the random sample and is
-            // never required -- see REQUIRED below.
+            // PingFang HK (855/755) replaced it. Every marker is in exactly one
+            // OS of fonts.json and is always listed by a launch of that OS
+            // (the OS base in essential-fonts.json, or _LINUX_MARKER_FONTS for
+            // Arimo/Tinos). Calibri/Cambria are
+            // not markers because the Linux metric aliases made them lin-listed
+            // too (Carlito/Caladea), so a masked win context in a lin launch
+            // could resolve them.
             //
             // probe() returns `w !== base`, so a dead layout reads
             // base === w === 0 for every family, absent reference included --
@@ -7322,19 +7330,20 @@ jobs:
               renderer,
               base: baseWidth,
               mac: ['Helvetica Neue', 'Lucida Grande', 'PingFang HK'].filter(probe),
-              win: ['Segoe UI', 'Calibri', 'Cambria'].filter(probe),
-              lin: ['Arimo', 'Tinos', 'Noto Sans JP'].filter(probe),
+              win: ['Segoe UI', 'Candara', 'Corbel'].filter(probe),
+              lin: ['Arimo', 'Tinos', 'URW Gothic'].filter(probe),
               absent: probe('__CamouAbsentRef__0001'),
             };
           }'''
 
           EXPECT = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}
           # Markers a context of that OS must resolve when nothing masks it.
-          # Cambria is a random-sample font (not essential) and is excluded.
+          # Each is in exactly one OS of fonts.json and always in its launch's
+          # list (see the probe list above).
           REQUIRED = {
               'mac': ['Helvetica Neue', 'Lucida Grande', 'PingFang HK'],
-              'win': ['Segoe UI', 'Calibri'],
-              'lin': ['Arimo', 'Tinos', 'Noto Sans JP'],
+              'win': ['Segoe UI', 'Candara', 'Corbel'],
+              'lin': ['Arimo', 'Tinos', 'URW Gothic'],
           }
           NARROW = "can only narrow it, never restore a family (#44)"
           BIN = os.environ['CAMOUFOX_BIN']
@@ -7624,13 +7633,13 @@ jobs:
           # from PROBES; this step is a separate process and cannot, so if that
           # list ever changes, change this one with it.
           # MAC_ONLY's third slot is chosen at runtime by the guard step's
-          # precheck (Optima, else Palatino, else Helvetica), so this separate
+          # precheck (Optima, else Avenir, else Baskerville), so this separate
           # process cannot know which one won. Carry the SUPERSET -- every
           # family MAC_ONLY can hold -- rather than a stale literal. This is an
           # informational filter, so matching one name too many costs nothing.
           FC_PROBE_KEYS = ("helvetica neue", "pingfang hk",
-                           "optima", "palatino", "helvetica",
-                           "segoe ui", "calibri", "ms gothic")
+                           "optima", "avenir", "baskerville",
+                           "segoe ui", "candara", "ms gothic")
           fc_hits = []
           for _ts, _b, _i, ln in rows:
               if "CAMOU-FL fc-subst " not in ln or " hit=1 " not in ln or "key=" not in ln:
