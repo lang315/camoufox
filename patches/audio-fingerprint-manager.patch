@@ -229,23 +229,24 @@ index a1162b29e3..eec89694f8 100644
  
    mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
 diff --git a/dom/media/webaudio/AnalyserNode.cpp b/dom/media/webaudio/AnalyserNode.cpp
-index 3c80514a1d..befe6ee2bc 100644
+index 3c80514a1d..d15d3457b2 100644
 --- a/dom/media/webaudio/AnalyserNode.cpp
 +++ b/dom/media/webaudio/AnalyserNode.cpp
-@@ -11,6 +11,12 @@
+@@ -11,6 +11,13 @@
  #include "mozilla/PodOperations.h"
  #include "mozilla/dom/AnalyserNodeBinding.h"
  #include "nsMathUtils.h"
 +#include "AudioFingerprintManager.h"
 +#include "AccessObserverDom.hpp"
 +#include "nsPIDOMWindow.h"
++#include "nsPIDOMWindowInlines.h"
 +#include "nsIGlobalObject.h"
 +#include "mozilla/dom/BrowsingContext.h"
 +#include "mozilla/dom/WorkerPrivate.h"
  
  namespace mozilla {
  
-@@ -214,6 +219,28 @@ void AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray) {
+@@ -214,6 +221,28 @@ void AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray) {
      return;
    }
  
@@ -274,7 +275,7 @@ index 3c80514a1d..befe6ee2bc 100644
    aArray.ProcessData([&](const Span<float>& aData, JS::AutoCheckCannotGC&&) {
      size_t length = std::min(size_t(aData.Length()), mOutputBuffer.Length());
  
-@@ -230,6 +253,28 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
+@@ -230,6 +259,28 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
      return;
    }
  
@@ -303,7 +304,7 @@ index 3c80514a1d..befe6ee2bc 100644
    const double rangeScaleFactor = 1.0 / (mMaxDecibels - mMinDecibels);
  
    aArray.ProcessData([&](const Span<uint8_t>& aData, JS::AutoCheckCannotGC&&) {
-@@ -253,6 +294,28 @@ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
+@@ -253,6 +304,28 @@ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
      size_t length = std::min(aData.Length(), size_t(FftSize()));
  
      GetTimeDomainData(aData.Elements(), length);
@@ -332,7 +333,7 @@ index 3c80514a1d..befe6ee2bc 100644
    });
  }
  
-@@ -267,6 +326,28 @@ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
+@@ -267,6 +340,28 @@ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
  
      GetTimeDomainData(tmpBuffer.Elements(), length);
  
