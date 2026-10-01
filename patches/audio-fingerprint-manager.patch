@@ -363,20 +363,21 @@ index 3c80514a1d..d15d3457b2 100644
      for (size_t i = 0; i < length; ++i) {
        const float value = tmpBuffer[i];
 diff --git a/dom/media/webaudio/AudioBuffer.cpp b/dom/media/webaudio/AudioBuffer.cpp
-index 74fe4e6470..2416f63fa1 100644
+index 74fe4e6470..3f1bf03dbd 100644
 --- a/dom/media/webaudio/AudioBuffer.cpp
 +++ b/dom/media/webaudio/AudioBuffer.cpp
-@@ -19,6 +19,9 @@
+@@ -19,6 +19,10 @@
  #include "mozilla/dom/AudioBufferBinding.h"
  #include "nsPrintfCString.h"
  #include "nsTHashSet.h"
 +#include "AudioFingerprintManager.h"
 +#include "nsPIDOMWindow.h"
++#include "nsPIDOMWindowInlines.h"
 +#include "mozilla/dom/BrowsingContext.h"
  
  namespace mozilla::dom {
  
-@@ -301,6 +304,27 @@ bool AudioBuffer::RestoreJSChannelData(JSContext* aJSContext) {
+@@ -301,6 +305,27 @@ bool AudioBuffer::RestoreJSChannelData(JSContext* aJSContext) {
        MOZ_ASSERT(!isShared);  // Was created as unshared above
        CopyChannelDataToFloat(mSharedChannels, i, 0, jsData, Length());
      }
@@ -404,7 +405,7 @@ index 74fe4e6470..2416f63fa1 100644
      mJSChannels[i] = array;
    }
  
-@@ -352,6 +376,24 @@ void AudioBuffer::CopyFromChannel(const Float32Array& aDestination,
+@@ -352,6 +377,24 @@ void AudioBuffer::CopyFromChannel(const Float32Array& aDestination,
                                   JS::AutoCheckCannotGC&&) {
        CopyChannelDataToFloat(mSharedChannels, aChannelNumber, aBufferOffset,
                               aData.Elements(), calculateCount(aData.Length()));
