@@ -260,8 +260,8 @@ Python Packages
   fpgen                       v1.3.0
   Playwright                  v1.62.0
 Browser
-  Active                      official/stable/152.0.4-beta.31
-  Current browser             v152.0.4-beta.31
+  Active                      official/stable/156.0.1-beta.32
+  Current browser             v156.0.1-beta.32
   Installed                   Yes
   Latest in official/stable?  Yes
   Last Sync                   2026-03-07 00:23

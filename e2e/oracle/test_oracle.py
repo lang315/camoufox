@@ -67,7 +67,18 @@ def test_font_markers_skip_alias_sources_but_keep_alias_targets():
     # Alias sources of fonts.conf render on stock Linux; targets only are not askable aliases.
     assert "Century" not in m["windows"] and "Zapf Dingbats" not in m["macos"]
     assert "Segoe UI" in m["windows"] and "PingFang SC" in m["macos"]
-    assert len(m["windows"]) > 200 and len(m["macos"]) > 350
+    # The filter removes only alias sources, so most of each OS's exclusive
+    # families survive. Derived from fonts.json, so a regeneration cannot trip it.
+    import json
+    from pathlib import Path
+
+    import camoufox
+
+    raw = json.loads((Path(camoufox.__file__).parent / "fonts.json").read_text(encoding="utf-8"))
+    for os_name, key in (("windows", "win"), ("macos", "mac")):
+        exclusive = set(raw[key]) - set().union(*(set(raw[o]) for o in raw if o != key))
+        assert set(m[os_name]) <= exclusive
+        assert len(m[os_name]) * 2 > len(exclusive), os_name
 
 
 def test_packaged_locales_reads_loose_and_omni_ja(tmp_path):

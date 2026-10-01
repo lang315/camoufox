@@ -66,7 +66,7 @@ page's own inline script at 55ms on the same time origin. `about:blank` is
 skipped so init scripts added between opening a page and its first real
 navigation still apply.
 
-The teardown only *writes* the per-`userContextId` disabled flags that all 17
+The teardown only *writes* the per-`userContextId` disabled flags that all 15
 WebIDL `Func` guards already read, so no guard changes. The entry point is
 chrome-only XPCOM, the same shape as `overrideTimezone`: a teardown exposed as
 a page-visible function would just be a sixteenth artifact.
