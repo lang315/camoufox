@@ -172,6 +172,24 @@ on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
 
+## Two contexts in one content process (Firefox 156)
+
+The cross-context cache arms (#81, #82, #83) need two contexts whose documents
+are laid out by one content process, because the caches they test are
+per-process. Firefox 152 gave every `web` document the bare remote type, so
+`dom.ipc.processCount=1` with `fission.autostart=false` put two Playwright
+contexts in one process. Firefox 156 gives `web` documents the type
+`web=^userContextId=<N>` (`SharedWebRemoteType` in `dom/ipc/ProcessIsolation.cpp`),
+one process pool per container, whatever those prefs say: in smoke run
+36853787702 every pair of contexts, from arm (b) to arm (n5), was laid out by two
+processes (read from the pid MOZ_LOG prefixes to each `CAMOU-FL group` line; the
+`cfx-child.<n>` file name is shared by several processes and says nothing). The
+`file` remote type carries no container and `dom.ipc.processCount.file` is 1, so
+arms (i2), (j), (j2) and (n4) now load their two pages from `file:` URLs and
+assert that both documents' group lines carry one pid. Arms that still use `data:`
+pages for two contexts ((b), (b2), (b2r), (n5), the pid and disc probes) are green
+without having shared a process; their green says nothing about a per-process leak.
+
 ## macOS host (#148)
 
 Measured on a native macOS arm64 host against build run 35799717143 (`main` at
