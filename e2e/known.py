@@ -30,11 +30,6 @@ CHECKS = [
     # Windows host (run 36114027483): goapi's linux spoof exposes the host's Microsoft voices.
     (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-linux\]",
      "voices_no_foreign_os: ", 166, True, {"Windows"}),
-    # Linux host (CI run 36038692790): only goapi collapses the generics, under every spoof.
-    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-",
-     "monospace_is_monospace: monospace ", 162, True, {"Linux"}),
-    (r"test_02_fingerprint\.py::test_fingerprint_is_coherent\[go-",
-     "fonts_measurable: fallback floors", 162, True, {"Linux"}),
     (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
      "no LAN address", 163, True, {"Darwin", "Linux", "Windows"}),
     (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
