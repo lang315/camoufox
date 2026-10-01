@@ -660,13 +660,17 @@ jobs:
           # the same substitution _generate_fontconfig (utils.py:58-92) makes.
           #
           # CONSEQUENCE, stated up front because it decides three arms:
-          # bundle/fontconfig/linux/fonts.conf aliases serif/sans-serif/
-          # monospace to Tinos/Arimo/Cousine -- all `lin`-only in fonts.json,
-          # so all refused under any mac or win per-context list. Every generic
-          # under such a list is therefore decided by A2's table, not by
-          # fontconfig. The file also carries ZERO <include> elements, so the
-          # host's /etc/fonts/conf.d/30-metric-aliases.conf is absent and
-          # `Times` is not silently aliased to `Tinos`.
+          # bundle/fontconfig/linux/fonts.conf resolves serif/sans-serif/
+          # monospace through `prefer` chains to Noto Serif/Noto Sans/DejaVu
+          # Sans Mono -- listed for win and lin in fonts.json but not for mac,
+          # so refused under a mac per-context list and allowed under a win one
+          # (it used to alias them to the lin-only Tinos/Arimo/Cousine). A
+          # context with a list is answered by A2's table first either way
+          # (FindGenericFamilies runs it before the fontconfig loop); the conf
+          # decides only the ctx-0 pref path (n1) and mac-list distance (n2).
+          # The file also carries ZERO <include> elements: the host's
+          # /etc/fonts/conf.d is absent, and the metric aliases it applies
+          # (Times, Helvetica, Arial, Calibri, ...) are copied into the file.
           #
           # WHAT THIS GUARD CANNOT SEE (CLAUDE.md lesson 3). It measures the
           # LINUX conf. A shipped Camoufox picks the conf by the SPOOFED os:
@@ -3755,13 +3759,16 @@ jobs:
           # miss fixes the cell for the whole process, at context 0, where the
           # gate allows everything.
           #
-          # Fixture. Context list ["Times"] (mac-only in fonts.json). Stack
+          # Fixture. Context list ["Times"] (its face is in the macOS-only font
+          # group; fonts.json also reports the name for win and lin, as a metric
+          # alias, which no gate here reads). Stack
           # '72px "Times", serif' -- naming a generic makes mFallbackGeneric
           # Serif (gfxTextRun.cpp:1998-2000), so the cell consulted is
           # [x-cyrillic][Serif]. U+1C80 is UBLOCK_CYRILLIC_EXTENDED_C, which has
           # a case in GetFontPrefLangFor, and the Unix block of all.js:2746 sets
           # font.name-list.serif.x-cyrillic to the literal "serif" -- which
-          # fontconfig, under the bundle's own fonts.conf, answers with Tinos.
+          # fontconfig, under the bundle's own fonts.conf, answers with Noto Serif
+          # first (its serif `prefer` chain; the conf used to say Tinos).
           #
           # WHY "Times" AND NOT "Geneva". The plan wrote this fixture as
           # ["Geneva"], and Geneva is the one bundled mac family that never
@@ -3772,7 +3779,7 @@ jobs:
           # mFonts EMPTY, which routes U+1C80 through GetDefaultFont's
           # last-resort walk (#88) instead of FindFontForChar exit 7 (#94) and
           # would make a RED here attributable to the wrong issue -- and the
-          # tofu floor and the Tinos reference could then be the same face,
+          # tofu floor and the Noto Serif reference could then be the same face,
           # which trips this arm's own control-invalid branch. Times is mac-only
           # like Geneva, renders, and is A2's first serif-row family, so the
           # appended `serif` generic resolves to Times as well: mFonts holds a
@@ -3782,18 +3789,21 @@ jobs:
           #
           # WHY U+1C80. Scanned over every face and every cmap subtable of
           # bundle/fonts/{macos,windows,linux}: among families whose name does
-          # not start with '.', ONLY Tinos and Arimo cover it. Both are
-          # lin-only in fonts.json, so both gates refuse them under ["Times"],
-          # and no mac family can answer instead -- which is what makes a RED
-          # here attributable to the ungated pref path rather than to an
-          # ordinary in-list fallback. Re-run against the shipped bundle before
-          # this arm landed: 345 faces scanned, U+1C80 -> ['Arimo', 'Tinos'].
+          # not start with '.', these cover it: Noto Serif, Noto Sans (and its
+          # Display and Mono), Tinos, Arimo, FreeSerif, Sans Serif Collection
+          # and the Iosevka family. Re-scanned over the shipped bundle
+          # (fonts-bundle-v1, 1974 faces) when the Linux conf moved off
+          # Arimo/Tinos. None is in the ["Times"] list, so both gates refuse
+          # them and nothing in the list can answer instead -- which is what
+          # makes a RED here attributable to the ungated pref path rather than
+          # to an ordinary in-list fallback. (fonts.json mac lists Iosevka, so
+          # a fixture list that held it would break that argument.)
           #
           # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
-          #  * The Tinos reference and the tofu floor could be equal, in which
-          #    case "matched Tinos" and "rendered nothing" are the same number.
+          #  * The Noto Serif reference and the tofu floor could be equal, in which
+          #    case "matched Noto Serif" and "rendered nothing" are the same number.
           #    Asserted below; if equal the arm scores nothing.
-          #  * The Tinos reference is measured by FAMILY NAME in a BARE context.
+          #  * The Noto Serif reference is measured by FAMILY NAME in a BARE context.
           #    That is a SEPARATE browser process -- one_page_list_arg opens its
           #    own sync_playwright() -- so this is not a same-process
           #    comparison. What makes the two sides comparable is narrower and
@@ -3802,7 +3812,7 @@ jobs:
           #    canvas measureText path, and an advance width that is a property
           #    of the face rather than of the context. Arm (h) relies on the
           #    same property and states it the same way.
-          #  * The reference launch's OWN font list contains Tinos -- its
+          #  * The reference launch's OWN font list contains Noto Serif -- its
           #    appended serif generic resolves there because no per-context list
           #    refuses it -- so its `fontlist` line would satisfy the "a carrier
           #    reached mFonts" branch below if it were in the window. Every
@@ -3816,9 +3826,14 @@ jobs:
           #    Phase 0 RED.
           N1_CP = 0x1C80          # CYRILLIC SMALL LETTER ROUNDED VE
           N1_PUA = 0xE000         # tofu floor: nothing MAC-side covers it
-          N1_NAMED = "Times"      # mac-only, renders (unlike Geneva, #95)
+          N1_NAMED = "Times"      # macOS-group face, renders (unlike Geneva, #95)
           N1_LIST = [N1_NAMED]
-          N1_OUTSIDE = "Tinos"    # the ctx-0 pref answer under the bundle conf
+          # The ctx-0 pref answer under the bundle's Linux conf: the first family
+          # of its serif `prefer` chain, which covers U+1C80 (scan above).
+          N1_OUTSIDE = "Noto Serif"
+          # Every U+1C80 carrier a `fontlist` line must NOT show in mFonts.
+          N1_CARRIERS = ("noto serif", "noto sans", "tinos", "arimo", "freeserif",
+                         "iosevka", "sans serif collection")
 
           JS_N1 = """(a) => {
             const c = document.createElement('canvas').getContext('2d');
@@ -3861,7 +3876,7 @@ jobs:
                "outside": N1_OUTSIDE})
           # EVERY log read happens HERE, before the reference launch. The
           # reference runs with no per-context list, so its own appended serif
-          # generic resolves to Tinos and its `fontlist` line names a U+1C80
+          # generic resolves to Noto Serif and its `fontlist` line names a U+1C80
           # carrier -- which is exactly the string the "a carrier reached
           # mFonts" branch below refuses on. camou_fl reads every file in
           # LOG_DIR and treats a file absent from the mark as offset 0
@@ -3879,7 +3894,7 @@ jobs:
           n1_fl = [ln for ln in n1_fl_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
           n1_pf = [ln for ln in n1_pf_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
 
-          # The reference: Tinos's U+1C80 measured by family name in a BARE
+          # The reference: Noto Serif's U+1C80 measured by family name in a BARE
           # context, where no per-context list gates anything.
           n1_ref = one_page_list_arg(
               None, JS_N1,
@@ -3887,7 +3902,7 @@ jobs:
                "outside": N1_OUTSIDE})["outsideDirect"]
           n1_have_fontlist = kind_total("fontlist") > 0
           print(f"  [arm n1 / #94] probe(U+1C80 in {N1_LIST})={n1['probe']} "
-                f"floor(U+E000)={n1['floor']} tinos_ref={n1_ref} ctx={n1_ctx} "
+                f"floor(U+E000)={n1['floor']} outside_ref={n1_ref} ctx={n1_ctx} "
                 f"fontlist_lines={len(n1_fl)}/{len(n1_fl_all)} "
                 f"pref_fallback_lines={len(n1_pf)}/{len(n1_pf_all)} "
                 f"kind_totals: fontlist={kind_total('fontlist')} "
@@ -3898,7 +3913,7 @@ jobs:
           n1_failures = []
           if abs(n1_ref - n1["floor"]) < 0.01:
               n1_failures.append(
-                  f"control invalid: Tinos's U+1C80 width ({n1_ref}) equals the "
+                  f"control invalid: {N1_OUTSIDE}'s U+1C80 width ({n1_ref}) equals the "
                   f"stack's own tofu floor ({n1['floor']}), so 'the pref path "
                   f"answered' and 'nothing rendered' are the same number and this "
                   f"arm cannot tell them apart")
@@ -3913,28 +3928,28 @@ jobs:
                   n1_failures.append(
                       f"PREF PATH LEAK (width-only, no `fontlist` kind in this "
                       f"binary): U+1C80 in a {N1_LIST} context measured "
-                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) measured by "
+                      f"{n1['probe']}, which is {N1_OUTSIDE}'s width ({n1_ref}) measured by "
                       f"name in a bare context, and differs from this stack's own "
-                      f"tofu floor ({n1['floor']}). Tinos is lin-only in fonts.json, "
+                      f"tofu floor ({n1['floor']}). {N1_OUTSIDE} is not in fonts.json mac, "
                       f"so both gates refuse it and no allowed family covers U+1C80.")
               elif abs(n1["probe"] - n1["floor"]) < 0.01:
                   # The probe IS the floor, so nothing rendered and no ungated
                   # path answered. This branch is split out because the message
-                  # below would otherwise print "neither Tinos nor the tofu
+                  # below would otherwise print "neither Noto Serif nor the tofu
                   # floor" for a probe that is exactly the tofu floor -- a false
                   # statement in the one case where the gate did its job, and
                   # the case a Phase 1 re-run of this arm is trying to reach.
                   print(f"  [arm n1 / #94] no leak on width evidence (binary emits "
                         f"no `fontlist` kind): U+1C80 measured {n1['probe']}, which "
                         f"is this stack's own tofu floor ({n1['floor']}) and not "
-                        f"Tinos ({n1_ref}) -- nothing rendered the codepoint. The "
+                        f"{N1_OUTSIDE} ({n1_ref}) -- nothing rendered the codepoint. The "
                         f"width half cannot go further without the `fontlist` and "
                         f"`pref-fallback` kinds, so this arm scores nothing here "
                         f"and its GREEN is NOT evidence the pref path is gated.")
               else:
                   print(f"  [arm n1 / #94] DIAGNOSTIC (binary emits no `fontlist` "
                         f"kind): U+1C80 measured {n1['probe']}, which is neither "
-                        f"Tinos ({n1_ref}) nor the tofu floor ({n1['floor']}). Some "
+                        f"{N1_OUTSIDE} ({n1_ref}) nor the tofu floor ({n1['floor']}). Some "
                         f"third face answered; this arm cannot say which, and it "
                         f"scores nothing on this binary.")
           elif n1_ctx is None:
@@ -3953,7 +3968,7 @@ jobs:
               # covers "the pref path was never consulted at all", which is the
               # vacuous green lesson 4 is about.
               _refused = [ln for ln in n1_pf
-                          if "key=tinos" in ln.lower() and "allowed=0" in ln]
+                          if f"key={N1_OUTSIDE.lower()}" in ln.lower() and "allowed=0" in ln]
               if not _mine:
                   n1_failures.append(
                       f"setup invalid: the run emitted {kind_total('fontlist')} "
@@ -3964,22 +3979,22 @@ jobs:
                       "setup invalid: a `fontlist` line came back with an EMPTY "
                       "families= field, which is a child-process AsString failure "
                       "(SharedFontList.h:142-148), not an empty list")
-              elif any(t in f.lower() for f in _fams for t in ("tinos", "arimo")):
+              elif any(t in f.lower() for f in _fams for t in N1_CARRIERS):
                   n1_failures.append(
                       f"setup invalid: a U+1C80 carrier reached mFonts, so exit 4 "
                       f"answers before exit 7 and this arm tests nothing: {_mine[-1]}")
               elif abs(n1["probe"] - n1_ref) < 0.01:
                   n1_failures.append(
                       f"PREF PATH LEAK: U+1C80 in a {N1_LIST} context measured "
-                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) -- a "
-                      f"lin-only family both gates refuse. pref-fallback lines for "
+                      f"{n1['probe']}, which is {N1_OUTSIDE}'s width ({n1_ref}) -- a "
+                      f"family outside the list both gates refuse. pref-fallback lines for "
                       f"ctx={n1_ctx}: {len(n1_pf)}, of which "
-                      f"{len(_refused)} refused tinos")
+                      f"{len(_refused)} refused {N1_OUTSIDE.lower()}")
               elif not _refused:
                   n1_failures.append(
                       f"PREF PATH NOT CONSULTED: the width is right ({n1['probe']} vs "
-                      f"tinos {n1_ref}, floor {n1['floor']}) but no "
-                      f"`pref-fallback ctx={n1_ctx} key=tinos allowed=0` line exists, "
+                      f"{N1_OUTSIDE.lower()} {n1_ref}, floor {n1['floor']}) but no "
+                      f"`pref-fallback ctx={n1_ctx} key={N1_OUTSIDE.lower()} allowed=0` line exists, "
                       f"so this GREEN would also cover 'the read filter never ran'. "
                       f"pref-fallback lines for this ctx: {n1_pf[-3:] or 'none'}")
           if n1_failures:
@@ -4001,7 +4016,8 @@ jobs:
           # so it returns the WHOLE config sorted by fontconfig's distance
           # metric and the loop takes the first `limit` (default 3) families the
           # gate accepts. Under a mac list the three fontconfig answers
-          # (Tinos/Arimo/Cousine) are all refused, so what comes back is three
+          # (Noto Sans/Noto Serif/DejaVu Sans Mono under the Linux conf) are all
+          # refused, so what comes back is three
           # families chosen by distance from a pattern the gate already emptied
           # of its real answer -- not by the generic. That is #92's mechanism.
           #
@@ -6166,8 +6182,11 @@ jobs:
           # Times and both groups read families=times,times. The only U+FFFD
           # carrier the donor can reach is N4_CARRIER, through system fallback.
           # U+FFFD is the FIRST character of its own text run so aPrevMatchedFont
-          # (exit 8) is empty. Re-scanned against the shipped bundle before this
-          # arm landed: 345 faces, U+FFFD carriers are Apple Symbols, Arimo,
+          # (exit 8) is empty. Scanned against the shipped bundle before this
+          # arm landed (345 faces; re-checked on the 1974-face fonts-bundle-v1:
+          # Times and Geneva still carry no U+FFFD, Menlo, Lucida Grande,
+          # Arimo, Tinos, Segoe UI, Tahoma and Verdana still do): U+FFFD
+          # carriers are Apple Symbols, Arimo,
           # Lucida Grande, Malgun Gothic, Menlo, Microsoft Sans Serif, STIX Two
           # Math, Segoe UI (+Black/Light/Semibold/Semilight), System Font,
           # Tahoma, Tinos, Verdana -- Times and Geneva are in neither, which is
