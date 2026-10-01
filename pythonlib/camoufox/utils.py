@@ -717,8 +717,9 @@ _WINDOW_DIM_KEYS = (
 )
 
 
-def _camou_config_blob(from_options: Dict[str, Any]) -> str:
-    env = from_options.get('env') or {}
+def _camou_config_blob(from_options: Optional[Dict[str, Any]]) -> str:
+    """The CAMOU_CONFIG_<n> env chunks of a launch_options() dict, joined in index order."""
+    env = (from_options or {}).get('env') or {}
     chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
     return ''.join(v for _, v in sorted(chunks))
 
@@ -759,11 +760,7 @@ def spoofs_window_dimensions(from_options: Dict[str, Any]) -> bool:
     dimension. The config is chunked across CAMOU_CONFIG_<n> env vars, so
     reassemble it in index order before looking.
     """
-    env = (from_options or {}).get('env') or {}
-    chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
-    if not chunks:
-        return False
-    blob = ''.join(v for _, v in sorted(chunks))
+    blob = _camou_config_blob(from_options)
     return any(key in blob for key in _WINDOW_DIM_KEYS)
 
 
@@ -785,13 +782,11 @@ STOCK_MEDIA_DEFAULTS = {
 
 
 def _launch_config(from_options: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The CAMOU_CONFIG a launch_options() dict carries, reassembled from its chunks."""
-    env = (from_options or {}).get('env') or {}
-    chunks = [(int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_')]
-    try:
-        return orjson.loads(''.join(v for _, v in sorted(chunks))) if chunks else {}
-    except orjson.JSONDecodeError:
-        return {}
+    """The CAMOU_CONFIG a launch_options() dict carries ({} when it has none).
+
+    Raises orjson.JSONDecodeError on a corrupt config rather than reporting it as absent.
+    """
+    return orjson.loads(_camou_config_blob(from_options) or '{}')
 
 
 def attach_launch_fonts(target: Any, from_options: Optional[Dict[str, Any]]) -> Any:
