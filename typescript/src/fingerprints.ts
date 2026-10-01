@@ -1549,6 +1549,7 @@ export function fromPreset(
 
 export interface InitValues {
 	audioFingerprintSeed?: number;
+	canvasSeed?: number;
 	navigatorPlatform?: string;
 	navigatorOscpu?: string;
 	navigatorUserAgent?: string;
@@ -1574,6 +1575,7 @@ export function buildInitScript(values: InitValues): string {
 
 	const setters: Array<[keyof InitValues, string]> = [
 		["audioFingerprintSeed", "setAudioFingerprintSeed"],
+		["canvasSeed", "setCanvasSeed"],
 		["navigatorPlatform", "setNavigatorPlatform"],
 		["navigatorOscpu", "setNavigatorOscpu"],
 		["navigatorUserAgent", "setNavigatorUserAgent"],
@@ -1833,6 +1835,11 @@ export function generateContextFingerprint({
 		resolvedPreset = { navigator: nav, screen, webgl };
 	}
 
+	// Fork-only canvas noise seed (patches/canvas-spoofing.patch); neither
+	// source above carries one.
+	if (!("canvas:seed" in config))
+		config["canvas:seed"] = pyRandom.randint(1, 4_294_967_295);
+
 	if (timezone) config.timezone = timezone;
 	if (locale) {
 		const parsed = normalizeLocale(locale);
@@ -1846,6 +1853,7 @@ export function generateContextFingerprint({
 
 	const initValues: InitValues = {
 		audioFingerprintSeed: config["audio:seed"],
+		canvasSeed: config["canvas:seed"],
 		navigatorPlatform: nav.platform,
 		navigatorOscpu: config["navigator.oscpu"],
 		navigatorUserAgent: config["navigator.userAgent"],

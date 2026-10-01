@@ -819,6 +819,29 @@ describe.skipIf(!modelReady)(
 			expect(context.init_script).not.toContain("setFontSpacingSeed");
 		});
 
+		it("every launch draws its own canvas seed", async () => {
+			const seeds = new Set<number>();
+			for (let i = 0; i < 40; i++) {
+				seeds.add(
+					(await launchConfig({ os: "linux", headless: true }))["canvas:seed"],
+				);
+			}
+			expect(seeds.size).toBe(40);
+		});
+
+		it("seeds the canvas setter in a context fingerprint", () => {
+			const context = fingerprints.generateContextFingerprint({
+				os: "linux",
+				config_overrides: { "canvas:seed": 7 },
+			});
+			expect(context.config["canvas:seed"]).toBe(7);
+			expect(context.init_script).toContain("setCanvasSeed(7)");
+			const drawn = fingerprints.generateContextFingerprint({ os: "linux" });
+			expect(drawn.init_script).toContain(
+				`setCanvasSeed(${drawn.config["canvas:seed"]})`,
+			);
+		});
+
 		it("config_overrides reach the config and the init script", () => {
 			const context = fingerprints.generateContextFingerprint({
 				os: "linux",
@@ -955,9 +978,10 @@ describe.skipIf(!modelReady)(
 		it("keeps the caller's seeds", async () => {
 			const config = await launchConfig({
 				os: "linux",
-				config: { "audio:seed": 9 },
+				config: { "audio:seed": 9, "canvas:seed": 11 },
 			});
 			expect(config["audio:seed"]).toBe(9);
+			expect(config["canvas:seed"]).toBe(11);
 		});
 
 		it("a Windows fr-FR identity has French voices", async () => {

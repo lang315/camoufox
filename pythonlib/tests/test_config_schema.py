@@ -86,6 +86,15 @@ def test_properties_json_is_wellformed():
         assert "property" in entry and "type" in entry, f"malformed entry: {entry}"
 
 
+def test_the_typescript_fixture_bundle_ships_this_schema():
+    """The TypeScript goldens launch against a copy of properties.json. A copy
+    that lacks a key the launcher sends makes launch_options() print "Skipping
+    unknown patch <key>" and the TS port, which prints nothing, fail every
+    golden (canvas:seed, after the FF156 sync)."""
+    fixture = REPO / "typescript" / "tests" / "fixtures" / "launch" / "bundle" / "properties.json"
+    assert fixture.read_bytes() == PROPERTIES.read_bytes()
+
+
 def test_every_key_the_browser_reads_is_declared():
     declared = _declared_keys()
     read = _keys_read()

@@ -19,6 +19,9 @@ the goldens are a function of the code alone:
     probe and the public-IP lookup are patched; the GeoIP reader is a fake
     maxminddb module over a fixed table; numpy's weighted locale choice uses a
     fixed uniform draw (same algorithm as numpy, so the TS port can mirror it).
+  * module-level random: launch_options() draws the canvas seed per launch;
+    the module generator is re-seeded to MODULE_SEED before each scenario (the
+    TS test seeds its pyRandom the same way).
   * paths: the browser bundle is tests/fixtures/launch/bundle*, the cache the
     scratch dir; both are written back as <BUNDLE>/<CACHE>/... placeholders.
 
@@ -30,6 +33,7 @@ import copy
 import io
 import json
 import os
+import random
 import re
 import sys
 import tempfile
@@ -41,6 +45,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 TS_ROOT = HERE.parent.parent
 FIXTURES = TS_ROOT / 'tests' / 'fixtures' / 'launch'
+MODULE_SEED = 20261001
 
 # Must precede every camoufox import: INSTALL_DIR is computed at import time.
 SCRATCH = Path(tempfile.mkdtemp(prefix='camoufox-golden-'))
@@ -454,6 +459,7 @@ def run(name, spec):
         env_backup[k] = os.environ.get(k)
         os.environ[k] = fill(v)
 
+    random.seed(MODULE_SEED)
     out = io.StringIO()
     record = {'name': name, 'kwargs': spec['kwargs'], 'special': special}
     try:
@@ -512,7 +518,7 @@ def main():
     for old in FIXTURES.glob('scenario-*.json'):
         if not only:
             old.unlink()
-    summary = {'host': HOST, 'geo_table': GEO_TABLE, 'scenarios': []}
+    summary = {'host': HOST, 'geo_table': GEO_TABLE, 'module_seed': MODULE_SEED, 'scenarios': []}
     for name, spec in S.items():
         if only and name not in only:
             continue
