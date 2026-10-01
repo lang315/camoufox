@@ -18,6 +18,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PyFloat, parsePyJson } from "../src/pycompat.js";
+import { pyRandom } from "../src/pyrandom.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "fixtures", "launch");
@@ -241,6 +242,9 @@ async function replay(scenario: any) {
 		});
 	}
 
+	// The per-launch canvas seed is the one module-level draw; the recorded run
+	// re-seeded Python's generator the same way.
+	pyRandom.seed(hostInfo.module_seed);
 	try {
 		const { result, error, warnings } = await mods.warnings.recordWarnings(() =>
 			mods.utils.launchOptions(kwargs),

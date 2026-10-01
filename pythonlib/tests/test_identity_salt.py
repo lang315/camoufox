@@ -116,6 +116,10 @@ class TestCanvasSeed:
     def test_caller_seed_is_kept(self):
         assert launch(config={"canvas:seed": 9})["canvas:seed"] == 9
 
+    def test_the_seed_is_a_declared_key(self, capsys):
+        launch()
+        assert "Skipping unknown patch" not in capsys.readouterr().out
+
     def test_context_fingerprint_seeds_the_canvas_setter(self):
         context = fp.generate_context_fingerprint(os="linux")
         seed = context["config"]["canvas:seed"]

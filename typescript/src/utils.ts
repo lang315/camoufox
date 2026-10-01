@@ -80,6 +80,7 @@ import {
 	pyStr,
 	ValueError,
 } from "./pycompat.js";
+import { pyRandom } from "./pyrandom.js";
 import type { VirtualDisplay } from "./virtdisplay.js";
 import { FallbackWarning, LeakWarning, warn } from "./warnings.js";
 import { sampleWebglForScreen, webglForGpu } from "./webgl.js";
@@ -1540,13 +1541,17 @@ export async function launchOptions({
 
 	// The audio noise seed follows the identity: a returning "same device" must
 	// reproduce its audio hash (#442/#765). Never 0 (0 disables the noise).
-	// There is no canvas seed: the browser adds no canvas noise (#528), and no
-	// glyph-spacing noise either (ci/tribal-rules.yml: no-glyph-spacing-noise).
+	// There is no glyph-spacing noise (ci/tribal-rules.yml: no-glyph-spacing-noise).
 	if (!userSetAudioSeed) {
 		config["audio:seed"] = audioSeedFromIdentity(
 			utilsDeps.identitySeed(config, salt),
 		);
 	}
+
+	// The canvas noise seed is fork-only (patches/canvas-spoofing.patch) and is
+	// drawn per launch, so two launches on one preset still render different
+	// canvases. 0 disables the noise.
+	setInto(config, "canvas:seed", pyRandom.randint(1, 4_294_967_295));
 
 	// Set geolocation
 	if (isTruthy(geoip)) {
