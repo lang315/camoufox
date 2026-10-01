@@ -37,7 +37,7 @@ claims", lessons 3 and 4). Three checks run in the same page, on the same canvas
 in the same launch as the measurement:
 
   self_equal     hash(U+1EE5) must equal hash(U+1EE5) drawn twice. If it does
-                 not, per-draw perturbation (the `fonts:spacing_seed` noise) is
+                 not, per-draw perturbation is
                  defeating pixel comparison and no collision reading from this
                  run means anything.
   self_distinct  hash(U+1EE5) must differ from hash('o'). If it does not, the

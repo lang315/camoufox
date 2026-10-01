@@ -65,10 +65,10 @@ SETTERS = [
     "setWebRTCIPv4",
     "setWebRTCIPv6",
     "setFontList",
-    "setFontSpacingSeed",
     "setAudioFingerprintSeed",
     "setSpeechVoices",
     "setTimezone",
+    "setCanvasSeed",
 ]
 
 # The page reports from its own world. `visible` is what a `for...in` sweep

@@ -62,6 +62,54 @@ def test_font_markers_are_exclusive():
             assert a == b or not set(m[a]) & set(m[b])
 
 
+def test_font_markers_skip_alias_sources_but_keep_alias_targets():
+    m = docs.font_markers()
+    # Alias sources of fonts.conf render on stock Linux; targets only are not askable aliases.
+    assert "Century" not in m["windows"] and "Zapf Dingbats" not in m["macos"]
+    assert "Segoe UI" in m["windows"] and "PingFang SC" in m["macos"]
+    # The filter removes only alias sources, so most of each OS's exclusive
+    # families survive. Derived from fonts.json, so a regeneration cannot trip it.
+    import json
+    from pathlib import Path
+
+    import camoufox
+
+    raw = json.loads((Path(camoufox.__file__).parent / "fonts.json").read_text(encoding="utf-8"))
+    for os_name, key in (("windows", "win"), ("macos", "mac")):
+        exclusive = set(raw[key]) - set().union(*(set(raw[o]) for o in raw if o != key))
+        assert set(m[os_name]) <= exclusive
+        assert len(m[os_name]) * 2 > len(exclusive), os_name
+
+
+def test_packaged_locales_reads_loose_and_omni_ja(tmp_path):
+    import zipfile
+
+    import util
+
+    loose = tmp_path / "loose"
+    (loose / "res").mkdir(parents=True)
+    (loose / "res" / "multilocale.txt").write_text("en-US,de\n")
+    assert util.packaged_locales(loose / "camoufox-bin") == ["en-US", "de"]
+    packed = tmp_path / "packed"
+    packed.mkdir()
+    with zipfile.ZipFile(packed / "omni.ja", "w") as z:
+        z.writestr("res/multilocale.txt", "en-US\n")
+    assert util.packaged_locales(packed / "camoufox-bin") == ["en-US"]
+    assert util.packaged_locales(tmp_path / "none" / "camoufox-bin") is None
+
+
+def test_prerequisite_fails_in_ci_unless_allowed(monkeypatch):
+    import util
+
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.delenv("CAMOUFOX_TEST_ALLOW_MISSING", raising=False)
+    with pytest.raises(AssertionError):
+        util.prerequisite("packaged-locales", False)
+    monkeypatch.setenv("CAMOUFOX_TEST_ALLOW_MISSING", "packaged-locales")
+    assert util.prerequisite("packaged-locales", False) is False
+    assert util.prerequisite("packaged-locales", True) is True
+
+
 def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     import known
     from util import Checks

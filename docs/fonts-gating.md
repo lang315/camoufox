@@ -6,6 +6,9 @@ keeps a short lesson 5; the first section below is its full text, which is what
 code comments citing "CLAUDE.md lesson 5" (smoke.yml, probe_windows_fonts.py)
 lean on.
 
+> **Line numbers below are beta.31 (Firefox 152).** The tree is now Firefox 156
+> (beta.32) and they have not been re-measured; re-anchor before citing one.
+
 ## The per-context gate fails open (lesson 5)
 
 `gfxFontGroup` caches its user context id once in its constructor, through
@@ -100,7 +103,8 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   at population. Both consumers filter at read.
   `WhichPrefFontSupportsChar` is **measured** on Linux (smoke arm (n1), run
   34544934746: the probe moves from Tinos's own 33 to its own floor 43 with
-  `pref-fallback ctx=6 key=tinos allowed=0`). `AddGenericFonts`' half is
+  `pref-fallback ctx=6 key=tinos allowed=0`; the Linux conf now answers
+  `serif` with Noto Serif first, which arm (n1) reads). `AddGenericFonts`' half is
   **gated by reading only** — on the runner it is reached for `system-ui` and
   `x-math` alone.
 - **Generic family to family map under a per-context list (#92).**
@@ -115,14 +119,22 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
   Segoe UI for `Win32`, only if the list allows it). The step asks the
   context's own `navigator.platform` (`NavigatorManager::GetPlatform`) first
-  and the launch's (`MaskConfig`) second (#138), which only matters when the
-  launch's `fonts` admit more than one OS; under a one-OS launch mask a
-  context whose OS differs from the launch's is refused either way.
+  and the launch's (`MaskConfig`) second (#138). A launch's fontconfig search
+  path holds only the font groups its own OS reads (`utils._generate_fontconfig`,
+  `docs/FONTS.md`), so a context whose OS differs from the launch's never sees
+  that OS's exclusive faces (`Helvetica`, `Helvetica Neue`, `Menlo` and `Times`
+  are all in the macOS-only group, read from `groups.json` in
+  `fonts-bundle-v1`), and the Windows conf rewrites `Helvetica` to `Arial`
+  before the gate. In a Windows launch the macOS context's step therefore logs
+  `step=system-ui key=helvetica` only when its list also admits `Arial` (a
+  face the Windows groups carry); that is read from the code, and the guard's
+  mixed-OS arm is the measurement. It reads that line, not a width.
   **Measured** on Linux by probe run 35591973853 on build 35586323562, and
   the context-first read by probe run 35698448037: a macOS context in a
   Windows launch logs `step=system-ui key=helvetica` on build 35696007399
   against `step=row key=helvetica neue` on build 35586323562
-  (`fix/131-system-ui-step` @ `5b0e698`, browser inputs equal to main's).
+  (`fix/131-system-ui-step` @ `5b0e698`, browser inputs equal to main's), in the
+  whole-bundle search path that preceded per-OS grouping.
   The guard's Windows arm cannot discriminate, since Segoe UI is also the
   sans row's first choice there. The proof is the `CAMOU-FL generic-map ...
   step=system-ui` log line, not the guard's widths — on the Linux bundle
@@ -155,10 +167,31 @@ dormant while `gfx.e10s.font-list.shared` is true; and the
 context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
 the Linux bundle conf, and at the remaining live sites by reading the callers
 (lesson 5, above). The macOS host
-was unmeasured until #148; see "macOS host (#148)" below. #82 is closed by measurement on Linux — arm (n4) GREEN
+was unmeasured until #148; see "macOS host (#148)" below. #82 is closed by measurement on Linux (Firefox 152) — arm (n4) GREEN
 on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
+
+## Two contexts in one content process (Firefox 156)
+
+The cross-context cache arms (#81, #82, #83) need two contexts whose documents
+are laid out by one content process, because the caches they test are
+per-process. Firefox 152 gave every `web` document the bare remote type, so
+`dom.ipc.processCount=1` with `fission.autostart=false` put two Playwright
+contexts in one process. Firefox 156 gives `web` documents the type
+`web=^userContextId=<N>` (`SharedWebRemoteType` in `dom/ipc/ProcessIsolation.cpp`),
+one process pool per container, whatever those prefs say: in smoke run
+36853787702 every pair of contexts, from arm (b) to arm (n5), was laid out by two
+processes (read from the pid MOZ_LOG prefixes to each `CAMOU-FL group` line; the
+`cfx-child.<n>` file name is shared by several processes and says nothing). The
+`file` remote type carries no container and `dom.ipc.processCount.file` is 1, so
+arms (i), (i2), (j), (j2) and (n4) now load their two pages from `file:` URLs and
+assert that both documents' group lines carry one pid; a throwaway launch before
+them proves a `file:` page loads and otherwise names one SETUP-INVALID. Arms that
+still use `data:` pages for two contexts ((b), (b2), (b2r), (n5), the pid and disc
+probes) are green without having shared a process; their green says nothing about
+a per-process leak, and the step prints a non-scoring `shared-process` line for each
+pair.
 
 ## macOS host (#148)
 

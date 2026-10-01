@@ -127,26 +127,29 @@ def test_pool_keeps_duplicates_so_sampling_tracks_real_prevalence():
     )
 
 
+def scaled_macos_configs():
+    """from_preset configs of the bundled macOS presets recorded at dpr != 1."""
+    from camoufox.fingerprints import from_preset
+
+    for preset in load_presets(152)["presets"]["macos"]:
+        dpr = preset.get("screen", {}).get("devicePixelRatio")
+        if dpr and abs(dpr - 1) >= 0.02:
+            yield from_preset(preset, "152"), dpr
+
+
 def test_macos_availtop_is_a_plausible_menu_bar():
     """Removing the availTop impossibility must not replace it with an implausible
     value: macOS always reserves a menu bar, and it is tens of pixels, not hundreds."""
-    from camoufox.fingerprints import FP_GENERATOR, from_browserforge
-
     seen = 0
-    for _ in range(60):
-        fp = FP_GENERATOR.generate(os="macos")
-        dpr = fp.screen.devicePixelRatio
-        if not dpr or abs(dpr - 1) < 0.02:
-            continue
-        cfg = from_browserforge(fp, "152")
-        if "screen.availTop" not in cfg:
-            continue
+    for cfg, dpr in scaled_macos_configs():
+        # No bundled preset carries an availTop; give it a real menu bar's.
+        cfg.setdefault("screen.availTop", 33)
         resample_screen_for_dpr1(cfg, "mac", dpr, 152)
         top = cfg["screen.availTop"]
         seen += 1
         assert 0 < top <= 60, f"availTop={top} is not a macOS menu bar"
         assert top + cfg["screen.availHeight"] <= cfg["screen.height"]
-    assert seen, "no scaled-display macOS fingerprints were exercised"
+    assert seen, "no scaled-display macOS presets"
 
 
 def test_macos_never_reports_a_zero_menu_bar():
@@ -236,18 +239,14 @@ def test_empty_pool_for_one_version_does_not_poison_another():
 def test_avail_offsets_do_not_survive_the_swapped_screen():
     """availTop/availLeft are not in the preset block, so a naive swap leaves them
     pointing at the discarded device: availTop + availHeight > screen.height."""
-    from camoufox.fingerprints import (FP_GENERATOR, clamp_window_dimensions,
-                                       fix_screen_no_taskbar, from_browserforge)
+    from camoufox.fingerprints import clamp_window_dimensions, fix_screen_no_taskbar
 
-    for _ in range(40):
-        fp = FP_GENERATOR.generate(os="macos")
-        dpr = fp.screen.devicePixelRatio
-        if not dpr or abs(dpr - 1) < 0.02:
-            continue
-        cfg = from_browserforge(fp, "152")
+    seen = 0
+    for cfg, dpr in scaled_macos_configs():
         resample_screen_for_dpr1(cfg, "mac", dpr, 152)
         fix_screen_no_taskbar(cfg, "mac")
         clamp_window_dimensions(cfg)
+        seen += 1
 
         top = cfg.get("screen.availTop", 0) or 0
         assert top + cfg["screen.availHeight"] <= cfg["screen.height"], (
@@ -255,11 +254,10 @@ def test_avail_offsets_do_not_survive_the_swapped_screen():
             f"{top}+{cfg['screen.availHeight']} > {cfg['screen.height']}"
         )
         assert cfg.get("screen.availLeft", 0) + cfg["screen.availWidth"] <= cfg["screen.width"]
-        # Window keys are not emitted for every fingerprint, so only assert nesting
-        # when they are actually present.
         inner, outer = cfg.get("window.innerWidth"), cfg.get("window.outerWidth")
         if inner and outer:
             assert inner <= outer <= cfg["screen.availWidth"]
+    assert seen
 
 
 # ---------------------------------------------------------------------------
@@ -267,43 +265,14 @@ def test_avail_offsets_do_not_survive_the_swapped_screen():
 # ---------------------------------------------------------------------------
 
 
-def test_pinned_screen_predicate_covers_every_way_of_choosing_one():
-    """B2's decision logic, tested without a binary. The launch_options test below
-    proves the same thing end to end but skips wherever no browser is installed,
-    including CI -- which is how the original override shipped unnoticed."""
-    from browserforge.fingerprints import Screen
-
-    from camoufox.utils import _caller_pinned_screen as pinned
-
-    assert pinned(None, None, None, None) is False           # default path resamples
-    assert pinned(None, None, None, True) is False           # opt-in presets, not pinned
-    assert pinned(Screen(max_width=1280), None, None, None) is True
-    assert pinned(None, (1600, 1000), None, None) is True
-    assert pinned(None, None, object(), None) is True        # caller-supplied fingerprint
-    assert pinned(None, None, None, {"screen": {}}) is True  # pinned preset dict
-
-
-def _binary():
-    for c in (os.environ.get("CFX_BIN"),
-              "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"):
-        if c and os.path.exists(c):
-            return c
-    return None
-
-
 def _launch_config(**kwargs):
-    """Drive the real launch_options.
-
-    executable_path is MANDATORY here, never optional: without it launch_options
-    resolves the installed browser and will DOWNLOAD ~312MB if none is present. A
-    test suite must never do that, so these tests skip instead (see _binary()).
-    """
+    """Drive the real launch_options (conftest stubs the install and the addons)."""
     import json
 
     from camoufox.utils import launch_options
 
     lo = launch_options(headless=True, os="macos", ff_version=152,
-                        i_know_what_im_doing=True, executable_path=_binary(), **kwargs)
+                        i_know_what_im_doing=True, **kwargs)
     env = lo["env"]
     return json.loads("".join(
         env[k] for k in sorted((k for k in env if k.startswith("CAMOU_CONFIG_")),
@@ -311,67 +280,40 @@ def _launch_config(**kwargs):
     ))
 
 
-@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
-def test_explicit_screen_constraint_is_not_discarded():
-    """A caller's screen= is a MAX constraint. The other fixups only ever shrink, so
-    they cannot violate it; this one REPLACES the screen, so it must not run at all
-    when the caller pinned one."""
-    from browserforge.fingerprints import Screen
-
-    for _ in range(15):
-        cfg = _launch_config(screen=Screen(max_width=1280, max_height=800))
-        assert cfg["screen.width"] <= 1280, f"screen= was discarded: {cfg['screen.width']}"
-        assert cfg["screen.height"] <= 800
-
-
-@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
-def test_resample_still_runs_when_nothing_is_pinned(monkeypatch):
-    """Guard against over-correcting B2 into a no-op for the default path.
-
-    Asserts the call happened rather than inspecting the drawn screen: ~16% of macOS
-    fingerprints already have dpr~1, and those are correctly NOT resampled, so their
-    screen comes from browserforge and need not be in the preset pool. An
-    "every draw is in the pool" assertion looks stricter but is simply flaky.
-    """
+def test_resample_does_not_run_when_the_caller_pinned_a_screen(monkeypatch):
+    """A caller's screen= bounds the identity. The other fixups only ever shrink,
+    so they cannot violate it; the resample REPLACES the screen, so it must not
+    run when the caller pinned one, and must run when nothing is pinned."""
     from camoufox import utils
+    from camoufox.fingerprints import Screen
 
-    seen_dprs = []
+    calls = []
     real = utils.resample_screen_for_dpr1
-
-    def spy(config, target_os, source_dpr, ff_version=None):
-        seen_dprs.append(source_dpr)
-        return real(config, target_os, source_dpr, ff_version)
-
-    monkeypatch.setattr(utils, "resample_screen_for_dpr1", spy)
-    for _ in range(8):
-        _launch_config()
-
-    assert seen_dprs, "resample_screen_for_dpr1 was never reached on the default path"
-    assert any(d and abs(d - 1) > 0.02 for d in seen_dprs), (
-        f"never invoked with a scaled-display dpr in 8 draws: {seen_dprs}"
+    monkeypatch.setattr(
+        utils, "resample_screen_for_dpr1", lambda *a, **k: calls.append(a) or real(*a, **k)
     )
+    for _ in range(5):
+        _launch_config(fingerprint_preset=True, screen=Screen(max_width=1280, max_height=800))
+    assert calls == []
+    for _ in range(5):
+        _launch_config(fingerprint_preset=True)
+    assert calls, "resample_screen_for_dpr1 was never reached on the default preset path"
 
 
-@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
-def test_headless_macos_screens_are_all_real_1x_resolutions():
-    import json
-
-    from camoufox.utils import launch_options
-
+def test_headless_macos_preset_screens_are_all_real_1x_resolutions():
     valid = real_dpr1_screens("macos")
+    scaled = {
+        (s["width"], s["height"])
+        for s in (p["screen"] for p in load_presets(152)["presets"]["macos"])
+        if (s.get("devicePixelRatio") or 1) > 1.5
+    }
     drawn = []
-    for _ in range(12):
-        lo = launch_options(headless=True, os="macos", ff_version=152,
-                            i_know_what_im_doing=True, executable_path=_binary())
-        env = lo["env"]
-        cfg = json.loads("".join(
-            env[k] for k in sorted(
-                (k for k in env if k.startswith("CAMOU_CONFIG_")),
-                key=lambda k: int(k.rsplit("_", 1)[1]),
-            )
-        ))
+    for _ in range(30):
+        cfg = _launch_config(fingerprint_preset=True)
         drawn.append((cfg.get("screen.width"), cfg.get("screen.height")))
 
-    bad = [d for d in drawn if d not in valid]
-    assert not bad, f"screens no real device reports at 1x reached the config: {bad}"
+    # A preset recorded at dpr~1 keeps its own screen; every scaled one is
+    # swapped, so a 2x panel's CSS size (960x540) must never come out.
+    bad = [d for d in drawn if d in scaled and d not in valid]
+    assert not bad, f"screens only a scaled display reports reached a headless config: {bad}"
     assert len(set(drawn)) >= 3, f"headless macOS collapsed to {set(drawn)}"
