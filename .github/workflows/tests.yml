@@ -970,6 +970,14 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
+    env:
+      # The browser under test is the build job's unpackaged dist/bin, which
+      # packages en-US only (scripts/package.py adds the langpacks and CI never
+      # runs it), so a de-DE identity's Intl locale reads en-US here though a
+      # packaged release reads de-DE. The Intl locale assertions skip on that
+      # named gap; navigator.language and every other check still run.
+      # Remove this once the test artifact carries the langpacks.
+      CAMOUFOX_TEST_ALLOW_MISSING: packaged-locales
     steps:
       - uses: actions/checkout@v4
         with:

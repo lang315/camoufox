@@ -5,7 +5,7 @@ import pytest
 
 from oracle import coherence
 from oracle.docs import cite
-from util import wait_out
+from util import packaged_locales, prerequisite, wait_out
 
 
 def measure(drv, site, identity=False, **launch):
@@ -18,8 +18,10 @@ def measure(drv, site, identity=False, **launch):
     return fp, req
 
 
-def report(check, fp, req, os_name):
+def report(check, fp, req, os_name, skip=()):
     for name, ok, detail, red in coherence.evaluate(fp, req, os_name):
+        if name in skip:
+            continue
         if ok is None:
             print(f"n/a  {name}: {detail}")
             continue
@@ -35,12 +37,21 @@ def test_fingerprint_is_coherent(drv, site, os_name, check):
     check.done()
 
 
-def test_locale_option_reaches_navigator_and_intl(drv, site, check):
+def test_locale_option_reaches_navigator_and_intl(drv, site, binary, check):
     print(cite("locale"))
     fp, req = measure(drv, site, os="windows", locale="de-DE")
     check(fp["main"]["language"] == "de-DE", f"navigator.language={fp['main']['language']!r}")
-    check(fp["intl"].startswith("de"), f"Intl locale={fp['intl']!r}")
-    report(check, fp, req, "windows")
+    # Intl follows the app locale, which Gecko negotiates against the PACKAGED locales
+    # (intl.locale.requested): a binary that does not package "de" answers en-US.
+    packaged = packaged_locales(binary)
+    intl = prerequisite(
+        "packaged-locales",
+        packaged is None or any(p.split("-")[0] == "de" for p in packaged),
+        f"the binary packages {packaged}, not de",
+    )
+    if intl:
+        check(fp["intl"].startswith("de"), f"Intl locale={fp['intl']!r}")
+    report(check, fp, req, "windows", skip=() if intl else ("intl_locale_matches_language",))
     check.done()
 
 
