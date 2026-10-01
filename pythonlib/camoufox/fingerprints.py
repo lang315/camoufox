@@ -1618,6 +1618,7 @@ def _build_init_script(values: Dict[str, Any]) -> str:
 
     setters = [
         ('audioFingerprintSeed', 'setAudioFingerprintSeed', '{val}'),
+        ('canvasSeed', 'setCanvasSeed', '{val}'),
         ('navigatorPlatform', 'setNavigatorPlatform', '{val}'),
         ('navigatorOscpu', 'setNavigatorOscpu', '{val}'),
         ('navigatorUserAgent', 'setNavigatorUserAgent', '{val}'),
@@ -1826,6 +1827,9 @@ def generate_context_fingerprint(
         }
         preset = {'navigator': nav, 'screen': screen, 'webgl': webgl}
 
+    # Fork-only canvas noise seed (patches/canvas-spoofing.patch); neither source above carries one
+    config.setdefault('canvas:seed', randint(1, 4_294_967_295))  # nosec
+
     # Inject explicit timezone/locale into config (takes priority over preset)
     if timezone:
         config['timezone'] = timezone
@@ -1845,6 +1849,7 @@ def generate_context_fingerprint(
     # Build the values dict for the init script (works for both paths)
     init_values: Dict[str, Any] = {
         'audioFingerprintSeed': config.get('audio:seed'),
+        'canvasSeed': config.get('canvas:seed'),
         'navigatorPlatform': nav.get('platform'),
         'navigatorOscpu': config.get('navigator.oscpu'),
         'navigatorUserAgent': config.get('navigator.userAgent'),

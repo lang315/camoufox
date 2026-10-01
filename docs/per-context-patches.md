@@ -7,6 +7,7 @@ Camoufox spoofs fingerprints globally via `CAMOU_CONFIG` — every browser conte
 **Per-context patches (with a `window.setXxx()` API):**
 - `anti-font-fingerprinting.patch` — adds `RoverfoxStorageManager` (the shared per-context store) and gives each font group its context's userContextId, which `font-list-spoofing.patch` uses to pick that context's font list
 - `audio-fingerprint-manager.patch` — per-context audio fingerprint seeding (all 6 AudioBuffer + AnalyserNode methods)
+- `canvas-spoofing.patch` — per-context canvas pixel noise (fork-only: upstream removed canvas noise in #528)
 - `timezone-spoofing.patch` — true per-realm timezone isolation via SpiderMonkey DateTimeInfo
 - `screen-spoofing.patch` — per-context screen dimensions and color depth via `ScreenDimensionManager`
 - `navigator-spoofing.patch` — per-context platform, oscpu, hardwareConcurrency, userAgent
@@ -18,14 +19,12 @@ Camoufox spoofs fingerprints globally via `CAMOU_CONFIG` — every browser conte
 **Infrastructure:**
 - `cross-process-storage.patch` — IPDL messages for content-to-parent storage writes, so per-context values reach every process
 
-There is no canvas pixel noise: Camoufox leaves `toDataURL()`/`getImageData()`
-output as the GPU and fonts produce it.
-
 ## Quick Reference
 
 | Function | Patch | What it controls |
 |----------|-------|-----------------|
 | `window.setAudioFingerprintSeed(seed)` | `audio-fingerprint-manager.patch` | Audio buffer/analyser fingerprint hash |
+| `window.setCanvasSeed(seed)` | `canvas-spoofing.patch` | Canvas 2D `toDataURL()`/`getImageData()` and WebGL `readPixels()` hash |
 | `window.setTimezone(tz)` | `timezone-spoofing.patch` | `Date`, `Intl.DateTimeFormat`, all time APIs |
 | `window.setScreenDimensions(w, h)` | `screen-spoofing.patch` | `screen.width`, `screen.height` |
 | `window.setScreenColorDepth(depth)` | `screen-spoofing.patch` | `screen.colorDepth` |
@@ -489,6 +488,28 @@ When `window.setXxx()` stores a value, `RoverfoxStorageManager` writes it locall
 
 ---
 
+### 11. canvas-spoofing.patch
+
+**Controls:** Canvas fingerprint hash. Websites draw text, shapes and gradients on a canvas, then hash the pixels from `toDataURL()`, `toBlob()` or `getImageData()`. GPU, driver and font rendering make that hash highly unique; this patch makes it differ per seed.
+
+**How it works:** `CanvasSeedManager` stores a seed per context and perturbs the pixel buffers on every read path: the 2D canvas's `GetImageBuffer()` (BGRA, behind `toDataURL()`/`toBlob()`/`convertToBlob()`), its `GetImageData()` (RGBA), and WebGL `readPixels()` into an `ArrayBufferView`. The alpha channel is never touched. Each colour channel is shifted by `canvas:noiseStrength` (default 1) with probability `canvas:noiseDensity` (default 0.0005), chosen by an LCG over the seed mixed with a hash of the first KiB of the buffer.
+
+**Deterministic, not random:** the same seed and the same pixels always give the same output, so calling `toDataURL()` twice returns identical data. Different seeds, or different drawings, give different noise.
+
+**Scope:** `OffscreenCanvas` in a worker has no owner document, so the 2D and WebGL hooks leave it unperturbed.
+
+**MaskConfig fallback:** if no per-context seed is set, `GetSeed()` reads `MaskConfig::GetUint32("canvas:seed")` from `CAMOU_CONFIG`; a seed of 0 turns the noise off. `launch_options()` draws one per launch, and `generate_context_fingerprint()` draws one per context and calls `setCanvasSeed()` from its init script.
+
+**API:**
+```javascript
+window.setCanvasSeed(55555555); // uint32 seed
+```
+
+**New C++ files:** `CanvasSeedManager.h/cpp`
+**Modified Firefox files:** `nsGlobalWindowInner.cpp/h`, `CanvasRenderingContext2D.cpp`, `ClientWebGLContext.cpp`, `Window.webidl`, `moz.build` (dom/base)
+
+---
+
 ## Global-Only Patches (No JavaScript API)
 
 These patches read from `CAMOU_CONFIG` at startup and apply to all contexts equally. They don't expose any `window.setXxx()` functions.
@@ -617,6 +638,7 @@ bundles are shipped in the wheel.
 | WebGL vendor/renderer | Preset, or `sample_webgl_for_screen()` in `webgl.py` | A generated identity draws a GPU weighted by fpgen's share of Firefox on the OS, never a software rasteriser, a discrete GPU behind a netbook screen, or an Intel Mac GPU beside a core count or a notched panel no Intel Mac has (`coherence.gpu_fits_machine()`). `launch_options()` adds that GPU's recorded parameters, extensions and shader precisions from fpgen (`webgl_for_gpu()`), WebGL2 from the same device as WebGL1. |
 | Font list | `_generate_random_font_subset()` | One weighted OS-version base in full, plus each addition unit at its measured probability; marker fonts always included. See [FONTS.md](FONTS.md). NOT from presets. |
 | Audio seed | Derived from the identity (NewBrowser) or `randint(1, 2^32-1)` (NewContext) | Never 0 |
+| Canvas seed | `randint(1, 2^32-1)` per launch (NewBrowser) or per context (NewContext) | Never 0; not derived from the identity, so a pinned preset still renders a different canvas on each launch |
 | Timezone | From preset, or `timezone` in `CAMOU_CONFIG` | The init script calls `setTimezone()` only for an explicit value; otherwise the C++ side falls back to `CAMOU_CONFIG` (set from geoip at launch) or the browser default. |
 | Speech voices | `_generate_random_voice_subset()` | Follows the measured model in `voice-manifests.json`: Windows gets the display language's OneCore pack plus its legacy Desktop voices at their measured rate; macOS the compact + Eloquence base plus rare downloads; Linux speech-dispatcher's espeak-ng list. Seeded by the identity. NOT from presets. |
 | WebRTC IP | Not set by default | NewContext's `webrtc_ip` (or the proxy's exit IP) goes to `window.setWebRTCIPv4()` or `window.setWebRTCIPv6()` by address family; an invalid address raises `InvalidIP`. Without one, the init script calls `setWebRTCIPv4("")` |
@@ -647,7 +669,7 @@ bundles are shipped in the wheel.
 
 **`voice-manifests.json`, `voice-uris.json`** — The per-OS model the voice draw follows (a base, language packs and additions, each entry `"Name:locale:type"`) and the real `voiceURI` a stock browser reports for each voice.
 
-**`properties.json`** — Includes `audio:seed` as a `CAMOU_CONFIG` property (uint type), the MaskConfig fallback for the audio patch when using global config without per-context JavaScript.
+**`properties.json`** — Includes `audio:seed` and `canvas:seed` as `CAMOU_CONFIG` properties (uint type), the MaskConfig fallback for the audio and canvas patches when using global config without per-context JavaScript. `canvas:noiseDensity` and `canvas:noiseStrength` tune the canvas noise.
 
 **`camoufox.cfg`** — Sets `fission.autostart=true` and `dom.ipc.processPrelaunch.enabled=false`. No `dom.ipc.processCount` override needed with cross-process storage.
 
