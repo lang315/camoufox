@@ -667,4 +667,4 @@ These patches control what JavaScript APIs report, but they cannot change how th
 
 Advanced fingerprinting services (reCAPTCHA, hCaptcha, Kasada, etc.) cross-reference these signals against what `navigator.platform` and the User-Agent claim. A mismatch is a strong bot signal.
 
-**Recommendation:** Always run Camoufox on the OS that matches the fingerprint profile. Use macOS fingerprints on macOS workers, Linux fingerprints on Linux workers. The per-context patches are designed to make each context look like a *different person on the same OS*, not to impersonate a different OS entirely.
+**Recommendation:** Always run Camoufox on the OS that matches the fingerprint profile. Use macOS fingerprints on macOS workers, Linux fingerprints on Linux workers. The per-context patches are designed to make each context look like a *different person on the same OS*, not to impersonate a different OS entirely. A context whose OS differs from the launch's cannot render the other OS's exclusive fonts: the launch's search path holds only the font groups its own OS reads, so the context's font list can only narrow what the launch's OS has (`NewContext` warns).
