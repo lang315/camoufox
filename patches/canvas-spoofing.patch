@@ -1,9 +1,9 @@
 diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
 new file mode 100644
-index 0000000000..191e47ecc0
+index 0000000000..f83ffb1860
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,161 @@
+@@ -0,0 +1,162 @@
 +#include "CanvasSeedManager.h"
 +#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
@@ -14,6 +14,7 @@ index 0000000000..191e47ecc0
 +#include "mozilla/dom/Document.h"
 +#include "nsDocShell.h"
 +#include "nsPIDOMWindow.h"
++#include "nsPIDOMWindowInlines.h"
 +
 +namespace mozilla {
 +namespace dom {
