@@ -48,7 +48,7 @@ jobs:
   build:
     needs: matrix
     # macOS legs run on macos-26 (Xcode 26 / SDK 26.x). FF150 hard-requires the
-    # macOS 26 SDK: mac_sdk_min_version() is "26.2", and the source actually uses
+    # macOS 26 SDK: mac_sdk_min_version() is "26.5", and the source actually uses
     # macOS-26-only APIs (e.g. widget/cocoa/nsCocoaWindow.mm references
     # NSGlassEffectView), so it cannot compile against an older SDK — macos-15
     # (SDK 15.5) failed with "use of undeclared identifier 'NSGlassEffectView'".
@@ -257,7 +257,7 @@ jobs:
             # sets --disable-bootstrap and --with-macos-sdk (xcrun), so
             # ./mach build uses Xcode's preinstalled clang/SDK instead.
             #
-            # macos-26 ships Xcode 26 with SDK 26.x (>= the "26.2" pinned by
+            # macos-26 ships Xcode 26 with SDK 26.x (>= the "26.5" pinned by
             # mac_sdk_min_version()), so the SDK gate passes natively and no
             # toolchain.configure patching is needed. (macos-15 / SDK 15.5 both
             # failed the gate and lacked macOS-26 APIs like NSGlassEffectView.)

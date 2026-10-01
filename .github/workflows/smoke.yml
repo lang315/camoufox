@@ -7592,9 +7592,9 @@ jobs:
           all_launch = launch_renderer is not None and all(x == launch_renderer for x in renderers)
           # Two contexts drawing the same WebGL renderer is a coincidence, not
           # the #44 defect (that is all three == launch). Context renderers are
-          # sampled from webgl/webgl_data.db (AsyncNewContext passes no preset);
-          # its mac and lin pools share 3 strings, so on a weighted draw
-          # it happens on roughly 1 run in 37. It must NOT go through
+          # drawn per OS by generate_context_fingerprint (AsyncNewContext passes
+          # no preset) from fpgen's recorded GPUs, whose macOS and Linux pools
+          # can overlap, so a repeat is possible. It must NOT go through
           # `invalid`: that exits before the font verdict, and the font half is
           # what this guard exists for. Only the WebGL sub-verdict is skipped;
           # the font contract is still measured.
@@ -7634,10 +7634,12 @@ jobs:
               bad.append(f"every context reports the LAUNCH renderer {launch_renderer!r} "
                          f"-- the original #44 WebGL defect")
           elif len(set(renderers)) == 1:
-              # All three on ONE renderer that is not the launch's. The win pool
-              # shares no string with mac or lin in webgl_data.db, so three
-              # contexts of three OSes cannot land on one renderer by chance:
-              # this is a cross-context leak (the #83 class), not a collision.
+              # All three on ONE renderer that is not the launch's. The Windows
+              # GPU pool is disjoint from the macOS and Linux ones in the preset
+              # pools (webgl.firefox_gpus), so three contexts of three OSes should
+              # not land on one renderer by chance: read as a cross-context leak
+              # (the #83 class), not a collision. Disjointness is not asserted
+              # for the fpgen draw this step actually uses.
               # Also the only bucket that catches launch_renderer=None.
               bad.append(f"all three contexts report one renderer {renderers[0]!r} that is "
                          f"not the launch's -- a cross-context leak, not a preset draw")
