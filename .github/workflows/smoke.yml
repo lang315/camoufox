@@ -340,10 +340,9 @@ jobs:
           #   B  vendor behaves like renderer -- the two paths are line-for-line
           #      identical, so a typo dropping one disjunct would regress vendor
           #      while a renderer-only guard stayed green;
-          #   C  with NO per-context value the launch config still applies. The
-          #      table is skipped at the top of GetParameter, so it has to be
-          #      honoured in the dedicated branch instead, or a config setting
-          #      only webGl:parameters loses its spoof silently.
+          #   C  with NO per-context value the webGl:vendor/webGl:renderer shorthand
+          #      answers. UNMASKED_* are not read from webGl:parameters (the
+          #      patch's fromTable switch excludes them), so the table must not win.
           #
           # For C the table and the shorthand carry DIFFERENT values, otherwise
           # the assertion cannot tell which source answered.
@@ -411,10 +410,10 @@ jobs:
           assert per_ctx == [("CTX-RENDERER-1", "CTX-VENDOR-1"),
                              ("CTX-RENDERER-2", "CTX-VENDOR-2")], (
               f"per-context renderer/vendor lost to the launch config: {per_ctx}")
-          # C -- the table is the more specific source, so it wins the fallback
-          assert (plain["renderer"], plain["vendor"]) == ("TABLE-RENDERER", "TABLE-VENDOR"), (
-              "launch-level webGl:parameters no longer reaches the renderer/vendor "
-              f"branch: got {plain['renderer']}/{plain['vendor']}")
+          # C -- the shorthand answers; the table is not consulted for UNMASKED_*
+          assert (plain["renderer"], plain["vendor"]) == ("SHORTHAND-RENDERER", "SHORTHAND-VENDOR"), (
+              "webGl:vendor/webGl:renderer no longer answers UNMASKED_* when no "
+              f"per-context value is set: got {plain['renderer']}/{plain['vendor']}")
           PY
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
