@@ -167,7 +167,7 @@ dormant while `gfx.e10s.font-list.shared` is true; and the
 context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
 the Linux bundle conf, and at the remaining live sites by reading the callers
 (lesson 5, above). The macOS host
-was unmeasured until #148; see "macOS host (#148)" below. #82 is closed by measurement on Linux — arm (n4) GREEN
+was unmeasured until #148; see "macOS host (#148)" below. #82 is closed by measurement on Linux (Firefox 152) — arm (n4) GREEN
 on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
@@ -185,10 +185,13 @@ one process pool per container, whatever those prefs say: in smoke run
 processes (read from the pid MOZ_LOG prefixes to each `CAMOU-FL group` line; the
 `cfx-child.<n>` file name is shared by several processes and says nothing). The
 `file` remote type carries no container and `dom.ipc.processCount.file` is 1, so
-arms (i2), (j), (j2) and (n4) now load their two pages from `file:` URLs and
-assert that both documents' group lines carry one pid. Arms that still use `data:`
-pages for two contexts ((b), (b2), (b2r), (n5), the pid and disc probes) are green
-without having shared a process; their green says nothing about a per-process leak.
+arms (i), (i2), (j), (j2) and (n4) now load their two pages from `file:` URLs and
+assert that both documents' group lines carry one pid; a throwaway launch before
+them proves a `file:` page loads and otherwise names one SETUP-INVALID. Arms that
+still use `data:` pages for two contexts ((b), (b2), (b2r), (n5), the pid and disc
+probes) are green without having shared a process; their green says nothing about
+a per-process leak, and the step prints a non-scoring `shared-process` line for each
+pair.
 
 ## macOS host (#148)
 

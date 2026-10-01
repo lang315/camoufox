@@ -618,11 +618,13 @@ jobs:
           #
           # Option choices, each read out of xpcom/base/Logging.cpp on the
           # beta.31 tree rather than recalled:
-          #  * `%PID` (MOZ_LOG_PID_TOKEN, Logging.h:28) is expanded per process
-          #    by ExpandLogFileName (Logging.cpp:121-146): the parent writes
-          #    `cfx-main.<pid>.moz_log`, each content process
-          #    `cfx-child.<pid>.moz_log`. Without it every process in a launch
-          #    shares one file and no line can be attributed to a process.
+          #  * `%PID` (MOZ_LOG_PID_TOKEN, Logging.h:28) is expanded by
+          #    ExpandLogFileName (Logging.cpp:121-146): the parent writes
+          #    `cfx-main.<pid>.moz_log`, the children one `cfx-child.<launch
+          #    pid>.child-1.moz_log` file per launch, shared by several content
+          #    processes (run 36853787702: pids 14763, 14819 and 14854 in one
+          #    file). Attribute a line to a process by the `[Child <pid>:` the
+          #    line itself carries, never by the file name.
           #  * `append` -- the default open mode is "w" (Logging.cpp:572), so a
           #    later launch that is handed a recycled pid would TRUNCATE an
           #    earlier launch's file. That would silently delete arm (b2)'s
@@ -1299,13 +1301,54 @@ jobs:
           PAGES_DIR = tempfile.mkdtemp(prefix="smoke-pages-")
 
           def page_uri(name):
+              if not FILE_PAGES["ok"]:
+                  return "data:text/html,<h1>%s</h1>" % name
               path = os.path.join(PAGES_DIR, name + ".html")
               with open(path, "w", encoding="utf-8") as fh:
                   fh.write("<!doctype html><meta charset=utf-8><h1>%s</h1>" % name)
               return "file://" + path
 
-          def docs_share_process(mark, name_a, name_b):
+          # One throwaway launch before the first arm that loads a file: page. If
+          # the Linux file-content sandbox cannot read the temp dir, goto() raises
+          # and, uncaught, would end the whole step and erase every later arm.
+          # Instead it is registered as one named SETUP-INVALID with the exception
+          # text, and page_uri() then hands out data: pages, which carry no
+          # `/<name>.html` in their uri, so the arms that need a shared process
+          # report "no group line" and go unmeasured rather than crash or pass.
+          FILE_PAGES = {"ok": True}
+
+          def file_page_precheck():
+              try:
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          firefox_user_prefs={"dom.ipc.processCount": 1},
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      try:
+                          pg = b.new_context().new_page()
+                          pg.goto(page_uri("file-precheck"))
+                          got = pg.evaluate("document.querySelector('h1') && "
+                                            "document.querySelector('h1').textContent")
+                      finally:
+                          b.close()
+                  if got != "file-precheck":
+                      raise RuntimeError(f"the file: page loaded but its h1 read {got!r}")
+              except Exception as exc:
+                  FILE_PAGES["ok"] = False
+                  _why = (f"file: pages could not be loaded ({type(exc).__name__}: {exc}); "
+                          f"arms (i), (i2), (j), (j2) and (n4) need them to put two contexts "
+                          f"in one content process, so they cannot be measured")
+                  tripwires.append(f"(file) {_why}")
+                  unmeasured_arms["(file)"] = _why[:220]
+                  print(f"  [setup] FILE-PAGE PRECHECK FAILED: {_why}")
+              else:
+                  print("  [setup] file: page precheck ok: a file: document loaded in a throwaway launch")
+
+          def docs_share_process(mark, needle_a, needle_b):
               """(shared, pids of A's document, pids of B's document).
+
+              `needle_*` is a substring of the document's uri: `/<name>.html` for the
+              file: pages, `<h1>name</h1>` for the data: pages.
 
               Whether two documents ran in ONE content process, read from the
               browser. Every document's font group logs a `CAMOU-FL group ... uri=`
@@ -1319,15 +1362,17 @@ jobs:
               one process, which a pid cannot do; wrongly failing needs the log off,
               and then both sets are empty and the caller's message prints them.
               """
-              def pids(name):
+              def pids(needle):
                   out = set()
-                  for ln in camou_fl(mark, "CAMOU-FL group", "/" + name + ".html", limit=None):
+                  for ln in camou_fl(mark, "CAMOU-FL group", needle, limit=None):
                       m = re.search(r"\[(?:Child|Parent) (\d+):", ln)
                       if m:
                           out.add(m.group(1))
                   return out
-              pa, pb = pids(name_a), pids(name_b)
+              pa, pb = pids(needle_a), pids(needle_b)
               return bool(pa & pb), sorted(pa), sorted(pb)
+
+          file_page_precheck()
 
           # bare launch -- no `fonts` key at all, so mFontFamilies holds every
           # bundled family and nothing is deleted from font.system.whitelist.
@@ -4975,8 +5020,11 @@ jobs:
                     calib: sum('"Arial"', 'AWmi')};
           }"""
 
+          i_mark = log_mark()
           i_a, i_b, i_pids = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
-          print(f"  [arm i / 4b] tab pids after A / after B: {i_pids}")
+          i_same, i_pa, i_pb = docs_share_process(i_mark, "/4b-a.html", "/4b-b.html")
+          print(f"  [arm i / 4b] tab pids after A / after B: {i_pids}; documents' pids "
+                f"A {i_pa or 'none'} / B {i_pb or 'none'}")
           i_a_tofu = i_a["final"] in i_a["refs"].values()
           # NOT i_b["refs"]: FONTS["win"] broadly covers CJK, so B's own
           # generic-family refs (monospace/sans-serif/serif) can ALSO
@@ -5049,6 +5097,15 @@ jobs:
                   f"{i_a['pxFallback']} matches NONE of the families B allows "
                   f"({i_b['pxNamedW']}) -- the serving face is unidentified, so neither "
                   f"#94/#88 nor #81 can be decided.")
+          elif not i_same:
+              # Same gate as (i2), placed before the leak branch below: B resolving
+              # its own font is what two separate processes would also give.
+              i_failures.append(
+                  f"arm (i)/#81 unmeasured: A's and B's documents were laid out by different "
+                  f"content processes (A: {i_pa or 'no group line'}, B: {i_pb or 'no group line'}; "
+                  f"tab pids {sorted(i_pids['after_a'])} after A and "
+                  f"{sorted(i_pids['after_b'])} after B), so A's miss cannot reach B and "
+                  f"this arm tests nothing.")
           elif not i_a_tofu:
               i_failures.append(
                   f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
@@ -5169,7 +5226,7 @@ jobs:
           i2_a, i2_b, i2_pids = two_contexts_installs_first(
               NO_CJK_PROBE, FONTS["win"], JS_4B,
               extra_prefs={"fission.autostart": False})
-          i2_same, i2_pa, i2_pb = docs_share_process(i2_mark, "i2-a", "i2-b")
+          i2_same, i2_pa, i2_pb = docs_share_process(i2_mark, "/i2-a.html", "/i2-b.html")
           i2_a_tofu = i2_a["final"] in i2_a["refs"].values()
           # M4 (from this task's review): a 0.01 tolerance, matching every other
           # comparison the new arms make. The exact `==` inherited from arm (i)
@@ -5485,7 +5542,7 @@ jobs:
               FFFD_DONOR, FFFD_NO_PROBE, JS_4C,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
-          j_same, j_pa, j_pb = docs_share_process(j_mark, "4b-a", "4b-b")
+          j_same, j_pa, j_pb = docs_share_process(j_mark, "/4b-a.html", "/4b-b.html")
           # Task 4's fallback-observation question, now answerable: which face
           # the donor's U+FFFD fallback actually settled on, from the browser's
           # own log rather than inferred from a width. Three of this arm's five
@@ -6133,7 +6190,7 @@ jobs:
                   FFFD_NO_PROBE, JS_4C,
                   extra_prefs={"gfx.font_rendering.fallback.async": False,
                                "fission.autostart": False})
-              j2_same, j2_pa, j2_pb = docs_share_process(j2_mark, "4b-bare-a", "4b-bare-b")
+              j2_same, j2_pa, j2_pb = docs_share_process(j2_mark, "/4b-bare-a.html", "/4b-bare-b.html")
               # Arm (j)'s fallback observation, for the bare donor. Both of this
               # arm's `setup invalid` branches are statements about what the
               # bare donor resolved; this names the face the browser itself
@@ -6307,7 +6364,7 @@ jobs:
               N4_DONOR, N4_VICTIM, JS_N4,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
-          n4_same, n4_pa, n4_pb = docs_share_process(n4_mark, "4b-a", "4b-b")
+          n4_same, n4_pa, n4_pb = docs_share_process(n4_mark, "/4b-a.html", "/4b-b.html")
           # Every log read BEFORE the reference launch, for the reason stated in
           # arm (n1)'s log-window note above.
           n4_fl = camou_fl(n4_mark, "CAMOU-FL fontlist", limit=None)
@@ -6390,11 +6447,7 @@ jobs:
           # binary that was never going to have them. Every precondition in the
           # log branch below reads `fontlist`; that is the kind to test.
           n4_have_log = kind_total("fontlist") > 0
-          if isinstance(n4_pids["after_a"], str) or isinstance(n4_pids["after_b"], str):
-              n4_failures.append(
-                  f"setup invalid: pgrep failed, so 'same process' could not be "
-                  f"asserted: {n4_pids}")
-          elif not n4_same:
+          if not n4_same:
               # Was `after_a & after_b` non-empty, which any process common to both
               # samples satisfies (the extension process was in both on FF156
               # while donor and victim ran in different content processes).
@@ -7066,9 +7119,12 @@ jobs:
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
                       "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
-                      "re-probe tests",
+                      "re-probe tests. On FF156 the donor and recipient run in different "
+                      "content processes (see the shared-process audit above), so this GREEN "
+                      "measures that setup, not an in-process leak",
               "(b2r)": "#83, same, with the init script on the document under test; "
-                       "measures the flush, not the key -- see (b2)'s re-probe",
+                       "measures the flush, not the key -- see (b2)'s re-probe; same FF156 "
+                       "process caveat as (b2)",
               # Back here, as Phase 0 said they would be. These two emit TWO
               # kinds of red and this table takes no prefix, so BOTH now fail
               # the step: the "#94/#88 refused-list render:" red that Phase 0
@@ -7099,7 +7155,9 @@ jobs:
                       "split into two disjoint halves of 6681, and each context read "
                       "~6480 names all from its OWN half and none from the other's. A "
                       "RED here is either a real cross-context leak or a runner whose "
-                      "speech registry went away; both must fail the step",
+                      "speech registry went away; both must fail the step. That run is "
+                      "FF152; on FF156 the two contexts run in different content processes "
+                      "(see the shared-process audit above)",
               # Round 3's own arms. Each was EXPECTED_RED through Phase 0 and
               # each guards a defect this branch's C++ closes, so each must be
               # GREEN on a binary built from this head -- and an arm that comes
@@ -7230,6 +7288,23 @@ jobs:
                   continue
               tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
               (unmeasured if tag else unexpected).append(t)
+          # Non-scoring. Arms that still load their two contexts' pages from data:
+          # URLs ran in different content processes on FF156 (docs/fonts-gating.md,
+          # "Two contexts in one content process"), so their GREEN is not a
+          # measurement of a per-process leak. Printed so a log reader does not
+          # have to take that on trust; nothing here fails the step.
+          print("=== shared-process audit (data: page pairs; non-scoring) ===")
+          for _arm, _a, _b in (("(b)", "b-mac", "b-win"),
+                               ("(b2)", "b2-mac", "b2-win"),
+                               ("(b2r)", "b2r-mac", "b2r-win"),
+                               ("(n5)", "n5-a", "n5-b"),
+                               ("(disc)", "disc-mac", "disc-win"),
+                               ("(pid)", "pid-mac", "pid-win"),
+                               ("(pid2)", "pid-mac2", "pid-win2")):
+              _same, _pa, _pb = docs_share_process(
+                  LOG_START, "<h1>%s</h1>" % _a, "<h1>%s</h1>" % _b)
+              print(f"  shared-process: {'yes' if _same else 'NO '} {_arm:6} "
+                    f"A {_pa or 'none'} / B {_pb or 'none'}")
           print("=== tripwire triage ===")
           for k, (_pfx, why) in EXPECTED_RED.items():
               hit = any(t.startswith(_pfx) for t in tripwires)
