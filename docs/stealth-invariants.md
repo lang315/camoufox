@@ -44,21 +44,21 @@ above.
 
 ## No spoofing setter reaches a page
 
-The 14 setters (`setCanvasSeed`, `setWebGLRenderer`, …) exist only so an init
+The 15 setters (`setCanvasSeed`, `setWebGLRenderer`, …) exist only so an init
 script can apply a per-context fingerprint. A page that can read
 `typeof window.setCanvasSeed` identifies the browser in one line.
 
 The trap: **a setter self-destructs as a side effect of being called**, not as
 a cleanup step. So the number left on `window` equals the number of fields the
-config never set — and in a context with no init script at all, that is all 14:
+config never set — and in a context with no init script at all, that is all 15:
 
 ```
-default context (no init script) : 14/14 survive
-context calling exactly one      : 13/14 survive
+default context (no init script) : 15/15 survive
+context calling exactly one      : 14/15 survive
 ```
 
 `Camoufox(...)` then `browser.new_page()` is the first thing anyone writes, and
-it is the 14/14 case.
+it is the 15/15 case.
 
 Juggler therefore calls `docShell.disableSpoofSetters()` immediately after the
 init-script loop — measured as the right slot: init scripts run at 52ms and the
@@ -66,10 +66,10 @@ page's own inline script at 55ms on the same time origin. `about:blank` is
 skipped so init scripts added between opening a page and its first real
 navigation still apply.
 
-The teardown only *writes* the per-`userContextId` disabled flags that all 17
+The teardown only *writes* the per-`userContextId` disabled flags that all 15
 WebIDL `Func` guards already read, so no guard changes. The entry point is
 chrome-only XPCOM, the same shape as `overrideTimezone`: a teardown exposed as
-a page-visible function would just be the fifteenth artifact.
+a page-visible function would just be a sixteenth artifact.
 
 ## Per-context values outrank the launch config
 

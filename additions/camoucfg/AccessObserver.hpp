@@ -8,7 +8,7 @@
 #include <cstdlib>
 #include <unordered_set>
 
-// Header-only (like MaskConfig.hpp / MouseTrajectories.hpp) — the camoucfg dir
+// Header-only (like MaskConfig.hpp) — the camoucfg dir
 // is NOT a compiled build target, so any out-of-line .cpp definition here never
 // links into XUL. All state and functions are therefore inline. Single shared
 // bounded buffer across all TUs via C++17 inline variables (on overflow it

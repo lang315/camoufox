@@ -95,7 +95,7 @@ jobs:
           # | head -1`. scripts/package.py copytrees the whole
           # bundle/fontconfig directory, so the artifact carries THREE
           # fonts.conf files and `head -1` would pick one by directory order:
-          #   linux/   sans-serif=Arimo  serif=Tinos            monospace=Cousine
+          #   linux/   sans-serif=Noto Sans serif=Noto Serif    monospace=DejaVu Sans Mono
           #   macos/   sans-serif=Helvetica serif=Times         monospace=Menlo
           #   windows/ sans-serif=Arial  serif=Times New Roman  monospace=Consolas
           # All three contain the `<dir prefix="cwd">fonts</dir>` needle, so the
@@ -255,7 +255,7 @@ jobs:
           from playwright.sync_api import sync_playwright
 
           # Every Camoufox window.setXxx(); keep in step with dom/webidl/Window.webidl.
-          NAMES = ["setFontSpacingSeed","setAudioFingerprintSeed","setCanvasSeed","setTimezone",
+          NAMES = ["setAudioFingerprintSeed","setCanvasSeed","setTimezone",
                    "setScreenDimensions","setScreenColorDepth","setNavigatorPlatform",
                    "setNavigatorOscpu","setNavigatorUserAgent",
                    "setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",
@@ -340,10 +340,9 @@ jobs:
           #   B  vendor behaves like renderer -- the two paths are line-for-line
           #      identical, so a typo dropping one disjunct would regress vendor
           #      while a renderer-only guard stayed green;
-          #   C  with NO per-context value the launch config still applies. The
-          #      table is skipped at the top of GetParameter, so it has to be
-          #      honoured in the dedicated branch instead, or a config setting
-          #      only webGl:parameters loses its spoof silently.
+          #   C  with NO per-context value the webGl:vendor/webGl:renderer shorthand
+          #      answers. UNMASKED_* are not read from webGl:parameters (the
+          #      patch's fromTable switch excludes them), so the table must not win.
           #
           # For C the table and the shorthand carry DIFFERENT values, otherwise
           # the assertion cannot tell which source answered.
@@ -411,81 +410,18 @@ jobs:
           assert per_ctx == [("CTX-RENDERER-1", "CTX-VENDOR-1"),
                              ("CTX-RENDERER-2", "CTX-VENDOR-2")], (
               f"per-context renderer/vendor lost to the launch config: {per_ctx}")
-          # C -- the table is the more specific source, so it wins the fallback
-          assert (plain["renderer"], plain["vendor"]) == ("TABLE-RENDERER", "TABLE-VENDOR"), (
-              "launch-level webGl:parameters no longer reaches the renderer/vendor "
-              f"branch: got {plain['renderer']}/{plain['vendor']}")
+          # C -- the shorthand answers; the table is not consulted for UNMASKED_*
+          assert (plain["renderer"], plain["vendor"]) == ("SHORTHAND-RENDERER", "SHORTHAND-VENDOR"), (
+              "webGl:vendor/webGl:renderer no longer answers UNMASKED_* when no "
+              f"per-context value is set: got {plain['renderer']}/{plain['vendor']}")
           PY
-        env:
-          CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
-          LIBGL_ALWAYS_SOFTWARE: "1"
-
-      - name: "webGl:contextAttributes reach the page (premultipliedAlpha guard)"
-        timeout-minutes: 10
-        run: |
-          # MBoolVal() passes a BARE field name to MaskConfig::GetAttribute,
-          # which prepends the domain itself. premultipliedAlpha passed the
-          # domain-qualified string instead, so the lookup became
-          # data["webGl:contextAttributes"]["webGl:contextAttributes.premultipliedAlpha"]
-          # -- a key that cannot exist. GetNested returns nullopt on a miss
-          # with no warning, so MBoolVal fell back to the page's own real
-          # value and the override was silently inert. Nothing tested this.
-          #
-          # antialias is asserted alongside it on purpose: it pins that the
-          # mechanism works, so a failure here separates "this one key is
-          # wrong" from "contextAttributes stopped applying entirely".
-          pip install --quiet 'playwright==1.55.0'
-          xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY2'
-          import json, os
-          from playwright.sync_api import sync_playwright
-
-          # Both default to true, so false is a value the page cannot produce
-          # on its own for this request.
-          # antialias is spoofed the OTHER way on purpose. A driver may DECLINE
-          # MSAA (reporting false when the page asked true), but it cannot
-          # spuriously ENABLE it, so "page asked false, got true" can only come
-          # from the spoof -- on any runner, whatever the GL stack does. Asking
-          # true and spoofing false would have gone vacuous the day a runner
-          # downgraded naturally. Measured on this CI (run 33289500088): with no
-          # config at all, antialias comes back true, so the old direction was
-          # load-bearing today but only by luck of the driver.
-          CFG = json.dumps({"webGl:contextAttributes": {
-              "premultipliedAlpha": False, "antialias": True}})
-          READ = """() => {
-            const c = document.createElement('canvas');
-            const gl = c.getContext('webgl', {premultipliedAlpha: true, antialias: false});
-            if (!gl) return '(no webgl)';
-            const a = gl.getContextAttributes();
-            return JSON.stringify({pma: a.premultipliedAlpha, aa: a.antialias});
-          }"""
-
-          with sync_playwright() as pw:
-              b = pw.firefox.launch(executable_path=os.environ["CAMOUFOX_BIN"],
-                                    headless=False,
-                                    firefox_user_prefs={"webgl.force-enabled": True},
-                                    env={**os.environ, "CAMOU_CONFIG": CFG})
-              page = b.new_page()
-              page.goto("data:text/html,<h1>ca</h1>")
-              got = page.evaluate(READ)
-              b.close()
-
-          print(f"getContextAttributes -> {got}")
-          assert got != "(no webgl)", "no GL context -- the guard tested nothing"
-          a = json.loads(got)
-          assert a["aa"] is True, (
-              f"antialias override lost: {a} -- the page asked for antialias:false and a\n"
-              "driver cannot turn MSAA on by itself, so true here can only come from the spoof")
-          assert a["pma"] is False, (
-              f"premultipliedAlpha override never reached the page: {a} "
-              "(antialias did, so the key string is wrong, not the mechanism)")
-          PY2
         env:
           CAMOUFOX_BIN: ${{ steps.bin.outputs.bin }}
           LIBGL_ALWAYS_SOFTWARE: "1"
 
       - name: "which setter bindings reached the build (#83 diagnostic)"
         run: |
-          # setFontList is the only one of Camoufox's 14 setters missing from
+          # setFontList is the only one of Camoufox's 15 setters missing from
           # window when an init script runs; setWebGLRenderer uses a Func gate
           # identical line for line, including the RoverfoxStorageManager call,
           # and is present. So the gate logic is not the difference -- check
@@ -671,7 +607,7 @@ jobs:
           # must not agree.
           pip install --quiet 'playwright==1.55.0' fonttools
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
-          import glob, json, os
+          import glob, json, os, re, tempfile
           from playwright.sync_api import sync_playwright
 
           # ---- #83/#88 diagnostic capture (Phase D) -------------------------
@@ -682,11 +618,13 @@ jobs:
           #
           # Option choices, each read out of xpcom/base/Logging.cpp on the
           # beta.31 tree rather than recalled:
-          #  * `%PID` (MOZ_LOG_PID_TOKEN, Logging.h:28) is expanded per process
-          #    by ExpandLogFileName (Logging.cpp:121-146): the parent writes
-          #    `cfx-main.<pid>.moz_log`, each content process
-          #    `cfx-child.<pid>.moz_log`. Without it every process in a launch
-          #    shares one file and no line can be attributed to a process.
+          #  * `%PID` (MOZ_LOG_PID_TOKEN, Logging.h:28) is expanded by
+          #    ExpandLogFileName (Logging.cpp:121-146): the parent writes
+          #    `cfx-main.<pid>.moz_log`, the children one `cfx-child.<launch
+          #    pid>.child-1.moz_log` file per launch, shared by several content
+          #    processes (run 36853787702: pids 14763, 14819 and 14854 in one
+          #    file). Attribute a line to a process by the `[Child <pid>:` the
+          #    line itself carries, never by the file name.
           #  * `append` -- the default open mode is "w" (Logging.cpp:572), so a
           #    later launch that is handed a recycled pid would TRUNCATE an
           #    earlier launch's file. That would silently delete arm (b2)'s
@@ -724,13 +662,17 @@ jobs:
           # the same substitution _generate_fontconfig (utils.py:58-92) makes.
           #
           # CONSEQUENCE, stated up front because it decides three arms:
-          # bundle/fontconfig/linux/fonts.conf aliases serif/sans-serif/
-          # monospace to Tinos/Arimo/Cousine -- all `lin`-only in fonts.json,
-          # so all refused under any mac or win per-context list. Every generic
-          # under such a list is therefore decided by A2's table, not by
-          # fontconfig. The file also carries ZERO <include> elements, so the
-          # host's /etc/fonts/conf.d/30-metric-aliases.conf is absent and
-          # `Times` is not silently aliased to `Tinos`.
+          # bundle/fontconfig/linux/fonts.conf resolves serif/sans-serif/
+          # monospace through `prefer` chains to Noto Serif/Noto Sans/DejaVu
+          # Sans Mono -- listed for win and lin in fonts.json but not for mac,
+          # so refused under a mac per-context list and allowed under a win one
+          # (it used to alias them to the lin-only Tinos/Arimo/Cousine). A
+          # context with a list is answered by A2's table first either way
+          # (FindGenericFamilies runs it before the fontconfig loop); the conf
+          # decides only the ctx-0 pref path (n1) and mac-list distance (n2).
+          # The file also carries ZERO <include> elements: the host's
+          # /etc/fonts/conf.d is absent, and the metric aliases it applies
+          # (Times, Helvetica, Arial, Calibri, ...) are copied into the file.
           #
           # WHAT THIS GUARD CANNOT SEE (CLAUDE.md lesson 3). It measures the
           # LINUX conf. A shipped Camoufox picks the conf by the SPOOFED os:
@@ -763,13 +705,17 @@ jobs:
               f"{FONTS_CONF_SRC} does not contain {_needle!r}; the bundle's fonts.conf "
               f"has changed shape and this substitution would silently do nothing.")
           # Identity check, not a path check: all three bundled fonts.conf files
-          # carry the needle above, so only their alias targets tell them apart.
-          # Arimo/Tinos/Cousine appear ONLY in the linux file (verified: grep -c
-          # over the macos and windows files returns 0 for all three).
-          _missing = [f for f in ("Arimo", "Tinos", "Cousine") if f not in _conf]
+          # carry the needle above, so only their generic families tell them apart.
+          # The linux conf resolves serif / monospace / cursive to Noto Serif /
+          # DejaVu Sans Mono / Z003; those names appear ONLY in the linux file
+          # (verified: grep -c over the macos and windows files returns 0 for
+          # all three). Arimo/Tinos/Cousine are no longer a test: they survive
+          # in the linux file as metric-alias targets, so they would pass for
+          # any conf that carries those aliases.
+          _missing = [f for f in ("Noto Serif", "DejaVu Sans Mono", "Z003") if f not in _conf]
           assert not _missing, (
-              f"{FONTS_CONF_SRC} does not alias to {_missing}: this is not the LINUX "
-              f"fonts.conf, and arms (n1), (n2) and (n4) all rest on the Linux aliases. "
+              f"{FONTS_CONF_SRC} does not name {_missing}: this is not the LINUX "
+              f"fonts.conf, and arms (n1), (n2) and (n4) all rest on its generics. "
               f"See the unpack step's -path '*/fontconfig/linux/fonts.conf' pin.")
           _conf = _conf.replace(_needle, "<dir>%s</dir>" % FONTS_DIR)
           FONTCONFIG_FILE = os.path.join(FC_DIR, "fonts.conf")
@@ -907,7 +853,7 @@ jobs:
           # its OWN launch, before PROBES exists: picking it inside the bare
           # launch would leave arm (a) measuring a different probe set from
           # arm (b).
-          MAC_CANDIDATES = ["Optima", "Palatino", "Helvetica"]
+          MAC_CANDIDATES = ["Optima", "Avenir", "Baskerville"]
 
           # One checksum implementation, shared by this precheck and the
           # Geneva discriminator below. Two different faces essentially never
@@ -997,7 +943,7 @@ jobs:
           print(f"  [MAC_ONLY precheck] chosen third MAC_ONLY family: {MAC_THIRD}")
 
           MAC_ONLY = ["Helvetica Neue", "PingFang HK", MAC_THIRD]
-          WIN_ONLY = ["Segoe UI", "Calibri", "MS Gothic"]
+          WIN_ONLY = ["Segoe UI", "Candara", "MS Gothic"]
           PROBES = MAC_ONLY + WIN_ONLY
           # Derived, never written out -- see fc_subst_hits above. The fc memo
           # lowercases its key, and so does the reader, so these are lowercase.
@@ -1071,9 +1017,11 @@ jobs:
           # `72px "<absent family>", monospace`. That is a verdict only while the
           # reference is GUARANTEED to differ from the family under test, and
           # since B0 put every launch under FONTCONFIG_FILE it is not: the font
-          # universe is the bundle alone, the linux conf aliases monospace to
-          # Cousine, Cousine is lin-only and refused under a win or mac `fonts`
-          # list, and the generic lands on some other bundled face. Run
+          # universe is the bundle alone, and the linux conf's monospace lands on
+          # a bundled face the list may refuse (when run 34471565975 was taken
+          # it aliased monospace to the lin-only Cousine, refused under a win or
+          # mac `fonts` list; it is now DejaVu Sans Mono, refused under a mac
+          # list), so the generic is some other bundled face. Run
           # 34471565975 read `MS Gothic: False` out of that comparison while the
           # SAME launch reported document.fonts.check True, FontFace.status
           # 'loaded', and (CAMOU-FL, ctx=6) `gate ... key=ms gothic allowed=1`.
@@ -1340,6 +1288,92 @@ jobs:
                       pids.add(parts[0])
               return pids
 
+          # Two contexts can only share a content process through a remote type
+          # that carries no container. FF156 (ProcessIsolation.cpp,
+          # SharedWebRemoteType) gives every `web` document the type
+          # `web=^userContextId=<N>`, one process pool per container, whatever
+          # dom.ipc.processCount or fission.autostart say; FF152 returned the bare
+          # `web` for all of them. data: documents therefore never shared a
+          # process across contexts (run 36853787702: donor in pid 14819, victim
+          # in pid 14854, same cfx-child file). `file` is a remote type of its own
+          # with no container suffix and dom.ipc.processCount.file=1, so pages
+          # loaded from file: URLs are the way to put two contexts in one process.
+          PAGES_DIR = tempfile.mkdtemp(prefix="smoke-pages-")
+
+          def page_uri(name):
+              if not FILE_PAGES["ok"]:
+                  return "data:text/html,<h1>%s</h1>" % name
+              path = os.path.join(PAGES_DIR, name + ".html")
+              with open(path, "w", encoding="utf-8") as fh:
+                  fh.write("<!doctype html><meta charset=utf-8><h1>%s</h1>" % name)
+              return "file://" + path
+
+          # One throwaway launch before the first arm that loads a file: page. If
+          # the Linux file-content sandbox cannot read the temp dir, goto() raises
+          # and, uncaught, would end the whole step and erase every later arm.
+          # Instead it is registered as one named SETUP-INVALID with the exception
+          # text, and page_uri() then hands out data: pages, which carry no
+          # `/<name>.html` in their uri, so the arms that need a shared process
+          # report "no group line" and go unmeasured rather than crash or pass.
+          FILE_PAGES = {"ok": True}
+
+          def file_page_precheck():
+              try:
+                  with sync_playwright() as pw:
+                      b = pw.firefox.launch(
+                          executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
+                          firefox_user_prefs={"dom.ipc.processCount": 1},
+                          env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
+                      try:
+                          pg = b.new_context().new_page()
+                          pg.goto(page_uri("file-precheck"))
+                          got = pg.evaluate("document.querySelector('h1') && "
+                                            "document.querySelector('h1').textContent")
+                      finally:
+                          b.close()
+                  if got != "file-precheck":
+                      raise RuntimeError(f"the file: page loaded but its h1 read {got!r}")
+              except Exception as exc:
+                  FILE_PAGES["ok"] = False
+                  _why = (f"file: pages could not be loaded ({type(exc).__name__}: {exc}); "
+                          f"arms (i), (i2), (j), (j2) and (n4) need them to put two contexts "
+                          f"in one content process, so they cannot be measured")
+                  tripwires.append(f"(file) {_why}")
+                  unmeasured_arms["(file)"] = _why[:220]
+                  print(f"  [setup] FILE-PAGE PRECHECK FAILED: {_why}")
+              else:
+                  print("  [setup] file: page precheck ok: a file: document loaded in a throwaway launch")
+
+          def docs_share_process(mark, needle_a, needle_b):
+              """(shared, pids of A's document, pids of B's document).
+
+              `needle_*` is a substring of the document's uri: `/<name>.html` for the
+              file: pages, `<h1>name</h1>` for the data: pages.
+
+              Whether two documents ran in ONE content process, read from the
+              browser. Every document's font group logs a `CAMOU-FL group ... uri=`
+              line, and MOZ_LOG prefixes each line with `[Child <pid>:` -- the pid
+              of the process that wrote it. NOT the file name: on Linux the
+              `cfx-child.<n>` file is shared by several content processes (run
+              36853787702: pids 14763, 14819 and 14854 all wrote cfx-child.14753),
+              which is why this reads the pid in the line. `tab_pids()` is only
+              printed; it also counts processes that lay out no document.
+              Wrongly PASSING needs one pid on both documents' group lines without
+              one process, which a pid cannot do; wrongly failing needs the log off,
+              and then both sets are empty and the caller's message prints them.
+              """
+              def pids(needle):
+                  out = set()
+                  for ln in camou_fl(mark, "CAMOU-FL group", needle, limit=None):
+                      m = re.search(r"\[(?:Child|Parent) (\d+):", ln)
+                      if m:
+                          out.add(m.group(1))
+                  return out
+              pa, pb = pids(needle_a), pids(needle_b)
+              return bool(pa & pb), sorted(pa), sorted(pb)
+
+          file_page_precheck()
+
           # bare launch -- no `fonts` key at all, so mFontFamilies holds every
           # bundled family and nothing is deleted from font.system.whitelist.
           # setFontList() per context is the only narrowing in play. Covers
@@ -1373,19 +1407,20 @@ jobs:
                         'typ: typeof window.setFontList, '
                         'fontProps: Object.getOwnPropertyNames(window).filter('
                         'n => /font/i.test(n)), '
-                        # Which of the 14 setters are reachable from an init
+                        # Which of the 15 setters are reachable from an init
                         # script (main world)? The #57 arm enumerates them with
                         # page.evaluate(), which runs in an isolated world and
-                        # cannot see them either way, so its 0/14 says nothing.
+                        # cannot see them either way, so its 0/15 says nothing.
                         # setNavigatorPlatform demonstrably applies from an init
                         # script in this same run, so if it is present here and
                         # setFontList is not, the difference is specific rather
                         # than systemic (#83).
-                        'setters: ["setFontSpacingSeed","setAudioFingerprintSeed",'
+                        'setters: ["setAudioFingerprintSeed",'
                         '"setCanvasSeed","setTimezone","setScreenDimensions",'
                         '"setScreenColorDepth","setNavigatorPlatform","setNavigatorOscpu",'
                         '"setNavigatorHardwareConcurrency","setWebGLVendor","setWebGLRenderer",'
-                        '"setFontList","setSpeechVoices","setWebRTCIPv4"]'
+                        '"setFontList","setSpeechVoices","setWebRTCIPv4","setWebRTCIPv6",'
+                        '"setNavigatorUserAgent"]'
                         '.filter(n => typeof window[n] === "function"), '
                         'applied: false, err: null}; '
                         'try { window.setFontList(%s); out.applied = true; } '
@@ -3204,13 +3239,14 @@ jobs:
                           f"{expect!r} ({'arm (b) measurement' if fam != 'Tahoma' else 'Tahoma is in both FONTS[mac] and FONTS[win]'})")
 
           # Discriminator: does document.fonts.add(new FontFace(...)) --
-          # the ALREADY-SCOPED path -- resolve "Calibri" (win-only)
+          # the ALREADY-SCOPED path -- resolve "Calibri" (in the win list, not
+          # the mac list; fonts.json also reports it for lin)
           # correctly per context, and does the bare-identifier Tahoma
           # rule (no quotes needed in its source) resolve correctly,
           # where the space-containing (always-quoted) Segoe UI /
           # Helvetica Neue rules do not? The combination tells Task 3
           # which defect this tripwire is actually reporting.
-          js_face_expect = {"mac": "error", "win": "loaded"}  # Calibri is win-only
+          js_face_expect = {"mac": "error", "win": "loaded"}  # Calibri is in the win list, not the mac list
           js_face_correct = all(
               e[label]["jsFaceStatus"] == js_face_expect[label] for label in ("mac", "win"))
           tahoma_bare_correct = all(
@@ -3814,13 +3850,16 @@ jobs:
           # miss fixes the cell for the whole process, at context 0, where the
           # gate allows everything.
           #
-          # Fixture. Context list ["Times"] (mac-only in fonts.json). Stack
+          # Fixture. Context list ["Times"] (its face is in the macOS-only font
+          # group; fonts.json also reports the name for win and lin, as a metric
+          # alias, which no gate here reads). Stack
           # '72px "Times", serif' -- naming a generic makes mFallbackGeneric
           # Serif (gfxTextRun.cpp:1998-2000), so the cell consulted is
           # [x-cyrillic][Serif]. U+1C80 is UBLOCK_CYRILLIC_EXTENDED_C, which has
           # a case in GetFontPrefLangFor, and the Unix block of all.js:2746 sets
           # font.name-list.serif.x-cyrillic to the literal "serif" -- which
-          # fontconfig, under the bundle's own fonts.conf, answers with Tinos.
+          # fontconfig, under the bundle's own fonts.conf, answers with Noto Serif
+          # first (its serif `prefer` chain; the conf used to say Tinos).
           #
           # WHY "Times" AND NOT "Geneva". The plan wrote this fixture as
           # ["Geneva"], and Geneva is the one bundled mac family that never
@@ -3831,9 +3870,10 @@ jobs:
           # mFonts EMPTY, which routes U+1C80 through GetDefaultFont's
           # last-resort walk (#88) instead of FindFontForChar exit 7 (#94) and
           # would make a RED here attributable to the wrong issue -- and the
-          # tofu floor and the Tinos reference could then be the same face,
-          # which trips this arm's own control-invalid branch. Times is mac-only
-          # like Geneva, renders, and is A2's first serif-row family, so the
+          # tofu floor and the Noto Serif reference could then be the same face,
+          # which trips this arm's own control-invalid branch. Times' face is in
+          # the macOS-only font group like Geneva's, renders, and is A2's first
+          # serif-row family, so the
           # appended `serif` generic resolves to Times as well: mFonts holds a
           # real face, exit 7 is the path under test, and the substitution
           # changes nothing about the attribution argument below, because that
@@ -3841,18 +3881,21 @@ jobs:
           #
           # WHY U+1C80. Scanned over every face and every cmap subtable of
           # bundle/fonts/{macos,windows,linux}: among families whose name does
-          # not start with '.', ONLY Tinos and Arimo cover it. Both are
-          # lin-only in fonts.json, so both gates refuse them under ["Times"],
-          # and no mac family can answer instead -- which is what makes a RED
-          # here attributable to the ungated pref path rather than to an
-          # ordinary in-list fallback. Re-run against the shipped bundle before
-          # this arm landed: 345 faces scanned, U+1C80 -> ['Arimo', 'Tinos'].
+          # not start with '.', these cover it: Noto Serif, Noto Sans (and its
+          # Display and Mono), Tinos, Arimo, FreeSerif, Sans Serif Collection
+          # and the Iosevka family. Re-scanned over the shipped bundle
+          # (fonts-bundle-v1, 1974 faces) when the Linux conf moved off
+          # Arimo/Tinos. None is in the ["Times"] list, so both gates refuse
+          # them and nothing in the list can answer instead -- which is what
+          # makes a RED here attributable to the ungated pref path rather than
+          # to an ordinary in-list fallback. (fonts.json mac lists Iosevka, so
+          # a fixture list that held it would break that argument.)
           #
           # WHAT WOULD MAKE THIS PRINT A WRONG ANSWER (CLAUDE.md lesson 4):
-          #  * The Tinos reference and the tofu floor could be equal, in which
-          #    case "matched Tinos" and "rendered nothing" are the same number.
+          #  * The Noto Serif reference and the tofu floor could be equal, in which
+          #    case "matched Noto Serif" and "rendered nothing" are the same number.
           #    Asserted below; if equal the arm scores nothing.
-          #  * The Tinos reference is measured by FAMILY NAME in a BARE context.
+          #  * The Noto Serif reference is measured by FAMILY NAME in a BARE context.
           #    That is a SEPARATE browser process -- one_page_list_arg opens its
           #    own sync_playwright() -- so this is not a same-process
           #    comparison. What makes the two sides comparable is narrower and
@@ -3861,7 +3904,7 @@ jobs:
           #    canvas measureText path, and an advance width that is a property
           #    of the face rather than of the context. Arm (h) relies on the
           #    same property and states it the same way.
-          #  * The reference launch's OWN font list contains Tinos -- its
+          #  * The reference launch's OWN font list contains Noto Serif -- its
           #    appended serif generic resolves there because no per-context list
           #    refuses it -- so its `fontlist` line would satisfy the "a carrier
           #    reached mFonts" branch below if it were in the window. Every
@@ -3875,9 +3918,14 @@ jobs:
           #    Phase 0 RED.
           N1_CP = 0x1C80          # CYRILLIC SMALL LETTER ROUNDED VE
           N1_PUA = 0xE000         # tofu floor: nothing MAC-side covers it
-          N1_NAMED = "Times"      # mac-only, renders (unlike Geneva, #95)
+          N1_NAMED = "Times"      # macOS-group face, renders (unlike Geneva, #95)
           N1_LIST = [N1_NAMED]
-          N1_OUTSIDE = "Tinos"    # the ctx-0 pref answer under the bundle conf
+          # The ctx-0 pref answer under the bundle's Linux conf: the first family
+          # of its serif `prefer` chain, which covers U+1C80 (scan above).
+          N1_OUTSIDE = "Noto Serif"
+          # Every U+1C80 carrier a `fontlist` line must NOT show in mFonts.
+          N1_CARRIERS = ("noto serif", "noto sans", "tinos", "arimo", "freeserif",
+                         "iosevka", "sans serif collection")
 
           JS_N1 = """(a) => {
             const c = document.createElement('canvas').getContext('2d');
@@ -3920,7 +3968,7 @@ jobs:
                "outside": N1_OUTSIDE})
           # EVERY log read happens HERE, before the reference launch. The
           # reference runs with no per-context list, so its own appended serif
-          # generic resolves to Tinos and its `fontlist` line names a U+1C80
+          # generic resolves to Noto Serif and its `fontlist` line names a U+1C80
           # carrier -- which is exactly the string the "a carrier reached
           # mFonts" branch below refuses on. camou_fl reads every file in
           # LOG_DIR and treats a file absent from the mark as offset 0
@@ -3938,7 +3986,7 @@ jobs:
           n1_fl = [ln for ln in n1_fl_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
           n1_pf = [ln for ln in n1_pf_all if _ctx_tok(ln) == n1_ctx] if n1_ctx else []
 
-          # The reference: Tinos's U+1C80 measured by family name in a BARE
+          # The reference: Noto Serif's U+1C80 measured by family name in a BARE
           # context, where no per-context list gates anything.
           n1_ref = one_page_list_arg(
               None, JS_N1,
@@ -3946,7 +3994,7 @@ jobs:
                "outside": N1_OUTSIDE})["outsideDirect"]
           n1_have_fontlist = kind_total("fontlist") > 0
           print(f"  [arm n1 / #94] probe(U+1C80 in {N1_LIST})={n1['probe']} "
-                f"floor(U+E000)={n1['floor']} tinos_ref={n1_ref} ctx={n1_ctx} "
+                f"floor(U+E000)={n1['floor']} outside_ref={n1_ref} ctx={n1_ctx} "
                 f"fontlist_lines={len(n1_fl)}/{len(n1_fl_all)} "
                 f"pref_fallback_lines={len(n1_pf)}/{len(n1_pf_all)} "
                 f"kind_totals: fontlist={kind_total('fontlist')} "
@@ -3957,7 +4005,7 @@ jobs:
           n1_failures = []
           if abs(n1_ref - n1["floor"]) < 0.01:
               n1_failures.append(
-                  f"control invalid: Tinos's U+1C80 width ({n1_ref}) equals the "
+                  f"control invalid: {N1_OUTSIDE}'s U+1C80 width ({n1_ref}) equals the "
                   f"stack's own tofu floor ({n1['floor']}), so 'the pref path "
                   f"answered' and 'nothing rendered' are the same number and this "
                   f"arm cannot tell them apart")
@@ -3972,28 +4020,28 @@ jobs:
                   n1_failures.append(
                       f"PREF PATH LEAK (width-only, no `fontlist` kind in this "
                       f"binary): U+1C80 in a {N1_LIST} context measured "
-                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) measured by "
+                      f"{n1['probe']}, which is {N1_OUTSIDE}'s width ({n1_ref}) measured by "
                       f"name in a bare context, and differs from this stack's own "
-                      f"tofu floor ({n1['floor']}). Tinos is lin-only in fonts.json, "
+                      f"tofu floor ({n1['floor']}). {N1_OUTSIDE} is not in fonts.json mac, "
                       f"so both gates refuse it and no allowed family covers U+1C80.")
               elif abs(n1["probe"] - n1["floor"]) < 0.01:
                   # The probe IS the floor, so nothing rendered and no ungated
                   # path answered. This branch is split out because the message
-                  # below would otherwise print "neither Tinos nor the tofu
+                  # below would otherwise print "neither Noto Serif nor the tofu
                   # floor" for a probe that is exactly the tofu floor -- a false
                   # statement in the one case where the gate did its job, and
                   # the case a Phase 1 re-run of this arm is trying to reach.
                   print(f"  [arm n1 / #94] no leak on width evidence (binary emits "
                         f"no `fontlist` kind): U+1C80 measured {n1['probe']}, which "
                         f"is this stack's own tofu floor ({n1['floor']}) and not "
-                        f"Tinos ({n1_ref}) -- nothing rendered the codepoint. The "
+                        f"{N1_OUTSIDE} ({n1_ref}) -- nothing rendered the codepoint. The "
                         f"width half cannot go further without the `fontlist` and "
                         f"`pref-fallback` kinds, so this arm scores nothing here "
                         f"and its GREEN is NOT evidence the pref path is gated.")
               else:
                   print(f"  [arm n1 / #94] DIAGNOSTIC (binary emits no `fontlist` "
                         f"kind): U+1C80 measured {n1['probe']}, which is neither "
-                        f"Tinos ({n1_ref}) nor the tofu floor ({n1['floor']}). Some "
+                        f"{N1_OUTSIDE} ({n1_ref}) nor the tofu floor ({n1['floor']}). Some "
                         f"third face answered; this arm cannot say which, and it "
                         f"scores nothing on this binary.")
           elif n1_ctx is None:
@@ -4012,7 +4060,7 @@ jobs:
               # covers "the pref path was never consulted at all", which is the
               # vacuous green lesson 4 is about.
               _refused = [ln for ln in n1_pf
-                          if "key=tinos" in ln.lower() and "allowed=0" in ln]
+                          if f"key={N1_OUTSIDE.lower()}" in ln.lower() and "allowed=0" in ln]
               if not _mine:
                   n1_failures.append(
                       f"setup invalid: the run emitted {kind_total('fontlist')} "
@@ -4023,22 +4071,22 @@ jobs:
                       "setup invalid: a `fontlist` line came back with an EMPTY "
                       "families= field, which is a child-process AsString failure "
                       "(SharedFontList.h:142-148), not an empty list")
-              elif any(t in f.lower() for f in _fams for t in ("tinos", "arimo")):
+              elif any(t in f.lower() for f in _fams for t in N1_CARRIERS):
                   n1_failures.append(
                       f"setup invalid: a U+1C80 carrier reached mFonts, so exit 4 "
                       f"answers before exit 7 and this arm tests nothing: {_mine[-1]}")
               elif abs(n1["probe"] - n1_ref) < 0.01:
                   n1_failures.append(
                       f"PREF PATH LEAK: U+1C80 in a {N1_LIST} context measured "
-                      f"{n1['probe']}, which is Tinos's width ({n1_ref}) -- a "
-                      f"lin-only family both gates refuse. pref-fallback lines for "
+                      f"{n1['probe']}, which is {N1_OUTSIDE}'s width ({n1_ref}) -- a "
+                      f"family outside the list both gates refuse. pref-fallback lines for "
                       f"ctx={n1_ctx}: {len(n1_pf)}, of which "
-                      f"{len(_refused)} refused tinos")
+                      f"{len(_refused)} refused {N1_OUTSIDE.lower()}")
               elif not _refused:
                   n1_failures.append(
                       f"PREF PATH NOT CONSULTED: the width is right ({n1['probe']} vs "
-                      f"tinos {n1_ref}, floor {n1['floor']}) but no "
-                      f"`pref-fallback ctx={n1_ctx} key=tinos allowed=0` line exists, "
+                      f"{N1_OUTSIDE.lower()} {n1_ref}, floor {n1['floor']}) but no "
+                      f"`pref-fallback ctx={n1_ctx} key={N1_OUTSIDE.lower()} allowed=0` line exists, "
                       f"so this GREEN would also cover 'the read filter never ran'. "
                       f"pref-fallback lines for this ctx: {n1_pf[-3:] or 'none'}")
           if n1_failures:
@@ -4060,12 +4108,14 @@ jobs:
           # so it returns the WHOLE config sorted by fontconfig's distance
           # metric and the loop takes the first `limit` (default 3) families the
           # gate accepts. Under a mac list the three fontconfig answers
-          # (Tinos/Arimo/Cousine) are all refused, so what comes back is three
+          # (Noto Sans/Noto Serif/DejaVu Sans Mono under the Linux conf) are all
+          # refused, so what comes back is three
           # families chosen by distance from a pattern the gate already emptied
           # of its real answer -- not by the generic. That is #92's mechanism.
           #
           # Fixture list ["Menlo", "Helvetica Neue", "Times"]: one family from
-          # each of A2's three rows, all mac-only. Menlo is REQUIRED -- without
+          # each of A2's three rows, all in the macOS-only font group (fonts.json
+          # also reports Times for win and lin). Menlo is REQUIRED -- without
           # a monospace-row family the helper's fallback maps monospace and
           # sans-serif onto the same family and the arm is RED for a reason it
           # cannot show (spec-review I8).
@@ -4102,8 +4152,8 @@ jobs:
           # So each generic is scored against the list member OF ITS OWN KIND,
           # named directly in the same context and run: sans-serif against
           # Helvetica Neue, serif against Times, monospace against Menlo. Those
-          # three are one family from each of A2's three rows, all mac-only, and
-          # the arm ASSERTS their `mmmmm` widths are pairwise distinct before
+          # three are one family from each of A2's three rows, all in the
+          # macOS-only font group, and the arm ASSERTS their `mmmmm` widths are pairwise distinct before
           # scoring anything -- if two collide the arm names the pair and stops.
           # Menlo is REQUIRED for the further reason spec-review I8 gives:
           # without a monospace-row family the helper's fallback maps monospace
@@ -4857,7 +4907,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_a)))
                   page_a = ctx_a.new_page()
-                  page_a.goto("data:text/html,<h1>4b-a</h1>")
+                  page_a.goto(page_uri("4b-a"))
                   pids_a = tab_pids()
                   result_a = page_a.evaluate(js)
 
@@ -4866,7 +4916,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                   page_b = ctx_b.new_page()
-                  page_b.goto("data:text/html,<h1>4b-b</h1>")
+                  page_b.goto(page_uri("4b-b"))
                   pids_b = tab_pids()
                   result_b = page_b.evaluate(js)
 
@@ -4970,8 +5020,11 @@ jobs:
                     calib: sum('"Arial"', 'AWmi')};
           }"""
 
+          i_mark = log_mark()
           i_a, i_b, i_pids = two_contexts_one_launch(NO_CJK_PROBE, FONTS["win"], JS_4B)
-          print(f"  [arm i / 4b] tab pids after A / after B: {i_pids}")
+          i_same, i_pa, i_pb = docs_share_process(i_mark, "/4b-a.html", "/4b-b.html")
+          print(f"  [arm i / 4b] tab pids after A / after B: {i_pids}; documents' pids "
+                f"A {i_pa or 'none'} / B {i_pb or 'none'}")
           i_a_tofu = i_a["final"] in i_a["refs"].values()
           # NOT i_b["refs"]: FONTS["win"] broadly covers CJK, so B's own
           # generic-family refs (monospace/sans-serif/serif) can ALSO
@@ -5044,6 +5097,15 @@ jobs:
                   f"{i_a['pxFallback']} matches NONE of the families B allows "
                   f"({i_b['pxNamedW']}) -- the serving face is unidentified, so neither "
                   f"#94/#88 nor #81 can be decided.")
+          elif not i_same:
+              # Same gate as (i2), placed before the leak branch below: B resolving
+              # its own font is what two separate processes would also give.
+              i_failures.append(
+                  f"arm (i)/#81 unmeasured: A's and B's documents were laid out by different "
+                  f"content processes (A: {i_pa or 'no group line'}, B: {i_pb or 'no group line'}; "
+                  f"tab pids {sorted(i_pids['after_a'])} after A and "
+                  f"{sorted(i_pids['after_b'])} after B), so A's miss cannot reach B and "
+                  f"this arm tests nothing.")
           elif not i_a_tofu:
               i_failures.append(
                   f"arm (i)/4b setup invalid: context A's no-CJK list ({NO_CJK_PROBE}) settled "
@@ -5131,7 +5193,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_a)))
                   page_a = ctx_a.new_page()
-                  page_a.goto("data:text/html,<h1>i2-a</h1>")
+                  page_a.goto(page_uri("i2-a"))
                   pids_a = tab_pids()
 
                   ctx_b = b.new_context()
@@ -5139,7 +5201,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                   page_b = ctx_b.new_page()
-                  page_b.goto("data:text/html,<h1>i2-b</h1>")
+                  page_b.goto(page_uri("i2-b"))
                   pids_b = tab_pids()
 
                   # Both installs are done, so both clears are spent. Only now
@@ -5160,9 +5222,11 @@ jobs:
           # least likely to be able to score. #83's process table (run
           # 34008395471) shows dom.ipc.processCount=1 alone does not reliably
           # collapse two contexts into one content process.
+          i2_mark = log_mark()
           i2_a, i2_b, i2_pids = two_contexts_installs_first(
               NO_CJK_PROBE, FONTS["win"], JS_4B,
               extra_prefs={"fission.autostart": False})
+          i2_same, i2_pa, i2_pb = docs_share_process(i2_mark, "/i2-a.html", "/i2-b.html")
           i2_a_tofu = i2_a["final"] in i2_a["refs"].values()
           # M4 (from this task's review): a 0.01 tolerance, matching every other
           # comparison the new arms make. The exact `==` inherited from arm (i)
@@ -5219,16 +5283,15 @@ jobs:
                   f"arm (i2)/#81 unmeasured: could not read the content-process table "
                   f"({i2_pids}) -- mCodepointsWithNoFonts is a per-process member, so without "
                   f"the pids this arm cannot tell a working gate from two isolated processes.")
-          elif (i2_pids["after_b"] - i2_pids["after_a"]) or not i2_pids["after_a"]:
-              # C4: arms (j)/(j2)'s exact test, for the reason they give -- a
-              # lingering or preallocated content process makes strict
-              # cardinality false on runs that DID share a process, which is what
-              # run 34322535132 printed here: two identical tab pids, scored
-              # "unmeasured". What is asserted is that B got no NEW tab process.
+          elif not i2_same:
+              # The pid table is only printed: it also counts processes that lay
+              # out no document. What is asserted is that A's and B's documents
+              # were laid out by one process (docs_share_process).
               i2_failures.append(
-                  f"arm (i2)/#81 unmeasured: a new content process appeared for B. Tab pids "
-                  f"were {sorted(i2_pids['after_a'])} after A's navigation and "
-                  f"{sorted(i2_pids['after_b'])} after B's, so A's miss cannot reach B and "
+                  f"arm (i2)/#81 unmeasured: A's and B's documents were laid out by different "
+                  f"content processes (A: {i2_pa or 'no group line'}, B: {i2_pb or 'no group line'}; "
+                  f"tab pids {sorted(i2_pids['after_a'])} after A's navigation and "
+                  f"{sorted(i2_pids['after_b'])} after B's), so A's miss cannot reach B and "
                   f"this arm tests nothing.")
           elif not i2_a_tofu:
               i2_failures.append(
@@ -5479,6 +5542,7 @@ jobs:
               FFFD_DONOR, FFFD_NO_PROBE, JS_4C,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
+          j_same, j_pa, j_pb = docs_share_process(j_mark, "/4b-a.html", "/4b-b.html")
           # Task 4's fallback-observation question, now answerable: which face
           # the donor's U+FFFD fallback actually settled on, from the browser's
           # own log rather than inferred from a width. Three of this arm's five
@@ -5515,16 +5579,16 @@ jobs:
                   f"arm (j)/#82 unmeasured: could not read the content-process table "
                   f"({j_pids}) -- #82's cache is a per-process singleton, so without the pids "
                   f"this arm cannot tell a working gate from two isolated processes.")
-          elif (j_pids["after_b"] - j_pids["after_a"]) or not j_pids["after_a"]:
-              # "No NEW tab pid appeared for B", not set equality: a lingering
-              # about:blank process that exits between the two samples would make
-              # equality false forever and the arm would read "unmeasured" on
-              # every run, including ones that did share a process.
+          elif not j_same:
+              # Not a pid-table comparison: that also counts processes that lay
+              # out no document (docs_share_process).
               j_failures.append(
-                  f"arm (j)/#82 unmeasured: a new content process appeared for B. Tab pids were "
-                  f"{sorted(j_pids['after_a'])} after A and {sorted(j_pids['after_b'])} after "
-                  f"B, so donor and recipient did not share the gfxPlatformFontList singleton "
-                  f"that holds mReplacementCharFallbackFamily. Not a verdict either way.")
+                  f"arm (j)/#82 unmeasured: donor and recipient documents were laid out by "
+                  f"different content processes (A: {j_pa or 'no group line'}, "
+                  f"B: {j_pb or 'no group line'}; tab pids {sorted(j_pids['after_a'])} after A and "
+                  f"{sorted(j_pids['after_b'])} after B), so they did not share the "
+                  f"gfxPlatformFontList singleton that holds mReplacementCharFallbackFamily. "
+                  f"Not a verdict either way.")
           elif "Tahoma" not in fffd_working:
               j_failures.append(
                   f"arm (j)/#82 setup invalid: Tahoma is not among the families that "
@@ -6084,7 +6148,7 @@ jobs:
                           env={**os.environ, "CAMOU_CONFIG": json.dumps({})})
                       ctx_a = b.new_context()
                       page_a = ctx_a.new_page()
-                      page_a.goto("data:text/html,<h1>4b-bare-a</h1>")
+                      page_a.goto(page_uri("4b-bare-a"))
                       pids_a = tab_pids()
                       result_a = page_a.evaluate(js)
 
@@ -6093,7 +6157,7 @@ jobs:
                           'if (typeof window.setFontList === "function") '
                           'window.setFontList(%s);' % json.dumps(",".join(list_b)))
                       page_b = ctx_b.new_page()
-                      page_b.goto("data:text/html,<h1>4b-bare-b</h1>")
+                      page_b.goto(page_uri("4b-bare-b"))
                       pids_b = tab_pids()
                       result_b = page_b.evaluate(js)
 
@@ -6126,6 +6190,7 @@ jobs:
                   FFFD_NO_PROBE, JS_4C,
                   extra_prefs={"gfx.font_rendering.fallback.async": False,
                                "fission.autostart": False})
+              j2_same, j2_pa, j2_pb = docs_share_process(j2_mark, "/4b-bare-a.html", "/4b-bare-b.html")
               # Arm (j)'s fallback observation, for the bare donor. Both of this
               # arm's `setup invalid` branches are statements about what the
               # bare donor resolved; this names the face the browser itself
@@ -6156,13 +6221,14 @@ jobs:
                   j2_failures.append(
                       f"arm (j2)/#82 unmeasured: could not read the content-process table "
                       f"({j2_pids}); #82's cache is a per-process singleton.")
-              elif (j2_pids["after_b"] - j2_pids["after_a"]) or not j2_pids["after_a"]:
-                  # Same "no NEW tab pid" test as arm (j), for the same reason.
+              elif not j2_same:
+                  # Same shared-process reading as arm (j), for the same reason.
                   j2_failures.append(
-                      f"arm (j2)/#82 unmeasured: a new content process appeared for B. Tab pids were "
-                      f"{sorted(j2_pids['after_a'])} after A and {sorted(j2_pids['after_b'])} "
-                      f"after B, so donor and recipient did not share the gfxPlatformFontList "
-                      f"singleton. Not a verdict either way.")
+                      f"arm (j2)/#82 unmeasured: donor and recipient documents were laid out by "
+                      f"different content processes (A: {j2_pa or 'no group line'}, "
+                      f"B: {j2_pb or 'no group line'}; tab pids {sorted(j2_pids['after_a'])} after A "
+                      f"and {sorted(j2_pids['after_b'])} after B), so they did not share the "
+                      f"gfxPlatformFontList singleton. Not a verdict either way.")
               elif abs(j2_a["final"] - j2_floor) < 0.01:
                   # Ordered BEFORE the sig-families check on purpose. When the
                   # donor resolves nothing, families that also lack U+FFFD
@@ -6225,8 +6291,11 @@ jobs:
           # Times and both groups read families=times,times. The only U+FFFD
           # carrier the donor can reach is N4_CARRIER, through system fallback.
           # U+FFFD is the FIRST character of its own text run so aPrevMatchedFont
-          # (exit 8) is empty. Re-scanned against the shipped bundle before this
-          # arm landed: 345 faces, U+FFFD carriers are Apple Symbols, Arimo,
+          # (exit 8) is empty. Scanned against the shipped bundle before this
+          # arm landed (345 faces; re-checked on the 1974-face fonts-bundle-v1:
+          # Times and Geneva still carry no U+FFFD, Menlo, Lucida Grande,
+          # Arimo, Tinos, Segoe UI, Tahoma and Verdana still do): U+FFFD
+          # carriers are Apple Symbols, Arimo,
           # Lucida Grande, Malgun Gothic, Menlo, Microsoft Sans Serif, STIX Two
           # Math, Segoe UI (+Black/Light/Semibold/Semilight), System Font,
           # Tahoma, Tinos, Verdana -- Times and Geneva are in neither, which is
@@ -6239,9 +6308,10 @@ jobs:
           #    two_contexts_one_launch forces dom.ipc.processCount=1 and the
           #    pids are ASSERTED equal, not assumed.
           #  * mReplacementCharFallbackFamily is indexed by FontVisibility
-          #    LEVEL. Both pages are same-scheme (data:) content documents, so
-          #    both groups sit at the same level; a mismatch reads an empty slot
-          #    and looks exactly like the pre-#93 report B6 keys on.
+          #    LEVEL. Both pages are same-scheme (file:) content documents, so
+          #    both groups sit at the same level (the donor's and the victim's
+          #    `global-fallback ... level=` lines carry it); a mismatch reads an
+          #    empty slot and looks exactly like the pre-#93 report B6 keys on.
           #  * The victim's own tofu floor and Menlo's U+FFFD width could be
           #    equal, in which case "leaked" and "rendered nothing" are the same
           #    number. Asserted.
@@ -6294,6 +6364,7 @@ jobs:
               N4_DONOR, N4_VICTIM, JS_N4,
               extra_prefs={"gfx.font_rendering.fallback.async": False,
                            "fission.autostart": False})
+          n4_same, n4_pa, n4_pb = docs_share_process(n4_mark, "/4b-a.html", "/4b-b.html")
           # Every log read BEFORE the reference launch, for the reason stated in
           # arm (n1)'s log-window note above.
           n4_fl = camou_fl(n4_mark, "CAMOU-FL fontlist", limit=None)
@@ -6376,15 +6447,15 @@ jobs:
           # binary that was never going to have them. Every precondition in the
           # log branch below reads `fontlist`; that is the kind to test.
           n4_have_log = kind_total("fontlist") > 0
-          if isinstance(n4_pids["after_a"], str) or isinstance(n4_pids["after_b"], str):
+          if not n4_same:
+              # Was `after_a & after_b` non-empty, which any process common to both
+              # samples satisfies (the extension process was in both on FF156
+              # while donor and victim ran in different content processes).
               n4_failures.append(
-                  f"setup invalid: pgrep failed, so 'same process' could not be "
-                  f"asserted: {n4_pids}")
-          elif not (n4_pids["after_a"] & n4_pids["after_b"]):
-              n4_failures.append(
-                  f"setup invalid: donor and victim rendered in different content "
-                  f"processes, and mReplacementCharFallbackFamily is a per-process "
-                  f"singleton, so nothing could have been shared: {n4_pids}")
+                  f"setup invalid: donor and victim documents were laid out by different "
+                  f"content processes (A: {n4_pa or 'no group line'}, B: {n4_pb or 'no group line'}), "
+                  f"and mReplacementCharFallbackFamily is a per-process singleton, so "
+                  f"nothing could have been shared: {n4_pids}")
           elif abs(n4_ref - n4_b["floor"]) < 0.01:
               n4_failures.append(
                   f"control invalid: {N4_CARRIER}'s U+FFFD width ({n4_ref}) equals "
@@ -7048,9 +7119,12 @@ jobs:
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
                       "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
-                      "re-probe tests",
+                      "re-probe tests. On FF156 the donor and recipient run in different "
+                      "content processes (see the shared-process audit above), so this GREEN "
+                      "measures that setup, not an in-process leak",
               "(b2r)": "#83, same, with the init script on the document under test; "
-                       "measures the flush, not the key -- see (b2)'s re-probe",
+                       "measures the flush, not the key -- see (b2)'s re-probe; same FF156 "
+                       "process caveat as (b2)",
               # Back here, as Phase 0 said they would be. These two emit TWO
               # kinds of red and this table takes no prefix, so BOTH now fail
               # the step: the "#94/#88 refused-list render:" red that Phase 0
@@ -7081,7 +7155,9 @@ jobs:
                       "split into two disjoint halves of 6681, and each context read "
                       "~6480 names all from its OWN half and none from the other's. A "
                       "RED here is either a real cross-context leak or a runner whose "
-                      "speech registry went away; both must fail the step",
+                      "speech registry went away; both must fail the step. That run is "
+                      "FF152; on FF156 the two contexts run in different content processes "
+                      "(see the shared-process audit above)",
               # Round 3's own arms. Each was EXPECTED_RED through Phase 0 and
               # each guards a defect this branch's C++ closes, so each must be
               # GREEN on a binary built from this head -- and an arm that comes
@@ -7212,6 +7288,23 @@ jobs:
                   continue
               tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
               (unmeasured if tag else unexpected).append(t)
+          # Non-scoring. Arms that still load their two contexts' pages from data:
+          # URLs ran in different content processes on FF156 (docs/fonts-gating.md,
+          # "Two contexts in one content process"), so their GREEN is not a
+          # measurement of a per-process leak. Printed so a log reader does not
+          # have to take that on trust; nothing here fails the step.
+          print("=== shared-process audit (data: page pairs; non-scoring) ===")
+          for _arm, _a, _b in (("(b)", "b-mac", "b-win"),
+                               ("(b2)", "b2-mac", "b2-win"),
+                               ("(b2r)", "b2r-mac", "b2r-win"),
+                               ("(n5)", "n5-a", "n5-b"),
+                               ("(disc)", "disc-mac", "disc-win"),
+                               ("(pid)", "pid-mac", "pid-win"),
+                               ("(pid2)", "pid-mac2", "pid-win2")):
+              _same, _pa, _pb = docs_share_process(
+                  LOG_START, "<h1>%s</h1>" % _a, "<h1>%s</h1>" % _b)
+              print(f"  shared-process: {'yes' if _same else 'NO '} {_arm:6} "
+                    f"A {_pa or 'none'} / B {_pb or 'none'}")
           print("=== tripwire triage ===")
           for k, (_pfx, why) in EXPECTED_RED.items():
               hit = any(t.startswith(_pfx) for t in tripwires)
@@ -7306,7 +7399,10 @@ jobs:
         #   (1) the context whose os= matches the LAUNCH's spoofed OS resolves
         #       its required marker fonts;
         #   (2) the other two contexts resolve NO markers -- not their own (the
-        #       mask holds) and not anyone else's (no cross-OS leak);
+        #       mask holds) and not anyone else's (no cross-OS leak). Today the
+        #       launch mask and the per-OS font search path BOTH enforce this
+        #       (the other OS's faces are not on the path), so a green here
+        #       cannot tell a broken mask from the path doing the work;
         #   (3) warn_fonts_excluded_by_launch fires for each of those two (the
         #       matching context may or may not fire it -- both sides are random
         #       30-78% samples of the same list, so its set difference can be
@@ -7333,8 +7429,7 @@ jobs:
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
           import asyncio, os, warnings
           from camoufox.async_api import AsyncCamoufox, AsyncNewContext
-          from camoufox.utils import (_reassemble_camou_config, get_target_os,
-                                       launch_options)
+          from camoufox.utils import _launch_config, get_target_os, launch_options
 
           READ = '''() => {
             const c = document.createElement('canvas');
@@ -7362,9 +7457,13 @@ jobs:
             // fonts, invisible under FONTCONFIG_FILE; Menlo/Consolas are the
             // mac/win monospace aliases; Monaco is monospaced at 600/1000em
             // next to Menlo's 602 and collapses to the same width at 72px.
-            // PingFang HK (855/755) replaced it. Cambria is NOT in
-            // _ESSENTIAL_FONTS_WINDOWS, so it is in the random sample and is
-            // never required -- see REQUIRED below.
+            // PingFang HK (855/755) replaced it. Every marker is in exactly one
+            // OS of fonts.json and is always listed by a launch of that OS
+            // (the OS base in essential-fonts.json, or _LINUX_MARKER_FONTS for
+            // Arimo/Tinos). Calibri/Cambria are
+            // not markers because the Linux metric aliases made them lin-listed
+            // too (Carlito/Caladea), so a masked win context in a lin launch
+            // could resolve them.
             //
             // probe() returns `w !== base`, so a dead layout reads
             // base === w === 0 for every family, absent reference included --
@@ -7385,19 +7484,20 @@ jobs:
               renderer,
               base: baseWidth,
               mac: ['Helvetica Neue', 'Lucida Grande', 'PingFang HK'].filter(probe),
-              win: ['Segoe UI', 'Calibri', 'Cambria'].filter(probe),
-              lin: ['Arimo', 'Tinos', 'Noto Sans JP'].filter(probe),
+              win: ['Segoe UI', 'Candara', 'Corbel'].filter(probe),
+              lin: ['Arimo', 'Tinos', 'URW Gothic'].filter(probe),
               absent: probe('__CamouAbsentRef__0001'),
             };
           }'''
 
           EXPECT = {'macos': 'mac', 'windows': 'win', 'linux': 'lin'}
           # Markers a context of that OS must resolve when nothing masks it.
-          # Cambria is a random-sample font (not essential) and is excluded.
+          # Each is in exactly one OS of fonts.json and always in its launch's
+          # list (see the probe list above).
           REQUIRED = {
               'mac': ['Helvetica Neue', 'Lucida Grande', 'PingFang HK'],
-              'win': ['Segoe UI', 'Calibri'],
-              'lin': ['Arimo', 'Tinos', 'Noto Sans JP'],
+              'win': ['Segoe UI', 'Candara', 'Corbel'],
+              'lin': ['Arimo', 'Tinos', 'URW Gothic'],
           }
           NARROW = "can only narrow it, never restore a family (#44)"
           BIN = os.environ['CAMOUFOX_BIN']
@@ -7447,8 +7547,8 @@ jobs:
           # -- headline: one launch, no os=, three contexts --------------------
           opts = launch_options(headless=False, executable_path=BIN)
           fontconfig_file = opts['env'].get('FONTCONFIG_FILE', '(unset)')
-          launch_config = _reassemble_camou_config(opts)
-          if launch_config is None:
+          launch_config = _launch_config(opts)
+          if not launch_config:
               invalid.append("launch config did not reassemble from CAMOU_CONFIG_* -- cannot "
                              "read the launch's OS or renderer")
               spoofed_os, launch_renderer = '(unavailable)', None
@@ -7492,9 +7592,9 @@ jobs:
           all_launch = launch_renderer is not None and all(x == launch_renderer for x in renderers)
           # Two contexts drawing the same WebGL renderer is a coincidence, not
           # the #44 defect (that is all three == launch). Context renderers are
-          # sampled from webgl/webgl_data.db (AsyncNewContext passes no preset);
-          # its mac and lin pools share 3 strings, so on a weighted draw
-          # it happens on roughly 1 run in 37. It must NOT go through
+          # drawn per OS by generate_context_fingerprint (AsyncNewContext passes
+          # no preset) from fpgen's recorded GPUs, whose macOS and Linux pools
+          # can overlap, so a repeat is possible. It must NOT go through
           # `invalid`: that exits before the font verdict, and the font half is
           # what this guard exists for. Only the WebGL sub-verdict is skipped;
           # the font contract is still measured.
@@ -7534,10 +7634,12 @@ jobs:
               bad.append(f"every context reports the LAUNCH renderer {launch_renderer!r} "
                          f"-- the original #44 WebGL defect")
           elif len(set(renderers)) == 1:
-              # All three on ONE renderer that is not the launch's. The win pool
-              # shares no string with mac or lin in webgl_data.db, so three
-              # contexts of three OSes cannot land on one renderer by chance:
-              # this is a cross-context leak (the #83 class), not a collision.
+              # All three on ONE renderer that is not the launch's. The Windows
+              # GPU pool is disjoint from the macOS and Linux ones in the preset
+              # pools (webgl.firefox_gpus), so three contexts of three OSes should
+              # not land on one renderer by chance: read as a cross-context leak
+              # (the #83 class), not a collision. Disjointness is not asserted
+              # for the fpgen draw this step actually uses.
               # Also the only bucket that catches launch_renderer=None.
               bad.append(f"all three contexts report one renderer {renderers[0]!r} that is "
                          f"not the launch's -- a cross-context leak, not a preset draw")
@@ -7687,13 +7789,13 @@ jobs:
           # from PROBES; this step is a separate process and cannot, so if that
           # list ever changes, change this one with it.
           # MAC_ONLY's third slot is chosen at runtime by the guard step's
-          # precheck (Optima, else Palatino, else Helvetica), so this separate
+          # precheck (Optima, else Avenir, else Baskerville), so this separate
           # process cannot know which one won. Carry the SUPERSET -- every
           # family MAC_ONLY can hold -- rather than a stale literal. This is an
           # informational filter, so matching one name too many costs nothing.
           FC_PROBE_KEYS = ("helvetica neue", "pingfang hk",
-                           "optima", "palatino", "helvetica",
-                           "segoe ui", "calibri", "ms gothic")
+                           "optima", "avenir", "baskerville",
+                           "segoe ui", "candara", "ms gothic")
           fc_hits = []
           for _ts, _b, _i, ln in rows:
               if "CAMOU-FL fc-subst " not in ln or " hit=1 " not in ln or "key=" not in ln:

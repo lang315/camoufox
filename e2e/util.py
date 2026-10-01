@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, List, Optional, Set
 
@@ -155,3 +157,34 @@ def build_id(binary: Path) -> str:
                 if line.startswith("BuildID="):
                     return line.split("=", 1)[1]
     return "unknown"
+
+
+def packaged_locales(binary: Path) -> Optional[List[str]]:
+    """The locales the browser packages (res/multilocale.txt): loose in an unpackaged
+    dist/bin, inside omni.ja once packaged (macOS keeps it in Contents/Resources).
+    None when it cannot be read."""
+    binary = Path(binary)
+    for root in (binary.parent, binary.parent.parent / "Resources"):
+        loose = root / "res" / "multilocale.txt"
+        try:
+            if loose.exists():
+                text = loose.read_text()
+            else:
+                text = zipfile.ZipFile(root / "omni.ja").read("res/multilocale.txt").decode()
+        except (OSError, KeyError, zipfile.BadZipFile):
+            continue
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return None
+
+
+def prerequisite(name: str, ok: bool, detail: str = "") -> bool:
+    """True when `name` is available. Otherwise False on a developer machine, and a
+    failure in CI unless the job lists `name` in CAMOUFOX_TEST_ALLOW_MISSING next to a
+    comment saying why: a skip reads as green, so a forgotten prerequisite must not."""
+    if ok:
+        return True
+    allowed = {part.strip() for part in os.environ.get("CAMOUFOX_TEST_ALLOW_MISSING", "").split(",")}
+    if os.environ.get("CI") and name not in allowed:
+        raise AssertionError(f"test prerequisite missing in CI: {name} ({detail}); provide it or allow it with a reason")
+    print(f"skipping what needs {name} ({detail})", flush=True)
+    return False

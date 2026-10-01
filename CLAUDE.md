@@ -1,21 +1,15 @@
-# CLAUDE.md
+@AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## Fork notes (lang315/camoufox)
 
-## What this is
+The repository rules are in `AGENTS.md`. Everything below is specific to this fork.
 
-Camoufox is an anti-detect fork of Firefox for web scraping and automation. This repo is **not the Firefox source** — it is a *build system* that fetches upstream Firefox, applies a stack of patches + code additions, and produces a hardened, fingerprint-spoofing browser. The distinguishing design choice is that fingerprint spoofing happens at the **C++/Juggler implementation level**, not via injected JavaScript, so it is invisible to page-side inspection.
-
-The actual Firefox tree lives in `camoufox-<version>-<release>/` (e.g. `camoufox-152.0.4-beta.31/`), created by the build. That directory is generated — never edit it directly to make lasting changes; changes there are captured as patches (see "Working with patches" below).
-
-`upstream.sh` pins `version` / `release`, and is sourced+exported by the `Makefile`, so those variables flow into every script.
-
-## Build commands
+### Building
 
 The build system is designed for **Linux**, and `multibuild.py` cross-compiles
 Windows from it. **macOS is not cross-compiled** — `.github/workflows/build.yml`
 runs the macOS legs natively on `macos-26` runners, because FF150 hard-requires
-the macOS 26 SDK (`mac_sdk_min_version()` is 26.2 and `widget/cocoa/nsCocoaWindow.mm`
+the macOS 26 SDK (`mac_sdk_min_version()` is 26.5 on FF156 (26.2 on FF152) and `widget/cocoa/nsCocoaWindow.mm`
 uses `NSGlassEffectView`; a macos-15 runner fails with `use of undeclared
 identifier 'NSGlassEffectView'`). That SDK is universal, so the macOS x86_64 leg
 cross-compiles on the arm64 runner. `make setup-macos-sdk` downloads the SDK only
@@ -31,34 +25,7 @@ whether an existing run already covers the commit you care about: a run whose
 diff against yours touches no `patches/`, `additions/`, `settings/`, `assets/` or
 `upstream.sh` is the same browser. A cold macOS leg is ~2h.
 
-```bash
-bash scripts/install-deps.sh   # install host build deps (Python ≥3.11, Rust, aria2, p7zip, go, msitools, wget, sqlite)
-make dir                       # fetch Firefox source, extract, copy additions/settings, apply all patches → touches _READY
-make bootstrap                 # install system deps (apt/dnf/pacman) + run `mach bootstrap` (one-time)
-make build                     # ./mach build in the source dir
-make run                       # run the built browser (wipes ~/.camoufox profile)
-make run args="--headless https://test.com"
-python3 multibuild.py --target linux windows macos --arch x86_64 arm64 i686   # full cross-platform build + package
-```
-
-`make dir` is the pipeline that matters: `setup` (fetch tarball via `aria2c` → extract → `copy-additions.sh`) → `python3 scripts/patch.py` (applies every patch, writes `mozconfig`) → `_READY`. `mach` requires **Python ≥ 3.11** (stdlib `tomllib`); older `python3` crashes with `ModuleNotFoundError: No module named 'tomllib'`.
-
-Docker is the portable path: `docker build -t camoufox-builder .` then `docker run -v "$(pwd)/dist:/app/dist" camoufox-builder --target <os> --arch <arch>`.
-
-Packaging: `make package-linux|package-macos|package-windows arch=<arch>` (wraps `scripts/package.py`). Launcher (Go): `make build-launcher arch=<arch> os=<os>`.
-
-## Working with patches (the core workflow)
-
-Almost all browser-behavior changes are `patches/*.patch` (~60 patches: `fingerprint-injection.patch`, `webgl-spoofing.patch`, `navigator-spoofing.patch`, `webrtc-ip-spoofing.patch`, the `playwright/` and `librewolf/` and `ghostery/` subdirs, etc.). Do not hand-edit patch files.
-
-Use the developer UI instead:
-
-```bash
-make edits          # launches scripts/developer.py — apply/undo/create/manage patches
-```
-
-- **New patch:** in the UI "Reset workspace" → edit files in `camoufox-*/` → `make build` / `make run` to test → "Write workspace to patch".
-- **Edit existing patch:** "Edit a patch" (resets workspace to that patch's state) → edit → "Write workspace to patch" to overwrite.
+### Patches: hand-written hunks
 
 **Balance the context lines in every hunk you hand-write.** GNU `patch` (what
 `scripts/patch.py` shells out to) charges the *difference* between leading and trailing
@@ -74,30 +41,9 @@ rejects (also verified). Dry-run with the invocation the build actually uses:
 patch -p1 --forward -l --binary --dry-run < patches/your.patch
 ```
 
-Low-level equivalents: `make patch ./patches/x.patch`, `make unpatch ./patches/x.patch`, `make workspace ./patches/x.patch`, `make revert` (reset to `unpatched` tag), `make diff` (diff against `first-checkpoint`). The source dir is a git repo with `unpatched` / `first-checkpoint` / `checkpoint` tags used by these targets.
-
 `make workspace ./patches/x.patch` is unsafe when a LATER patch also edits that patch's files (e.g. `font-list-spoofing.patch`): it wrongly reports the patch as "not applied", moves the `first-checkpoint` tag onto the full stack, and re-applies with fuzz, duplicating hunks. Rebuild the tree at the patch's own position instead — reset to `unpatched`, apply patches 1..N in `scripts/patch.py`'s order, checkpoint, then edit — and prove the baseline by regenerating the unedited patch byte-for-byte before editing (#131).
 
-## Repository layout (the parts that require cross-file understanding)
-
-- **`patches/`** — the diffs applied to Firefox source. This is where browser behavior is changed.
-- **`additions/`** — whole files copied *into* the source tree (not diffs) by `scripts/copy-additions.sh`:
-  - `additions/camoucfg/` — the C++ config layer. `MaskConfig.hpp` reads the spoofing config (from `CAMOU_CONFIG` env var / `camoufox.cfg`) that the patches consult at the C++ level; `MouseTrajectories.hpp` is the human-cursor algorithm.
-  - `additions/juggler/` — Camoufox's patched **Juggler** (Firefox's Playwright automation protocol, the Firefox analog of CDP). This is where Playwright is made undetectable — the page agent runs in an isolated scope so injected automation JS is not visible to the page.
-- **`settings/`** — `camoufox.cfg`, `chrome.css`, `properties.json`, `camoucfg.jvv`, prefs/policies. Copied into the source's `lw/` dir by `copy-additions.sh`. Edit the built config with `make edit-cfg`.
-- **`scripts/`** — `patch.py` (the patcher, LibreWolf-derived), `developer.py` (the `make edits` UI), `package.py`, `copy-additions.sh`, `install-deps.sh`.
-- **`pythonlib/`** — the `camoufox` PyPI package: the Playwright-compatible Python interface that generates + injects fingerprints via BrowserForge and launches the binary. `fingerprint-presets-v150.json` holds real scraped fingerprints. This is the user-facing API; the browser binary is the backend.
-- **`jsonvv/`** — JSON-with-validation format library used for `camoucfg.jvv` (config schema).
-- **`legacy/launcher/`** — Go launcher binary.
-- **`goapi/`** — pure-Go launcher and Juggler-protocol client (no Python, Node or
-  playwright-go); CI is `goapi.yml`.
-- **`assets/`** — `base.mozconfig` and other build inputs.
-
-## Testing
-
-`ci/` is the whole pipeline, and it runs identically locally and on a pull
-request — see [`ci/README.md`](ci/README.md). Every gate below must pass before a
-PR can merge; the workflow is `.github/workflows/tests.yml`.
+### Testing additions
 
 - **`build-tester/`** — the raw binary directly, bypassing the Python package:
   eight fingerprint profiles, injected via `generate_context_fingerprint` +
@@ -144,15 +90,6 @@ PR can merge; the workflow is `.github/workflows/tests.yml`.
   python3 -m ci.run_e2e --binary /path/to/camoufox-bin      # what CI runs
   gh workflow run e2e.yml --repo <fork> -f release=<tag>    # Linux/macOS/Windows
   ```
-- **`pythonlib/`**, **`service-tester/`** — the Python package and service layer.
-- **stealth grade** — `ci/run_sundial.py` reports a letter grade and a count.
-  Its per-vector detail never leaves that module, because this repo is public.
-
-The Playwright suite is **not** a fork: `tests/` holds only `patches/` and
-`camoufox/`. Do not vendor upstream tests back into it — a deliberate difference
-from upstream belongs in `ci/skiplist.yml` with a stated reason.
-
-`ccache` is enabled in the build config — install it for fast incremental rebuilds (cold ~40 min, incremental ~5 min).
 
 ## Verifying spoofing claims (learned the hard way)
 
@@ -276,7 +213,7 @@ remember doing.
 The #83 leak (one context rendering another context's allow/deny pattern) was
 `gfxFcPlatformFontList::mFcSubstituteCache`: a process-global memo of family
 name → resolved family, consulted in its `FindAndAddFamiliesLocked` override
-(pristine `gfxFcPlatformFontList.cpp:2437`) *before*
+(beta.31 pristine `gfxFcPlatformFontList.cpp:2437`) *before*
 the call reaches the base `gfxPlatformFontList::FindAndAddFamiliesLocked` where
 `CamouIsFontAllowed` sits. The recon had declared "no cache above the gate"
 after reading only the base class. Whichever context populated the memo first

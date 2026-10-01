@@ -40,40 +40,8 @@ FAKE_HOST_MONITOR = SimpleNamespace(width=1512, height=982)
 
 
 # ---------------------------------------------------------------------------
-# The policy: constrain to the host display only when a real one will show the window
-# ---------------------------------------------------------------------------
-
-
-def test_headless_does_not_constrain_to_host_display():
-    """The fix: headless renders offscreen, so the host monitor is irrelevant."""
-    assert utils._should_constrain_to_host_display(True, {"DISPLAY": ":0"}, None) is False
-
-
-def test_headful_with_real_display_still_constrains():
-    """Unchanged behavior: a visible window must fit the monitor showing it."""
-    assert utils._should_constrain_to_host_display(False, {"DISPLAY": ":0"}, None) is True
-
-
-def test_headful_with_self_spawned_xvfb_does_not_constrain():
-    """#242 must stay fixed: our own Xvfb is not a real monitor."""
-    assert utils._should_constrain_to_host_display(False, {"DISPLAY": ":99"}, ":99") is False
-
-
-def test_headful_without_any_display_does_not_constrain(monkeypatch):
-    # Linux-pinned: DISPLAY / WAYLAND_DISPLAY exist only there, so only there does
-    # an empty env mean "no session". Windows and macOS always have one.
-    monkeypatch.setattr(display, "OS_NAME", "lin")
-    assert utils._should_constrain_to_host_display(False, {}, None) is False
-
-
-def test_virtual_headless_does_not_constrain():
-    """headless='virtual' is truthy and shows on Xvfb, never on the host monitor."""
-    assert utils._should_constrain_to_host_display("virtual", {"DISPLAY": ":99"}, ":99") is False
-
-
-# ---------------------------------------------------------------------------
-# End-to-end through get_screen_cons: the host monitor must never be queried
-# for a headless launch, so its dimensions cannot reach browserforge.
+# The policy, as get_screen_cons() states it: only a headful launch asks the host
+# monitor; headless never queries it.
 # ---------------------------------------------------------------------------
 
 
@@ -82,21 +50,30 @@ def test_headless_never_queries_the_host_monitor(monkeypatch):
     monkeypatch.setattr(
         utils, "largest_display", lambda: queried.append(1) or FAKE_HOST_MONITOR
     )
-
-    flag = utils._should_constrain_to_host_display(True, {"DISPLAY": ":0"}, None)
-    assert utils.get_screen_cons(flag) is None
+    assert utils.get_screen_cons(True) is None
     assert queried == [], "headless must not read the host monitor at all"
 
 
-def test_headful_real_display_still_reaches_browserforge(monkeypatch):
+def test_headful_real_display_still_constrains(monkeypatch):
     """Guard against over-correcting: the headful path must keep its constraint."""
     monkeypatch.setattr(utils, "largest_display", lambda: FAKE_HOST_MONITOR)
 
-    flag = utils._should_constrain_to_host_display(False, {"DISPLAY": ":0"}, None)
-    screen = utils.get_screen_cons(flag)
+    screen = utils.get_screen_cons(False)
     assert screen is not None
     assert screen.max_width == 1512
     assert screen.max_height == 982
+
+
+def test_headful_on_a_self_spawned_xvfb_does_not_query_the_monitor(monkeypatch):
+    """#242 stays fixed at the call site: launch_options must not bound the
+    identity by our own Xvfb."""
+    monkeypatch.setattr(utils, "has_display", lambda env: True)
+    monkeypatch.setattr(
+        utils, "largest_display", lambda: pytest.fail("queried a self-spawned Xvfb")
+    )
+    utils.launch_options(
+        headless=False, os="linux", virtual_display=":99", i_know_what_im_doing=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -122,16 +99,6 @@ def _camou_config(launch_opts):
     return json.loads("".join(parts))
 
 
-def _binary():
-    """launch_options needs a real binary: validate_config reads properties.json."""
-    candidates = [
-        os.environ.get("CFX_BIN"),
-        "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox",
-    ]
-    return next((c for c in candidates if c and os.path.exists(c)), None)
-
-
-@pytest.mark.skipif(_binary() is None, reason="needs a Camoufox binary (set CFX_BIN)")
 def test_launch_options_headless_output_never_contains_host_resolution(monkeypatch):
     """The leak must be absent from the config that actually reaches the browser."""
     from camoufox.utils import launch_options
@@ -143,15 +110,14 @@ def test_launch_options_headless_output_never_contains_host_resolution(monkeypat
         cfg = _camou_config(
             launch_options(
                 headless=True, os="macos", ff_version=152,
-                i_know_what_im_doing=True, executable_path=_binary(),
+                i_know_what_im_doing=True,
             )
         )
         drawn.append((cfg.get("screen.width"), cfg.get("screen.height")))
 
     assert (1234, 567) not in drawn, (
         f"the host monitor reached the generated fingerprint ({drawn}) -- the "
-        "launch_options call site is no longer routed through "
-        "_should_constrain_to_host_display"
+        "launch_options call site no longer skips get_screen_cons for headless"
     )
     # Not "every draw exceeds the bound": unconstrained macOS legitimately includes
     # 960x540 (~5% of browserforge's firefox+macOS data). Constrained, NOTHING can

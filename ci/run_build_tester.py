@@ -52,10 +52,10 @@ _MUST_VARY = ("uniqueAudio", "uniqueTimezones")
 # See ci/tribal-rules.yml: canvas-noise-entropy-is-lower-than-audio.
 _TRACKED_LOW_ENTROPY = ("uniqueCanvas",)
 
-# Values drawn from the preset pool. Three draws from a pool of a dozen collide
-# regularly -- that is the birthday paradox, not a leak, and the pools are
-# deliberately small because they hold real devices. Counted and reported,
-# never fatal on their own.
+# Values that follow the device rather than the context. fonts, screens, voices
+# and WebGL are drawn from a pool of real devices, and three draws from a pool
+# of a dozen collide regularly -- the birthday paradox, not a leak. Counted and
+# reported, never fatal.
 _MAY_COLLIDE = ("uniqueFonts", "uniqueScreens", "uniqueVoices", "uniqueWebGL")
 
 # Properties of the operating system. Every macOS context reports MacIntel and
@@ -165,7 +165,7 @@ def category_failures(full: dict, required: List[str]) -> Dict[str, int]:
 def uniqueness(full: dict) -> Dict[str, List[str]]:
     """Sort the cross-profile slots into leaks, noise, and things not measured.
 
-    Returns {"leaks": [...], "noise": [...], "absent": [...], "not_constant": [...]}.
+    Returns {"leaks": [...], "noise": [...], "low_entropy": [...], "absent": [...], "not_constant": [...]}.
     Only `leaks` and `not_constant` should fail a build.
     """
     out: Dict[str, List[str]] = {
@@ -290,7 +290,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if slots["noise"]:
         result.note(
-            f"{len(slots['noise'])} preset-pool collision(s), not gated: "
+            f"{len(slots['noise'])} device-level collision(s), not gated: "
             + ", ".join(slots["noise"])
         )
     if slots["absent"]:

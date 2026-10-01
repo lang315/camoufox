@@ -16,7 +16,7 @@ CLAIMS = {
     "locale": ("pythonlib/camoufox/utils.py", "The first listed locale will be used for the Intl API."),
     "geoip": ("pythonlib/camoufox/utils.py", "Calculate longitude, latitude, timezone, country, & locale based on the IP address."),
     "humanize": ("pythonlib/camoufox/utils.py", "Humanize the cursor movement."),
-    "virtual": ("pythonlib/camoufox/utils.py", "passing headless='virtual' to Camoufox & AsyncCamoufox"),
+    "virtual": ("pythonlib/camoufox/utils.py", "passing headless='virtual' to Camoufox, AsyncCamoufox"),
     "webrtc": ("README.md", "WebRTC IP spoofing at the protocol level"),
     "unique_context": ("pythonlib/camoufox/sync_api.py", "Creates a new browser context with a unique fingerprint identity."),
 }
@@ -32,11 +32,24 @@ def cite(key: str) -> str:
 def font_markers() -> dict:
     """Families exactly one OS's font universe contains, from the package's own
     shipped per-OS lists (camoufox/fonts.json). A family two OSes share, such as
-    Tahoma on Windows and macOS, can never be a marker."""
+    Tahoma on Windows and macOS, can never be a marker. On Linux the conf also
+    aliases stock metric/URW names (Century, Zapf Dingbats), so a foreign marker
+    that is an alias SOURCE there (a name a page can ask for and fontconfig
+    rewrites to an installed face) renders on a stock Linux Firefox: it is dropped,
+    or the arm goes red for a reason that is not a leak. Names that are only alias
+    targets (Segoe UI, PingFang SC) stay: asking for them reaches nothing."""
     import json
+    import re
 
     import camoufox
 
     raw = json.loads((Path(camoufox.__file__).parent / "fonts.json").read_text(encoding="utf-8"))
     lists = {"windows": set(raw["win"]), "macos": set(raw["mac"]), "linux": set(raw["lin"])}
-    return {o: sorted(lists[o] - set().union(*(lists[x] for x in lists if x != o))) for o in lists}
+    conf = (REPO / "bundle/fontconfig/linux/fonts.conf").read_text(encoding="utf-8")
+    # fontconfig compares family names case- and space-insensitively.
+    key = lambda f: re.sub(r"\s+", "", f).lower()
+    named = {key(f) for f in re.findall(r"<alias[^>]*>\s*<family>\s*([^<]*?)\s*</family>", conf)}
+    markers = {o: lists[o] - set().union(*(lists[x] for x in lists if x != o)) for o in lists}
+    for o in ("windows", "macos"):
+        markers[o] = {f for f in markers[o] if key(f) not in named}
+    return {o: sorted(m) for o, m in markers.items()}

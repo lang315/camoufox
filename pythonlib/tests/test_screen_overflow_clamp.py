@@ -1,72 +1,58 @@
 """
-Regression test for daijro/camoufox#118: browserforge's raw fingerprint can
-put window.outerWidth > screen.width or window.outerHeight > screen.availHeight
--- a window bigger than the screen, which is a physical impossibility and a
-detectable tell. from_browserforge() (via clamp_window_to_screen) must clamp
-outer/inner window dimensions to the screen.
-
-Run with:
-    cd camoufox && PYTHONPATH=pythonlib python3 -m pytest pythonlib/tests/test_screen_overflow_clamp.py -v
+Regression test for daijro/camoufox#118: a generated fingerprint can put
+window.outerWidth > screen.width or window.outerHeight > screen.availHeight --
+a window bigger than the screen, which is physically impossible and detectable.
+launch_options() clamps with clamp_window_dimensions().
 """
-import os
-import sys
+from camoufox.fingerprints import clamp_window_dimensions
+from camoufox.utils import launch_options
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
-from camoufox.fingerprints import (  # noqa: E402
-    clamp_window_to_screen,
-    from_browserforge,
-    generate_fingerprint,
-)
+import orjson
 
 
 def test_clamp_shrinks_oversized_outer_dims():
-    camoufox_data = {
-        'screen.width': 1280,
-        'screen.availHeight': 720,
-        'window.outerWidth': 1920,  # bigger than screen.width -- impossible
-        'window.outerHeight': 1080,  # bigger than screen.availHeight -- impossible
+    config = {
+        'screen.width': 1280, 'screen.height': 720,
+        'screen.availWidth': 1280, 'screen.availHeight': 720,
+        'window.outerWidth': 1920,  # bigger than the screen
+        'window.outerHeight': 1080,
         'window.innerWidth': 1900,
         'window.innerHeight': 1060,
     }
-    clamp_window_to_screen(camoufox_data)
+    clamp_window_dimensions(config)
 
-    assert camoufox_data['window.outerWidth'] <= camoufox_data['screen.width']
-    assert camoufox_data['window.outerHeight'] <= camoufox_data['screen.availHeight']
-    assert camoufox_data['window.innerWidth'] <= camoufox_data['window.outerWidth']
-    assert camoufox_data['window.innerHeight'] <= camoufox_data['window.outerHeight']
+    assert config['window.outerWidth'] <= config['screen.availWidth']
+    assert config['window.outerHeight'] <= config['screen.availHeight']
+    assert config['window.innerWidth'] <= config['window.outerWidth']
+    assert config['window.innerHeight'] <= config['window.outerHeight']
 
 
 def test_clamp_leaves_valid_dims_untouched():
-    camoufox_data = {
-        'screen.width': 1920,
-        'screen.availHeight': 1040,
-        'window.outerWidth': 1280,
-        'window.outerHeight': 800,
-        'window.innerWidth': 1264,
-        'window.innerHeight': 760,
+    config = {
+        'screen.width': 1920, 'screen.height': 1080,
+        'screen.availWidth': 1920, 'screen.availHeight': 1040,
+        'window.outerWidth': 1280, 'window.outerHeight': 800,
+        'window.innerWidth': 1264, 'window.innerHeight': 760,
     }
-    original = dict(camoufox_data)
-    clamp_window_to_screen(camoufox_data)
-    assert camoufox_data == original
+    original = dict(config)
+    clamp_window_dimensions(config)
+    assert config == original
 
 
 def test_clamp_handles_missing_keys_gracefully():
-    # screen.width/availHeight absent (e.g. browserforge omitted them) -- must not crash.
-    camoufox_data = {'window.outerWidth': 1920, 'window.outerHeight': 1080}
-    clamp_window_to_screen(camoufox_data)
-    assert camoufox_data == {'window.outerWidth': 1920, 'window.outerHeight': 1080}
+    config = {'window.outerWidth': 1920, 'window.outerHeight': 1080}
+    clamp_window_dimensions(config)
+    assert config == {'window.outerWidth': 1920, 'window.outerHeight': 1080}
 
 
-def test_from_browserforge_clamps_real_fingerprint_overflow():
-    # Build a real Fingerprint via BrowserForge, then force the exact physically
-    # impossible condition #118 describes before feeding it through from_browserforge().
-    fp = generate_fingerprint(os='linux')
-    fp.screen.outerWidth = fp.screen.width + 500
-    fp.screen.outerHeight = fp.screen.availHeight + 300
-
-    data = from_browserforge(fp)
-
-    assert data['window.outerWidth'] <= data['screen.width']
-    assert data['window.outerHeight'] <= data['screen.availHeight']
+def test_launched_windows_never_exceed_the_screen():
+    for os_name in ('linux', 'windows', 'macos'):
+        for _ in range(5):
+            opts = launch_options(os=os_name, headless=True, i_know_what_im_doing=True)
+            env = opts['env']
+            chunks = sorted((int(k.rsplit('_', 1)[1]), v) for k, v in env.items() if k.startswith('CAMOU_CONFIG_'))
+            cfg = orjson.loads(''.join(v for _, v in chunks))
+            for axis in ('Width', 'Height'):
+                screen, outer = cfg.get(f'screen.{axis.lower()}'), cfg.get(f'window.outer{axis}')
+                if screen and outer:
+                    assert outer <= screen, (os_name, axis, cfg)

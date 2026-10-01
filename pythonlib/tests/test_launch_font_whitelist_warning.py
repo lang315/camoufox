@@ -16,9 +16,10 @@ silent when the launch list covers them.
 import json
 import warnings
 
+import orjson
 import pytest
 
-from camoufox.utils import attach_launch_fonts, warn_fonts_excluded_by_launch
+from camoufox.utils import _launch_config, attach_launch_fonts, warn_fonts_excluded_by_launch
 
 
 class FakeBrowser:
@@ -70,3 +71,19 @@ def test_long_lists_are_truncated_rather_than_dumped():
     msg = str(rec[0].message)
     assert "9 of this context's fonts" in msg
     assert "and 4 more" in msg
+
+
+def test_launch_config_reassembles_chunks_in_index_order():
+    """CAMOU_CONFIG_10 must not sort before CAMOU_CONFIG_2."""
+    blob = json.dumps({"fonts": ["Tahoma"], "pad": "x" * 60})
+    chunks = [blob[i : i + 6] for i in range(0, len(blob), 6)]
+    assert len(chunks) > 10
+    env = {f"CAMOU_CONFIG_{i + 1}": c for i, c in enumerate(chunks)}
+    assert _launch_config({"env": env}) == {"fonts": ["Tahoma"], "pad": "x" * 60}
+
+
+def test_launch_config_is_empty_without_a_config_and_raises_on_a_corrupt_one():
+    assert _launch_config(None) == {}
+    assert _launch_config({"env": {}}) == {}
+    with pytest.raises(orjson.JSONDecodeError):
+        _launch_config({"env": {"CAMOU_CONFIG_1": '{"fonts": ['}})
