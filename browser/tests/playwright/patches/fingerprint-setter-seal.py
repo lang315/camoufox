@@ -37,9 +37,9 @@ What PASS means:
       launch path or through NewContext();
     * none of them is callable either -- a name can be missing from `for...in`
       and still work when called;
-    * setCanvasSeed, setWebRTCIPv4 and setWebRTCIPv6 stay absent in a context
-      whose init script calls none of them, on its first document and after a
-      navigation;
+    * no setter, setCanvasSeed, setWebRTCIPv4 and setWebRTCIPv6 included,
+      stays on window in a context whose init script calls only
+      setNavigatorPlatform, on its first document and after a navigation;
     * sealing did not cost the spoofing. Two contexts asking for different
       operating systems each get their own fingerprint, and an init script
       registered after the page already exists still applies on the next
@@ -71,8 +71,6 @@ SETTERS = [
     "setTimezone",
     "setCanvasSeed",
 ]
-# The fork's own setters, gated outside upstream's managers.
-FORK_ONLY_SETTERS = ("setCanvasSeed", "setWebRTCIPv4", "setWebRTCIPv6")
 
 # The page reports from its own world. `visible` is what a `for...in` sweep
 # finds, `callable` is the stronger check -- a deleted name that still resolves
@@ -148,13 +146,15 @@ def main():
                         fp["config"].get("screen.width"))
                 results.append((tag, probe(ctx, url), want))
 
-            # The fork-only setters (canvas-spoofing, webrtc-ip-spoofing) in a
-            # context whose init script runs but calls none of them. Each one is
-            # closed only by its own Func gate asking IsSetterOffered, which is
-            # where the seal lives: a gate that reads its own key instead
-            # re-offers the name through the resolve hook after the seal
-            # deleted it. Read on the first document and on the one a
-            # navigation brings, which is a fresh window.
+            # A context whose init script runs but calls none of the setters
+            # but one. The fork-only ones (canvas-spoofing, webrtc-ip-spoofing)
+            # are the reason for this arm: each is closed only by its own Func
+            # gate asking IsSetterOffered, which is where the seal lives, and a
+            # gate that reads its own key instead re-offers the name through
+            # the resolve hook after the seal deleted it. Every setter name is
+            # checked, so an upstream one leaking here is read too. Read on the
+            # first document and on the one a navigation brings, which is a
+            # fresh window.
             ctx = browser.new_context()
             ctx.add_init_script('if (typeof window.setNavigatorPlatform === "function") '
                                 'window.setNavigatorPlatform("Win32");')
@@ -162,10 +162,7 @@ def main():
             for step in ("first document", "after a navigation"):
                 page.goto(url)
                 page.wait_for_function("document.title !== 'pending'", timeout=10000)
-                r = json.loads(page.title())
-                for field in ("visible", "callable", "enumerated"):
-                    r[field] = [n for n in r[field] if n in FORK_ONLY_SETTERS]
-                results.append((f"fork-only setters unset / {step}", r, None))
+                results.append((f"setters unset / {step}", json.loads(page.title()), None))
 
             # add_init_script() registered *after* the page exists. The initial
             # about:blank has already been sealed by then, and the script only

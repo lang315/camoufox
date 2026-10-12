@@ -116,22 +116,28 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   broken by it (#131): the table step answered it with the sans row and
   returned before the #599 hook ran, on Linux as well, because
   `gfxFcPlatformFontList::AddGenericFonts` delegates `system-ui` to the base
-  class. It now takes a `step=system-ui` first, from system-ui-font-spoofing's
-  hook (`GetSystemUIFontFamilies`: Helvetica for macOS, Segoe UI for Windows,
-  Ubuntu for Linux, the host's own font for a native identity), and only if
-  the list allows that name and the face it resolves to. The pref path then
-  answers from the hook's per-OS cell. The hook asks the context's own OS
-  (`NavigatorManager::GetSpoofedOS`) first and the launch's second (#138), and
-  a worker asks through its own origin attributes. A launch's fontconfig search
+  class. `system-ui` now skips the table and is answered by the pref path, as
+  in stock, in two cases. For a spoofed macOS, Windows or Linux identity, the
+  pref path answers from system-ui-font-spoofing's per-OS cell
+  (`GetSystemUIFontFamilies`: Helvetica, Segoe UI, Ubuntu), when the list
+  allows that name and the face it resolves to; a refused family falls back
+  to the table. A native identity (`SystemUISpoofedOS` is `None`) always takes
+  the stock path, with stock's own system-ui family gated by the read filter.
+  Either way the `step=system-ui` line names the family system-ui got, or
+  `none`. The OS is the context's own (`NavigatorManager::GetSpoofedOS`)
+  first and the launch's second (#138). A worker asks through its own origin
+  attributes (`FontListManager::ContextIdFor`). A launch's fontconfig search
   path holds only the font groups its own OS reads (`utils._generate_fontconfig`,
   `docs/FONTS.md`), so a context whose OS differs from the launch's never sees
   that OS's exclusive faces (`Helvetica`, `Helvetica Neue`, `Menlo` and `Times`
   are all in the macOS-only group, read from `groups.json` in
   `fonts-bundle-v1`), and the Windows conf rewrites `Helvetica` to `Arial`
-  before the gate. In a Windows launch the macOS context's step therefore logs
-  `step=system-ui key=helvetica` only when its list also admits `Arial` (a
-  face the Windows groups carry); that is read from the code, and the guard's
-  mixed-OS arm is the measurement. It reads that line, not a width.
+  before the gate. In a Windows launch the macOS context's step therefore
+  takes the hook only when its list also admits `Arial` (a face the Windows
+  groups carry), and its `step=system-ui` line then names the family the
+  rewrite produced; that is read from the code, and the guard's mixed-OS arm
+  is the measurement. It reads that line, not a width. The measurements below
+  predate the line naming the family got, and read `key=helvetica`.
   **Measured** on Linux by probe run 35591973853 on build 35586323562, and
   the context-first read by probe run 35698448037: a macOS context in a
   Windows launch logs `step=system-ui key=helvetica` on build 35696007399
