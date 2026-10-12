@@ -42,6 +42,14 @@ function canvasHash() {
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return h;
 }
+async function audioHash() {
+  const ac = new OfflineAudioContext(1, 4410, 44100), o = ac.createOscillator();
+  o.connect(ac.destination); o.start();
+  const bits = new Uint32Array(Float32Array.from((await ac.startRendering()).getChannelData(0)).buffer);
+  let h = 0;
+  for (const b of bits) h = (h * 31 + b) | 0;
+  return h;
+}
 const voices = () => new Promise(ok => {
   const v = speechSynthesis.getVoices();
   if (v.length) return ok(v);
@@ -59,6 +67,7 @@ const step = s => { document.getElementById("out").dataset.progress = `${s}@${Ma
     screen: {w: screen.width, h: screen.height, aw: screen.availWidth, ah: screen.availHeight, iw: innerWidth, ih: innerHeight,
              ow: outerWidth, oh: outerHeight, dpr: devicePixelRatio},
     fonts: await within(10000, (step("fonts"), fonts())), webgl: webgl(), canvas: canvasHash(),
+    audio: await within(5000, (step("audio"), audioHash())),
     voices: typeof speechSynthesis === "undefined" ? null : (await within(5000, voices()).catch(() => [])).map(v => ({name: v.name, uri: v.voiceURI}))};
   step("main-done");
   const w = new Worker("/fp-worker.js");

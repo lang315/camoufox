@@ -21,9 +21,10 @@ def fp_of(page, site):
 
 def identity(fp, covered=False):
     # A covered launch reads RFP's random placeholder, which never agrees with itself and
-    # differs from every other read: it can say neither "same" nor "different".
+    # differs from every other read: it can say neither "same" nor "different". The audio
+    # hash is seeded per context and no launch covers it, so contexts differ by construction.
     canvas = () if covered else (fp["canvas"],)
-    return (*canvas, fp["main"]["ua"], fp["screen"]["w"], fp["screen"]["h"], str(fp.get("webgl")))
+    return (*canvas, fp["audio"], fp["main"]["ua"], fp["screen"]["w"], fp["screen"]["h"], str(fp.get("webgl")))
 
 
 def test_two_contexts_share_nothing(drv, site, check):
@@ -54,7 +55,8 @@ def test_new_context_gives_each_context_its_own_identity(drv, site, check):
 
 
 def test_two_browsers_at_once(drv, site, check):
-    b1, b2 = drv.launch(), drv.launch()
+    # Two OSes, so the user agents differ by construction.
+    b1, b2 = drv.launch(os="windows"), drv.launch(os="macos")
     p1, p2 = b1.new_context().new_page(), b2.new_context().new_page()
     sign_in(p1, site)
     p2.goto(site.url("/account"))
