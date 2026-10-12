@@ -75,9 +75,11 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 	c.b.conn.ReplaySession(att.SessionID)
 	// Wait for the main-world execution context so the first
 	// Evaluate doesn't fail. about:blank fires this within ms.
+	ready := time.NewTimer(30 * time.Second)
+	defer ready.Stop()
 	select {
 	case <-p.contextReadyCh:
-	case <-time.After(30 * time.Second):
+	case <-ready.C:
 		_ = p.Close(ctx)
 		return nil, errors.New("camoufox: new page's main execution context never became ready (30s)")
 	case <-ctx.Done():
