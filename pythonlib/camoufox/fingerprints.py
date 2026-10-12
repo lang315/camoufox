@@ -1720,8 +1720,9 @@ def generate_context_fingerprint(
             is built but before init_script is rendered (e.g. {'audio:seed': 7}).
         launch_window: The browser's launch window, as attach_launch_window records it
             ({'outer': (w, h), 'inner': (w|None, h|None), 'screen': (w, h)}). The window is
-            process-wide, so the context's viewport becomes the launch inner size (or no
-            viewport when the launch set none) and its screen is made to hold the window.
+            process-wide, so the context's viewport becomes the launch inner size (or, when
+            the launch set none, the preset viewport clamped inside the launch outer window)
+            and its screen is made to hold the window.
     """
     # Only a well-formed record counts; anything else (a mock, a half-built dict) is no record.
     if not (
@@ -1899,14 +1900,23 @@ def generate_context_fingerprint(
             # The launch window's own inner size: inner <= outer by construction.
             context_options['viewport'] = {'width': inner[0], 'height': inner[1]}
         elif launch_window:
-            context_options['no_viewport'] = True
+            # No launch inner (fpgen leaves window.inner* unmapped, so the default): the
+            # preset viewport, held inside the launch outer window by
+            # clamp_window_dimensions' inner <= outer rule.
+            win = {
+                'window.outerWidth': launch_window['outer'][0],
+                'window.outerHeight': launch_window['outer'][1],
+                'window.innerWidth': sw,
+                'window.innerHeight': max(sh - 28, 600),
+            }
+            clamp_window_dimensions(win)
+            context_options['viewport'] = {'width': win['window.innerWidth'], 'height': win['window.innerHeight']}
         else:
             # ponytail: a browser NewBrowser did not launch carries no record, so the
             # old preset-sized viewport stays and #164 can still happen there.
             context_options['viewport'] = {'width': sw, 'height': max(sh - 28, 600)}
     dpr = screen.get('devicePixelRatio')
-    # Playwright rejects deviceScaleFactor with a null viewport.
-    if dpr and not context_options.get('no_viewport'):
+    if dpr:
         context_options['device_scale_factor'] = dpr
     tz = config.get('timezone')
     if not tz and isinstance(preset, dict):
