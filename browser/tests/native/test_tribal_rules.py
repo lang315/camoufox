@@ -16,9 +16,11 @@ build.
 
 from __future__ import annotations
 
+import ast
 import importlib
 import inspect
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -541,6 +543,37 @@ def test_a_sandbox_held_over_a_page_window_is_nuked_not_just_dropped():
     assert "nukeSandbox" in source, (
         "FrameTree.js caches a Cu.Sandbox over a page window but never nukes it."
         + explain("per-frame-state-released-on-dispose")
+    )
+
+
+def _added_lines(patch: Path, target: str) -> str:
+    """The lines a patch adds to one file of the Firefox tree."""
+    added = []
+    for diff in re.split(r"^diff --git ", patch.read_text(encoding="utf-8"), flags=re.M)[1:]:
+        if diff.split("\n", 1)[0].endswith(f" b/{target}"):
+            added += [line[1:] for line in diff.splitlines() if line.startswith("+") and not line.startswith("+++")]
+    return "\n".join(added)
+
+
+def test_every_window_setter_is_on_the_seal_list():
+    """A setter the seal does not name stays on window for page script to call."""
+    patches = BROWSER / "patches"
+    webidl = "\n".join(_added_lines(p, "dom/webidl/Window.webidl") for p in sorted(patches.rglob("*.patch")))
+    setters = set(re.findall(r'\[[^\]]*\bFunc="[^"]*"[^\]]*\]\s*[\w?]+\s+(set[A-Z]\w*)\s*\(', webidl))
+    seal = re.search(r"kCamouFingerprintSetters\[\] = \{(.*?)\};",
+                     _added_lines(patches / "window-setter-seal.patch", "dom/base/ChromeUtils.cpp"), re.S)
+    sealed = set(re.findall(r'"(\w+)"', seal.group(1))) if seal else set()
+    guard = ast.parse((BROWSER / "tests" / "playwright" / "patches" / "fingerprint-setter-seal.py").read_text())
+    probed = next(set(ast.literal_eval(node.value)) for node in guard.body
+                  if isinstance(node, ast.Assign) and getattr(node.targets[0], "id", None) == "SETTERS")
+    assert setters, "no Func= setter found in any Window.webidl hunk: the parse is broken"
+    assert not setters - sealed, (
+        f"Window.webidl setters missing from kCamouFingerprintSetters: {sorted(setters - sealed)}"
+        + explain("fingerprint-setters-sealed-per-window")
+    )
+    assert not setters - probed, (
+        f"Window.webidl setters missing from fingerprint-setter-seal.py SETTERS: {sorted(setters - probed)}"
+        + explain("fingerprint-setters-sealed-per-window")
     )
 
 
