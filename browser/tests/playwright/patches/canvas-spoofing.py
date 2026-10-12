@@ -18,8 +18,9 @@ document, then hashes getImageData of both:
     page S1 == DOMParser S1        it is the seed the page's own canvas uses
     perturb lines carry S1 and S2  the log arm 2 counts can be read at all
 
-With the old lookup all three DOMParser hashes are the unnoised canvas, so the
-second check fails.
+With the old lookup all three DOMParser hashes should be the unnoised canvas,
+so the second check should fail. That is read from the code: this guard has
+not been run against a browser with the old lookup.
 
 Arm 2, a covered launch: the RFP canvas targets the launchers add for an
 identity on another OS (python/src/camoufox/host_rendering.py). Its context
