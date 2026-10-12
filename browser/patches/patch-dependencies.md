@@ -33,25 +33,29 @@ be listed there.
 |-------|-------------|
 | `audio-context-spoofing.patch` | `AudioContext:sampleRate`, `AudioContext:outputLatency`, `AudioContext:maxChannelCount` |
 | `audio-fingerprint-manager.patch` | `audio:seed` |
+| `canvas-spoofing.patch` | `canvas:seed`, `canvas:noiseDensity`, `canvas:noiseStrength` |
 | `chromeutil.patch` | `debug` |
+| `css-media-spoofing.patch` | `cssMedia:colorGamut`, `cssMedia:prefersColorScheme`, `cssMedia:dynamicRange` |
 | `fingerprint-injection.patch` | `navigator.*`, `screen.*`, `window.*` |
 | `font-hijacker.patch` | `fonts`, `navigator.platform` |
 | `font-system-fonts-css2.patch` | `navigator.platform`, `window.devicePixelRatio` |
 | `force-default-pointer.patch` | `navigator.maxTouchPoints` |
 | `geolocation-spoofing.patch` | `geolocation:*` |
 | `locale-spoofing.patch` | `locale:*`, `navigator.language` |
-| `media-codec-spoofing.patch` | `media:spoof_codecs` (bypasses `PDMFactory::Supports()` in `MP4Decoder`/`MatroskaDecoder` so `canPlayType()`/`isTypeSupported()` don't leak system codec libraries) |
+| `media-codec-spoofing.patch` | `media:spoof_codecs` (bypasses `PDMFactory::Supports()` in `MP4Decoder`/`MatroskaDecoder` so `canPlayType()`/`isTypeSupported()` don't leak system codec libraries), `mediaCapabilities:canPlayType`, `mediaCapabilities:decodingInfo` |
 | `media-device-spoofing.patch` | `mediaDevices:*` |
 | `navigator-spoofing.patch` | `navigator.*` |
 | `network-patches.patch` | `headers.*`, `navigator.userAgent` |
 | `no-css-animations.patch` | `instantAnimations` |
+| `screen-orientation-spoofing.patch` | `screen:orientation`, `screen:orientationAngle` |
 | `screen-spoofing.patch` | `screen.*` |
 | `system-ui-font-spoofing.patch` | `navigator.platform` |
 | `timezone-spoofing.patch` | `timezone` |
 | `touchscreen-fingerprint-spoofing.patch` | `navigator.maxTouchPoints` |
 | `voice-spoofing.patch` | `voices`, `voices:blockIfNotDefined` |
 | `webgl-spoofing.patch` | `webGl:*`, `webGl2:*` |
-| `webrtc-ip-spoofing.patch` | `webrtc:ipv4`, `webrtc:ipv6`, `navigator.platform` |
+| `webrtc-ip-spoofing.patch` | `navigator.platform` (the host socket's port range). The per-context addresses are `webrtc_ipv4_<ctx>` and `webrtc_ipv6_<ctx>` in `RoverfoxStorageManager`, set by `setWebRTCIPv4`/`setWebRTCIPv6`; the `webrtc:ipv4`/`webrtc:ipv6` config keys have no reader yet (#163) |
+| `webrtc-ip-spoofing2.patch` | `webrtc:localipv4`, `webrtc:localipv6` |
 
 To regenerate the list: `grep -l 'MaskConfig::' patches/*.patch`.
 
@@ -67,7 +71,8 @@ already set up, and do not add the include or `LOCAL_INCLUDES` themselves:
 | `system-ui-font-spoofing.patch` | `font-hijacker.patch` for `MaskConfig.hpp` in `gfx/thebes/gfxPlatformFontList.cpp` and `/camoucfg` in `gfx/thebes/moz.build` |
 | `touchscreen-fingerprint-spoofing.patch` | `navigator-spoofing.patch` for `MaskConfig.hpp` in `dom/base/Navigator.cpp` |
 | `font-list-spoofing.patch` | `anti-font-fingerprinting.patch` for `gfxFontGroup::mUserContextId` |
-| `timezone-spoofing.patch`, `webrtc-ip-spoofing.patch` | `audio-fingerprint-manager.patch` for `RoverfoxStorageManager.h` in `dom/base/nsGlobalWindowInner.cpp` |
+| `canvas-spoofing.patch`, `timezone-spoofing.patch`, `webrtc-ip-spoofing.patch` | `audio-fingerprint-manager.patch` for `RoverfoxStorageManager.h` in `dom/base/nsGlobalWindowInner.cpp` |
+| `cross-process-storage.patch` | `font-list-spoofing.patch` for `FontListManager::OnFontListStored()`, which its storage-pref callback calls |
 | `font-system-fonts-css2.patch`, `system-ui-font-spoofing.patch`, `webrtc-ip-spoofing.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
 
 ## RoverfoxStorageManager
@@ -79,7 +84,10 @@ screen, navigator, WebGL, font list, voices, ...) are kept in
 a context's documents can land in any of them, and only the first document
 calls the setter. The same patch provides the guard and removal every setter
 uses (`IsSetterOffered`, `MarkSetterUsed`, `RemoveSetter`), and
-`window-setter-seal.patch` adds its seal check to `IsSetterOffered`.
+`window-setter-seal.patch` adds its seal check to `IsSetterOffered`. When a
+context's font list (`fontlist_<id>`) reaches a process, the storage-pref
+callback hands it to `FontListManager::OnFontListStored()`, which flushes that
+process's font caches.
 
 `RoverfoxStorageManager::UserContextId()` is the one way a patch finds the
 context a value is stored under: the principal of the node, document or window
