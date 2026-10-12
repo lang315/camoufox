@@ -58,6 +58,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "webrtc-context-ip",
         "webrtc-port-range",
         "worker-config-reads",
+        # Beyond worker-config-reads: the worker's userAgent, and the launch-level context's worker.
         "worker-navigator-spoofing",
     ),
     "automation": (
