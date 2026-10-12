@@ -24,6 +24,7 @@ def test_user_agent_matches_the_browser_version(api):
     browser = mock.MagicMock()
     # Playwright's Browser.version for Firefox: MOZ_APP_VERSION_DISPLAY.
     browser.version = "160.0.1"
+    browser._camoufox_launch_window = None  # a MagicMock would invent one
     if api == "sync":
         browser.new_context.return_value = context
         sync_api.NewContext(browser, os="linux")

@@ -16,6 +16,7 @@ from .utils import (
     attach_no_viewport_default,
     attach_desktop_only_warning,
     attach_launch_fonts,
+    attach_launch_window,
     attach_stock_media_defaults,
     warn_fonts_excluded_by_launch,
     launch_options,
@@ -152,6 +153,7 @@ def NewBrowser(
             if no_viewport_default:
                 attach_no_viewport_default(browser)
             attach_launch_fonts(browser, from_options)
+            attach_launch_window(browser, from_options)
             attach_stock_media_defaults(browser)
             attach_desktop_only_warning(browser)
             return sync_attach_vd(browser, virtual_display)
@@ -213,10 +215,15 @@ def NewContext(
         webrtc_ip = webrtc_ip or exit_ip
         context_kwargs.setdefault("timezone_id", timezone)
 
-    fp = generate_context_fingerprint(preset=preset, os=os, ff_version=ff_version, webrtc_ip=webrtc_ip)
+    fp = generate_context_fingerprint(
+        preset=preset, os=os, ff_version=ff_version, webrtc_ip=webrtc_ip,
+        launch_window=getattr(browser, '_camoufox_launch_window', None),
+    )
 
     # Merge generated context options with user overrides (user wins)
     opts: Dict[str, Any] = {**fp['context_options'], **context_kwargs}
+    if 'viewport' in context_kwargs and 'no_viewport' not in context_kwargs:
+        opts.pop('no_viewport', None)  # #164: an explicit viewport beats the launch-window default
     if proxy:
         opts['proxy'] = proxy
     if geolocation:
