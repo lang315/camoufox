@@ -1,15 +1,18 @@
 diff --git a/dom/base/FontListManager.cpp b/dom/base/FontListManager.cpp
 new file mode 100644
-index 0000000000..8e31c103ed
+index 0000000000..1f6c62c075
 --- /dev/null
 +++ b/dom/base/FontListManager.cpp
-@@ -0,0 +1,157 @@
+@@ -0,0 +1,184 @@
 +/* Camoufox: Per-context font list manager */
 +#include "FontListManager.h"
 +
++#include "FontVisibilityProvider.h"
 +#include "gfxPlatformFontList.h"
 +#include "mozilla/Logging.h"
 +#include "mozilla/Mutex.h"
++#include "mozilla/dom/Document.h"
++#include "mozilla/dom/WorkerPrivate.h"
 +#include "nsThreadUtils.h"
 +
 +namespace mozilla {
@@ -134,6 +137,30 @@ index 0000000000..8e31c103ed
 +  return entry.Data().Contains(aFontName);
 +}
 +
++uint32_t FontListManager::ContextIdFor(const FontVisibilityProvider* aProvider,
++                                       const char** aSource) {
++  const char* source = "provider-null";
++  uint32_t id = 0;
++  if (aProvider) {
++    if (Document* doc = aProvider->GetDocument()) {
++      source = "principal";
++      id = RoverfoxStorageManager::UserContextId(doc);
++    } else if (WorkerPrivate* wp = GetCurrentThreadWorkerPrivate()) {
++      // Camoufox (#44): a worker's origin attributes carry the userContextId
++      // of the document that spawned it (WorkerPrivate.cpp populates
++      // mLoadInfo.mOriginAttributes from the parent's load context).
++      source = "worker";
++      id = wp->GetOriginAttributes().mUserContextId;
++    } else {
++      source = "doc-null";
++    }
++  }
++  if (aSource) {
++    *aSource = source;
++  }
++  return id;
++}
++
 +void FontListManager::SetCurrentContext(uint32_t aId) {
 +  // Camoufox (#83) diagnostic: a scope opening on one context while another
 +  // context's scope is already active on this thread should be impossible --
@@ -163,10 +190,10 @@ index 0000000000..8e31c103ed
 +}  // namespace mozilla
 diff --git a/dom/base/FontListManager.h b/dom/base/FontListManager.h
 new file mode 100644
-index 0000000000..b660c0b303
+index 0000000000..444abf354c
 --- /dev/null
 +++ b/dom/base/FontListManager.h
-@@ -0,0 +1,46 @@
+@@ -0,0 +1,53 @@
 +/* Camoufox: Per-context font list manager */
 +#ifndef mozilla_dom_FontListManager_h
 +#define mozilla_dom_FontListManager_h
@@ -176,6 +203,8 @@ index 0000000000..b660c0b303
 +#include "nsHashKeys.h"
 +#include "nsTHashSet.h"
 +#include "RoverfoxStorageManager.h"
++
++class FontVisibilityProvider;
 +
 +namespace mozilla {
 +namespace dom {
@@ -189,6 +218,11 @@ index 0000000000..b660c0b303
 +  static bool HasFontList(uint32_t aUserContextId);
 +  static bool IsFontAllowed(uint32_t aUserContextId,
 +                             const nsACString& aFontName);
++  // The context a font lookup runs in: its document's principal's, or, for a
++  // worker's provider, which has no document, the worker's own. aSource, when
++  // given, names which one answered, or why none did.
++  static uint32_t ContextIdFor(const FontVisibilityProvider* aProvider,
++                               const char** aSource = nullptr);
 +  static void SetCurrentContext(uint32_t aUserContextId);
 +  static uint32_t GetCurrentContext();
 +  static void DisableFunction(uint32_t aId);
@@ -1368,16 +1402,15 @@ index bdd4b52666..bcb7977c0f 100644
    // on pages with lots of problems
    mozilla::EnumeratedArray<FontVisibility, FontFamily,
 diff --git a/gfx/thebes/gfxTextRun.cpp b/gfx/thebes/gfxTextRun.cpp
-index bc887921c8..c21e2000c1 100644
+index bc887921c8..c8e3d63a1f 100644
 --- a/gfx/thebes/gfxTextRun.cpp
 +++ b/gfx/thebes/gfxTextRun.cpp
-@@ -34,12 +34,23 @@
+@@ -34,12 +34,21 @@
  #include "nsStyleUtil.h"
  #include "nsUnicodeProperties.h"
  #include "mozilla/dom/Document.h"
+-#include "mozilla/dom/RoverfoxStorageManager.h"
 +#include "mozilla/dom/FontListManager.h"
- #include "mozilla/dom/RoverfoxStorageManager.h"
-+#include "mozilla/dom/WorkerPrivate.h"
  
  #ifdef XP_WIN
  #  include "gfxWindowsPlatform.h"
@@ -1395,42 +1428,28 @@ index bc887921c8..c21e2000c1 100644
  using namespace mozilla;
  using namespace mozilla::gfx;
  using namespace mozilla::intl;
-@@ -1874,9 +1885,42 @@ gfxFontGroup::gfxFontGroup(FontVisibilityProvider* aFontVisibilityProvider,
+@@ -1874,9 +1883,27 @@ gfxFontGroup::gfxFontGroup(FontVisibilityProvider* aFontVisibilityProvider,
    // We don't use SetUserFontSet() here, as we want to unconditionally call
    // EnsureFontList() rather than only do UpdateUserFonts() if it changed.
  
+-  if (mFontVisibilityProvider) {
+-    mUserContextId = mozilla::dom::RoverfoxStorageManager::UserContextId(
+-        mFontVisibilityProvider->GetDocument());
 +  // Camoufox (#83) diagnostic: which source gave this font group its context
 +  // id, or why it has none. CamouIsFontAllowed treats 0 as "no per-context
 +  // list", so a font group rendering the wrong pattern either carries the
 +  // wrong id or is attached to the wrong document. The document URI is what
 +  // maps a font group to a smoke context in the log.
-+  const char* camouHop = "provider-null";
-+  mozilla::dom::Document* camouDoc = nullptr;
-   if (mFontVisibilityProvider) {
--    mUserContextId = mozilla::dom::RoverfoxStorageManager::UserContextId(
--        mFontVisibilityProvider->GetDocument());
-+    if (auto* doc = mFontVisibilityProvider->GetDocument()) {
-+      camouDoc = doc;
-+      camouHop = "principal";
-+      mUserContextId = mozilla::dom::RoverfoxStorageManager::UserContextId(doc);
-+    } else if (mozilla::dom::WorkerPrivate* wp =
-+                   mozilla::dom::GetCurrentThreadWorkerPrivate()) {
-+      // Camoufox (#44): worker/OffscreenCanvas font group -- GetDocument()
-+      // is null off the main thread. A worker's own origin attributes carry
-+      // the same mUserContextId as the document that spawned it
-+      // (WorkerPrivate.cpp populates mLoadInfo.mOriginAttributes from the
-+      // parent document's load context) -- the id SetFontList keyed the
-+      // list under.
-+      camouHop = "worker";
-+      mUserContextId = wp->GetOriginAttributes().mUserContextId;
-+    } else {
-+      camouHop = "doc-null";
-+    }
-+  }
++  const char* camouHop = nullptr;
++  mUserContextId = mozilla::dom::FontListManager::ContextIdFor(
++      mFontVisibilityProvider, &camouHop);
 +  // The URI copy allocates, so unlike the MOZ_LOG argument list it needs an
 +  // explicit enabled-check to stay free when the module is off.
 +  if (MOZ_UNLIKELY(CAMOU_LOG_FONTLIST_ENABLED())) {
 +    nsAutoCString camouUri("none");
++    mozilla::dom::Document* camouDoc =
++        mFontVisibilityProvider ? mFontVisibilityProvider->GetDocument()
++                                : nullptr;
 +    if (camouDoc && camouDoc->GetDocumentURI()) {
 +      camouUri = camouDoc->GetDocumentURI()->GetSpecOrDefault();
 +    }
@@ -1440,7 +1459,7 @@ index bc887921c8..c21e2000c1 100644
    }
  }
  
-@@ -1922,6 +1966,8 @@ class DeferredClearResolvedFonts final : public nsIRunnable {
+@@ -1922,6 +1949,8 @@ class DeferredClearResolvedFonts final : public nsIRunnable {
  NS_IMPL_ISUPPORTS(DeferredClearResolvedFonts, nsIRunnable)
  
  void gfxFontGroup::EnsureFontList() {
@@ -1449,7 +1468,7 @@ index bc887921c8..c21e2000c1 100644
    // Ensure resolved font instances are valid; discard them if necessary.
    auto* pfl = gfxPlatformFontList::PlatformFontList();
    if (mFontListGeneration != pfl->GetGeneration()) {
-@@ -1993,6 +2039,43 @@ void gfxFontGroup::EnsureFontList() {
+@@ -1993,6 +2022,43 @@ void gfxFontGroup::EnsureFontList() {
      }
    }
  
@@ -1493,7 +1512,7 @@ index bc887921c8..c21e2000c1 100644
    mFontListGeneration = pfl->GetGeneration();
    mResolvedFonts = true;
  }
-@@ -2169,6 +2252,16 @@ static nsAutoCString FamilyListToString(
+@@ -2169,6 +2235,16 @@ static nsAutoCString FamilyListToString(
  }
  
  already_AddRefed<gfxFont> gfxFontGroup::GetDefaultFont() {
@@ -1510,7 +1529,7 @@ index bc887921c8..c21e2000c1 100644
    if (mDefaultFont) {
      return do_AddRef(mDefaultFont);
    }
-@@ -2213,21 +2306,40 @@ already_AddRefed<gfxFont> gfxFontGroup::GetDefaultFont() {
+@@ -2213,21 +2289,40 @@ already_AddRefed<gfxFont> gfxFontGroup::GetDefaultFont() {
        fontlist::FontList* list = pfl->SharedFontList();
        numFonts = list->NumFamilies();
        fontlist::Family* families = list->Families();
@@ -1564,7 +1583,7 @@ index bc887921c8..c21e2000c1 100644
            }
          }
        }
-@@ -2278,11 +2390,23 @@ already_AddRefed<gfxFont> gfxFontGroup::GetDefaultFont() {
+@@ -2278,11 +2373,23 @@ already_AddRefed<gfxFont> gfxFontGroup::GetDefaultFont() {
      MOZ_CRASH_UNSAFE(msg);
    }
  
@@ -1588,7 +1607,7 @@ index bc887921c8..c21e2000c1 100644
    EnsureFontList();
  
    uint32_t count = mFonts.Length();
-@@ -3528,7 +3652,36 @@ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
+@@ -3528,7 +3635,36 @@ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
                               ? mFontVisibilityProvider->GetFontVisibility()
                               : FontVisibility::User;
    auto* pfl = gfxPlatformFontList::PlatformFontList();
@@ -1626,7 +1645,7 @@ index bc887921c8..c21e2000c1 100644
        (!StaticPrefs::gfx_font_rendering_fallback_unassigned_chars() &&
         GetGeneralCategory(aCh) == HB_UNICODE_GENERAL_CATEGORY_UNASSIGNED)) {
      if (candidateFont) {
-@@ -3585,6 +3738,13 @@ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
+@@ -3585,6 +3721,13 @@ already_AddRefed<gfxFont> gfxFontGroup::FindFontForChar(
  
    // -- otherwise look for other stuff
    font = WhichSystemFontSupportsChar(aCh, aNextCh, aRunScript, presentation);
@@ -1640,7 +1659,7 @@ index bc887921c8..c21e2000c1 100644
    if (font) {
      if (CheckCandidate(font, FontMatchType::Kind::kSystemFallback)) {
        return font.forget();
-@@ -3995,6 +4155,17 @@ bool gfxFontGroup::ContainsUserFont(const gfxUserFontEntry* aUserFont) {
+@@ -3995,6 +4138,17 @@ bool gfxFontGroup::ContainsUserFont(const gfxUserFontEntry* aUserFont) {
  
  already_AddRefed<gfxFont> gfxFontGroup::WhichPrefFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, FontPresentation aPresentation) {
@@ -1658,7 +1677,7 @@ index bc887921c8..c21e2000c1 100644
    eFontPrefLang charLang;
    gfxPlatformFontList* pfl = gfxPlatformFontList::PlatformFontList();
  
-@@ -4038,6 +4209,29 @@ already_AddRefed<gfxFont> gfxFontGroup::WhichPrefFontSupportsChar(
+@@ -4038,6 +4192,29 @@ already_AddRefed<gfxFont> gfxFontGroup::WhichPrefFontSupportsChar(
          continue;
        }
  
@@ -1688,7 +1707,7 @@ index bc887921c8..c21e2000c1 100644
        // if a pref font is used, it's likely to be used again in the same text
        // run. the style doesn't change so the face lookup can be cached rather
        // than calling FindOrMakeFont repeatedly.  speeds up FindFontForChar
-@@ -4102,6 +4296,10 @@ already_AddRefed<gfxFont> gfxFontGroup::WhichPrefFontSupportsChar(
+@@ -4102,6 +4279,10 @@ already_AddRefed<gfxFont> gfxFontGroup::WhichPrefFontSupportsChar(
  already_AddRefed<gfxFont> gfxFontGroup::WhichSystemFontSupportsChar(
      uint32_t aCh, uint32_t aNextCh, Script aRunScript,
      FontPresentation aPresentation) {
