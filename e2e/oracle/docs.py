@@ -10,7 +10,7 @@ REPO = Path(__file__).resolve().parents[2]
 
 CLAIMS = {
     "isolated_eval": ("README.md", "Playwright's `evaluate`, selectors and init scripts run in an isolated world the page cannot see"),
-    "trusted_input": ("README.md", "`set_input_files` fire trusted events"),
+    "trusted_input": ("README.md", "input handlers, so it is handled as a user's would be."),
     "webdriver": ("README.md", "`navigator.webdriver` is `false`"),
     "os_option": ("python/src/camoufox/utils.py", 'Can be "windows", "macos", "linux", or a list to randomly choose from.'),
     "locale": ("python/src/camoufox/utils.py", "The first listed locale will be used for the Intl API."),
