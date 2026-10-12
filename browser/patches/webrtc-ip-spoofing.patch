@@ -1,20 +1,14 @@
 diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
 new file mode 100644
-index 0000000000..dfcc7beff9
+index 0000000000..520fd6887f
 --- /dev/null
 +++ b/dom/base/WebRTCIPManager.cpp
-@@ -0,0 +1,147 @@
+@@ -0,0 +1,85 @@
 +#include "WebRTCIPManager.h"
 +#include "nsTHashMap.h"
 +#include "RoverfoxStorageManager.h"
 +#include "nsPrintfCString.h"
-+#include "nsGlobalWindowInner.h"
 +#include "nsDocShell.h"
-+#include "xpcpublic.h"
-+#include "mozilla/dom/BrowsingContext.h"
-+#include "mozilla/dom/Document.h"
-+#include "nsPIDOMWindow.h"
-+#include "nsPIDOMWindowInlines.h"
 +
 +namespace mozilla {
 +namespace dom {
@@ -31,22 +25,6 @@ index 0000000000..dfcc7beff9
 +WebRTCIPManager::IPv6KeyForUserContext(uint32_t userContextId) {
 +  nsString key;
 +  key.AppendLiteral(u"webrtc_ipv6_");
-+  key.AppendInt(userContextId);
-+  return key;
-+}
-+
-+/* static */ nsString
-+WebRTCIPManager::IPv4DisabledKeyForUserContext(uint32_t userContextId) {
-+  nsString key;
-+  key.AppendLiteral(u"webrtc_ipv4_disabled_");
-+  key.AppendInt(userContextId);
-+  return key;
-+}
-+
-+/* static */ nsString
-+WebRTCIPManager::IPv6DisabledKeyForUserContext(uint32_t userContextId) {
-+  nsString key;
-+  key.AppendLiteral(u"webrtc_ipv6_disabled_");
 +  key.AppendInt(userContextId);
 +  return key;
 +}
@@ -85,66 +63,26 @@ index 0000000000..dfcc7beff9
 +
 +
 +
-+/* static */ bool
-+WebRTCIPManager::IsIPv4FunctionDisabled(uint32_t userContextId) {
-+  nsString key = IPv4DisabledKeyForUserContext(userContextId);
-+  bool disabled = false;
-+  return RoverfoxStorageManager::GetBool(key, disabled) && disabled;
-+}
-+
 +/* static */ void
 +WebRTCIPManager::DisableIPv4Function(uint32_t userContextId) {
-+  nsString key = IPv4DisabledKeyForUserContext(userContextId);
-+  RoverfoxStorageManager::PutBool(key, true);
-+}
-+
-+/* static */ bool
-+WebRTCIPManager::IsIPv6FunctionDisabled(uint32_t userContextId) {
-+  nsString key = IPv6DisabledKeyForUserContext(userContextId);
-+  bool disabled = false;
-+  return RoverfoxStorageManager::GetBool(key, disabled) && disabled;
++  RoverfoxStorageManager::MarkSetterUsed("webrtc_v4", userContextId);
 +}
 +
 +/* static */ void
 +WebRTCIPManager::DisableIPv6Function(uint32_t userContextId) {
-+  nsString key = IPv6DisabledKeyForUserContext(userContextId);
-+  RoverfoxStorageManager::PutBool(key, true);
++  RoverfoxStorageManager::MarkSetterUsed("webrtc_v6", userContextId);
 +}
 +
 +
 +
 +/* static */ bool
 +WebRTCIPManager::IsIPv4FunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj) {
-+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
-+  if (!win) {
-+    return false;
-+  }
-+
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = win->GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
-+
-+  bool disabled = false;
-+  RoverfoxStorageManager::GetBool(IPv4DisabledKeyForUserContext(userContextId), disabled);
-+  return !disabled;
++  return RoverfoxStorageManager::IsSetterOffered(aObj, "webrtc_v4");
 +}
 +
 +/* static */ bool
 +WebRTCIPManager::IsIPv6FunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj) {
-+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
-+  if (!win) {
-+    return false;
-+  }
-+
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = win->GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
-+
-+  bool disabled = false;
-+  RoverfoxStorageManager::GetBool(IPv6DisabledKeyForUserContext(userContextId), disabled);
-+  return !disabled;
++  return RoverfoxStorageManager::IsSetterOffered(aObj, "webrtc_v6");
 +}
 +
 +
@@ -153,10 +91,10 @@ index 0000000000..dfcc7beff9
 +} // namespace mozilla
 diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
 new file mode 100644
-index 0000000000..c9810a06d2
+index 0000000000..c67d7be269
 --- /dev/null
 +++ b/dom/base/WebRTCIPManager.h
-@@ -0,0 +1,105 @@
+@@ -0,0 +1,89 @@
 +#ifndef mozilla_dom_WebRTCIPManager_h
 +#define mozilla_dom_WebRTCIPManager_h
 +
@@ -206,24 +144,10 @@ index 0000000000..c9810a06d2
 +
 +
 +  /**
-+   * Check if the setWebRTCIPv4 function has been used and should be disabled for a context.
-+   * @param userContextId The user context ID
-+   * @return true if the function has been used for this context and should not appear on new windows
-+   */
-+  static bool IsIPv4FunctionDisabled(uint32_t userContextId);
-+
-+  /**
 +   * Mark the setWebRTCIPv4 function as used/disabled for a context.
 +   * @param userContextId The user context ID
 +   */
 +  static void DisableIPv4Function(uint32_t userContextId);
-+
-+  /**
-+   * Check if the setWebRTCIPv6 function has been used and should be disabled for a context.
-+   * @param userContextId The user context ID
-+   * @return true if the function has been used for this context and should not appear on new windows
-+   */
-+  static bool IsIPv6FunctionDisabled(uint32_t userContextId);
 +
 +  /**
 +   * Mark the setWebRTCIPv6 function as used/disabled for a context.
@@ -254,8 +178,6 @@ index 0000000000..c9810a06d2
 +private:
 +  static nsString IPv4KeyForUserContext(uint32_t userContextId);
 +  static nsString IPv6KeyForUserContext(uint32_t userContextId);
-+  static nsString IPv4DisabledKeyForUserContext(uint32_t userContextId);
-+  static nsString IPv6DisabledKeyForUserContext(uint32_t userContextId);
 +};
 +
 +} // namespace dom
@@ -283,56 +205,30 @@ index 9656bb9b8a..cf51840752 100644
  # in unified builds (it includes RoverfoxStorageManager.h which can affect
  # alphabetically-later files like BarProps.cpp)
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index a1b1ea6e3c..dd5df99f4d 100644
+index 3da5385859..8dbc93a82c 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -334,6 +334,10 @@
+@@ -332,6 +332,8 @@
  #include "xpcprivate.h"
  #include "xpcpublic.h"
  
 +#include "WebRTCIPManager.h"
-+#include "nsDocShell.h"
-+#include "mozilla/OriginAttributes.h"
 +
  #ifdef NS_PRINTING
  #  include "nsIPrintSettings.h"
  #endif
-@@ -7813,6 +7817,42 @@ void nsGlobalWindowInner::SetTimezone(const nsAString& timezone, ErrorResult& aR
-   }
+@@ -7790,6 +7792,18 @@ void nsGlobalWindowInner::SetTimezone(const nsAString& timezone, ErrorResult& aR
+   RoverfoxStorageManager::RemoveSetter("setTimezone");
  }
  
 +void nsGlobalWindowInner::SetWebRTCIPv4(const nsAString& ipv4, ErrorResult& aRv) {
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
-+
-+  WebRTCIPManager::SetIPv4(userContextId, ipv4);
-+
-+  // Self-destruct: set to undefined first to bust IC/shape caches on ARM64.
-+  if (JSContext* cx = nsContentUtils::GetCurrentJSContext()) {
-+    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
-+    if (global) {
-+      JS_DeleteProperty(cx, global, "setWebRTCIPv4");
-+    }
-+  }
++  WebRTCIPManager::SetIPv4(RoverfoxStorageManager::UserContextId(this), ipv4);
++  RoverfoxStorageManager::RemoveSetter("setWebRTCIPv4");
 +}
 +
 +void nsGlobalWindowInner::SetWebRTCIPv6(const nsAString& ipv6, ErrorResult& aRv) {
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
-+
-+  WebRTCIPManager::SetIPv6(userContextId, ipv6);
-+
-+  // Self-destruct: set to undefined first to bust IC/shape caches on ARM64.
-+  if (JSContext* cx = nsContentUtils::GetCurrentJSContext()) {
-+    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
-+    if (global) {
-+      JS_DeleteProperty(cx, global, "setWebRTCIPv6");
-+    }
-+  }
++  WebRTCIPManager::SetIPv6(RoverfoxStorageManager::UserContextId(this), ipv6);
++  RoverfoxStorageManager::RemoveSetter("setWebRTCIPv6");
 +}
 +
 +
@@ -341,7 +237,7 @@ index a1b1ea6e3c..dd5df99f4d 100644
    MOZ_ASSERT(aSharedWorker);
    MOZ_ASSERT(!mSharedWorkers.Contains(aSharedWorker));
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index ca9fb7b687..4ccb734946 100644
+index 44d414d231..72f6849937 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
 @@ -690,6 +690,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
@@ -356,13 +252,14 @@ index ca9fb7b687..4ccb734946 100644
  
    void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
 diff --git a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp b/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
-index 0eefdc2645..4bc44d8ccf 100644
+index 0eefdc2645..3467d41fea 100644
 --- a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
 +++ b/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
-@@ -100,6 +100,11 @@
+@@ -100,6 +100,12 @@
  #include "mozilla/glean/DomMediaWebrtcMetrics.h"
  #include "mozilla/net/DataChannelProtocol.h"
  #include "mozilla/net/WebrtcProxyConfig.h"
++#include "mozilla/dom/RoverfoxStorageManager.h"
 +#include "MaskConfig.hpp"
 +#include "AccessObserverDom.hpp"
 +#include "mozilla/RustRegex.h"
@@ -371,7 +268,7 @@ index 0eefdc2645..4bc44d8ccf 100644
  #include "nsContentUtils.h"
  #include "nsDOMJSUtils.h"
  #include "nsGlobalWindowInner.h"
-@@ -1622,7 +1627,15 @@ PeerConnectionImpl::SetLocalDescription(int32_t aAction, const char* aSDP) {
+@@ -1622,7 +1628,15 @@ PeerConnectionImpl::SetLocalDescription(int32_t aAction, const char* aSDP) {
      }
    };
  
@@ -388,17 +285,13 @@ index 0eefdc2645..4bc44d8ccf 100644
  
    SyncToJsep();
  
-@@ -1788,11 +1801,44 @@ already_AddRefed<dom::Promise> PeerConnectionImpl::GetStats(
+@@ -1788,11 +1802,40 @@ already_AddRefed<dom::Promise> PeerConnectionImpl::GetStats(
      MOZ_CRASH("Failed to create a promise!");
    }
  
 +  // Camoufox: Capture userContextId for stats sanitization
-+  uint32_t statsUserContextId = 0;
-+  if (mWindow) {
-+    if (BrowsingContext* bc = mWindow->GetBrowsingContext()) {
-+      statsUserContextId = bc->OriginAttributesRef().mUserContextId;
-+    }
-+  }
++  const uint32_t statsUserContextId =
++      RoverfoxStorageManager::UserContextId(mWindow);
 +  bool shouldSanitizeStats = ShouldSpoofCandidateIP();
 +
    GetStats(aSelector, false)
@@ -435,7 +328,7 @@ index 0eefdc2645..4bc44d8ccf 100644
              RefPtr report = MakeRefPtr<RTCStatsReport>(window);
              report->Incorporate(*aReport);
              promise->MaybeResolve(std::move(report));
-@@ -3313,12 +3359,22 @@ const std::string& PeerConnectionImpl::GetName() {
+@@ -3313,12 +3356,22 @@ const std::string& PeerConnectionImpl::GetName() {
    return mName;
  }
  
@@ -459,7 +352,7 @@ index 0eefdc2645..4bc44d8ccf 100644
    if (mForceIceTcp && std::string::npos != candidate.find(" UDP ")) {
      CSFLogWarn(LOGTAG, "Blocking local UDP candidate: %s", candidate.c_str());
      STAMP_TIMECARD(mTimeCard, "UDP Ice Candidate blocked");
-@@ -3381,10 +3437,201 @@ void PeerConnectionImpl::SendLocalIceCandidateToContent(
+@@ -3381,10 +3434,188 @@ void PeerConnectionImpl::SendLocalIceCandidateToContent(
      uint16_t level, const std::string& mid, const std::string& candidate,
      const std::string& ufrag) {
    STAMP_TIMECARD(mTimeCard, "Send Ice Candidate to content");
@@ -492,10 +385,7 @@ index 0eefdc2645..4bc44d8ccf 100644
 +    return false;
 +  }
 +
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = mWindow->GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
++  const uint32_t userContextId = RoverfoxStorageManager::UserContextId(mWindow);
 +
 +  nsString ipv4, ipv6;
 +  return WebRTCIPManager::GetIPv4(userContextId, ipv4) ||
@@ -597,12 +487,7 @@ index 0eefdc2645..4bc44d8ccf 100644
 +    return candidate;
 +  }
 +
-+  uint32_t userContextId = 0;
-+  if (mWindow) {
-+    if (BrowsingContext* bc = mWindow->GetBrowsingContext()) {
-+      userContextId = bc->OriginAttributesRef().mUserContextId;
-+    }
-+  }
++  const uint32_t userContextId = RoverfoxStorageManager::UserContextId(mWindow);
 +
 +  // ipv4
 +  const char* ipv4Pattern = "(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)";
@@ -619,12 +504,7 @@ index 0eefdc2645..4bc44d8ccf 100644
 +    return NS_OK;
 +  }
 +
-+  uint32_t userContextId = 0;
-+  if (mWindow) {
-+    if (BrowsingContext* bc = mWindow->GetBrowsingContext()) {
-+      userContextId = bc->OriginAttributesRef().mUserContextId;
-+    }
-+  }
++  const uint32_t userContextId = RoverfoxStorageManager::UserContextId(mWindow);
 +
 +  // process the SDP line by line to handle candidate lines
 +  std::istringstream iss(sdp);
@@ -665,7 +545,7 @@ index 0eefdc2645..4bc44d8ccf 100644
  }
  
  // Implements the steps to "change the selected candidate pair and state".
-@@ -3790,11 +4037,27 @@ void PeerConnectionImpl::UpdateDefaultCandidate(
+@@ -3790,11 +4021,27 @@ void PeerConnectionImpl::UpdateDefaultCandidate(
      const std::string& defaultRtcpAddr, uint16_t defaultRtcpPort,
      const std::string& transportId) {
    CSFLogDebug(LOGTAG, "%s", __FUNCTION__);
@@ -695,7 +575,7 @@ index 0eefdc2645..4bc44d8ccf 100644
          transportId);
    }
  }
-@@ -4578,8 +4841,10 @@ bool PeerConnectionImpl::GetPrefDefaultAddressOnly() const {
+@@ -4578,8 +4825,10 @@ bool PeerConnectionImpl::GetPrefDefaultAddressOnly() const {
  
    uint64_t winId = mWindow->WindowID();
  
@@ -737,6 +617,121 @@ index 92c2255785..d1c4a6788a 100644
 +
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
+diff --git a/dom/media/webrtc/transport/common.build b/dom/media/webrtc/transport/common.build
+index 215d61190d..b7d83085ea 100644
+--- a/dom/media/webrtc/transport/common.build
++++ b/dom/media/webrtc/transport/common.build
+@@ -36,6 +36,7 @@ transport_cppsrcs = [
+ ]
+ 
+ LOCAL_INCLUDES += [
++    "/camoucfg",
+     "/dom/media/webrtc/transport/",
+     "/dom/media/webrtc/transport/third_party/",
+     "/dom/media/webrtc/transport/third_party/nICEr/src/crypto",
+diff --git a/dom/media/webrtc/transport/nr_socket_prsock.cpp b/dom/media/webrtc/transport/nr_socket_prsock.cpp
+index f15df437c8..824c40de63 100644
+--- a/dom/media/webrtc/transport/nr_socket_prsock.cpp
++++ b/dom/media/webrtc/transport/nr_socket_prsock.cpp
+@@ -111,6 +111,10 @@ nrappkit copyright:
+ #include "prnetdb.h"
+ #include "runnable_utils.h"
+ 
++// Camoufox: for the identity's ephemeral port range in CreateSocket.
++#include "MaskConfig.hpp"
++#include "mozilla/RandomNum.h"
++
+ #if defined(MOZILLA_INTERNAL_API)
+ // csi_platform.h deep in nrappkit defines LOG_INFO and LOG_WARNING
+ #  ifdef LOG_INFO
+@@ -1582,11 +1586,20 @@ static nr_socket_vtbl nr_socket_local_vtbl = {2,
+                                               nr_socket_local_listen,
+                                               nr_socket_local_accept};
+ 
++// Camoufox: the range this host's kernel gives a socket bound to port 0.
++#if defined(XP_WIN) || defined(XP_MACOSX)
++static constexpr std::pair<uint16_t, uint16_t> kHostEphemeralPorts{49152, 65535};
++#else
++static constexpr std::pair<uint16_t, uint16_t> kHostEphemeralPorts{32768, 60999};
++#endif
++
+ /* static */
+ int NrSocketBase::CreateSocket(
+     nr_transport_addr* addr, RefPtr<NrSocketBase>* sock,
+     const std::shared_ptr<NrSocketProxyConfig>& config) {
+   int r, _status;
++  uint16_t port = 0;
++  std::optional<std::pair<uint16_t, uint16_t>> ports;
+ 
+   if (IsForbiddenAddress(addr)) {
+     ABORT(R_REJECTED);
+@@ -1596,25 +1609,51 @@ int NrSocketBase::CreateSocket(
+     ABORT(R_REJECTED);
+   }
+ 
+-  // create IPC bridge for content process
+-  if (XRE_IsParentProcess()) {
+-    // TODO: Make NrTcpSocket work on the parent process
+-    *sock = new NrSocket();
+-  } else if (XRE_IsSocketProcess()) {
+-    if (addr->protocol == IPPROTO_TCP) {
+-      *sock = new NrTcpSocket(config);
+-    } else {
+-      *sock = new NrSocket();
++  // Camoufox: a UDP socket's port reaches the page in its ICE candidates. When
++  // the identity's OS gives out ephemeral ports from another range than this
++  // host does, pick one from the identity's range, at random as its kernel
++  // would, so a Windows identity on Linux never shows a Linux port.
++  if (addr->protocol == IPPROTO_UDP &&
++      !nr_transport_addr_get_port(addr, &port) && port == 0) {
++    ports = MaskConfig::SpoofedEphemeralPorts();
++    if (ports == kHostEphemeralPorts) {
++      ports.reset();
+     }
+-  } else {
+-    if (addr->protocol == IPPROTO_TCP) {
+-      *sock = new NrTcpSocket(config);
++  }
++
++  // A chosen port can be taken; the kernel would have tried another.
++  for (int attempt = 0; attempt < (ports ? 64 : 1); ++attempt) {
++    nr_transport_addr bindAddr;
++    nr_transport_addr_copy(&bindAddr, addr);
++    if (ports) {
++      uint32_t span = static_cast<uint32_t>(ports->second - ports->first) + 1u;
++      nr_transport_addr_set_port(
++          &bindAddr, ports->first + static_cast<int>(
++                                        mozilla::RandomUint64OrDie() % span));
++      nr_transport_addr_fmt_addr_string(&bindAddr);
++    }
++
++    // create IPC bridge for content process
++    if (XRE_IsParentProcess()) {
++      // TODO: Make NrTcpSocket work on the parent process
++      *sock = new NrSocket();
++    } else if (XRE_IsSocketProcess()) {
++      if (addr->protocol == IPPROTO_TCP) {
++        *sock = new NrTcpSocket(config);
++      } else {
++        *sock = new NrSocket();
++      }
+     } else {
+-      *sock = new NrUdpSocketIpc();
++      if (addr->protocol == IPPROTO_TCP) {
++        *sock = new NrTcpSocket(config);
++      } else {
++        *sock = new NrUdpSocketIpc();
++      }
+     }
+-  }
+ 
+-  r = (*sock)->create(addr);
++    r = (*sock)->create(ports ? &bindAddr : addr);
++    if (!r) break;
++  }
+   if (r) ABORT(r);
+ 
+   _status = 0;
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
 index 79dd3701b8..41689a288c 100644
 --- a/dom/webidl/Window.webidl
