@@ -634,14 +634,14 @@ bundles are shipped in the wheel.
 | Property | Source | Notes |
 |----------|--------|-------|
 | UA, platform, HWC, oscpu | fpgen or preset | UA version patched to the browser's Firefox version (NewContext reads it from Playwright's `browser.version` unless `ff_version` is given) |
-| Screen dims, colorDepth | fpgen or preset | Viewport adjusted by -28px for browser chrome |
+| Screen dims, colorDepth | fpgen or preset | Viewport: the launch window's inner size when the launch set one; otherwise screen height -28px for browser chrome, clamped inside the launch outer window (#164) |
 | WebGL vendor/renderer | Preset, or `sample_webgl_for_screen()` in `webgl.py` | A generated identity draws a GPU weighted by fpgen's share of Firefox on the OS, never a software rasteriser, a discrete GPU behind a netbook screen, or an Intel Mac GPU beside a core count or a notched panel no Intel Mac has (`coherence.gpu_fits_machine()`). `launch_options()` adds that GPU's recorded parameters, extensions and shader precisions from fpgen (`webgl_for_gpu()`), WebGL2 from the same device as WebGL1. |
 | Font list | `_generate_random_font_subset()` | One weighted OS-version base in full, plus each addition unit at its measured probability; marker fonts always included. See [FONTS.md](FONTS.md). NOT from presets. |
 | Audio seed | Derived from the identity (NewBrowser) or `randint(1, 2^32-1)` (NewContext) | Never 0 |
 | Canvas seed | `randint(1, 2^32-1)` per launch (NewBrowser) or per context (NewContext) | Never 0; not derived from the identity, so a pinned preset still renders a different canvas on each launch |
 | Timezone | From preset, or `timezone` in `CAMOU_CONFIG` | The init script calls `setTimezone()` only for an explicit value; otherwise the C++ side falls back to `CAMOU_CONFIG` (set from geoip at launch) or the browser default. |
 | Speech voices | `_generate_random_voice_subset()` | Follows the measured model in `voice-manifests.json`: Windows gets the display language's OneCore pack plus its legacy Desktop voices at their measured rate; macOS the compact + Eloquence base plus rare downloads; Linux speech-dispatcher's espeak-ng list. Seeded by the identity. NOT from presets. |
-| WebRTC IP | Not set by default | NewContext's `webrtc_ip` (or the proxy's exit IP) goes to `window.setWebRTCIPv4()` or `window.setWebRTCIPv6()` by address family; an invalid address raises `InvalidIP`. Without one, the init script calls `setWebRTCIPv4("")` |
+| WebRTC IP | Not set by default | NewContext's `webrtc_ip` (or the proxy's exit IP) goes to `window.setWebRTCIPv4()` or `window.setWebRTCIPv6()` by address family; an invalid address raises `InvalidIP`. Without one, the init script calls no WebRTC setter, so the launch-level `webrtc:ipv4` (set by `geoip=`) stands once the browser-side fallback lands (W1, #163); until then #163 still reproduces |
 | Geolocation | User parameter or geoip detection | Via Playwright `context.setGeolocation()` |
 
 ### Key Files
@@ -650,7 +650,7 @@ bundles are shipped in the wheel.
 - `generate_context_fingerprint()` — main API. Returns `{init_script, context_options, config, preset}`
 - `from_preset()` — converts real preset to CAMOU_CONFIG format
 - `from_fpgen()` — converts an fpgen fingerprint dict to CAMOU_CONFIG using `fpgen.yml` mappings
-- `_build_init_script()` — generates a JavaScript IIFE calling the `window.setXxx()` functions with `typeof` guards (every setter except `setWebRTCIPv6` — IPv6 is optional and rarely set)
+- `_build_init_script()` — generates a JavaScript IIFE calling the `window.setXxx()` functions with a `typeof` guard on every setter
 - `_generate_random_font_subset()` — the font list of one plausible machine of the OS (weighted base + per-unit draws, marker fonts always included)
 - `_generate_random_voice_subset()` — the voice list of one plausible machine of the OS, as MaskConfig voice objects
 

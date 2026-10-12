@@ -709,6 +709,32 @@ def warn_manual_config(config: Dict[str, Any]) -> None:
         LeakWarning.warn('viewport', False)
 
 
+# #162 (B): each spoofed OS's generics (monospace, serif, sans-serif). Without
+# them, generics resolve through the HOST's font.name-list.* prefs (Menlo on a
+# mac host, Consolas on a Windows host), which the launch font mask refuses, so
+# monospace fell to the first allowed family: Arial or Arimo. Every family is
+# in that OS's fonts.json (tests/test_generic_font_prefs.py). Kept identical to
+# goapi's genericFamilies (goapi/fontconfig.go).
+# ponytail: x-western and x-unicode only; other lang groups keep the host
+# default until the browser-side fix (W1) lands.
+GENERIC_FONT_FAMILIES = {
+    'win': ('Consolas, Courier New', 'Times New Roman', 'Arial'),
+    'mac': ('Menlo, Courier New', 'Times', 'Helvetica'),
+    'lin': ('Cousine', 'Tinos', 'Arimo'),
+}
+
+
+def generic_font_prefs(target_os: str) -> Dict[str, str]:
+    families = GENERIC_FONT_FAMILIES.get(target_os)
+    if not families:
+        return {}
+    prefs = {}
+    for lang in ('x-western', 'x-unicode'):
+        for generic, value in zip(('monospace', 'serif', 'sans-serif'), families):
+            prefs[f'font.name-list.{generic}.{lang}'] = value
+    return prefs
+
+
 _WINDOW_DIM_KEYS = (
     'window.outerWidth',
     'window.outerHeight',
@@ -807,6 +833,26 @@ def attach_launch_fonts(target: Any, from_options: Optional[Dict[str, Any]]) -> 
             target._camoufox_launch_fonts = frozenset(fonts)
         except AttributeError:
             pass  # a Playwright object that does not accept attributes
+    return target
+
+
+def attach_launch_window(target: Any, from_options: Optional[Dict[str, Any]]) -> Any:
+    """Record the launch window and screen on the browser for NewContext (#164).
+
+    The launch window is process-wide (browser-init.patch resizes the real window
+    once), so every context shares it; a context can only claim a viewport inside
+    it and a screen that holds it. 1280x1040 is browser-init.patch's default when
+    the config sets no outer size.
+    """
+    cfg = _launch_config(from_options)
+    try:
+        target._camoufox_launch_window = {
+            'outer': (cfg.get('window.outerWidth') or 1280, cfg.get('window.outerHeight') or 1040),
+            'inner': (cfg.get('window.innerWidth'), cfg.get('window.innerHeight')),
+            'screen': (cfg.get('screen.width'), cfg.get('screen.height')),
+        }
+    except AttributeError:
+        pass  # a Playwright object that does not accept attributes
     return target
 
 
@@ -1360,6 +1406,12 @@ def launch_options(
                 config.get('navigator.userAgent'),
             )
             update_fonts(config, target_os)
+
+    # CAMOUFOX_NO_GENERIC_PREFS=1 is a test hook: it lets the browser-side #162
+    # fix be measured without these prefs hiding it.
+    if environ.get('CAMOUFOX_NO_GENERIC_PREFS') != '1':
+        for key, value in generic_font_prefs(target_os).items():
+            firefox_user_prefs.setdefault(key, value)
 
     # Draw the identity's media devices (counts + OS-style labels/groups from
     # media-devices.json, seeded by the identity) unless the caller set any
