@@ -313,3 +313,15 @@ Launch a remote Playwright server.
 ## Usage
 
 All of the latest stable documentation is available at [camoufox.com/python](https://camoufox.com/python).
+
+**Bare Playwright** (launched with `camoufox.utils.launch_options`)
+
+> **Open contexts with `no_viewport=True`.** Playwright's default viewport is 1280x720 whatever
+> window the fingerprint spoofs, so a spoofed window smaller than that gives a page
+> `innerWidth > outerWidth`, which no real browser can report (#164). `NewBrowser` and
+> `Camoufox()` default to it for you:
+>
+> ```python
+> browser = playwright.firefox.launch(**launch_options(os="macos"))
+> page = browser.new_context(no_viewport=True).new_page()
+> ```

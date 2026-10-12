@@ -74,11 +74,12 @@ class PwCtx:
 
 
 class PwBrowser:
-    def __init__(self, browser, identity_context=None) -> None:
+    def __init__(self, browser, identity_context=None, context_kwargs=None) -> None:
         self.b, self._identity_context = browser, identity_context
+        self._ctx_kwargs = context_kwargs or {}
 
     def new_context(self) -> PwCtx:
-        return PwCtx(self.b.new_context())
+        return PwCtx(self.b.new_context(**self._ctx_kwargs))
 
     def new_identity_context(self) -> PwCtx:
         """camoufox.sync_api.NewContext: a context with its own fingerprint (pkg only)."""
@@ -140,7 +141,7 @@ class PwDriver(_Base):
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
                   config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
         opts = launch_options(**{k: v for k, v in kw.items() if v is not None})
-        b = PwBrowser(playwright().firefox.launch(**opts))
+        b = PwBrowser(playwright().firefox.launch(**opts), context_kwargs={"no_viewport": True})
         self.browsers.append(b)
         return b
 
