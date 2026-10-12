@@ -1668,10 +1668,6 @@ def _build_init_script(values: Dict[str, Any]) -> str:
         lines.append(
             f'  if (typeof w.{fn_name} === "function") w.{fn_name}({_json.dumps(ip)});'
         )
-    else:
-        lines.append(
-            '  if (typeof w.setWebRTCIPv4 === "function") w.setWebRTCIPv4("");'
-        )
 
     # Font list (comma-separated)
     font_list = values.get('fontList')
