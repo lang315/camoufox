@@ -2154,10 +2154,10 @@ jobs:
           _mac_only_sets = [ln for ln in _mac_sets if ln not in _win_sets]
           b2_mac_ctx = ctx_token(_mac_only_sets[0]) if _mac_only_sets else None
           b2_win_ctx = ctx_token(_win_sets[0]) if _win_sets else None
-          # R2: any re-install of the DONOR's list after the re-probe mark.
-          b2_reinstall = next(
-              (ln for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL set ", limit=None)
-               if b2_mac_ctx and b2_mac_ctx in ln.split()), None)
+          # R2: any font-cache flush after the re-probe mark, for any context.
+          b2_flushed = next(
+              (ln for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL ", limit=None)
+               if "CAMOU-FL set " in ln or "CAMOU-FL flush " in ln), None)
           # R4: did the recipient actually reach a gated read path for these
           # families? R7 (re-review): a `gate` line shows that SOME gated read
           # path ran for that family under that context -- CamouIsFontAllowed
@@ -2177,7 +2177,7 @@ jobs:
               f"{ctx_token(ln)} {next((t for t in ln.split() if t.startswith('hop=')), 'hop=?')}"
               for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL group", "b2-reprobe", limit=None)})
           print(f"  [b2 / mac-after-win] derived: mac {b2_mac_ctx}, win {b2_win_ctx}, "
-                f"donor list re-installed after the mark: {b2_reinstall or 'no'}, "
+                f"font caches flushed after the mark: {b2_flushed or 'no'}, "
                 f"win gate lines on probe families: {len(b2_win_pop)}, "
                 f"re-probe font groups: {b2_reprobe_hops or 'none captured'}")
 
@@ -2247,16 +2247,15 @@ jobs:
                   f"mFcSubstituteCache is a per-process singleton, so an 'unchanged' "
                   f"result from another process is vacuous.")
           # R2 (re-review): the whole re-probe rests on NOTHING having flushed
-          # the memo between win's render and it. setFontList is one-shot per
-          # user context, so the init script on the re-probe page should find
-          # no binding and install nothing -- but that is prose, and if it ever
-          # failed, SetFontList would clear both memos, mac would re-resolve
-          # through its own gate, the pattern would be unchanged and this arm
-          # would print GREEN having measured nothing. The decisive line is
-          # already emitted: a `CAMOU-FL set` line for the MAC context after
-          # the re-probe mark. Qualified by context id, not by the mark alone,
-          # because camou_fl slices by byte offset and the donor is alive by
-          # design.
+          # the memo between win's render and it. Two things flush it: a
+          # `CAMOU-FL set` (SetFontList in the setter's process) and a
+          # `CAMOU-FL flush` (RoverfoxStorageManager's pref callback, in every
+          # process the list reaches, including a second, asynchronous flush in
+          # the setter's own). ClearFontNameCaches is process-wide, so either
+          # line for ANY context after the re-probe mark wipes win's entries:
+          # mac would re-resolve through its own gate, the pattern would be
+          # unchanged and this arm would print GREEN having measured nothing.
+          # Not qualified by context id for that reason.
           #
           # R5, residual: "no new pid appeared" does not rule out two
           # pre-existing tab processes with mac and win split between them and
@@ -2271,13 +2270,13 @@ jobs:
                   f"the re-probe's 'unchanged' result vacuous. Either the fontlist log "
                   f"module did not capture, or this build predates the `CAMOU-FL set` "
                   f"line: check the dump step's `set` count.")
-          elif b2_reinstall:
+          elif b2_flushed:
               b2_reprobe_bad.append(
-                  f"arm (b2) setup invalid (re-probe half only): the donor's list was "
-                  f"RE-INSTALLED after the "
-                  f"re-probe mark ({b2_reinstall!r}). SetFontList flushes both font-name "
-                  f"memos, so mac re-resolved through its own gate and its unchanged "
-                  f"pattern says nothing about the per-context key.")
+                  f"arm (b2) setup invalid (re-probe half only): the font caches were "
+                  f"flushed after the re-probe mark ({b2_flushed!r}). A set or flush for "
+                  f"any context clears both font-name memos process-wide, so mac "
+                  f"re-resolved through its own gate and its unchanged pattern says "
+                  f"nothing about the per-context key.")
           # R4 (re-review): with no win entries in the memo there is nothing for
           # mac's second lookup to hit, so an unchanged donor is guaranteed
           # under a broken key as well as a working one. A `gate` line under
@@ -2378,17 +2377,18 @@ jobs:
           # so the first and only init-script invocation happens on the final
           # document, in the process that will render it.
           #
-          # Hypothesis H1: the per-context list is process-local
-          # (`static nsTHashMap sFontLists`, dom/base/FontListManager.cpp:14)
-          # while the one-shot disable flag is cross-process
-          # (RoverfoxStorageManager, FontListManager.cpp:79-81). A context whose
-          # about:blank lands in P1 and whose real document lands in P2 installs
-          # its list in P1, and P2 finds the setter already disabled, never
-          # receives the list, and renders with HasFontList(ctx) == false --
-          # where CamouIsFontAllowed returns true for every family
-          # (gfxPlatformFontList.cpp:1232-1239). Under H1 this reorder makes the
-          # leak disappear. Under H2 (gfxFontGroup::mUserContextId cached as 0,
-          # gfxTextRun.cpp:1855-1875) ordering is irrelevant and the leak stays.
+          # Hypothesis H1, from when the list was process-local while the
+          # one-shot setter flag was cross-process: a context whose about:blank
+          # lands in P1 and whose real document lands in P2 installs its list in
+          # P1, and P2 finds the setter already used, never receives the list,
+          # and renders with HasFontList(ctx) == false -- where
+          # CamouIsFontAllowed returns true for every family. Now the list sits
+          # in RoverfoxStorageManager next to the flag, and FontListManager's
+          # EnsureFontList parses it in whichever process asks, so H1 can only
+          # recur if that store read misses. Under H1 this reorder makes the
+          # leak disappear. Under H2 (gfxFontGroup::mUserContextId resolving
+          # to 0 in the gfxFontGroup ctor) ordering is irrelevant and the leak
+          # stays.
           #
           # WHAT WOULD MAKE THIS ARM GREEN WRONGLY (CLAUDE.md lesson 4):
           #  * Nothing about "win resolved no mac families" is self-validating.

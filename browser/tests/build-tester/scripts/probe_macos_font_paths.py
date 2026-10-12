@@ -185,7 +185,9 @@ def log_findings(logdir, fonts):
         for ln in p["text"].splitlines():
             if "CAMOU-FL" not in ln:
                 continue
-            if "CAMOU-FL set ctx=" in ln:
+            # A list reached this process: set in the setter's, flush (the
+            # storage-pref callback) in every other.
+            if "CAMOU-FL set ctx=" in ln or "CAMOU-FL flush ctx=" in ln:
                 seen_set = True
             unfiltered += "default-unfiltered" in ln
             m = re.search(r"CAMOU-FL (gate|pref-fallback|facename) ctx=(\d+) .*?key=(.*?) allowed=1", ln)
