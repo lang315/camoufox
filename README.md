@@ -444,7 +444,9 @@ The goal is a browser that behaves exactly like stock Firefox, except that it
 reports a different machine. A value is spoofed when it identifies the host
 machine or the network. Anything else stays as Firefox has it, because
 something stock Firefox never does, such as noise, is a fingerprint in its own
-right.
+right. The one exception is canvas: this fork adds seeded per-context canvas
+noise where the canvas is not covered, accepting that tell to keep contexts on
+one host from being linked by canvas.
 
 | Trait | What a page sees | Why it is spoofed | Where |
 |---|---|---|---|
