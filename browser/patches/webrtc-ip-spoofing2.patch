@@ -1,5 +1,5 @@
 diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
-index 520fd6887f..30d97a4510 100644
+index df6b8d4e05..42b6333190 100644
 --- a/dom/base/WebRTCIPManager.cpp
 +++ b/dom/base/WebRTCIPManager.cpp
 @@ -1,6 +1,7 @@
@@ -30,10 +30,10 @@ index 520fd6887f..30d97a4510 100644
 +  return key;
 +}
 +
- 
- 
  /* static */ void
-@@ -49,6 +66,44 @@ WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
+ WebRTCIPManager::SetIPv4(uint32_t userContextId, const nsAString& ipv4) {
+   nsString key = IPv4KeyForUserContext(userContextId);
+@@ -47,6 +64,44 @@ WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
    DisableIPv6Function(userContextId);
  }
  
@@ -79,7 +79,7 @@ index 520fd6887f..30d97a4510 100644
  WebRTCIPManager::GetIPv6(uint32_t userContextId, nsAString& outIPv6) {
    nsString key = IPv6KeyForUserContext(userContextId);
 diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
-index c67d7be269..bee318767d 100644
+index a134ba615a..a15ac372e0 100644
 --- a/dom/base/WebRTCIPManager.h
 +++ b/dom/base/WebRTCIPManager.h
 @@ -44,6 +44,13 @@ public:
@@ -93,10 +93,10 @@ index c67d7be269..bee318767d 100644
 +  static bool GetLocalIPv6(uint32_t userContextId, nsAString& out);
 +  static void SetLocalIPv6(uint32_t userContextId, const nsAString& ipv6);
 +
- 
- 
    /**
-@@ -81,6 +88,8 @@ public:
+    * Mark the setWebRTCIPv4 function as used/disabled for a context.
+    * @param userContextId The user context ID
+@@ -75,6 +82,8 @@ public:
  private:
    static nsString IPv4KeyForUserContext(uint32_t userContextId);
    static nsString IPv6KeyForUserContext(uint32_t userContextId);
