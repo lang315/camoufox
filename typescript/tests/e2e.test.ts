@@ -156,9 +156,9 @@ function configOf(options: Record<string, any>): Record<string, any> {
 }
 
 /**
- * Every launcher draws its own canvas seed per launch (the audio seed follows
- * the identity, this one deliberately does not), so two launches of one
- * identity only agree when the seed is pinned through the public option.
+ * Every launcher draws its own canvas seed per uncovered launch (the audio
+ * seed follows the identity, this one deliberately does not), so two launches
+ * of one identity only agree when the seed is pinned through the public option.
  */
 const CANVAS_SEED = 424242;
 

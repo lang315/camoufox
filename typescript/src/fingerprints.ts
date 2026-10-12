@@ -1596,6 +1596,8 @@ export function targetOsFromPlatform(plat: string): SupportedOS {
  *   and before the init script is rendered.
  * @param webgl_config The [vendor, renderer] a drawn identity claims, instead
  *   of drawing one.
+ * @param canvas_seed Draw a canvas noise seed for setCanvasSeed(). NewContext
+ *   passes false on a browser whose canvas the RFP placeholder covers.
  */
 export function generateContextFingerprint({
 	preset,
@@ -1606,6 +1608,7 @@ export function generateContextFingerprint({
 	locale,
 	config_overrides,
 	webgl_config,
+	canvas_seed = true,
 }: {
 	preset?: Preset | null;
 	os?: string | null;
@@ -1615,6 +1618,7 @@ export function generateContextFingerprint({
 	locale?: string | null;
 	config_overrides?: Config | null;
 	webgl_config?: [string, string] | null;
+	canvas_seed?: boolean;
 } = {}): ContextFingerprint {
 	let config: Config;
 	let nav: Record<string, any>;
@@ -1743,8 +1747,8 @@ export function generateContextFingerprint({
 
 	// Fork-only canvas noise seed (patches/canvas-spoofing.patch); neither
 	// source above carries one.
-	if (!("canvas:seed" in config))
-		config["canvas:seed"] = pyRandom.randint(1, 4_294_967_295);
+	if (canvas_seed && !("canvas:seed" in config))
+		config["canvas:seed"] = random.randint(1, 4_294_967_295);
 
 	if (timezone) config.timezone = timezone;
 	if (locale) {

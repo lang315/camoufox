@@ -22,7 +22,7 @@ the goldens are a function of the code alone:
     TS port can mirror it).
   * module-level random: launch_options() draws the canvas seed per launch;
     the module generator is re-seeded to MODULE_SEED before each scenario (the
-    TS test seeds its pyRandom the same way).
+    TS test seeds python-random's module generator the same way).
   * paths: the browser bundle is tests/fixtures/launch/bundle*, the cache the
     scratch dir; both are written back as <BUNDLE>/<CACHE>/... placeholders.
 

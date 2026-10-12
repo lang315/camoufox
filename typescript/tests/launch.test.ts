@@ -933,12 +933,15 @@ describe.skipIf(!MODEL.ok)(
 			expect(context.init_script).not.toContain("setFontSpacingSeed");
 		});
 
-		it("every launch draws its own canvas seed", async () => {
+		it("every uncovered launch draws its own canvas seed", async () => {
 			const seeds = new Set<number>();
 			for (let i = 0; i < 40; i++) {
-				seeds.add(
-					(await launchConfig({ os: "linux", headless: true }))["canvas:seed"],
-				);
+				const config = await launchConfig({
+					os: "linux",
+					headless: true,
+					canvas_noise: false,
+				});
+				seeds.add(config["canvas:seed"]);
 			}
 			expect(seeds.size).toBe(40);
 		});
