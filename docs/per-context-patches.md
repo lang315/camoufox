@@ -641,7 +641,7 @@ bundles are shipped in the wheel.
 | Canvas seed | `randint(1, 2^32-1)` per launch (NewBrowser) or per context (NewContext) | Never 0; not derived from the identity, so a pinned preset still renders a different canvas on each launch |
 | Timezone | From preset, or `timezone` in `CAMOU_CONFIG` | The init script calls `setTimezone()` only for an explicit value; otherwise the C++ side falls back to `CAMOU_CONFIG` (set from geoip at launch) or the browser default. |
 | Speech voices | `_generate_random_voice_subset()` | Follows the measured model in `voice-manifests.json`: Windows gets the display language's OneCore pack plus its legacy Desktop voices at their measured rate; macOS the compact + Eloquence base plus rare downloads; Linux speech-dispatcher's espeak-ng list. Seeded by the identity. NOT from presets. |
-| WebRTC IP | Not set by default | NewContext's `webrtc_ip` (or the proxy's exit IP) goes to `window.setWebRTCIPv4()` or `window.setWebRTCIPv6()` by address family; an invalid address raises `InvalidIP`. Without one, the init script calls `setWebRTCIPv4("")` |
+| WebRTC IP | Not set by default | NewContext's `webrtc_ip` (or the proxy's exit IP) goes to `window.setWebRTCIPv4()` or `window.setWebRTCIPv6()` by address family; an invalid address raises `InvalidIP`. Without one, the init script calls no WebRTC setter, so the launch-level `webrtc:ipv4` (set by `geoip=`) stands |
 | Geolocation | User parameter or geoip detection | Via Playwright `context.setGeolocation()` |
 
 ### Key Files
@@ -650,7 +650,7 @@ bundles are shipped in the wheel.
 - `generate_context_fingerprint()` — main API. Returns `{init_script, context_options, config, preset}`
 - `from_preset()` — converts real preset to CAMOU_CONFIG format
 - `from_fpgen()` — converts an fpgen fingerprint dict to CAMOU_CONFIG using `fpgen.yml` mappings
-- `_build_init_script()` — generates a JavaScript IIFE calling the `window.setXxx()` functions with `typeof` guards (every setter except `setWebRTCIPv6` — IPv6 is optional and rarely set)
+- `_build_init_script()` — generates a JavaScript IIFE calling the `window.setXxx()` functions with a `typeof` guard on every setter
 - `_generate_random_font_subset()` — the font list of one plausible machine of the OS (weighted base + per-unit draws, marker fonts always included)
 - `_generate_random_voice_subset()` — the voice list of one plausible machine of the OS, as MaskConfig voice objects
 
