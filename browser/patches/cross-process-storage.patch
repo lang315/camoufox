@@ -1,10 +1,11 @@
 diff --git a/dom/base/RoverfoxStorageManager.cpp b/dom/base/RoverfoxStorageManager.cpp
 new file mode 100644
-index 0000000000..c5f3dd4247
+index 0000000000..8ac207f60d
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.cpp
-@@ -0,0 +1,275 @@
+@@ -0,0 +1,290 @@
 +#include "RoverfoxStorageManager.h"
++#include "FontListManager.h"
 +#include "mozilla/Preferences.h"
 +#include "nsIPrefBranch.h"
 +#include "nsXULAppAPI.h"
@@ -54,7 +55,21 @@ index 0000000000..c5f3dd4247
 +}
 +
 +static void OnStoragePrefChanged(const char* aPrefName, void*) {
-+  RoverfoxStorageManager::MirrorPref(nsDependentCString(aPrefName));
++  nsDependentCString name(aPrefName);
++  RoverfoxStorageManager::MirrorPref(name);
++  // Camoufox: a context's font list reached this process. A lookup that ran
++  // before it arrived answered without it and memoized that answer, so the
++  // font caches are flushed here -- after MirrorPref has released the cache
++  // mutex, which the font list's lookups take under their own locks.
++  constexpr auto kFontListPrefix = "roverfox.s.fontlist_"_ns;
++  if (StringBeginsWith(name, kFontListPrefix)) {
++    nsresult rv;
++    uint32_t id =
++        Substring(name, kFontListPrefix.Length()).ToUnsignedInteger(&rv);
++    if (NS_SUCCEEDED(rv)) {
++      FontListManager::OnFontListStored(id);
++    }
++  }
 +}
 +
 +/* static */ void RoverfoxStorageManager::MirrorPref(const nsACString& aPrefName) {
@@ -281,10 +296,10 @@ index 0000000000..c5f3dd4247
 +}  // namespace mozilla
 diff --git a/dom/base/RoverfoxStorageManager.h b/dom/base/RoverfoxStorageManager.h
 new file mode 100644
-index 0000000000..c7dad0158f
+index 0000000000..68541aef17
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.h
-@@ -0,0 +1,64 @@
+@@ -0,0 +1,67 @@
 +#ifndef mozilla_dom_RoverfoxStorageManager_h
 +#define mozilla_dom_RoverfoxStorageManager_h
 +
@@ -317,6 +332,10 @@ index 0000000000..c7dad0158f
 +  // A put reached this process's prefs: copy it into the local cache (main
 +  // thread only), which is all a worker thread reads.
 +  static void MirrorPref(const nsACString& aPrefName);
++  // Main thread only, idempotent. Called from ContentChild::InitXPCOM so the
++  // mirror is live before any worker can read; the main-thread paths also
++  // call it lazily.
++  static void EnsureMirror();
 +
 +  // The userContextId per-context values are stored under: the principal's.
 +  // A document without a browsing context of its own (createHTMLDocument,
@@ -339,7 +358,6 @@ index 0000000000..c7dad0158f
 +  static nsCString MakePrefName(const nsAString& key);
 +  static void SetPrefValue(const nsCString& prefName, const nsCString& value);
 +  static void ReadValue(const nsCString& prefName, nsACString& outValue);
-+  static void EnsureMirror();
 +  static nsTHashSet<nsCString>& GetMissCache();
 +  static nsTHashMap<nsCStringHashKey, nsCString>& GetLocalCache();
 +  static mozilla::Mutex& GetLocalCacheMutex();
@@ -350,10 +368,10 @@ index 0000000000..c7dad0158f
 +
 +#endif  // mozilla_dom_RoverfoxStorageManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index ad24dc91a2..e8f35ff5c4 100644
+index af5abf9a37..f104f5e03f 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -261,6 +261,7 @@ EXPORTS.mozilla.dom += [
+@@ -262,6 +262,7 @@ EXPORTS.mozilla.dom += [
      "RequestCallbackManager.h",
      "ResizeObserver.h",
      "ResponsiveImageSelector.h",
@@ -361,7 +379,7 @@ index ad24dc91a2..e8f35ff5c4 100644
      "SameProcessMessageQueue.h",
      "ScreenLuminance.h",
      "ScreenOrientation.h",
-@@ -481,6 +482,7 @@ UNIFIED_SOURCES += [
+@@ -483,6 +484,7 @@ UNIFIED_SOURCES += [
      "RemoteOuterWindowProxy.cpp",
      "ResizeObserver.cpp",
      "ResponsiveImageSelector.cpp",
@@ -369,6 +387,29 @@ index ad24dc91a2..e8f35ff5c4 100644
      "SameProcessMessageQueue.cpp",
      "ScreenLuminance.cpp",
      "ScreenOrientation.cpp",
+diff --git a/dom/ipc/ContentChild.cpp b/dom/ipc/ContentChild.cpp
+index 44726e08c4..697d9290a6 100644
+--- a/dom/ipc/ContentChild.cpp
++++ b/dom/ipc/ContentChild.cpp
+@@ -81,6 +81,7 @@
+ #include "mozilla/dom/PushNotifier.h"
+ #include "mozilla/dom/RemoteWorkerDebuggerManagerChild.h"
+ #include "mozilla/dom/RemoteWorkerService.h"
++#include "mozilla/dom/RoverfoxStorageManager.h"
+ #include "mozilla/dom/ScreenOrientation.h"
+ #include "mozilla/dom/ServiceWorkerManager.h"
+ #include "mozilla/dom/SessionStorageManager.h"
+@@ -1444,6 +1445,10 @@ void ContentChild::InitXPCOM(
+   Preferences::RegisterCallbackAndCall(&OnFissionBlocklistPrefChange,
+                                        kFissionOmitBlockListValues);
+ 
++  // Camoufox: worker threads read the storage cache only, so fill it before
++  // any worker can start.
++  RoverfoxStorageManager::EnsureMirror();
++
+   // Set the dynamic scalar definitions for this process.
+   TelemetryIPC::AddDynamicScalarDefinitions(aXPCOMInit.dynamicScalarDefs());
+ }
 diff --git a/dom/ipc/ContentParent.cpp b/dom/ipc/ContentParent.cpp
 index a3b9fd9ead..fb4011d2c3 100644
 --- a/dom/ipc/ContentParent.cpp
