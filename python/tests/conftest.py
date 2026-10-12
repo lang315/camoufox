@@ -34,7 +34,7 @@ def repo_version() -> str:
 
 
 @pytest.fixture(autouse=True)
-def no_browser_fetch(monkeypatch, tmp_path):
+def no_browser_fetch(request, monkeypatch, tmp_path):
     """Fail any test that reaches the browser fetcher instead of mocking it.
 
     Running the suite locally used to download the browser (issue #108). Every
@@ -46,6 +46,9 @@ def no_browser_fetch(monkeypatch, tmp_path):
     addons.py:94 wraps around the uBlock Origin download (#110). ADDONS_DIR is
     redirected because, with the refusal escaping, addons.py:96's rmtree no
     longer runs and a trip would leave a directory in the real user cache.
+
+    A test marked `network` downloads on purpose (test_geoip_sources checks
+    what each source serves today), so its downloads are let through.
     """
 
     def _refuse(*args, **kwargs):
@@ -54,8 +57,9 @@ def no_browser_fetch(monkeypatch, tmp_path):
     monkeypatch.setattr(pkgman.CamoufoxFetcher, "install", _refuse)
     monkeypatch.setattr(pkgman.CamoufoxFetcher, "fetch_latest", _refuse)
     monkeypatch.setattr(pkgman.CamoufoxFetcher, "get_asset", _refuse)
-    monkeypatch.setattr(pkgman, "webdl", _refuse)
-    monkeypatch.setattr(pkgman.requests, "get", _refuse)
+    if not request.node.get_closest_marker("network"):
+        monkeypatch.setattr(pkgman, "webdl", _refuse)
+        monkeypatch.setattr(pkgman.requests, "get", _refuse)
     monkeypatch.setattr(addons, "ADDONS_DIR", tmp_path / "addons")
 
     # Tests that call launch_options() without `executable_path` or

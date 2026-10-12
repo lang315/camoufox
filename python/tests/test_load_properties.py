@@ -12,8 +12,6 @@ Run with:
 import os
 import sys
 
-import pytest
-
 # Make `import camoufox` resolve to the in-tree python/src without an install.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
@@ -29,9 +27,9 @@ def _write(p: Path, data: bytes = PROPS) -> None:
     p.write_bytes(data)
 
 
-@pytest.mark.skipif(sys.platform != "darwin", reason="macOS .app bundle layout")
 def test_macos_bundle_resolves_properties_from_resources(tmp_path):
-    # Layout: Camoufox.app/Contents/{MacOS/camoufox, Resources/properties.json}
+    # Layout: Camoufox.app/Contents/{MacOS/camoufox, Resources/properties.json}.
+    # pkgman.build_file resolves it on every host, so this runs everywhere.
     app = tmp_path / "Camoufox.app" / "Contents"
     exe = app / "MacOS" / "camoufox"
     exe.parent.mkdir(parents=True, exist_ok=True)
@@ -39,7 +37,7 @@ def test_macos_bundle_resolves_properties_from_resources(tmp_path):
     _write(app / "Resources" / "properties.json")
 
     result = _load_properties(path=exe)
-    assert result == {"test:key": "str"}
+    assert result == {"test:key": {"property": "test:key", "type": "str"}}
 
 
 def test_sibling_properties_still_used(tmp_path):
@@ -49,4 +47,4 @@ def test_sibling_properties_still_used(tmp_path):
     _write(tmp_path / "properties.json")
 
     result = _load_properties(path=exe)
-    assert result == {"test:key": "str"}
+    assert result == {"test:key": {"property": "test:key", "type": "str"}}

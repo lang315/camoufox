@@ -266,51 +266,27 @@ def warn_if_executable_predates_playwright(path: Optional[Path]) -> None:
     )
 
 
-def _bundle_app_version_line(path: Optional[Path]) -> Optional[str]:
-    """The raw value of `[App] Version=` from the bundle's own application.ini.
-
-    Packages ship application.ini -- a Gecko invariant generated from
-    build/application.ini.in -- but not version.json, which the installer
-    writes into INSTALL_DIR. On macOS the binary sits in Contents/MacOS and
-    the file in Contents/Resources; both layouts are tried. Only [App] carries
-    a bare `Version=` ([Gecko] uses MinVersion=/MaxVersion=), and [App] is the
-    first section, so no section tracking is needed. Returns None -- never
-    raises -- on no path, no file, or no such line.
-    """
-    if path is None:
-        return None
-    parent = Path(path).parent
-    for ini in (
-        parent / "application.ini",
-        parent.parent / "Resources" / "application.ini",
-    ):
-        try:
-            text = ini.read_text(encoding="utf-8", errors="replace")
-        except OSError:
-            continue
-        for line in text.splitlines():
-            if line.startswith("Version="):
-                return line[len("Version="):].strip()
-    return None
-
-
 def _bundle_version(path: Optional[Path]) -> Optional[Version]:
-    """The build at `path` as a Version, on the axis Version compares.
+    """The build at `path` as a Version, on the axis Version compares, from the
+    `[App] Version=` of its own application.ini (pkgman.build_file).
 
     Version.__lt__/__eq__ compare `sorted_rel`, which is derived from the BUILD
     TAG (`beta.31`) -- not the Firefox version. PLAYWRIGHT_BROWSER_FLOORS is
-    keyed the same way (`beta.30`). application.ini's `Version=` carries both
-    halves as `<firefox>-<build>`; this splits them so the result can stand in
-    for Version.from_path() where a package has no version.json (#102).
+    keyed the same way (`beta.30`). `Version=` carries both halves as
+    `<firefox>-<build>`; this splits them so the result can stand in for
+    Version.from_path() where a package has no version.json (#102).
 
-    Returns None when there is no parsable line or the value has no `-<build>`
-    half: a version with no build tag cannot be placed on the floor axis, and
-    guessing one would produce a confident wrong answer.
+    Returns None -- never raises, since it feeds a warning -- on no path, no
+    readable file, or a value with no `-<build>` half: a version with no build
+    tag cannot be placed on the floor axis, and guessing one would produce a
+    confident wrong answer.
     """
-    value = _bundle_app_version_line(path)
-    if value is None:
+    if path is None:
         return None
-    version, sep, build = value.partition("-")
+    try:
+        version, sep, build = resolve_verstr(path).partition("-")
+    except (OSError, ValueError):
+        return None
     if not sep or not build:
         return None
     try:
@@ -319,38 +295,6 @@ def _bundle_version(path: Optional[Path]) -> Optional[Version]:
         # Version.__post_init__ indexes each dot-separated build token; an
         # empty token ("beta.") raises IndexError. Never-raises contract.
         return None
-
-
-def _bundle_verstr(path: Optional[Path]) -> Optional[str]:
-    """Firefox major version of the build at `path`, read from its own bundle.
-
-    Packages ship application.ini -- a Gecko invariant generated from
-    build/application.ini.in -- but not version.json, which the installer
-    writes into INSTALL_DIR (pkgman.py:652). So Version.from_path() cannot
-    read a package or a raw build artifact, while `[App] Version=` can: it
-    carries the same "<major>.<minor>.<patch>-<build>" shape
-    installed_verstr() returns.
-
-    On macOS the binary sits in Contents/MacOS and the file ships in
-    Contents/Resources, beside properties.json -- the same fallback
-    _load_properties() makes. Unlike that function this one is not gated on
-    OS_NAME: the check is a cheap existence test either way, and leaving it
-    ungated keeps the behaviour testable on every host.
-
-    Returns None -- never raises -- when there is no executable path, no
-    application.ini beside it, or no parsable version line. The caller then
-    falls back to the managed install, which is the pre-existing behaviour.
-
-    Reads the FIRST `Version=` line only. An earlier version kept scanning past
-    a non-numeric value to later lines and to the next candidate file; Gecko's
-    generated application.ini carries exactly one `Version=` (in [App]), so
-    that branch was unreachable and is not preserved.
-    """
-    value = _bundle_app_version_line(path)
-    if value is None:
-        return None
-    major = value.split('.', 1)[0]
-    return major if major.isdigit() else None
 
 
 def _resolved_playwright_version_str() -> str:
@@ -1544,11 +1488,6 @@ def launch_options(
         _ident = identity_seed(config, _identity_salt)
         config['audio:seed'] = ((_ident * 2654435761 + 97) & 0xFFFFFFFF) or 1
 
-    # The canvas noise seed is fork-only (patches/canvas-spoofing.patch) and is
-    # drawn per launch, so two launches on one preset still render different
-    # canvases. 0 disables the noise.
-    set_into(config, 'canvas:seed', randint(1, 4_294_967_295))  # nosec
-
     # Set geolocation
     if geoip:
         geoip_allowed()  # Assert that geoip is allowed
@@ -1707,6 +1646,11 @@ def launch_options(
     if cover_canvas:
         add_canvas_placeholder(firefox_user_prefs)
         LeakWarning.warn('canvas_noise', i_know_what_im_doing)
+    else:
+        # The fork's canvas noise (canvas-spoofing.patch), drawn per launch so two
+        # launches on one host render different canvases. Only where the placeholder
+        # does not cover the canvas: without a seed the patch is inert.
+        set_into(config, 'canvas:seed', randint(1, 4_294_967_295))  # nosec
 
     if block_webgl:
         firefox_user_prefs['webgl.disabled'] = True
