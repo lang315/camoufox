@@ -46,7 +46,7 @@ site pairs the gate with `MaskedFontListBlocks`, which answers from the document
 so the fail-open gate is never reached for a masked family. Measured on the
 codepoint-fallback path, U+1F600 → Twemoji Mozilla under a mac launch list, on the
 Linux bundle conf: a bare `new_context()` and a persistent context (userContextId 0
-per `browser/additions/juggler/TargetRegistry.js:1240-1241` at HEAD; its own `CAMOU-FL pref-fallback ctx=0` line is
+per `browser/additions/juggler/TargetRegistry.js:1241-1242` at HEAD; its own `CAMOU-FL pref-fallback ctx=0` line is
 consistent with that, though a `ctx=0` line cannot distinguish a genuine id 0 from
 a hop that failed to it) both drew a missing glyph (checksum 524399160, against
 4262204629 unmasked), the browser's own system-fallback line read
