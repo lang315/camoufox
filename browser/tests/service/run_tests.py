@@ -40,7 +40,7 @@ sys.path.insert(0, str(BUILD_TESTER_DIR / "scripts"))
 from bundle import ensure_bundle  # noqa: E402
 from certificate import generate_certificate, print_certificate, print_profile_result  # noqa: E402
 from constants import BOLD, CYAN, RED, RESET, grade_color  # noqa: E402
-from grading import adjust_cross_os_font_checks, compute_cross_profile, compute_grade, count_all_checks  # noqa: E402
+from grading import compute_cross_profile, compute_grade, count_all_checks  # noqa: E402
 from runner import collect_results  # noqa: E402
 from server import start_http_server  # noqa: E402
 
@@ -55,13 +55,14 @@ async def _run_os_group(AsyncCamoufox, AsyncNewContext, launch_kwargs, entries,
 
     Split out of run_tests so each OS gets its own process: the launch-level
     font list becomes a process-wide whitelist and families outside it are
-    deleted from the font list entirely, so one process can host exactly one
-    font environment (#44/#45)."""
+    refused at lookup, so one process can host exactly one font environment
+    (#44/#45)."""
     async with AsyncCamoufox(**launch_kwargs) as browser:
             # Create all contexts simultaneously — camoufox handles all fingerprint injection
             open_contexts = []
             for entry in entries:
-                profile = {"name": entry["name"], "os": entry["os"], "proxy_geo": entry.get("proxy_geo", {})}
+                profile = {"name": entry["name"], "os": entry["os"], "mode": "per-context",
+                           "proxy_geo": entry.get("proxy_geo", {})}
                 try:
                     context = await AsyncNewContext(browser, os=entry["os"], proxy=entry["proxy"])
                     open_contexts.append({"context": context, "profile": profile})
@@ -86,10 +87,8 @@ async def _run_os_group(AsyncCamoufox, AsyncNewContext, launch_kwargs, entries,
                     return_exceptions=True,
                 )
 
-                # The page hands its results off through a DOM node; collect_results
-                # waits for it (page.evaluate() cannot see page-world globals on this
-                # fork, so the old window.__testComplete__ wait never returned).
-                # Collect results
+                # The page hands its results off through a DOM node, which
+                # collect_results waits for: it no longer sets window.__testComplete__.
                 print(f"  Collecting results from {len(open_contexts)} contexts...")
                 for ctx_data in open_contexts:
                     page = ctx_data["page"]
@@ -100,8 +99,8 @@ async def _run_os_group(AsyncCamoufox, AsyncNewContext, launch_kwargs, entries,
                             pr = {"profile": profile, "results": None, "grade": "F",
                                   "passCount": 0, "totalChecks": 0, "error": test_error}
                         else:
-                            adjust_cross_os_font_checks(profile["os"], results)
-                            pass_count, total_checks = count_all_checks(results)
+                            # No cross-OS font adjustment: each OS runs in its own browser (#45).
+                            pass_count, total_checks = count_all_checks(profile, results, [])
                             grade = compute_grade(pass_count, total_checks)
                             pr = {"profile": profile, "results": results, "grade": grade,
                                   "passCount": pass_count, "totalChecks": total_checks}
@@ -180,8 +179,8 @@ async def run_tests(
     # One browser per OS, not one browser for everything.
     #
     # The launch-level font list is a process-wide mask, enforced at lookup
-    # time as an AND-gate (patches/font-hijacker.patch, header): a family the
-    # launch list does not name is refused wherever a font is looked up, and a
+    # time as an AND-gate (MaskedFontListBlocks, browser/patches/font-hijacker.patch):
+    # a family the launch list does not name is refused wherever a font is looked up, and a
     # per-context setFontList() can only narrow that further, never widen it.
     # (An earlier version of the patch deleted the families outright via
     # ApplyWhitelist(); the outcome is the same, the mechanism is not.) So a
