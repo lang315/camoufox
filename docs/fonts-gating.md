@@ -12,8 +12,10 @@ lean on.
 ## The per-context gate fails open (lesson 5)
 
 `gfxFontGroup` caches its user context id once in its constructor, through
-`mFontVisibilityProvider->GetDocument()` → inner window → `BrowsingContext` —
-four hops, each failing silently to 0. `CamouIsFontAllowed` treats context 0 as
+`FontListManager::ContextIdFor`: provider → `GetDocument()` → the document's
+principal (`RoverfoxStorageManager::UserContextId`), or, when the provider has
+no document, the current worker's origin attributes — each hop failing silently
+to 0. `CamouIsFontAllowed` treats context 0 as
 "no per-context list" and **returns `true`, allowing every family**. It never
 consults the launch-level `fonts` key: that question is answered separately by
 `MaskedFontListBlocks` / `MaskConfig::IsFontAllowed`, at the sites that carry a
@@ -23,17 +25,20 @@ that chain have already been found failing
 (`OffscreenCanvas::GetDocument()` off-main-thread; #83 turned out to be a cache,
 not a hop). Fixing individual hops does not close the class — but the class is
 narrower than this paragraph first read (#105, smoke run 34698688879 on build
-34578327006, arm `(ctx105)`). Five sites ask this gate with no
-`MaskedFontListBlocks` beside it — `LookupInSharedFaceNameList`
-(`gfxPlatformFontList.cpp:1127`), both `GetFontList` branches (`:1409`, `:1427`),
-`GetFontFamilyList` (`:1450`) and `CommonFontFallback`'s non-shared branch
-(`:1713`) — and under a launch mask none of them can serve a masked family to a
-page: the face-name one is skipped by its caller (`gfxUserFontSet.cpp:463-469`
-refuses `local()` outright when `MaskedFontListAppliesTo`), `GetFontList` is
-reached only by the chrome font enumerator, and `GetFontFamilyList` and the
-non-shared branch are dormant while `gfx.e10s.font-list.shared` is true (default
-`true`, `StaticPrefList.yaml:7513-7516`, `mirror: once`, overridden nowhere in
-`settings/`, `additions/`, `pythonlib/` or `assets/`). Every *other* live lookup
+34578327006, arm `(ctx105)`). On the beta.32 tree four sites ask this gate with
+no `MaskedFontListBlocks` beside it — both `GetFontList` branches
+(`gfxPlatformFontList.cpp:1426`, `:1444`), `GetFontFamilyList` (`:1467`) and
+`CommonFontFallback`'s non-shared branch (`:1730`) — and under a launch mask
+none of them can serve a masked family to a page: `GetFontList` is reached only
+by the chrome font enumerator, and `GetFontFamilyList` and the non-shared branch
+are dormant while `gfx.e10s.font-list.shared` is true (default `true`, beta.32
+`StaticPrefList.yaml:7770-7773`, `mirror: once`, overridden nowhere in
+`browser/settings/`, `browser/additions/`, `browser/assets/`, `python/src/` or
+`typescript/src/`). The fifth site of the beta.31 reading,
+`LookupInSharedFaceNameList` (`:1144`), asks both halves through
+`CamouIsFamilyAllowed` since #150, which also let `local()` reach it:
+`gfxUserFontSet.cpp:483-493` drops a `local()` face whose resolved family the
+launch mask blocks. Every *other* live lookup
 site pairs the gate with `MaskedFontListBlocks`, which answers from the document's
 `FontVisibilityProvider` and never from the context id, and asks *first* —
 `CamouIsFamilyAllowed` is `!MaskedFontListBlocks(...) && CamouIsFontAllowed(...)` —
@@ -208,7 +213,7 @@ Measured on a native macOS arm64 host against build run 35799717143 (`main` at
 `b8763a2`, whose compiled inputs equal `6e1a9f8`). The build is the packaged
 app, so the font universe is the one that ships: the host's fonts plus the
 bundled windows and linux sets. Headless. Probe:
-`build-tester/scripts/probe_macos_font_paths.py`.
+`browser/tests/build-tester/scripts/probe_macos_font_paths.py`.
 
 Each family is measured under two fallbacks that are checked to differ on the
 page. A family that renders measures the same under both, and a refused one
@@ -235,7 +240,7 @@ That split is #149, below.
 Arm (c) is the first macOS-host reading of the #131/#138 `system-ui` step. The
 mac row is the discriminating one: `system-ui` lands on Helvetica, and
 `sans-serif` lands elsewhere. The windows row is equal to `sans-serif` on this
-host too, which is the ambiguity `tests/patches/system-ui-font-spoofing.py`
+host too, which is the ambiguity `browser/tests/playwright/patches/system-ui-font-spoofing.py`
 already notes.
 
 **`src: local()` now follows the font-family gate (#150).** Until #150 every
@@ -258,12 +263,12 @@ as `font-family`:
   - Status agrees with render on every row.
 - **Linux and Windows:** the shared face-name list, `LookupInSharedFaceNameList`,
   gates the matched face's family with `CamouIsFamilyAllowed`, which asks both
-  halves. Linux is measured by `tests/patches/local-font-source.py`, red on
+  halves. Linux is measured by `browser/tests/playwright/patches/local-font-source.py`, red on
   main and green on the fix, and by smoke arms (d), (e) and (h) on run
   35952837490. Native Windows is measured by the same guard, which PASSes on
   every row (see "Native Windows after #149 and #150" below).
 
-`tests/patches/local-font-source.py` guards all of it. It covers both the
+`browser/tests/playwright/patches/local-font-source.py` guards all of it. It covers both the
 `FontFace` and the CSS `@font-face` rule paths, and it fails when a status
 disagrees with what renders.
 
@@ -293,7 +298,7 @@ the font-name caches, which may hold answers made before the list arrived.
 Font groups that had already resolved their fonts are not flushed. That the
 callback fires before the lists are needed is established by reading the code;
 the measurement is pending CI.
-`tests/patches/context-list-every-process.py` guards it: every page of one
+`browser/tests/playwright/patches/context-list-every-process.py` guards it: every page of one
 context, across two origins, must refuse a family that only the launch holds.
 It was red on main's browser and is green on the fix, both on Linux CI. Every
 other guard reads one page per context, so none of them can see this.
@@ -313,9 +318,9 @@ Georgia, Comic Sans MS) are the host's own fonts, so these rows go through
 
 | Check | Result |
 |---|---|
-| `tests/patches/local-font-source.py` (#150) | PASS. Arial and an alias load and render, a CSS alias loads and renders, and Georgia (launch only), Comic Sans MS (no list) and a CSS rule on Georgia are refused. Status agrees with render on every row. |
-| `tests/patches/context-list-every-process.py` (#149) | PASS. Three pages of one context on two origins all refuse Georgia; the parent isolates both origins as `WebContent`, and all three content logs installed the list. `getVoices()` reads 50 on every page. |
-| `build-tester/scripts/probe_windows_fonts.py` (#87) | 11 of 11 `pass`, `leaked` and `unmeasured` empty. The family-name half matches #87 (absent 817.8834, bare 1261.35, 84 host-only families collapsed). The codepoint half matches too: U+05EF 26.0167 bare, 21.18 and 21.12 under the two masks. |
+| `browser/tests/playwright/patches/local-font-source.py` (#150) | PASS. Arial and an alias load and render, a CSS alias loads and renders, and Georgia (launch only), Comic Sans MS (no list) and a CSS rule on Georgia are refused. Status agrees with render on every row. |
+| `browser/tests/playwright/patches/context-list-every-process.py` (#149) | PASS. Three pages of one context on two origins all refuse Georgia; the parent isolates both origins as `WebContent`, and all three content logs installed the list. `getVoices()` reads 50 on every page. |
+| `browser/tests/build-tester/scripts/probe_windows_fonts.py` (#87) | 11 of 11 `pass`, `leaked` and `unmeasured` empty. The family-name half matches #87 (absent 817.8834, bare 1261.35, 84 host-only families collapsed). The codepoint half matches too: U+05EF 26.0167 bare, 21.18 and 21.12 under the two masks. |
 
 Neither fix regressed the #87 Windows readings, and the DWrite face-name path
 that #150 opened is gated as the code reads.

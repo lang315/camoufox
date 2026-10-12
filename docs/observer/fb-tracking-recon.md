@@ -148,7 +148,7 @@ established-session arm is replicated.
 - **3rd-party Pixel is blocked by default** (bundled uBlock Origin) → the `/tr` beacon
   never fires on 3rd-party sites → no cross-site pixel fingerprinting for a default user.
 - **First-party facebook.com tracking runs**, but the fingerprint camoufox presents is
-  spoofed and coherent (`build-tester/observer/audit_coherence.py`: 12/12), so the
+  spoofed and coherent (`browser/tests/build-tester/observer/audit_coherence.py`: 12/12), so the
   device signals FB reads (`screen`, `wd`) match the claimed profile.
 - **Ephemeral profile by default** (`persistent_context=False`) → closing the browser
   wipes `datr`/`c_user`/`xs`, so a session leaves no persistent linkage unless the user
