@@ -216,7 +216,7 @@ rules:
       - "macOS 7 distinct of 12, Linux 9 of 12; one value seen three times"
       - "matches the rate at which CI flagged cross-profile canvas collisions"
       - "measured before the fork's canvas seed was restored for FF156 (3e1cd16)"
-      - "re-measured on CI Tests run 38299426185 (head e91d24e), build-tester gate, raw binary with a canvas seed per context: macPerContext.uniqueCanvas 3/3, linuxPerContext.uniqueCanvas 3/3, uniqueAudio 3/3 in both; uniqueness.low_entropy empty; grade A, 1056/1064"
+      - "re-measured on CI Tests run 38299426185 (head e91d24e), build-tester gate, raw-binary launches seeded per context (no launcher plan): macPerContext.uniqueCanvas 3/3, linuxPerContext.uniqueCanvas 3/3, uniqueAudio 3/3 in both; uniqueness.low_entropy empty; grade A, 1056/1064"
       - "in that run's macOS group uniqueFonts and uniqueWebGL were 1/3, so the three canvases differed with fonts and claimed GPU shared"
     rationale: >-
       Audio and canvas are both noised per context, by the same machinery, and
@@ -237,7 +237,10 @@ rules:
       not a rate, and it does not show that "far more often" has gone: a 1-in-3
       collision rate would leave a group of three collision-free some of the
       time. Its macOS group did differ with fonts and claimed GPU shared, which
-      fits the seed being what separates contexts. The run was headless (#195).
+      fits the seed being what separates contexts. Only the Linux group, on a
+      Linux host, is a path the product leaves uncovered; the launcher would
+      cover the macOS group there, so it measures the seed mechanism alone. The
+      run was headless (#195).
       Kept open until a larger sample settles it.
 
   # Fork divergence (lang315/camoufox): upstream's rule `canvas-is-not-noised`
@@ -265,7 +268,7 @@ rules:
       - "v156.0.1-beta.32: the three RFP canvas targets in privacy.baselineFingerprintingProtection.overrides give RFP's readback (random, toDataURL ~770 bytes) with hardwareConcurrency untouched"
       - "v156.0.1-beta.32: a Linux host with an RTX 5080 and a Ryzen iGPU reported 'AMD, Radeon HD 3200 Graphics, or similar' to WebGL, headless and headed"
       - "v156.0.1-beta.32: a Linux identity whose config claimed availHeight 1053 on a 1080 screen read 1080 (nsRFPService::GetSpoofedScreenAvailSize, no Linux offset)"
-      - "fork: CI Tests run 38299426185 (head e91d24e), build-tester, uncovered launches with a canvas seed per context: uniqueCanvas 3/3 macOS and 3/3 Linux (n=6)"
+      - "fork: CI Tests run 38299426185 (head e91d24e), build-tester, raw-binary launches seeded per context (no launcher plan): uniqueCanvas 3/3 macOS and 3/3 Linux on a Linux host; only the Linux group is a path the product leaves uncovered (n=3)"
     rationale: >-
       Canvas and WebGL pixels come from the host's OS, driver and GPU. On the
       host's OS the identity claims the GPU Firefox reports there, read from the
@@ -283,20 +286,25 @@ rules:
       what LibreWolf, Tor Browser and Mullvad Browser return; stock Firefox
       does not, so the launch warns. Firefox's older keyed pixel noise
       (CanvasRandomization) was rejected: no current Firefox produces it by
-      default. (Fork divergence: this fork does apply keyed noise, its own
-      canvas-spoofing.patch, seeded per launch and per context, on every launch
-      the plan leaves uncovered, which is the host's OS on its own GPU or a
-      software renderer. That is the trade: a pixel perturbation no current
-      Firefox makes by default, taken for cross-context unlinkability on one
-      host, which upstream does not address. The evidence is the
-      CI Tests run 38299426185 reading above, n=6 and no collisions, not a rate.
-      Covered launches get RFP's placeholder and no seed.) Spoofed avail-screen and touch values go through baseline
+      default. Spoofed avail-screen and touch values go through baseline
       protection like the real ones, for the claimed OS, so the launchers
       claim them as it reports them (follow_baseline_protection,
       followBaselineProtection): the available screen is the screen less 48px
       on Windows, 76px on macOS and nothing on Linux, and more than one touch
       point is 5. A config claiming fpgen's recorded values read differently
       on the page.
+
+      Fork divergence: this fork does apply keyed noise, its own
+      canvas-spoofing.patch, seeded per launch and per context, on every launch
+      the plan leaves uncovered, which is the host's OS on its own GPU or a
+      software renderer. That is the trade: a pixel perturbation no current
+      Firefox makes by default, taken for cross-context unlinkability on one
+      host, which upstream does not address. The evidence is CI Tests run
+      38299426185 (head e91d24e), build-tester's raw-binary launches seeded per
+      context: no collisions, not a rate. Its product-relevant sample is the
+      Linux group on the Linux host, n=3, 3/3 distinct; the macOS group, which
+      the launcher would cover there, measures only the seed mechanism. Covered
+      launches get RFP's placeholder and no seed.
 
   - id: webgpu-follows-the-claimed-device
     title: navigator.gpu where Firefox on the claimed device has it; the host's adapter only behind the host's own GPU

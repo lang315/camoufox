@@ -30,8 +30,8 @@ CONFIG_PATH = CI_DIR / "build-tester.yml"
 # Values Camoufox derives per context, where one collision is the leak itself.
 _MUST_VARY = ("uniqueAudio", "uniqueTimezones")
 
-# Canvas belongs in _MUST_VARY and is not there yet, because it does not
-# currently hold. Measured across 24 profiles in 3 runs against
+# Canvas belongs in _MUST_VARY and is not there yet, because it has not been
+# shown to hold. Measured across 24 profiles in 3 runs against
 # v152.0.4-beta.30, once the canvas fingerprint was actually being hashed
 # (it had been a 100-character prefix of the data URL, which compared equal
 # for almost anything):
@@ -40,11 +40,13 @@ _MUST_VARY = ("uniqueAudio", "uniqueTimezones")
 #     canvas   16 distinct / 24 samples      values recurring across runs
 #              macOS  7/12, Linux 9/12       one value seen three times
 #
-# Same hash, same harness, same runs -- so this is not the measurement. Two
-# contexts share a canvas fingerprint roughly a third of the time, which matches
-# the rate at which CI flagged it. Gating on it would fail about one run in
-# three for a real reason nobody has fixed yet, so it is reported every run and
-# tracked here rather than quietly dropped or quietly tolerated.
+# Same hash, same harness, same runs -- so this is not the measurement. On
+# beta.30 two contexts shared a canvas fingerprint roughly a third of the time,
+# which matched the rate at which CI flagged it. That was before the canvas seed
+# was restored; on beta.32 (run 38299426185) six seeded contexts gave six
+# distinct canvases, which shows no collision at n=6 and is not a rate. The
+# finding stays open, so it is reported every run and tracked here rather than
+# gated, quietly dropped or quietly tolerated.
 #
 # See ci/tribal-rules.yml: canvas-noise-entropy-is-lower-than-audio.
 _TRACKED_LOW_ENTROPY = ("uniqueCanvas",)
@@ -281,11 +283,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if slots["low_entropy"]:
         result.note(
-            "KNOWN, UNFIXED -- per-context values that collide more often than they should: "
+            "OPEN FINDING -- per-context values that collided: "
             + ", ".join(slots["low_entropy"])
-            + ". Measured 16 distinct canvas fingerprints in 24 samples where audio gave "
-            "24/24, so two contexts are linkable by canvas roughly a third of the time. "
-            "Reported every run, not gated, because it is real and unfixed. See "
+            + ". beta.30 measured 16 distinct canvas fingerprints in 24 samples where "
+            "audio gave 24/24; beta.32 showed no collision at n=6. Reported every run, "
+            "not gated, while the finding is open. See "
             "ci/tribal-rules.yml: canvas-noise-entropy-is-lower-than-audio."
         )
 
