@@ -3,11 +3,11 @@
 What Facebook's client-side tracking reads is, on current camoufox, **coherent**
 — the device surface it fingerprints (canvas / webgl / screen / navigator, plus
 `devicePixelRatio` and window geometry) is spoofed consistently and verified by
-`build-tester/observer/audit_coherence.py` (12/12 across Windows/macOS/Linux).
+`browser/tests/build-tester/observer/audit_coherence.py` (12/12 across Windows/macOS/Linux).
 The remaining exposure is **not** the fingerprint — it is **identity linkage via
 cookies**, which no fingerprint quality can fix. This is the operational playbook.
 
-## What FB sets (measured logged-out, `build-tester/observer/recon_fb_live.json`)
+## What FB sets (measured logged-out, `browser/tests/build-tester/observer/recon_fb_live.json`)
 
 `.facebook.com` cookies from a single logged-out homepage load:
 
@@ -25,7 +25,7 @@ cross-links your identities **regardless of a clean, coherent fingerprint**.
 instagram.com sets a cookie named `datr` too (`recon_fb_live.json`). It holds a
 different value: one profile visiting both properties ends up holding two
 distinct `datr` cookies, on `.facebook.com` and `.instagram.com`, in both visit
-orders (`build-tester/observer/probe_cross_property_cookies.json`).
+orders (`browser/tests/build-tester/observer/probe_cross_property_cookies.json`).
 
 Two things had to be excluded before that difference could be read at all, and
 the artifact records both rather than assuming them. The pair is one entry per
@@ -124,9 +124,9 @@ Camoufox's Python API defaults to `persistent_context=False` (`sync_api.py:90`,
   fix, `spoofs_window_dimensions` + `clamp_window_dimensions`). A stale
   `cloverlabs-camoufox` install shadowing the editable one will exercise pre-fix
   code and fake an incoherence — uninstall it before an editable dev setup
-  (`build-tester/run_tests.sh:60` does this).
+  (`browser/tests/build-tester/run_tests.sh:60` does this).
 - `docs/observer/README.md:108-111` carried a stale "canvas-only" observer-scope
-  claim; all 7 surfaces are wired (`build-tester/observer/REPORT.md:16-29`, and
-  the assert at `build-tester/observer/test_observer_records.py:17-18`). Fixed in
+  claim; all 7 surfaces are wired (`browser/tests/build-tester/observer/REPORT.md:16-29`, and
+  the assert at `browser/tests/build-tester/observer/test_observer_records.py:17-18`). Fixed in
   #113 — `recon_fb_live.json` does not establish this: it records the four
   surfaces facebook.com touched on one load, a different question.

@@ -7,6 +7,13 @@ sessions that do not correlate. The launchers use them through `NewContext()`
 [TypeScript](../typescript/README.md#one-browser-many-identities)); this page is
 for people working on the patches or driving the browser without a launcher.
 
+A context's OS is its own only where the canvas allows it. On a launch that
+claims the host's OS, `new_context(os=<non-host>)` raises unless the browser was
+launched with `canvas_noise=True`, because the canvas renders as the host
+([`cross-os-canvas-is-the-rfp-placeholder`](../ci/tribal-rules.yml)). An
+explicit `canvas_noise=False` lifts the check too, and leaves the host's pixels
+under the other OS.
+
 ## The setters
 
 Each per-context patch adds a function to `window`. A setter stores its value
@@ -16,6 +23,7 @@ for the calling window's context, and is gone before any page script runs
 | Function | Patch | What a page sees |
 |---|---|---|
 | `setAudioFingerprintSeed(seed)` | `audio-fingerprint-manager.patch` | `AudioBuffer` and `AnalyserNode` output |
+| `setCanvasSeed(seed)` | `canvas-spoofing.patch` (this fork) | 2D canvas `toDataURL()`, `toBlob()`, `getImageData()` and WebGL `readPixels()` |
 | `setTimezone(tz)` | `timezone-spoofing.patch` | `Date`, `Intl.DateTimeFormat` and every other time API |
 | `setScreenDimensions(w, h)` | `screen-spoofing.patch` | `screen.width`, `screen.height`, matching CSS media features |
 | `setScreenColorDepth(depth)` | `screen-spoofing.patch` | `screen.colorDepth` |
@@ -37,10 +45,14 @@ Supporting patches, with no setter of their own:
 | `anti-font-fingerprinting.patch` | The context id on each font group |
 | `cross-process-storage.patch` | `RoverfoxStorageManager`, the per-context store, with the IPC that makes a value set in one process readable in every other, and the guard and removal every setter uses |
 
-There is no canvas pixel noise and no glyph-spacing noise: both produce output
-no real machine does ([`ci/tribal-rules.yml`](../ci/tribal-rules.yml)). A
-browser launched with `canvas_noise=True` returns random canvas readback, as
-`privacy.resistFingerprinting` does, for every context.
+There is no glyph-spacing noise: it produces text widths no real machine does
+([`ci/tribal-rules.yml`](../ci/tribal-rules.yml)). Canvas noise depends on the
+launch. Where the canvas is covered (another OS or GPU, or
+`canvas_noise=True`), readback is random for every context, as
+`privacy.resistFingerprinting` gives, and the launchers send no canvas seed.
+On a launch that claims the host's GPU, this fork adds seeded noise per
+context through `setCanvasSeed`, against linking contexts on one host by
+canvas. Stock Firefox adds no such noise.
 
 ## Using the setters
 
@@ -87,11 +99,11 @@ its own id).
 
 | Step | Write path |
 |---|---|
-| 1 | The setter resolves `userContextId` from the window's `BrowsingContext`. |
+| 1 | The setter resolves `userContextId` from its window's document principal (`RoverfoxStorageManager::UserContextId`). |
 | 2 | The value goes into the in-process cache. |
 | 3 | It is also written as a pref with the `roverfox.s.` prefix (every type serialized as a string). |
 | 4 | In a content process, it is sent to the parent with sync IPC (`SendRoverfoxStoragePut`). |
-| 5 | Audio, navigator, screen, timezone and WebGL also store it under id 0, for workers that cannot resolve their context. Fonts, voices and WebRTC do not. |
+| 5 | Audio, navigator, screen, timezone and WebGL also store it under id 0, for workers that cannot resolve their context. Canvas, fonts, voices and WebRTC do not. |
 
 | Tier | Read path |
 |---|---|
@@ -126,18 +138,20 @@ Every setter uses the same three `RoverfoxStorageManager` helpers:
 
 ### Context resolution and lookup order
 
-Windows resolve the id from `BrowsingContext`, which exists before the
-DocShell or Document attributes are populated:
+Every lookup site resolves the id through `RoverfoxStorageManager::UserContextId`,
+from a principal, a node's principal, or a window's current document:
 
 ```cpp
-if (BrowsingContext* bc = win->GetBrowsingContext()) {
-  userContextId = bc->OriginAttributesRef().mUserContextId;
+uint32_t RoverfoxStorageManager::UserContextId(nsIPrincipal* aPrincipal) {
+  return aPrincipal ? aPrincipal->OriginAttributesRef().mUserContextId : 0;
 }
 ```
 
-Workers use `WorkerPrivate::GetOriginAttributes()`. A spoofed getter checks the
-per-context value first, then `CAMOU_CONFIG` through `MaskConfig`, then the
-real value.
+Workers use `WorkerPrivate::GetOriginAttributes()`. A font group resolves its
+id once, in its constructor, through `FontListManager::ContextIdFor`: its
+provider's document, or else the current worker's origin attributes, or else 0.
+A spoofed getter checks the per-context value first, then `CAMOU_CONFIG` through
+`MaskConfig`, then the real value.
 
 ### Prefs that make it work
 
@@ -159,9 +173,10 @@ real value.
 | `timezone-spoofing.patch` | SpiderMonkey `DateTimeInfo` per realm (`JS::SetRealmTimeZoneOverride`), `nsGlobalWindowOuter::SetNewDocument`, `WorkerPrivate::GetOrCreateGlobalScope` | The only patch inside SpiderMonkey. Re-applied on navigation and in dedicated, shared and service workers; also sets a process-wide override. Invalid IDs throw `TypeError`. |
 | `screen-spoofing.patch` | `nsScreen::GetRect`, `nsDeviceContext`, `nsMediaFeatures.cpp` | CSS `device-width` and `color` agree with `screen.*`. |
 | `navigator-spoofing.patch` | `Navigator::GetPlatform`, `GetOscpu`, `HardwareConcurrency`, `GetUserAgent`, `GetAppVersion` (global only); the `WorkerNavigator` versions of platform, cores and UA | Falls back to `navigator.*` in `CAMOU_CONFIG`. |
-| `webrtc-ip-spoofing.patch` | `SanitizeSDPForIPLeak`, `CandidateReady`, candidate `.address`/`.relatedAddress`, `getStats()`, `UpdateDefaultCandidate`, `NrSocketBase::CreateSocket` | Forces `default_address_only` while spoofing; loopback, link-local and private addresses are left alone. UDP candidate ports come from the ephemeral range of the identity's OS (`MaskConfig::SpoofedEphemeralPorts()`), so a Windows identity on Linux never shows a Linux port. |
+| `webrtc-ip-spoofing.patch` | `SanitizeSDPForIPLeak`, `CandidateReady`, candidate `.address`/`.relatedAddress`, `getStats()`, `UpdateDefaultCandidate`, `NrSocketBase::CreateSocket` | Forces `default_address_only` while spoofing. Unspecified, loopback and IPv4 link-local addresses are left alone. With `webrtc-ip-spoofing2.patch` (this fork), a private address takes `webrtc:localipv4`/`webrtc:localipv6` when set, else the public one, and an IPv6 link-local address, derived from the MAC, is replaced by one fabricated per context. UDP candidate ports come from the ephemeral range of the identity's OS (`MaskConfig::SpoofedEphemeralPorts()`), so a Windows identity on Linux never shows a Linux port. |
 | `webgl-spoofing.patch` | `ClientWebGLContext::GetParameter` | Per context: vendor and renderer. Global only (`CAMOU_CONFIG`): parameters, extensions, shader precision. Works from `OffscreenCanvas` in workers. |
-| `font-list-spoofing.patch` | `gfxPlatformFontList::FindAndAddFamiliesLocked` | A thread-local context id, set by an RAII guard in `FontFaceSet::Check/Load` and `gfxFontGroup::EnsureFontList`, avoids changing ~50 signatures. The list is in the shared store, so it holds in every content process. Workers are not filtered. |
+| `font-list-spoofing.patch` | `gfxPlatformFontList::FindAndAddFamiliesLocked` | A thread-local context id, set by an RAII guard (`AutoFontListContext`) in `FontFaceSet::Check/Load` and in `gfxFontGroup`'s lookups, avoids changing ~50 signatures. A font group in a worker takes its worker's context. The list is in the shared store, so it holds in every content process, and each process flushes its font caches when the list arrives (`FontListManager::OnFontListStored`). |
+| `canvas-spoofing.patch` (this fork) | `CanvasRenderingContext2D::GetImageBuffer` and `GetImageDataArray`, `ClientWebGLContext::ReadPixels` | Shifts a few colour channels by a deterministic amount from the context's seed; alpha is untouched. Falls back to `canvas:seed` in `CAMOU_CONFIG`; with no seed it does nothing. An `OffscreenCanvas` in a worker has no document and is not perturbed. |
 | `speech-voices-spoofing.patch` | `SpeechSynthesis::GetVoices` | Filters the real list by name; a listed voice that is not installed is left out. |
 
 Global-only patches (no setter) read `CAMOU_CONFIG` at startup:
@@ -205,6 +220,7 @@ The User-Agent's version is rewritten to the running browser's.
 | Fonts | `_generate_random_font_subset()`: one OS-version base plus measured additions ([FONTS.md](FONTS.md)); never from presets |
 | Voices | `_generate_random_voice_subset()`, from `voice-manifests.json`, seeded by the identity; never from presets |
 | Audio seed | Derived from the identity (`NewBrowser`) or random (`NewContext`), never 0 |
+| Canvas seed | Random per launch and per context, only where the launch leaves the canvas uncovered (`plan_rendering`); none on a covered launch. A browser `NewBrowser` did not launch is seeded |
 | Timezone | The preset, or `timezone` in `CAMOU_CONFIG` (from geoip); with a proxy, `NewContext` looks it up from the exit IP |
 | WebRTC IP | `NewContext`'s `webrtc_ip` or the proxy's exit IP, to the IPv4 or IPv6 setter; an invalid address raises `InvalidIP` |
 | Geolocation | The `geolocation` argument, via Playwright |
@@ -225,5 +241,6 @@ Run each identity on the OS it claims. The per-context patches make each
 context a different person on the same OS, not a different OS. Where that is
 not possible, launch with `canvas_noise=True`: canvas and WebGL readback then
 return random data, which covers the two rasterization rows above. A browser
-launched without it gives its contexts the host's OS and GPU, and `NewContext`
-raises for another OS or GPU.
+whose launch leaves the canvas uncovered, with `canvas_noise` left at its
+default, gives its contexts the host's OS and GPU, and `NewContext` raises for
+another OS or GPU.

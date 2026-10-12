@@ -9,7 +9,7 @@ artifact with `gh workflow run smoke.yml -f run_id=<build run id>`.
 
 ## `page.evaluate()` runs in its own compartment
 
-`Frame._onGlobalObjectCleared` in `additions/juggler/content/FrameTree.js` puts
+`Frame._onGlobalObjectCleared` in `browser/additions/juggler/content/FrameTree.js` puts
 the world Playwright names `''` in a `Cu.Sandbox` rather than on the page
 window. Page globals are invisible to automation, automation's writes are
 invisible to the page, and page-installed traps never fire.
@@ -35,7 +35,7 @@ The last line is the one that matters most: a trap the *page* installed on
 `window.eval` fired eleven times. The page was not merely able to see
 automation artifacts, it could hook and count them.
 
-beta.29 passes all 17 assertions. Guard: `tests/patches/isolated-evaluate.py`,
+beta.29 passes all 17 assertions. Guard: `browser/tests/playwright/patches/isolated-evaluate.py`,
 run by the smoke step *"page.evaluate() is isolated from the page"*.
 
 The `mw:` prefix is the deliberate escape hatch out of this, gated on
@@ -60,16 +60,18 @@ context calling exactly one      : 14/15 survive
 `Camoufox(...)` then `browser.new_page()` is the first thing anyone writes, and
 it is the 15/15 case.
 
-Juggler therefore calls `docShell.disableSpoofSetters()` immediately after the
-init-script loop — measured as the right slot: init scripts run at 52ms and the
-page's own inline script at 55ms on the same time origin. `about:blank` is
-skipped so init scripts added between opening a page and its first real
-navigation still apply.
+So a window is created sealed (`window-setter-seal.patch`). Juggler unseals it
+with `ChromeUtils.camouUnsealFingerprintSetters` just before the init-script
+loop and seals it again with `ChromeUtils.camouSealFingerprintSetters`
+immediately after (`browser/additions/juggler/content/FrameTree.js`): measured
+as the right slot, init scripts run at 52ms and the page's own inline script at
+55ms on the same time origin.
 
-The teardown only *writes* the per-`userContextId` disabled flags that all 15
-WebIDL `Func` guards already read, so no guard changes. The entry point is
-chrome-only XPCOM, the same shape as `overrideTimezone`: a teardown exposed as
-a page-visible function would just be a sixteenth artifact.
+The seal is a per-window flag that every setter's WebIDL `Func` guard consults
+(`RoverfoxStorageManager::IsSetterOffered`), next to the per-context "used" flag
+a called setter writes. The entry points are chrome-only `ChromeUtils`
+functions: a teardown exposed as a page-visible function would just be a
+sixteenth artifact.
 
 ## Per-context values outrank the launch config
 
@@ -81,11 +83,11 @@ per-context storage before `MaskConfig`, and `ClientWebGLContext::GetParameter`
 does the same for the renderer. Reversing that order would silently make the
 launch value win everywhere.
 
-**Clobbering on the next navigation.** Timezone overrides are process-global in
-this build — the Playwright patch disables per-realm overrides outright
-(`Realm::dateTimeInfo()` returns `nullptr`). So `nsDocShell::OverrideTimezone`
-records the per-context value into the store that `SetNewDocument` reads;
-without that, the next navigation re-applies the launch value over it. The
+**Clobbering on the next navigation.** The timezone override is per realm
+(`JS::SetRealmTimeZoneOverride`), and every navigation creates a new realm. So
+`nsGlobalWindowOuter::SetNewDocument` re-applies the context's stored timezone
+to the new document's realm; without that, the next page reports the launch
+value. The
 smoke guard asserts both directions for exactly this reason.
 
 The remaining limit is inherent to a process-global override: with two contexts
