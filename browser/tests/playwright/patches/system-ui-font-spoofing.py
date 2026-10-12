@@ -133,6 +133,9 @@ async def test_os(target_os: str) -> bool:
 # "Arial" is in the list because the rewrite makes it the family the gate is
 # asked about for the name "Helvetica": without it the step's lookup finds
 # nothing and neither platform could ever log a system-ui step.
+#
+# The `step=system-ui` line is written after the read filter and names the
+# family system-ui actually got, or `none` when the filter refused all of them.
 MIXED_OS_CONTEXT_FONTS = ["Helvetica", "Helvetica Neue", "Menlo", "Arial"]
 MIXED_OS_URI = "data:text/html,<h1>sysui138</h1>"
 SYSTEM_UI_GENERIC = 7  # StyleGenericFontFamily::SystemUi in the generic-map line
@@ -231,23 +234,27 @@ async def test_mixed_os_context(max_attempts: int = 15) -> bool:
                         "either the log module did not capture the step or system-ui never "
                         "reached the generic map (a product regression)")
     else:
-        # The verdict. A line `step=system-ui key=helvetica` can only come from
-        # the context's own platform (MacIntel): the launch's (Win32) would ask
-        # for "segoe ui", which this list refuses, and log `step=row` instead.
-        # So the pass value and the fail value are different literals by
-        # construction. WHAT WOULD PASS WRONGLY: a line naming "helvetica" from a
-        # different context -- ruled out by filtering to the one ctx that rendered
-        # this page's unique URI. WHAT WOULD FAIL WRONGLY: the log missing a step
-        # that ran -- ruled out above by requiring at least one system-ui line.
-        wrong = [s for s in steps if s != ("system-ui", "helvetica")]
+        # The verdict. A `step=system-ui` line with a family can only come from
+        # the context's own platform (MacIntel): its Helvetica is on the list and
+        # resolves to Arial, which is too. The launch's platform (Win32) would
+        # ask for "segoe ui", which this list refuses, so system-ui would fall to
+        # the #92 table and log `step=row` instead; `key=none` would mean the
+        # read filter refused the family the context's step chose. So the pass
+        # and fail values differ by construction. WHAT WOULD PASS WRONGLY: a line
+        # from a different context -- ruled out by filtering to the one ctx that
+        # rendered this page's unique URI. WHAT WOULD FAIL WRONGLY: the log
+        # missing a step that ran -- ruled out above by requiring at least one
+        # system-ui line.
+        wrong = [s for s in steps if s[0] != "system-ui" or s[1] in ("none", "")]
         if wrong:
             failures.append(f"system-ui did not resolve from the context's platform: {wrong} "
-                            "-- the launch's platform picked the family (#138)")
+                            "-- the launch's platform picked the family (#138), or the "
+                            "read filter refused what the step chose")
 
     for failure in failures:
         print(f"  FAIL: {failure}")
     if not failures:
-        print("  PASS: system-ui follows the context's platform (step=system-ui key=helvetica)")
+        print(f"  PASS: system-ui follows the context's platform ({steps})")
     return not failures
 
 
