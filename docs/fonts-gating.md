@@ -116,10 +116,13 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   broken by it (#131): the table step answered it with the sans row and
   returned before the #599 hook ran, on Linux as well, because
   `gfxFcPlatformFontList::AddGenericFonts` delegates `system-ui` to the base
-  class. It now takes a `step=system-ui` first (Helvetica for `MacIntel`,
-  Segoe UI for `Win32`, only if the list allows it). The step asks the
-  context's own `navigator.platform` (`NavigatorManager::GetPlatform`) first
-  and the launch's (`MaskConfig`) second (#138). A launch's fontconfig search
+  class. It now takes a `step=system-ui` first, from system-ui-font-spoofing's
+  hook (`GetSystemUIFontFamilies`: Helvetica for macOS, Segoe UI for Windows,
+  Ubuntu for Linux, the host's own font for a native identity), and only if
+  the list allows that name and the face it resolves to. The pref path then
+  answers from the hook's per-OS cell. The hook asks the context's own OS
+  (`NavigatorManager::GetSpoofedOS`) first and the launch's second (#138), and
+  a worker asks through its own origin attributes. A launch's fontconfig search
   path holds only the font groups its own OS reads (`utils._generate_fontconfig`,
   `docs/FONTS.md`), so a context whose OS differs from the launch's never sees
   that OS's exclusive faces (`Helvetica`, `Helvetica Neue`, `Menlo` and `Times`
