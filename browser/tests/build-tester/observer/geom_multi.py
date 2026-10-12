@@ -19,10 +19,10 @@ a Screen constraint from the host monitor, and a screen sampled for dpr!=1 is no
 resampled to one real devices report at dpr=1. Both change which screens appear here.
 Re-run before citing the count.
 
-Setup (order matters -- mirror build-tester/run_tests.sh:60):
+Setup (order matters -- mirror browser/tests/build-tester/run_tests.sh:60):
   uv pip uninstall cloverlabs-camoufox -p .venv     # FIRST, or you exercise stale code
-  uv pip install -e ../pythonlib -p .venv
-  cp ../settings/properties.json <binary_dir>/properties.json   # validate_config reads it"""
+  uv pip install -e ../../../python -p .venv
+  cp ../../settings/properties.json <binary_dir>/properties.json   # validate_config reads it"""
 from camoufox.sync_api import Camoufox
 import harness   # stdlib-only at import time; does not pull in Marionette
 

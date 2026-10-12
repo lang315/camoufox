@@ -8,14 +8,14 @@ exercise the extracted `_terminate()` helper directly against a real
 subprocess, without needing the Node/Playwright server itself.
 
 Run with:
-    cd pythonlib && python -m pytest tests/test_server_cleanup.py -v
+    cd python && python -m pytest tests/test_server_cleanup.py -v
 """
 
 import os
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox.server import _terminate  # noqa: E402
 

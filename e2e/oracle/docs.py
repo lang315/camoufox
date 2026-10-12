@@ -9,16 +9,16 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 CLAIMS = {
-    "isolated_eval": ("README.md", 'websites can no longer "see" any JavaScript that Playwright would typically inject'),
-    "trusted_input": ("README.md", "meaning they are handled the exact same way as if you were using the browser normally"),
-    "webdriver": ("README.md", "Fixes `navigator.webdriver` detection"),
-    "os_option": ("pythonlib/camoufox/utils.py", 'Can be "windows", "macos", "linux", or a list to randomly choose from.'),
-    "locale": ("pythonlib/camoufox/utils.py", "The first listed locale will be used for the Intl API."),
-    "geoip": ("pythonlib/camoufox/utils.py", "Calculate longitude, latitude, timezone, country, & locale based on the IP address."),
-    "humanize": ("pythonlib/camoufox/utils.py", "Humanize the cursor movement."),
-    "virtual": ("pythonlib/camoufox/utils.py", "passing headless='virtual' to Camoufox, AsyncCamoufox"),
-    "webrtc": ("README.md", "WebRTC IP spoofing at the protocol level"),
-    "unique_context": ("pythonlib/camoufox/sync_api.py", "Creates a new browser context with a unique fingerprint identity."),
+    "isolated_eval": ("README.md", "Playwright's `evaluate`, selectors and init scripts run in an isolated world the page cannot see"),
+    "trusted_input": ("README.md", "`set_input_files` fire trusted events"),
+    "webdriver": ("README.md", "`navigator.webdriver` is `false`"),
+    "os_option": ("python/src/camoufox/utils.py", 'Can be "windows", "macos", "linux", or a list to randomly choose from.'),
+    "locale": ("python/src/camoufox/utils.py", "The first listed locale will be used for the Intl API."),
+    "geoip": ("python/src/camoufox/utils.py", "Calculate longitude, latitude, timezone, country, & locale based on the IP address."),
+    "humanize": ("python/src/camoufox/utils.py", "Humanize the cursor movement."),
+    "virtual": ("python/src/camoufox/utils.py", "passing headless='virtual' to Camoufox, AsyncCamoufox"),
+    "webrtc": ("README.md", "ICE candidates, SDP and `getStats()` rewritten to the proxy IP"),
+    "unique_context": ("python/src/camoufox/sync_api.py", "Creates a new browser context with a unique fingerprint identity."),
 }
 
 
@@ -45,7 +45,7 @@ def font_markers() -> dict:
 
     raw = json.loads((Path(camoufox.__file__).parent / "fonts.json").read_text(encoding="utf-8"))
     lists = {"windows": set(raw["win"]), "macos": set(raw["mac"]), "linux": set(raw["lin"])}
-    conf = (REPO / "bundle/fontconfig/linux/fonts.conf").read_text(encoding="utf-8")
+    conf = (REPO / "browser/bundle/fontconfig/linux/fonts.conf").read_text(encoding="utf-8")
     # fontconfig compares family names case- and space-insensitively.
     key = lambda f: re.sub(r"\s+", "", f).lower()
     named = {key(f) for f in re.findall(r"<alias[^>]*>\s*<family>\s*([^<]*?)\s*</family>", conf)}

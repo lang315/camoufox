@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Measure the font read paths that only a native macOS host can see (#148).
 
-    PYTHONPATH=pythonlib python3 build-tester/scripts/probe_macos_font_paths.py \
+    PYTHONPATH=python/src python3 browser/tests/build-tester/scripts/probe_macos_font_paths.py \
         --executable-path /path/Camoufox.app/Contents/MacOS/camoufox --logdir out/
 
 Run it against the packaged app, so the font universe is the one that ships:

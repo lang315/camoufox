@@ -239,7 +239,7 @@ func TestFontconfigEnvFallsBackToHostOSWithoutUA(t *testing.T) {
 // loses the line, the runtime conf would carry no scan dir at all.
 func TestShippedFontConfsCarryThePlaceholder(t *testing.T) {
 	for _, osDir := range []string{"linux", "macos", "windows"} {
-		b, err := os.ReadFile(filepath.Join("..", "bundle", "fontconfig", osDir, "fonts.conf"))
+		b, err := os.ReadFile(filepath.Join("..", "browser", "bundle", "fontconfig", osDir, "fonts.conf"))
 		if err != nil {
 			t.Fatal(err)
 		}

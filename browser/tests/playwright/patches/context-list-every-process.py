@@ -96,7 +96,7 @@ async def main() -> int:
     port = serve(site)
     # Not /tmp: the Linux content sandbox gives content processes their own
     # view of it, so their per-process logs would not land where this reads.
-    work = Path(__file__).resolve().parents[2] / ".ci-work"
+    work = Path(__file__).resolve().parents[4] / ".ci-work"
     work.mkdir(exist_ok=True)
     logdir = Path(tempfile.mkdtemp(prefix="guard149-log-", dir=work))
     os.environ["MOZ_LOG"] = "fontlist:4,ProcessIsolation:4,sync,append"

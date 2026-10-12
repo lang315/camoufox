@@ -1,4 +1,4 @@
-# `scripts/rehearse-patch.sh`
+# `browser/scripts/rehearse-patch.sh`
 
 Dry-runs a single patch from `patches/` against a **real, freshly-fetched
 Firefox 152.0.4 tree** (not the local `camoufox-*/` working copy), so a
@@ -11,7 +11,7 @@ pinned FF152 release, not just drift against a stale local checkout.
 ## Usage
 
 ```bash
-FETCH="curl -fsSL" scripts/rehearse-patch.sh <patch-basename>
+FETCH="curl -fsSL" browser/scripts/rehearse-patch.sh <patch-basename>
 ```
 
 `<patch-basename>` is the filename of a patch under `patches/` (searched
@@ -138,10 +138,10 @@ and is not a bug in the script; run it on a host with unrestricted (or
 `hg.mozilla.org`-allowlisted) egress instead.
 
 **Status of the Step-3 smoke test in this environment:** the smoke test
-(`FETCH="curl -fsSL" bash scripts/rehearse-patch.sh css-media-spoofing.patch`,
+(`FETCH="curl -fsSL" bash browser/scripts/rehearse-patch.sh css-media-spoofing.patch`,
 expected `rc=0 rejects=0 skipped=0 wrongpath=0 fuzz=0 max|offset|=0`) is
 **deferred** — it could not be run in the sandbox this script was authored
 in, because that sandbox's network allowlist excludes `hg.mozilla.org`.
-What *was* verified in that environment: `bash -n scripts/rehearse-patch.sh`
+What *was* verified in that environment: `bash -n browser/scripts/rehearse-patch.sh`
 (syntax check) passes with exit 0. The smoke test itself is expected to
 run during Tasks 7/8, on a host with real egress to `hg.mozilla.org`.

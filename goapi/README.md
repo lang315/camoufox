@@ -28,7 +28,7 @@ Linux untested. WebGL/Network domains shipped but not exercised.
 The package implements the launch path and Juggler RPC core:
 
 - `pkg/juggler` — pipe transport (FDs 3/4, `\0`-delimited JSON), dispatcher, sessions
-- `pkg/config` — full `CAMOU_CONFIG` schema (mirrors `settings/properties.json`) and env-var chunking
+- `pkg/config` — full `CAMOU_CONFIG` schema (mirrors `browser/settings/properties.json`) and env-var chunking
 - `pkg/proxy` — proxy struct + IP/timezone resolution via `ip-api.com`
 - `pkg/fingerprint` — minimal Firefox fingerprint sampler (presets + font/voice subset)
 - `camoufox` — top-level public API: `Launch`, `Browser`, `BrowserContext`, `Page`
@@ -38,7 +38,7 @@ On Linux, `Launch` points the browser at a runtime fontconfig (`FONTCONFIG_FILE`
 identity's OS rather than the host's. The file is written to `$XDG_CACHE_HOME/camoufox/fontconfig/`
 (`~/.cache` by default). A `FONTCONFIG_FILE` passed through `WithEnv` takes precedence. A bundle
 without `fonts.conf` fails the launch. `pkg/fingerprint/data/fonts.json` must match
-`pythonlib/camoufox/fonts.json`; a test enforces it.
+`python/src/camoufox/fonts.json`; a test enforces it.
 
 ## Features
 
@@ -89,9 +89,9 @@ camoufox.Launch
 ## References
 
 Wire protocol traced from:
-- `additions/juggler/pipe/nsRemoteDebuggingPipe.cpp` — pipe framing (`\0`-delimited)
-- `additions/juggler/protocol/Dispatcher.js` — message envelope
-- `additions/juggler/protocol/Protocol.js` — domain method/event schemas
-- `additions/juggler/components/Juggler.js` — `--juggler-pipe` flag
-- `settings/properties.json` — CAMOU_CONFIG schema
-- `pythonlib/camoufox/utils.py:get_env_vars` — chunking limits
+- `browser/additions/juggler/pipe/nsRemoteDebuggingPipe.cpp` — pipe framing (`\0`-delimited)
+- `browser/additions/juggler/protocol/Dispatcher.js` — message envelope
+- `browser/additions/juggler/protocol/Protocol.js` — domain method/event schemas
+- `browser/additions/juggler/components/Juggler.js` — `--juggler-pipe` flag
+- `browser/settings/properties.json` — CAMOU_CONFIG schema
+- `python/src/camoufox/utils.py:get_env_vars` — chunking limits

@@ -47,7 +47,7 @@ def _check_fork_guard(commands: str) -> None:
 
 
 def test_a_fork_never_grades_against_the_released_browser():
-    """`camoufox fetch` resolves releases from pythonlib/camoufox/repos.yml,
+    """`camoufox fetch` resolves releases from python/src/camoufox/repos.yml,
     whose first entry is daijro/camoufox. On this fork the fetch tier would
     grade a driver-only pull request against upstream's browser, which carries
     none of the fork's patches -- a green about the wrong binary. Every run

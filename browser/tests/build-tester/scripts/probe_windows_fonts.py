@@ -37,7 +37,8 @@ Usage:
       --bundle-dir "C:\path\to\extracted\fonts" [--out result.json] [--headful]
 
 --bundle-dir is required for a real run; there is no fallback to a repo checkout.
-  python probe_windows_fonts.py --self-test     # no browser, no fontTools
+  python probe_windows_fonts.py --self-test     # no browser, no fontTools; needs
+                                                # browser/bundle/fonts (make fonts-extract)
 
 Exit status: 0 only when every verdict is `pass`; 1 otherwise, including
 `invalid`.
@@ -1226,9 +1227,11 @@ def self_test():
     # The bundle reader against the repo, when fontTools is present. This is the
     # one check that touches real data, and it is what would catch the
     # bundle/fonts/windows mistake: a Windows artifact ships macos+linux.
-    print("bundle reader (repo, optional):")
-    repo = Path(__file__).resolve().parents[2]
+    print("bundle reader (repo):")
+    repo = Path(__file__).resolve().parents[3]
     dirs = [repo / "bundle" / "fonts" / "macos", repo / "bundle" / "fonts" / "linux"]
+    check("bundle/fonts/{macos,linux} are extracted (make fonts-extract)",
+          all(d.is_dir() for d in dirs))
     if all(d.is_dir() for d in dirs):
         try:
             fams = bundle_families(dirs)
@@ -1236,8 +1239,6 @@ def self_test():
             check("keys are casefolded", all(k == k.casefold() for k in fams))
         except ImportError:
             print("  fontTools not installed -- skipped")
-    else:
-        print("  bundle dirs not present -- skipped")
 
     # The codepoint selectors, on canned cmaps. `judge` cannot see a reversed
     # filter here: it is handed whatever codepoint was chosen and scores widths.
@@ -1414,7 +1415,7 @@ def main(argv=None):
                          "families (Makefile:190), never the Windows ones.")
     ap.add_argument("--repo-root", default=None,
                     help="explicit alternative to --bundle-dir: reads "
-                         "<root>/bundle/fonts/macos and .../linux. Not a default; "
+                         "<root>/browser/bundle/fonts/macos and .../linux. Not a default; "
                          "a real run must name one or the other.")
     ap.add_argument("--out", "--json", dest="out", default=None,
                     help="write the JSON result object here")
@@ -1429,7 +1430,7 @@ def main(argv=None):
     # Family names out of C:\\Windows\\Fonts include localized nameID 1 records,
     # and the bundle alone carries 77 non-ASCII families. Windows gives stdout
     # the console code page, so printing one raises UnicodeEncodeError and costs
-    # the run. Same idiom as service-tester/run_tests.py:30-32, but not
+    # the run. Same idiom as browser/tests/service/run_tests.py:30-32, but not
     # win32-guarded: any piped run under a non-UTF-8 locale hits it, and the
     # brief's Step 4 pipes through tee.
     for _stream in (sys.stdout, sys.stderr):
@@ -1452,12 +1453,12 @@ def main(argv=None):
         bundle_dirs = [Path(d) for d in args.bundle_dir]
     elif args.repo_root:
         root = Path(args.repo_root)
-        bundle_dirs = [root / "bundle" / "fonts" / "macos",
-                       root / "bundle" / "fonts" / "linux"]
+        bundle_dirs = [root / "browser" / "bundle" / "fonts" / "macos",
+                       root / "browser" / "bundle" / "fonts" / "linux"]
     else:
         ap.error("--bundle-dir is required for a real run: point it at the extracted "
                  "artifact's own fonts directory. Pass --repo-root instead only if you "
-                 "deliberately want this checkout's bundle/fonts/{macos,linux}.")
+                 "deliberately want this checkout's browser/bundle/fonts/{macos,linux}.")
     missing = [str(d) for d in bundle_dirs if not d.is_dir()]
     if missing:
         print("FATAL: bundle directory not found: %s" % ", ".join(missing))

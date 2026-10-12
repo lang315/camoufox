@@ -6,7 +6,7 @@ given on macOS, properties.json lives in the .app bundle's
 Contents/Resources, not next to the binary in Contents/MacOS.
 
 Run with:
-    cd pythonlib && python -m pytest tests/test_load_properties.py -v
+    cd python && python -m pytest tests/test_load_properties.py -v
 """
 
 import os
@@ -14,8 +14,8 @@ import sys
 
 import pytest
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pathlib import Path  # noqa: E402
 

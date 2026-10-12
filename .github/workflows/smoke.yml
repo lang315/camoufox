@@ -86,7 +86,7 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           # Camoufox (#44 round 3): the fonts step now launches with
           # FONTCONFIG_FILE pointing at the bundle's own fonts.conf, the way
-          # pythonlib/camoufox/utils.py:238 ships it, so the measurement is of
+          # python/src/camoufox/utils.py:238 ships it, so the measurement is of
           # the font universe a shipped Camoufox has rather than of the
           # runner's host fontconfig. Export both paths from here rather than
           # deriving them in Python: the package layout is a property of
@@ -132,8 +132,8 @@ jobs:
           # beta.28 shipped it broken, which is the whole of #51 and #62:
           # TestTouchscreenTouchEvents passed there only by reading a page
           # global that a correctly isolated evaluate() cannot see.
-          pip install --quiet -e pythonlib 'playwright==1.55.0'
-          python tests/patches/isolated-evaluate.py
+          pip install --quiet -e python 'playwright==1.55.0'
+          python browser/tests/playwright/patches/isolated-evaluate.py
         env:
           CAMOUFOX_EXECUTABLE_PATH: ${{ steps.bin.outputs.bin }}
           # pkgman resolves fonts/ and properties.json through the releases API,
@@ -485,7 +485,7 @@ jobs:
           # absent: the guard runs a config launch first in the same Python
           # process, and its init script carries a 574-family list. Test both.
           import pathlib as _pl
-          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          FONTS = json.load(open("python/src/camoufox/fonts.json"))
           BIG = ('(() => { const o = %s.filter(n => typeof window[n] === "function"); '
                  'try { window.setFontList(%s); } catch (e) {} '
                  'const m = () => { try { document.documentElement.setAttribute("data-s", '
@@ -657,7 +657,7 @@ jobs:
           # Until now every launch here ran the raw binary with the runner's
           # host fontconfig, so ubuntu-24.04's fonts -- DejaVu among them --
           # were in every font list and every arm measured a font universe no
-          # shipped Camoufox has (recon open question 4). pythonlib/camoufox/
+          # shipped Camoufox has (recon open question 4). python/src/camoufox/
           # utils.py:238 sets FONTCONFIG_FILE for exactly this reason; this is
           # the same substitution _generate_fontconfig (utils.py:58-92) makes.
           #
@@ -676,7 +676,7 @@ jobs:
           #
           # WHAT THIS GUARD CANNOT SEE (CLAUDE.md lesson 3). It measures the
           # LINUX conf. A shipped Camoufox picks the conf by the SPOOFED os:
-          # pythonlib/camoufox/utils.py:213-231 maps user_agent_os through
+          # python/src/camoufox/utils.py:213-231 maps user_agent_os through
           # {'lin':'linux','mac':'macos','win':'windows'} and reads
           # fontconfig/<os_dir>/fonts.conf. So a real mac-fingerprinted session
           # runs with sans-serif/serif/monospace aliased to
@@ -828,7 +828,7 @@ jobs:
               return out[-limit:]
           # -------------------------------------------------------------------
 
-          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          FONTS = json.load(open("python/src/camoufox/fonts.json"))
           MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
           WIN_STRICT = set(FONTS["win"]) - set(FONTS["mac"]) - set(FONTS["lin"])
           # ---- #44 round 3: pick MAC_ONLY's third family from THIS RUN ------
@@ -848,7 +848,7 @@ jobs:
           # A probe family this guard cannot render is a reference that is
           # never right (CLAUDE.md lesson 4), so the third slot is chosen BY
           # THIS RUN from three mac-only candidates -- each checked against
-          # pythonlib/camoufox/fonts.json (in `mac`, absent from `win` and
+          # python/src/camoufox/fonts.json (in `mac`, absent from `win` and
           # `lin`) and present in bundle/fonts/macos/. The choice happens in
           # its OWN launch, before PROBES exists: picking it inside the bare
           # launch would leave arm (a) measuring a different probe set from
@@ -3486,7 +3486,7 @@ jobs:
           # one_page() launch is its own process and so its own log file, and
           # every launch emits `CAMOU-FL set ctx=N n=<families>` naming the size
           # of the list it installed. len(FONTS['mac']) and len(FONTS['win'])
-          # differ (574 vs 107 in pythonlib/camoufox/fonts.json), so that count
+          # differ (574 vs 107 in python/src/camoufox/fonts.json), so that count
           # says which context a file belongs to without consulting the answer.
           # Asserted distinct below: if the two lists ever became the same
           # length this would pair files with contexts at random.
@@ -4391,7 +4391,7 @@ jobs:
           def mac_bundle_families():
               from fontTools.ttLib import TTFont, TTCollection
               fams, errs = set(), []
-              root = "bundle/fonts/macos"
+              root = "browser/bundle/fonts/macos"
               for dirpath, _dirnames, filenames in os.walk(root):
                   for fn in filenames:
                       p = os.path.join(dirpath, fn)
@@ -4442,7 +4442,7 @@ jobs:
               hp_families = []
               hp_errs = [f"mac_bundle_families: {type(exc).__name__}: {exc}"]
           print(f"  [arm h' / #88] enumerated {len(hp_families)} family names from "
-                f"bundle/fonts/macos; {len(hp_errs)} file(s) could not be read: {hp_errs}")
+                f"browser/bundle/fonts/macos; {len(hp_errs)} file(s) could not be read: {hp_errs}")
           if not hp_families:
               print("  [arm h' / #88] SKIP: no family names could be extracted -- the "
                     "identification cannot run, #88 falls back to its method 2 (log the "
@@ -7425,7 +7425,7 @@ jobs:
           # used to raise (#97), so reaching the browser is #97's end-to-end proof.
           #
           # xvfb is mandatory: headless returns '(no webgl)' for every renderer.
-          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          pip install --quiet -e python 'playwright==1.55.0'
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
           import asyncio, os, warnings
           from camoufox.async_api import AsyncCamoufox, AsyncNewContext
@@ -7701,7 +7701,7 @@ jobs:
               # before its first launch. Say which it is rather than printing
               # an empty section that reads like "the log lines are gone".
               print("NO LOG FILES -- either the guard step never launched a browser, or "
-                    "MOZ_LOG_FILE did not take effect. A build without patches/"
+                    "MOZ_LOG_FILE did not take effect. A build without browser/patches/"
                     "font-list-spoofing.patch has no CAMOU-FL sites at all.")
               sys.exit(0)
 
@@ -7735,7 +7735,7 @@ jobs:
           if not rows:
               print("ZERO matching lines despite non-empty log files: the fontlist module "
                     "logged, but no CAMOU-FL site ran. Check that this artifact carries "
-                    "patches/font-list-spoofing.patch.")
+                    "browser/patches/font-list-spoofing.patch.")
 
           # The full set goes to a file the Upload results step collects, so a
           # reader can re-slice what the cap below drops.
@@ -7832,9 +7832,8 @@ jobs:
           # ffmpeg is a separate playwright download; without it video recording
           # hangs rather than erroring. playwright==1.55.0 is the version this
           # suite's browser interop is known good on.
-          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          pip install --quiet -e python 'playwright==1.55.0'
           python -m playwright install ffmpeg
-          cd pythonlib
           python - <<'PY'
           import os, glob
           from camoufox.sync_api import Camoufox
@@ -7859,7 +7858,7 @@ jobs:
           # pin here would stop guarding anything.
           assert size > 10_000, (
               f"video is {size} bytes -- an empty container. Composite is most likely "
-              "off; see the measurement table in pythonlib/camoufox/virtdisplay.py"
+              "off; see the measurement table in python/src/camoufox/virtdisplay.py"
           )
           PY
         env:

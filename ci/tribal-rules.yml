@@ -146,7 +146,7 @@ rules:
     title: Nothing here depends on someone else's camoufox package
     check: automated
     evidence:
-      - "PR #521 (2026-03-15) added `cloverlabs-camoufox` to build-tester/requirements.txt"
+      - "PR #521 (2026-03-15) added `cloverlabs-camoufox` to browser/tests/build-tester/requirements.txt"
       - "the commit's author is the PyPI author of that package"
       - "browser/tests/build-tester/scripts/presets.py already prints the correct answer in its ImportError handler"
     rationale: >-
@@ -234,7 +234,7 @@ rules:
   # Fork divergence (lang315/camoufox): upstream's rule `canvas-is-not-noised`
   # (canvas rendered, not noised, no canvas seed; PR #528, e4528a2 disabled canvas
   # noise) is deliberately NOT carried here. The fork re-added canvas noise in
-  # e1b227c (patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
+  # e1b227c (browser/patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
   # so the rule and its native test were removed rather than left red.
 
   - id: cross-os-canvas-is-the-rfp-placeholder

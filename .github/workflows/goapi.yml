@@ -5,14 +5,20 @@ on:
     branches: [main]
     paths:
       - 'goapi/**'
-      - 'additions/**'
+      - 'browser/additions/**'
+      - 'browser/settings/properties.json'
+      - 'browser/bundle/fontconfig/**'
+      - 'python/src/camoufox/fonts.json'
       - '.github/workflows/goapi.yml'
   pull_request:
     paths:
       - 'goapi/**'
-      # TestAdditionsImportTimerBeforeUsingIt guards additions/, so a PR that
-      # touches only additions/ must still trigger this job.
-      - 'additions/**'
+      # TestAdditionsImportTimerBeforeUsingIt guards browser/additions/, so a PR that
+      # touches only browser/additions/ must still trigger this job.
+      - 'browser/additions/**'
+      - 'browser/settings/properties.json'
+      - 'browser/bundle/fontconfig/**'
+      - 'python/src/camoufox/fonts.json'
       - '.github/workflows/goapi.yml'
   workflow_dispatch:
 

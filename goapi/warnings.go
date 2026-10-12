@@ -8,7 +8,7 @@ import (
 )
 
 // leakWarnings returns detection-risk warnings for the resolved launch
-// configuration. It mirrors the LeakWarning surface in pythonlib/camoufox
+// configuration. It mirrors the LeakWarning surface in python/src/camoufox
 // (_warnings.py). The one goapi currently lacked: a proxy set without
 // geolocation spoofing leaks the host timezone and locale, which a site can
 // cross-check against the proxy's egress region and flag as inconsistent.

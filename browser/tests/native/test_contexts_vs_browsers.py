@@ -340,7 +340,7 @@ async def test_two_browsers_get_different_fingerprints(binary):
 
 
 # A hash of a canvas readback. Every launch draws its own 32-bit canvas:seed
-# (pythonlib/camoufox/utils.py), so two launches differ here even when they draw
+# (python/src/camoufox/utils.py), so two launches differ here even when they draw
 # the same preset. The seven PROBES above are coarse -- Win32, 2560x1440, 8
 # cores, UTC, en-US is a common draw -- and two launches matched on all of them
 # on PR #152 (run 35823906083).

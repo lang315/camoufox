@@ -12,7 +12,7 @@ These tests fake out VirtualDisplay and the Playwright launch calls, so they
 run without Linux/Xvfb or an installed Camoufox browser.
 
 Run with:
-    cd pythonlib && python -m pytest tests/test_virtdisplay_launch_failure.py -v
+    cd python && python -m pytest tests/test_virtdisplay_launch_failure.py -v
 """
 
 import asyncio
@@ -22,8 +22,8 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox import async_api, sync_api  # noqa: E402
 
