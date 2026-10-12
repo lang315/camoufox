@@ -8,11 +8,14 @@ sessions that do not correlate. The launchers use them through `NewContext()`
 for people working on the patches or driving the browser without a launcher.
 
 A context's OS is its own only where the canvas allows it. On a launch that
-claims the host's OS, `new_context(os=<non-host>)` raises unless the browser was
-launched with `canvas_noise=True`, because the canvas renders as the host
-([`cross-os-canvas-is-the-rfp-placeholder`](../ci/tribal-rules.yml)). An
-explicit `canvas_noise=False` lifts the check too, and leaves the host's pixels
-under the other OS.
+leaves the canvas uncovered, with `canvas_noise` left at its default,
+`new_context(os=<non-host>)` raises, because the canvas renders as the host
+([`cross-os-canvas-is-the-rfp-placeholder`](../ci/tribal-rules.yml)). That is a
+launch on the host's OS that names no GPU and renders on a GPU fpgen has
+recorded there, or in software. Launch with `canvas_noise=True` to give a
+context another OS. An explicit `canvas_noise=False` lifts the check too: the
+context then claims another OS while its pixels are the host's, with this
+fork's seeded canvas noise on them.
 
 ## The setters
 
