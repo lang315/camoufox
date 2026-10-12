@@ -26,6 +26,7 @@ def test_web_apis_behave_like_the_reference(drv, site, reference, check):
     for api in sorted(reference):
         check(got.get(api) == reference[api], f"{api}: camoufox={got.get(api)!r} reference={reference[api]!r}")
     # Absolute, with an in-page control: drawn canvas vs a blank one, cleared GL vs its clear colour.
+    # Cannot fail on a covered launch: the placeholder reads random, so drawn and blank always differ (#197).
     check(got["canvas"] is True, "canvas draws")
     check(got["webgl"] is True, "WebGL renders")
     check.done()
