@@ -172,8 +172,8 @@ func isDir(p string) bool {
 // sans-serif. Without these, generics resolve through the HOST's
 // font.name-list.* prefs (Menlo on a mac host, Consolas on a Windows host),
 // which the launch font mask refuses, so monospace fell to the first allowed
-// family: Arial or Arimo (#162). Every family must be in that OS's fonts.json
-// (TestGenericFontPrefsNameOnlyFamiliesTheSpoofedOSShips). Kept identical to
+// family: Arial or Arimo (#162). Every family must be in every drawn font subset
+// (TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims). Kept identical to
 // pythonlib's GENERIC_FONT_FAMILIES.
 // ponytail: x-western and x-unicode only; other lang groups keep the host
 // default until the browser-side fix (#162, W1) lands.
