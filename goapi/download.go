@@ -30,7 +30,16 @@ func (c *BrowserContext) SetDownloadOptions(ctx context.Context, opts DownloadOp
 	if err := c.b.root.Call(ctx, "Browser.setDownloadOptions", params, nil); err != nil {
 		return fmt.Errorf("camoufox: SetDownloadOptions: %w", err)
 	}
+	c.dlMu.Lock()
+	c.downloadsDir = opts.DownloadsDir
+	c.dlMu.Unlock()
 	return nil
+}
+
+func (c *BrowserContext) currentDownloadsDir() string {
+	c.dlMu.Lock()
+	defer c.dlMu.Unlock()
+	return c.downloadsDir
 }
 
 // Download represents a single in-progress or completed file download.
@@ -54,11 +63,15 @@ type Download struct {
 // Page returns the page that initiated the download.
 func (d *Download) Page() *Page { return d.page }
 
-// Path returns the absolute path where the download will be saved once
-// complete. It is derived from DownloadsDir + SuggestedFileName because
-// the protocol's downloadFinished event carries no path field.
+// Path returns where the browser saved the download: <DownloadsDir>/<UUID>.
+// The browser names the file by its UUID (juggler TargetRegistry.js), never by
+// SuggestedFileName. Empty when SetDownloadOptions set no directory, in which
+// case nothing was saved.
 func (d *Download) Path() string {
-	return filepath.Join(d.downloadsDir, d.SuggestedFileName)
+	if d.downloadsDir == "" {
+		return ""
+	}
+	return filepath.Join(d.downloadsDir, d.UUID)
 }
 
 // Wait blocks until the download finishes (success or failure) or ctx
@@ -146,7 +159,7 @@ func (c *BrowserContext) OnDownload(handler func(*Download)) juggler.Subscriptio
 			URL:               dc.URL,
 			SuggestedFileName: dc.SuggestedFileName,
 			page:              pg,
-			downloadsDir:      "", // caller sets via SetDownloadOptions
+			downloadsDir:      c.currentDownloadsDir(),
 			done:              make(chan struct{}),
 		}
 
