@@ -1623,10 +1623,6 @@ export function buildInitScript(values: InitValues): string {
 		lines.push(
 			`  if (typeof w.${fnName} === "function") w.${fnName}(${pyJsonDumps(ip)});`,
 		);
-	} else {
-		lines.push(
-			'  if (typeof w.setWebRTCIPv4 === "function") w.setWebRTCIPv4("");',
-		);
 	}
 
 	// Font list (comma-separated)

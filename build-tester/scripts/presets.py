@@ -90,10 +90,10 @@ def inject_timezone(preset: dict, timezone: str) -> None:
 
 
 def inject_webrtc_ip(preset: dict) -> None:
-    preset["initScript"] = re.sub(
-        r'w\.setWebRTCIPv4\(""\)',
-        f"w.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)})",
-        preset["initScript"],
+    # The init script emits no WebRTC setter without a webrtc_ip (#163): append the call.
+    preset["initScript"] += (
+        f"\ntry {{ if (typeof window.setWebRTCIPv4 === 'function') "
+        f"window.setWebRTCIPv4({json.dumps(WEBRTC_TEST_IP)}); }} catch(e) {{}}"
     )
 
 
