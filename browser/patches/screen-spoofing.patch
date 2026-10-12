@@ -112,10 +112,10 @@ index 0000000000..a36944f3c6
 +
 +#endif  // mozilla_dom_ScreenDimensionManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index b0973412be..926cadf3dc 100644
+index b39f4a712d..c9a14f1e11 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -264,6 +264,7 @@ EXPORTS.mozilla.dom += [
+@@ -265,6 +265,7 @@ EXPORTS.mozilla.dom += [
      "ResponsiveImageSelector.h",
      "RoverfoxStorageManager.h",
      "SameProcessMessageQueue.h",
@@ -123,7 +123,7 @@ index b0973412be..926cadf3dc 100644
      "ScreenLuminance.h",
      "ScreenOrientation.h",
      "Selection.h",
-@@ -566,6 +567,9 @@ SOURCES += [
+@@ -568,6 +569,9 @@ SOURCES += [
  # (includes RoverfoxStorageManager.h which can affect compilation units)
  SOURCES += ["NavigatorManager.cpp"]
  
@@ -134,7 +134,7 @@ index b0973412be..926cadf3dc 100644
  SOURCES += ["FontListManager.cpp"]
  
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 1f133b6ed6..25f413db16 100644
+index 013cb357e0..ee60eb3a6a 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
 @@ -5,6 +5,7 @@
@@ -145,7 +145,7 @@ index 1f133b6ed6..25f413db16 100644
  
  #include <inttypes.h>
  #include <stdio.h>
-@@ -7841,6 +7842,28 @@ void nsGlobalWindowInner::SetNavigatorUserAgent(const nsAString& ua,
+@@ -7847,6 +7848,28 @@ void nsGlobalWindowInner::SetNavigatorUserAgent(const nsAString& ua,
    RoverfoxStorageManager::RemoveSetter("setNavigatorUserAgent");
  }
  
@@ -175,10 +175,10 @@ index 1f133b6ed6..25f413db16 100644
      bool aGranted) {
    // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index 9616144511..ff8c14d011 100644
+index 6f24829c65..10700bcbe2 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -704,6 +704,11 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -707,6 +707,11 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
                                         mozilla::ErrorResult& aRv);
    void SetNavigatorUserAgent(const nsAString& ua, mozilla::ErrorResult& aRv);
  
@@ -191,14 +191,15 @@ index 9616144511..ff8c14d011 100644
    void Alert(nsIPrincipal& aSubjectPrincipal, mozilla::ErrorResult& aError);
    void Alert(const nsAString& aMessage, nsIPrincipal& aSubjectPrincipal,
 diff --git a/dom/base/nsScreen.cpp b/dom/base/nsScreen.cpp
-index 4b989dd48a..db1b834258 100644
+index 4b989dd48a..af4ee752be 100644
 --- a/dom/base/nsScreen.cpp
 +++ b/dom/base/nsScreen.cpp
-@@ -5,11 +5,14 @@
+@@ -5,11 +5,15 @@
  #include "nsScreen.h"
  
  #include "MaskConfig.hpp"
 +#include "ScreenDimensionManager.h"
++#include "AccessObserverDom.hpp"
  
  #include "mozilla/GeckoBindings.h"
 +#include "mozilla/dom/BrowsingContext.h"
@@ -209,7 +210,7 @@ index 4b989dd48a..db1b834258 100644
  #include "mozilla/widget/ScreenManager.h"
  #include "nsCOMPtr.h"
  #include "nsDeviceContext.h"
-@@ -47,6 +50,12 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsScreen, DOMEventTargetHelper,
+@@ -47,6 +51,12 @@ NS_IMPL_CYCLE_COLLECTION_INHERITED(nsScreen, DOMEventTargetHelper,
                                     mScreenOrientation)
  
  int32_t nsScreen::PixelDepth() {
@@ -222,10 +223,21 @@ index 4b989dd48a..db1b834258 100644
    if (auto value = MaskConfig::GetUint32("screen.colorDepth"))
      return value.value();
    if (auto value = MaskConfig::GetUint32("screen.pixelDepth"))
-@@ -74,6 +83,17 @@ nsDeviceContext* nsScreen::GetDeviceContext() const {
+@@ -73,7 +83,28 @@ nsDeviceContext* nsScreen::GetDeviceContext() const {
+   return nsLayoutUtils::GetDeviceContextForScreenInfo(GetOuter());
  }
  
++// Camoufox tracking-observer: record a screen read (no-op when disarmed).
++static void RecordScreenRead(nsGlobalWindowInner* aWindow) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        aWindow ? aWindow->GetExtantDoc() : nullptr,
++        camoufox::SurfaceId::Screen);
++  }
++}
++
  CSSIntRect nsScreen::GetRect() {
++  RecordScreenRead(GetOwnerWindow());
 +  // Camoufox: per-context size wins over the global config.
 +  if (uint32_t w = 0, h = 0; ScreenDimensionManager::GetDimensions(
 +          RoverfoxStorageManager::UserContextId(GetOwnerWindow()), w, h)) {
@@ -240,10 +252,11 @@ index 4b989dd48a..db1b834258 100644
    // Return window inner rect to prevent fingerprinting.
    if (ShouldResistFingerprinting(RFPTarget::ScreenRect)) {
      return GetTopWindowInnerRectForRFP();
-@@ -106,9 +126,25 @@ CSSIntRect nsScreen::GetRect() {
+@@ -106,9 +137,26 @@ CSSIntRect nsScreen::GetRect() {
  }
  
  CSSIntRect nsScreen::GetAvailRect() {
++  RecordScreenRead(GetOwnerWindow());
 +  // Camoufox: stock Firefox's baseline fingerprinting protection derives the
 +  // available rect from the screen size below. The spoofed available rect
 +  // must not bypass it.
@@ -267,7 +280,7 @@ index 4b989dd48a..db1b834258 100644
      auto values = rect.value();
      return {values[0], values[1], values[2], values[3]};
    }
-@@ -137,7 +173,7 @@ CSSIntRect nsScreen::GetAvailRect() {
+@@ -137,7 +185,7 @@ CSSIntRect nsScreen::GetAvailRect() {
      }
    }
  
@@ -276,7 +289,7 @@ index 4b989dd48a..db1b834258 100644
      nsDeviceContext* context = GetDeviceContext();
      if (NS_WARN_IF(!context)) {
        return {};
-@@ -153,8 +189,16 @@ CSSIntRect nsScreen::GetAvailRect() {
+@@ -153,8 +201,16 @@ CSSIntRect nsScreen::GetAvailRect() {
        }
      }
  
@@ -295,7 +308,7 @@ index 4b989dd48a..db1b834258 100644
  
    nsDeviceContext* context = GetDeviceContext();
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index bfb0332a1c..c4cb127e83 100644
+index 9b750aa4d2..11c1c4a607 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
 @@ -982,6 +982,18 @@ partial interface Window {
@@ -358,7 +371,7 @@ index 0a628c93d2..cf8de1839e 100644
  }
  
 diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
-index 1587fcffd8..4b1952bc5d 100644
+index 1d9149d2fa..6ebab82568 100644
 --- a/layout/style/nsMediaFeatures.cpp
 +++ b/layout/style/nsMediaFeatures.cpp
 @@ -4,6 +4,7 @@
@@ -382,7 +395,7 @@ index 1587fcffd8..4b1952bc5d 100644
  #include "mozilla/gfx/gfxVars.h"
  #include "nsCSSProps.h"
  #include "nsCSSValue.h"
-@@ -58,6 +61,26 @@ static nsSize GetSize(const Document& aDocument) {
+@@ -59,6 +62,26 @@ static nsSize GetSize(const Document& aDocument) {
  
  // A helper for three features below.
  static nsSize GetDeviceSize(const Document& aDocument) {
@@ -409,7 +422,7 @@ index 1587fcffd8..4b1952bc5d 100644
    if (aDocument.ShouldResistFingerprinting(RFPTarget::CSSDeviceSize)) {
      return GetSize(aDocument);
    }
-@@ -171,6 +194,27 @@ int32_t Gecko_MediaFeatures_GetColorDepth(const Document* aDocument) {
+@@ -179,6 +202,27 @@ int32_t Gecko_MediaFeatures_GetColorDepth(const Document* aDocument) {
      return 0;
    }
  
