@@ -11,7 +11,7 @@ the stable, latest release, and X.Y.Z is published to PyPI and to npm `latest`.
 Each library release is paired with exactly one browser release -- the one built
 from the same sources, found by `ci.browser_inputs.source_digest()` in the
 release's manifest.json asset -- and `stamp` writes that pairing into the package
-(pythonlib/camoufox/browser-pin.json, read by both launchers). A library therefore
+(python/src/camoufox/browser-pin.json, read by both launchers). A library therefore
 never runs a browser it was not released with unless its user explicitly chooses
 another.
 
@@ -25,6 +25,7 @@ build's working tree. Rebuilding from the tag with `set-build` reproduces it.
     python3 -m ci.release paired [--root DIR] [--releases JSON]  # the browser release for this tree
     python3 -m ci.release lib-plan --channel prerelease|stable [--tag vX.Y.Z]
     python3 -m ci.release stamp --browser-tag T --py-version V --npm-version V
+    python3 -m ci.release lib-diff --channel C --wheel W --tarball T --py-version V --npm-version V
     python3 -m ci.release promote                 # paired browser -> stable, latest
     python3 -m ci.release check-promotable --tag vX.Y.Z
 """
@@ -40,13 +41,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from ._util import REPO_ROOT, die, http_json, log, read_upstream_sh, run, set_output
+from ._util import BROWSER_ROOT, REPO_ROOT, die, gh_headers, http_json, log, read_upstream_sh, run, set_output
 from .browser_inputs import BROWSER_DIRS, BROWSER_FILES, NON_NATIVE_SCRIPTS, source_digest
 
 PYPI_PROJECT = "camoufox"
-NPM_PACKAGE = "@camoufox/camoufox"
-PIN_FILE = REPO_ROOT / "pythonlib" / "camoufox" / "browser-pin.json"
-PYPROJECT = REPO_ROOT / "pythonlib" / "pyproject.toml"
+NPM_PACKAGE = "camoufox"
+PIN_FILE = REPO_ROOT / "python" / "src" / "camoufox" / "browser-pin.json"
+PYPROJECT = REPO_ROOT / "python" / "pyproject.toml"
 PACKAGE_JSON = REPO_ROOT / "typescript" / "package.json"
 TS_VERSION = REPO_ROOT / "typescript" / "src" / "__version__.ts"
 
@@ -62,7 +63,7 @@ STABLE_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 # prerelease (PEP 440 spelling, so it never reads as a browser tag).
 LIBRARY_TAG = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:b(\d+))?$")
 # What a library release ships besides the browser it pairs with.
-LIBRARY_DIRS = ("pythonlib", "typescript")
+LIBRARY_DIRS = ("python", "typescript")
 _BROWSER_TAG = re.compile(r"^v(?P<version>[^-]+)-(?P<prefix>[a-z]+)\.(?P<n>\d+)$")
 
 
@@ -149,9 +150,22 @@ def next_browser_release(upstream_release: str, tags: Iterable[str]) -> str:
     return f"{prefix}.{max([floor] + [u + 1 for u in used])}"
 
 
+def browser_interface(root: Path = REPO_ROOT) -> int:
+    """The browser interface this tree declares (CONSTRAINTS.INTERFACE)."""
+    text = (root / "python" / "src" / "camoufox" / "__version__.py").read_text(encoding="utf-8")
+    m = re.search(r"^\s*INTERFACE = (\d+)$", text, re.M)
+    if not m:
+        raise ValueError("python/src/camoufox/__version__.py declares no INTERFACE")
+    return int(m[1])
+
+
 def manifest(tag: str, digest: str, commit: str) -> dict:
-    """What every browser release carries as its manifest.json asset."""
-    return {"schema": 1, "tag": tag, "source_digest": digest, "commit": commit}
+    """What every browser release carries as its manifest.json asset.
+
+    The libraries read `interface` to refuse a browser they cannot drive.
+    """
+    return {"schema": 1, "tag": tag, "source_digest": digest, "commit": commit,
+            "interface": browser_interface()}
 
 
 def release_manifest(rel: dict) -> Optional[dict]:
@@ -202,7 +216,7 @@ def is_browser_source(rel: str) -> bool:
     """Whether a repo-relative path goes into the browser (as source_digest counts it)."""
     if rel in NON_NATIVE_SCRIPTS:
         return False
-    return rel in BROWSER_FILES or rel.split("/", 1)[0] in BROWSER_DIRS
+    return rel in BROWSER_FILES or rel.startswith(tuple(f"{d}/" for d in BROWSER_DIRS))
 
 
 @dataclass(frozen=True)
@@ -228,7 +242,7 @@ def find_paired(releases: Sequence[dict], root: Path = REPO_ROOT) -> Pairing:
     if found:
         return Pairing(found, f"{found['tag_name']} carries source digest {digest}")
 
-    up = read_upstream_sh(root / "upstream.sh")
+    up = read_upstream_sh(root / "browser" / "upstream.sh")
     tag = f"v{up['version']}-{up['release']}"
     rel = next((r for r in releases if r.get("tag_name") == tag), None)
     if rel is None or rel.get("draft"):
@@ -243,19 +257,111 @@ def find_paired(releases: Sequence[dict], root: Path = REPO_ROOT) -> Pairing:
 
 
 # ---------------------------------------------------------------------------
-# I/O
+# is a built package new?
 # ---------------------------------------------------------------------------
 
-def _gh_headers() -> dict:
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    return {"Authorization": f"Bearer {token}"} if token else {}
+_PY_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:b(\d+))?$")
+_NPM_VERSION = re.compile(r"^(\d+)\.(\d+)\.(\d+)(?:-beta\.(\d+))?$")
 
+
+def newest_version(versions: Iterable[str], spelling: "re.Pattern[str]") -> Optional[str]:
+    """The highest version in `spelling` (PyPI's or npm's), a prerelease below its release.
+
+    Versions in any other form are ignored: this package has never published one,
+    and guessing how one orders is worse than leaving it out.
+    """
+    keyed = []
+    for v in versions:
+        if m := spelling.match(v):
+            keyed.append(((int(m[1]), int(m[2]), int(m[3]), float(m[4]) if m[4] else float("inf")), v))
+    return max(keyed)[1] if keyed else None
+
+
+def package_files(path: Path, version: str) -> dict:
+    """{name: bytes} for a wheel or an npm tarball, with its own version taken out.
+
+    What is compared is what a user installs, so the version -- which every
+    release changes -- is replaced by a placeholder wherever it appears (the
+    dist-info directory, METADATA, package.json, the version module), and the
+    wheel's RECORD, which only hashes the other files, is left out.
+    """
+    import tarfile
+    import zipfile
+
+    files: dict = {}
+    if path.suffix == ".whl":
+        with zipfile.ZipFile(path) as z:
+            for name in z.namelist():
+                if not name.endswith("/"):
+                    files[name] = z.read(name)
+    else:
+        with tarfile.open(path) as t:
+            for member in t.getmembers():
+                if member.isfile():
+                    files[member.name] = t.extractfile(member).read()
+    old = version.encode()
+    out = {}
+    for name, data in files.items():
+        name = name.replace(version, "@VERSION@")
+        if name.endswith(".dist-info/RECORD"):
+            continue
+        out[name] = data.replace(old, b"@VERSION@")
+    return out
+
+
+def package_diff(built: dict, published: dict) -> List[str]:
+    """Names that differ between two package_files() results, sorted."""
+    return sorted(n for n in set(built) | set(published) if built.get(n) != published.get(n))
+
+
+def _download(url: str, dest: Path) -> Path:
+    import urllib.request
+
+    req = urllib.request.Request(url, headers={"User-Agent": "camoufox-harness"})
+    with urllib.request.urlopen(req, timeout=120) as resp:  # noqa: S310
+        dest.write_bytes(resp.read())
+    return dest
+
+
+def published_wheel(version: str, dest: Path) -> Path:
+    urls = http_json(f"https://pypi.org/pypi/{PYPI_PROJECT}/{version}/json")["urls"]
+    wheels = [u for u in urls if u.get("packagetype") == "bdist_wheel"]
+    if len(wheels) != 1:
+        die(f"{PYPI_PROJECT} {version} has {len(wheels)} wheels on PyPI; expected one")
+    return _download(wheels[0]["url"], dest / wheels[0]["filename"])
+
+
+def published_tarball(version: str, dest: Path) -> Path:
+    meta = http_json(f"https://registry.npmjs.org/{NPM_PACKAGE}/{version}")
+    return _download(meta["dist"]["tarball"], dest / f"published-{version}.tgz")
+
+
+def changed_since_published(built: Path, built_version: str, published: Sequence[str],
+                            spelling: "re.Pattern[str]", fetch, what: str) -> Tuple[bool, str]:
+    """Whether `built` differs from the newest version of it on its registry."""
+    import tempfile
+
+    newest = newest_version(published, spelling)
+    if newest is None:
+        return True, f"{what}: nothing published yet"
+    with tempfile.TemporaryDirectory() as tmp:
+        theirs = package_files(fetch(newest, Path(tmp)), newest)
+    diff = package_diff(package_files(built, built_version), theirs)
+    if not diff:
+        return False, f"{what}: identical to {newest}, which is already published"
+    shown = ", ".join(diff[:5]) + (f" and {len(diff) - 5} more" if len(diff) > 5 else "")
+    return True, f"{what}: {len(diff)} files differ from {newest}: {shown}"
+
+
+# ---------------------------------------------------------------------------
+# I/O
+# ---------------------------------------------------------------------------
 
 def github_releases(repo: str) -> List[dict]:
     out: List[dict] = []
     for page in range(1, 11):
         batch = http_json(f"https://api.github.com/repos/{repo}/releases?per_page=100&page={page}",
-                          headers=_gh_headers())
+                          headers=gh_headers())
         out += batch
         if len(batch) < 100:
             break
@@ -274,13 +380,13 @@ def registry_versions() -> Tuple[List[str], List[str]]:
             raise
 
     return (fetch(f"https://pypi.org/pypi/{PYPI_PROJECT}/json", "releases"),
-            fetch(f"https://registry.npmjs.org/{NPM_PACKAGE.replace('/', '%2f')}", "versions"))
+            fetch(f"https://registry.npmjs.org/{NPM_PACKAGE}", "versions"))
 
 
 def checked_in_version() -> str:
     m = re.search(r'^version = "([^"]+)"', PYPROJECT.read_text(), re.M)
     if not m:
-        die("pythonlib/pyproject.toml has no version")
+        die("python/pyproject.toml has no version")
     return m[1]
 
 
@@ -325,7 +431,7 @@ def cmd_set_build(args: argparse.Namespace) -> int:
     up = read_upstream_sh()
     if m["version"] != up["version"]:
         die(f"{args.tag} is Firefox {m['version']}, but upstream.sh builds {up['version']}")
-    path = REPO_ROOT / "upstream.sh"
+    path = BROWSER_ROOT / "upstream.sh"
     path.write_text(re.sub(r"^release=.*$", f"release={m['prefix']}.{m['n']}", path.read_text(), flags=re.M))
     log(f"upstream.sh: release={m['prefix']}.{m['n']}")
     return 0
@@ -392,6 +498,33 @@ def library_changed(root: Path = REPO_ROOT) -> Tuple[bool, str]:
     return True, f"{len(changed)} shipped files changed since {last}, e.g. {', '.join(changed[:3])}"
 
 
+def cmd_lib_diff(args: argparse.Namespace) -> int:
+    """Which registries get this release: those whose package it actually changes.
+
+    lib-plan only knows that something a library ships moved since the last
+    release. Here the packages are built, so each is compared, file by file, with
+    the newest version on its own registry. The Python package and the npm
+    package ship different things (a TypeScript-only change leaves the wheel
+    byte-identical), so each registry is decided on its own; the version counter
+    stays shared, which is why a registry can skip a number. A stable tag always
+    publishes both: it is the maintainer's explicit release.
+    """
+    if args.channel == "stable":
+        set_output("publish_pypi", "true")
+        set_output("publish_npm", "true")
+        return 0
+    pypi, npm = registry_versions()
+    py, py_why = changed_since_published(Path(args.wheel), args.py_version, pypi, _PY_VERSION,
+                                         published_wheel, "PyPI")
+    js, js_why = changed_since_published(Path(args.tarball), args.npm_version, npm, _NPM_VERSION,
+                                         published_tarball, "npm")
+    log(py_why)
+    log(js_why)
+    set_output("publish_pypi", "true" if py else "false")
+    set_output("publish_npm", "true" if js else "false")
+    return 0
+
+
 def is_gate_check(name: str) -> bool:
     """The test pipeline's gate, run directly or called by release.yml."""
     return name == GATE_CHECK or name.endswith(f" / {GATE_CHECK}")
@@ -404,7 +537,7 @@ def _require_tested(sha: str) -> None:
         batch = http_json(
             f"https://api.github.com/repos/{repo_name()}/commits/{sha}/check-runs"
             f"?filter=latest&per_page=100&page={page}",
-            headers=_gh_headers(),
+            headers=gh_headers(),
         ).get("check_runs", [])
         checks += batch
         if len(batch) < 100:
@@ -489,6 +622,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument("--py-version", required=True); p.add_argument("--npm-version", required=True)
     p.set_defaults(fn=cmd_stamp)
     sub.add_parser("promote").set_defaults(fn=cmd_promote)
+    p = sub.add_parser("lib-diff"); p.add_argument("--channel", choices=["prerelease", "stable"], required=True)
+    p.add_argument("--wheel", required=True); p.add_argument("--tarball", required=True)
+    p.add_argument("--py-version", required=True); p.add_argument("--npm-version", required=True)
+    p.set_defaults(fn=cmd_lib_diff)
     args = ap.parse_args(argv)
     return args.fn(args)
 

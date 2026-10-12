@@ -16,9 +16,10 @@ the goldens are a function of the code alone:
     the fresh salt, generate_fingerprint and get_random_preset.
   * host: XDG_CACHE_HOME points the camoufox cache at a scratch dir; the stock
     profile disk capacity, the host OS key, the host CPU count, the monitor
-    probe and the public-IP lookup are patched; the GeoIP reader is a fake
-    maxminddb module over a fixed table; numpy's weighted locale choice uses a
-    fixed uniform draw (same algorithm as numpy, so the TS port can mirror it).
+    probe, the host GPU probe and the public-IP lookup are patched; the GeoIP
+    reader is a fake maxminddb module over a fixed table; numpy's weighted
+    locale choice uses a fixed uniform draw (same algorithm as numpy, so the
+    TS port can mirror it).
   * module-level random: launch_options() draws the canvas seed per launch;
     the module generator is re-seeded to MODULE_SEED before each scenario (the
     TS test seeds its pyRandom the same way).
@@ -61,6 +62,15 @@ GEO_TABLE = {
     '2a01:4f8::1': {'country_code': 'DE', 'longitude': 9.491, 'latitude': 51.2993, 'timezone': 'Europe/Berlin'},
     '203.0.113.7': {'country_code': 'JP', 'longitude': 139.6899, 'latitude': 35.6893, 'timezone': 'Asia/Tokyo'},
 }
+# Each record answers in both layouts: GeoLite2's flat fields and the nested
+# ones the default source (GeoIP AIO) is read through.
+for _rec in GEO_TABLE.values():
+    _rec['country'] = {'iso_code': _rec['country_code']}
+    _rec['location'] = {
+        'longitude': _rec['longitude'],
+        'latitude': _rec['latitude'],
+        'time_zone': _rec['timezone'],
+    }
 _fake_mmdb = types.ModuleType('maxminddb')
 
 
@@ -93,7 +103,7 @@ from camoufox.utils import launch_options  # noqa: E402
 assert str(utils.INSTALL_DIR) == str(CACHE), (utils.INSTALL_DIR, CACHE)
 
 # The mmdb files only have to exist and be fresh; the fake reader answers.
-for name in ('maxmind geolite2-ipv4.mmdb', 'maxmind geolite2-ipv6.mmdb'):
+for name in ('geoip aio by daijro-combined.mmdb', 'maxmind geolite2-ipv4.mmdb', 'maxmind geolite2-ipv6.mmdb'):
     p = geolocation.MMDB_DIR / name
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_bytes(b'')
@@ -107,6 +117,8 @@ HOST = {
     'cpu_count': 16,
     'disk_capacity_kb': 250_000_000,
     'host_os_key': 'lin',
+    # No WebGL, so the GPU is drawn; scenarios that claim one set their own.
+    'host_gpu': None,
     'display': [1600, 900],
     'public_ip': '81.2.69.160',
     'locale_uniform': 0.5,
@@ -116,6 +128,7 @@ HOST = {
 fingerprints.host_cpu_count = lambda: HOST['cpu_count']
 utils._stock_profile_disk_capacity_kb = lambda: HOST['disk_capacity_kb']
 utils._host_os_key = lambda: HOST['host_os_key']
+utils.host_gpu = lambda *args: HOST['host_gpu']
 def _display():
     from camoufox.display import DisplaySize
 
@@ -407,6 +420,15 @@ scenario('executable_old_build', fingerprint=FP['linux'], os='linux', executable
 scenario('executable_from_env', {'process_env': {'CAMOUFOX_EXECUTABLE_PATH': '<BUNDLE>/camoufox-bin'}},
          fingerprint=FP['linux'], os='linux', executable_path=None)
 
+# canvas_noise: the canvas renders on the host
+LIN_GPU, OTHER_LIN_GPU = INPUTS['webgl_pairs']['lin']
+scenario('canvas_noise_other_os', {'host_gpu': LIN_GPU}, fingerprint=FP['windows'], os='windows')
+scenario('canvas_noise_false', {'host_gpu': LIN_GPU}, fingerprint=FP['windows'], os='windows', canvas_noise=False)
+scenario('canvas_noise_true_host_os', {'host_gpu': LIN_GPU}, fingerprint=FP['linux'], os='linux', canvas_noise=True)
+scenario('host_os_claims_host_gpu', {'host_gpu': LIN_GPU}, fingerprint=FP['linux'], os='linux', headless=True)
+scenario('host_os_pinned_gpu', {'host_gpu': LIN_GPU}, fingerprint=FP['linux'], os='linux',
+         webgl_config=OTHER_LIN_GPU)
+
 # chunking: a config bigger than one env var chunk
 scenario('config_large', fingerprint=FP['linux'], os='linux', i_know_what_im_doing=True,
          config={'fonts': [f'Font Family {i:05d}' for i in range(2600)]})
@@ -454,6 +476,13 @@ def run(name, spec):
 
         restore.append(('get_random_preset', utils.get_random_preset))
         utils.get_random_preset = fake_random_preset
+    if 'host_gpu' in special:
+        def fake_host_gpu(executable_path, headless, env):
+            calls.append({'fn': 'host_gpu', 'executable_path': executable_path, 'headless': headless})
+            return tuple(special['host_gpu'])
+
+        restore.append(('host_gpu', utils.host_gpu))
+        utils.host_gpu = fake_host_gpu
     env_backup = {}
     for k, v in special.get('process_env', {}).items():
         env_backup[k] = os.environ.get(k)

@@ -2,7 +2,7 @@
  * Browser package management: version resolution, GitHub release discovery,
  * download/extract, and path lookup.
  *
- * TypeScript twin of pythonlib/camoufox/pkgman.py.
+ * TypeScript twin of python/src/camoufox/pkgman.py.
  */
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -15,7 +15,6 @@ import type { Writable } from "node:stream";
 import AdmZip from "adm-zip";
 import cliProgress, { type Options as BarOptions } from "cli-progress";
 import prettyBytes from "pretty-bytes";
-import { parse as parseYaml } from "yaml";
 import { CONSTRAINTS, LIBRARY_VERSION } from "./__version__.js";
 import {
 	effectivePin,
@@ -38,36 +37,25 @@ import {
 // the ESM cycle resolves before any binding is read.
 import {
 	COMPAT_FLAG,
+	findInstalledVersion,
 	getActivePath,
 	getDefaultChannel,
 	installVersioned,
 	loadConfig,
+	loadRepoCache,
 } from "./multiversion.js";
 import {
 	ARCH_MAP,
 	INSTALL_DIR,
 	LAUNCH_FILE,
-	LOCAL_DATA,
+	loadDataFile,
 	OS_ARCH_MATRIX,
 	OS_MAP,
 	OS_NAME,
 	rprint,
 } from "./paths.js";
-
-// Platform constants and install paths live in paths.ts so that the
-// pkgman <-> multiversion cycle never needs them mid-evaluation. Re-exported
-// here so pkgman stays the single public entry point for them.
-export {
-	ARCH_MAP,
-	INSTALL_DIR,
-	LAUNCH_FILE,
-	LOCAL_DATA,
-	OS_ARCH_MATRIX,
-	OS_MAP,
-	OS_NAME,
-	rprint,
-	userCacheDir,
-} from "./paths.js";
+import { comparePyStr, ValueError } from "./pycompat.js";
+import { warn } from "./warnings.js";
 
 /** GITHUB_TOKEN, as the Python twin reads it: once, at import. */
 const GITHUB_TOKEN: string | undefined = process.env.GITHUB_TOKEN;
@@ -77,6 +65,45 @@ function githubHeaders(url: string): Record<string, string> {
 	return url.includes("api.github") && GITHUB_TOKEN
 		? { Authorization: `Bearer ${GITHUB_TOKEN}` }
 		: {};
+}
+
+/** Delays before each retry of a request that failed without a response. */
+const NETWORK_RETRY_DELAYS_MS = [1000, 2000];
+
+/**
+ * fetch(), retried when the request fails without any response, and naming
+ * the URL and cause when it gives up. Node's own error is only "fetch failed",
+ * which says neither what was being downloaded nor why (DNS, refused, reset,
+ * timeout).
+ *
+ * Unlike requests.get(), which opens a connection per call, fetch() reuses
+ * pooled keep-alive connections, and a server may close one just as it is
+ * reused ("other side closed"). On GitHub's runners that failed `camoufox
+ * fetch` right after the browser download, before any byte of the GeoIP
+ * request was answered. HTTP errors are responses, never retried.
+ */
+async function request(url: string, init: RequestInit): Promise<Response> {
+	for (let attempt = 0; ; attempt++) {
+		try {
+			return await fetch(url, init);
+		} catch (error) {
+			if (attempt < NETWORK_RETRY_DELAYS_MS.length) {
+				await new Promise((resolve) =>
+					setTimeout(resolve, NETWORK_RETRY_DELAYS_MS[attempt]),
+				);
+				continue;
+			}
+			const cause = (error as { cause?: { code?: string; message?: string } })
+				.cause;
+			const detail = cause
+				? `${cause.code ?? ""} ${cause.message ?? ""}`.trim()
+				: "";
+			throw new Error(
+				`Could not download ${url}: ${(error as Error).message}${detail ? ` (${detail})` : ""}`,
+				{ cause: error },
+			);
+		}
+	}
 }
 
 /** requests' raise_for_status() message, so callers can match "404". */
@@ -269,11 +296,16 @@ export const pkgmanDeps = {
  * The Python twin asks importlib.metadata for `playwright`; the npm package
  * that plays that role here is playwright-core.
  */
-function resolvedPlaywrightVersionRaw(): string | null {
+export function resolvedPlaywrightVersionRaw(): string | null {
+	return installedPackageVersion("playwright-core");
+}
+
+/** An installed npm package's version, or null if it cannot be read. */
+export function installedPackageVersion(name: string): string | null {
 	try {
 		const require = createRequire(import.meta.url);
 		const pkg = JSON.parse(
-			fs.readFileSync(require.resolve("playwright-core/package.json"), "utf-8"),
+			fs.readFileSync(require.resolve(`${name}/package.json`), "utf-8"),
 		);
 		return typeof pkg.version === "string" ? pkg.version : null;
 	} catch {
@@ -338,18 +370,6 @@ export interface BrowserRepoEntry {
 	name: string;
 	pattern?: string;
 	versions?: BrowserVersionConstraint[];
-}
-
-/**
- * Load a bundled YAML data file (repos.yml, warnings.yml, ...).
- */
-export function loadYaml(file: string): Record<string, any> {
-	return (
-		(parseYaml(fs.readFileSync(path.join(LOCAL_DATA, file), "utf-8")) as Record<
-			string,
-			any
-		>) ?? {}
-	);
 }
 
 /**
@@ -432,14 +452,14 @@ export class RepoConfig {
 	}
 
 	static loadRepos(spoofLibraryVersion?: string): RepoConfig[] {
-		const data = loadYaml("repos.yml");
+		const data = loadDataFile("repos.yml");
 		return ((data.browsers ?? []) as BrowserRepoEntry[]).map((r) =>
 			RepoConfig.fromEntry(r, spoofLibraryVersion),
 		);
 	}
 
 	static getDefaultName(): string {
-		return loadYaml("repos.yml").default?.browser ?? "Official";
+		return loadDataFile("repos.yml").default?.browser ?? "Official";
 	}
 
 	static fromEntry(
@@ -545,11 +565,6 @@ export class RepoConfig {
 	}
 }
 
-/** Python's str ordering (code points), not localeCompare's collation. */
-export function cmpStr(a: string, b: string): number {
-	return a < b ? -1 : a > b ? 1 : 0;
-}
-
 function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -569,67 +584,105 @@ export interface GitHubRelease {
 	assets: GitHubAsset[];
 }
 
+/** Whether this library speaks a browser's declared interface. */
+export function interfaceSupported(iface: number): boolean {
+	return CONSTRAINTS.MIN_INTERFACE <= iface && iface <= CONSTRAINTS.INTERFACE;
+}
+
+const releaseInterfaces = new Map<string | number, number>();
+
 /**
- * Manages fetching GitHub releases with fallback repos.
+ * The browser interface a GitHub release declares in its manifest.json. A
+ * release without a manifest, or a manifest without the field, predates the
+ * field and is interface 1.
  */
-export class GitHubDownloader {
-	githubRepos: string[];
-	githubRepo: string;
-	isPrerelease = false;
-
-	constructor(githubRepos: string | string[]) {
-		this.githubRepos =
-			typeof githubRepos === "string" ? [githubRepos] : githubRepos;
-		this.githubRepo = this.githubRepos[0];
-	}
-
-	/** Return truthy data if this is the desired asset, else null. */
-	checkAsset(asset: GitHubAsset, _release?: GitHubRelease): any {
-		return asset.browser_download_url;
-	}
-
-	missingAssetError(): never {
-		throw new MissingRelease(
-			`Could not find a release asset in ${this.githubRepo}.`,
-		);
-	}
-
-	protected async getReleases(githubRepo: string): Promise<GitHubRelease[]> {
-		const apiUrl = `https://api.github.com/repos/${githubRepo}/releases`;
-		const response = await fetch(apiUrl, {
-			headers: githubHeaders(apiUrl),
+export async function releaseInterface(
+	release: GitHubRelease,
+): Promise<number> {
+	const manifest = (release.assets ?? []).find(
+		(a) => a.name === "manifest.json",
+	);
+	if (!manifest) return 1;
+	const key = manifest.id ?? manifest.browser_download_url;
+	let iface = releaseInterfaces.get(key);
+	if (iface === undefined) {
+		const url = manifest.browser_download_url;
+		const response = await request(url, {
 			signal: AbortSignal.timeout(20_000),
 		});
-		raiseForStatus(response, apiUrl);
-		return (await response.json()) as GitHubRelease[];
+		raiseForStatus(response, url);
+		iface = Number(
+			((await response.json()) as { interface?: number }).interface ?? 1,
+		);
+		releaseInterfaces.set(key, iface);
 	}
+	return iface;
+}
 
-	/**
-	 * Fetch the first matching release asset, trying fallback repos on failure.
-	 */
-	async getAsset(): Promise<any> {
-		let lastError: unknown;
-		for (const repo of this.githubRepos) {
-			try {
-				const releases = await this.getReleases(repo);
-				for (const release of releases) {
-					for (const asset of release.assets ?? []) {
-						const data = this.checkAsset(asset, release);
-						if (data) {
-							this.githubRepo = repo;
-							this.isPrerelease = release.prerelease ?? false;
-							return data;
-						}
-					}
-				}
-			} catch (error) {
-				lastError = error;
-			}
-		}
+/** The interface recorded in an install's version.json at install time. */
+export function installedInterface(installPath: string): number {
+	const data = JSON.parse(
+		fs.readFileSync(path.join(installPath, "version.json"), "utf-8"),
+	) as { interface?: number };
+	return Number(data.interface ?? 1);
+}
 
-		if (lastError) throw lastError;
-		this.missingAssetError();
-	}
+/** Why a browser needs a newer package, and the command that gets one. */
+export function upgradeMessage(version: Version, iface: number): string {
+	return (
+		`Camoufox v${version.fullString} needs a newer camoufox package: it uses browser interface ` +
+		`${iface}, and this package supports ${CONSTRAINTS.MIN_INTERFACE}-` +
+		`${CONSTRAINTS.INTERFACE}. Upgrade with \`npm install camoufox@latest\`.`
+	);
+}
+
+export function incompatibleMessage(version: Version, iface: number): string {
+	return (
+		`${upgradeMessage(version, iface)} ` +
+		"Or run `camoufox fetch` to install a browser this package supports."
+	);
+}
+
+/** A build the last `camoufox sync` found that needs a newer package. */
+export interface IncompatibleBuild {
+	repo: string;
+	version: string;
+	build: string;
+	interface: number;
+}
+
+let outdatedWarned = false;
+
+/**
+ * Warn once when the last `camoufox sync` found a browser release that needs
+ * a newer package. Reads the sync cache, so a launch makes no request.
+ */
+export function warnIfPackageOutdated(): void {
+	if (outdatedWarned) return;
+	const newer = (loadRepoCache().incompatible ?? []) as IncompatibleBuild[];
+	if (!newer.length) return;
+	outdatedWarned = true;
+	const versionOf = (v: IncompatibleBuild) => new Version(v.build, v.version);
+	const newest = newer.reduce((a, b) =>
+		versionOf(b).compare(versionOf(a)) > 0 ? b : a,
+	);
+	warn(upgradeMessage(versionOf(newest), newest.interface));
+}
+
+/** Test hook: forget that the warning was already issued. */
+export function resetOutdatedWarning(): void {
+	outdatedWarned = false;
+}
+
+/** A GitHub repo's releases, newest first. */
+async function githubReleases(repo: string): Promise<GitHubRelease[]> {
+	const apiUrl = `https://api.github.com/repos/${repo}/releases`;
+	const response = await request(apiUrl, {
+		headers: githubHeaders(apiUrl),
+		signal: AbortSignal.timeout(20_000),
+	});
+	raiseForStatus(response, apiUrl);
+	return (await response.json()) as GitHubRelease[];
 }
 
 /**
@@ -644,6 +697,7 @@ export class AvailableVersion {
 	assetUpdatedAt?: string;
 	sha256?: string;
 	assetCreatedAt?: string;
+	interface = 1;
 
 	constructor(init: {
 		version: Version;
@@ -654,6 +708,7 @@ export class AvailableVersion {
 		assetUpdatedAt?: string;
 		sha256?: string;
 		assetCreatedAt?: string;
+		interface?: number;
 	}) {
 		Object.assign(this, init);
 		this.version = init.version;
@@ -681,6 +736,7 @@ export class AvailableVersion {
 			asset_updated_at: this.assetUpdatedAt ?? null,
 			sha256: this.sha256 ?? null,
 			created_at: this.assetCreatedAt ?? null,
+			interface: this.interface,
 		};
 	}
 }
@@ -688,20 +744,24 @@ export class AvailableVersion {
 /**
  * Handles fetching and installing Camoufox.
  */
-export class CamoufoxFetcher extends GitHubDownloader {
+export class CamoufoxFetcher {
+	githubRepos: string[];
+	githubRepo: string;
+	isPrerelease = false;
 	repoConfig: RepoConfig;
 	arch: string;
 	pattern: RegExp;
 	installedSha256?: string;
 	installedCreatedAt?: string;
+	installedInterface = 1;
 	_versionObj?: Version;
 	_selectedVersion?: AvailableVersion;
 	_url?: string;
 
 	constructor(repoConfig?: RepoConfig, selectedVersion?: AvailableVersion) {
-		const config = repoConfig ?? RepoConfig.getDefault();
-		super(config.repos);
-		this.repoConfig = config;
+		this.repoConfig = repoConfig ?? RepoConfig.getDefault();
+		this.githubRepos = this.repoConfig.repos;
+		this.githubRepo = this.githubRepos[0];
 		this.arch = this.getPlatformArch();
 		this.pattern = this.repoConfig.buildPattern();
 
@@ -712,6 +772,7 @@ export class CamoufoxFetcher extends GitHubDownloader {
 			this.isPrerelease = selectedVersion.isPrerelease;
 			this.installedSha256 = selectedVersion.sha256;
 			this.installedCreatedAt = selectedVersion.assetCreatedAt;
+			this.installedInterface = selectedVersion.interface;
 		}
 	}
 
@@ -770,11 +831,60 @@ export class CamoufoxFetcher extends GitHubDownloader {
 		return [version, asset.browser_download_url];
 	}
 
+	/**
+	 * Whether a release whose asset checkAsset() matched may be used. The
+	 * Python twin decides this inside check_asset(); reading a manifest is
+	 * async here, so it is a separate step.
+	 */
+	async acceptRelease(
+		release: GitHubRelease,
+		[version]: [Version, string],
+	): Promise<boolean> {
+		const iface = await releaseInterface(release);
+		if (!interfaceSupported(iface)) {
+			rprint(incompatibleMessage(version, iface), "yellow");
+			return false;
+		}
+		this.installedInterface = iface;
+		return true;
+	}
+
 	missingAssetError(): never {
 		throw new MissingRelease(
 			`No matching release found for ${OS_NAME} ${this.arch} in the ` +
-				"supported range. Please update the Python library.",
+				"supported range. Please update the camoufox package.",
 		);
+	}
+
+	protected getReleases(githubRepo: string): Promise<GitHubRelease[]> {
+		return githubReleases(githubRepo);
+	}
+
+	/**
+	 * Fetch the first matching release asset, trying fallback repos on failure.
+	 */
+	async getAsset(): Promise<[Version, string]> {
+		let lastError: unknown;
+		for (const repo of this.githubRepos) {
+			try {
+				const releases = await this.getReleases(repo);
+				for (const release of releases) {
+					for (const asset of release.assets ?? []) {
+						const data = this.checkAsset(asset, release);
+						if (data && (await this.acceptRelease(release, data))) {
+							this.githubRepo = repo;
+							this.isPrerelease = release.prerelease ?? false;
+							return data;
+						}
+					}
+				}
+			} catch (error) {
+				lastError = error;
+			}
+		}
+
+		if (lastError) throw lastError;
+		this.missingAssetError();
 	}
 
 	getPlatformArch(): string {
@@ -812,14 +922,16 @@ export class CamoufoxFetcher extends GitHubDownloader {
 
 	get url(): string {
 		if (!this._url) {
-			throw new Error("Url is not available. Make sure to run init() first.");
+			throw new ValueError(
+				"Url is not available. Make sure to run init() first.",
+			);
 		}
 		return this._url;
 	}
 
 	get version(): string {
 		if (!this._versionObj?.version) {
-			throw new Error(
+			throw new ValueError(
 				"Version is not available. Make sure to run init() first.",
 			);
 		}
@@ -828,7 +940,7 @@ export class CamoufoxFetcher extends GitHubDownloader {
 
 	get build(): string {
 		if (!this._versionObj) {
-			throw new Error(
+			throw new ValueError(
 				"Build information is not available. Make sure to run init() first.",
 			);
 		}
@@ -837,7 +949,7 @@ export class CamoufoxFetcher extends GitHubDownloader {
 
 	get verstr(): string {
 		if (!this._versionObj) {
-			throw new Error(
+			throw new ValueError(
 				"Version is not available. Make sure to run init() first.",
 			);
 		}
@@ -846,13 +958,16 @@ export class CamoufoxFetcher extends GitHubDownloader {
 }
 
 /**
- * Fetch all supported versions from GitHub for the current platform.
+ * Fetch all supported versions from GitHub for the current platform. With
+ * includeIncompatible, builds that need a newer package are returned too
+ * (check `interfaceSupported(v.interface)`) instead of being reported.
  */
 export async function listAvailableVersions(
 	repoConfig?: RepoConfig,
 	includePrerelease: boolean = true,
 	spoofOs?: string,
 	spoofArch?: string,
+	includeIncompatible: boolean = false,
 ): Promise<AvailableVersion[]> {
 	const config = repoConfig ?? RepoConfig.getDefault();
 	const pattern = config.buildPattern(spoofOs, spoofArch);
@@ -869,13 +984,7 @@ export async function listAvailableVersions(
 	let lastError: unknown;
 	for (const repo of config.repos) {
 		try {
-			const apiUrl = `https://api.github.com/repos/${repo}/releases`;
-			const resp = await fetch(apiUrl, {
-				headers: githubHeaders(apiUrl),
-				signal: AbortSignal.timeout(20_000),
-			});
-			raiseForStatus(resp, apiUrl);
-			releases = (await resp.json()) as GitHubRelease[];
+			releases = await githubReleases(repo);
 			break;
 		} catch (error) {
 			lastError = error;
@@ -897,6 +1006,11 @@ export async function listAvailableVersions(
 			const assetPrerelease = isPrerelease || version.isAlpha;
 			if (assetPrerelease && !includePrerelease) continue;
 			if (!config.isVersionSupported(version, assetPrerelease)) continue;
+			const iface = await releaseInterface(release);
+			if (!interfaceSupported(iface) && !includeIncompatible) {
+				rprint(incompatibleMessage(version, iface), "yellow");
+				continue;
+			}
 
 			const digest = asset.digest ?? "";
 			const sha256 = digest.startsWith("sha256:")
@@ -913,6 +1027,7 @@ export async function listAvailableVersions(
 					assetUpdatedAt: asset.updated_at,
 					sha256,
 					assetCreatedAt: asset.created_at,
+					interface: iface,
 				}),
 			);
 		}
@@ -921,7 +1036,7 @@ export async function listAvailableVersions(
 	versions.sort((a, b) => {
 		const byVersion = b.version.compare(a.version);
 		if (byVersion !== 0) return byVersion;
-		return cmpStr(b.assetCreatedAt ?? "", a.assetCreatedAt ?? "");
+		return comparePyStr(b.assetCreatedAt ?? "", a.assetCreatedAt ?? "");
 	});
 	return versions;
 }
@@ -1010,8 +1125,13 @@ function resolveInstalledPath(downloadIfMissing: boolean): string | null {
 	}
 
 	const active = getActivePath();
-	if (active && Version.fromPath(active).isSupported()) {
-		return active;
+	if (active) {
+		const installed = Version.fromPath(active);
+		const iface = installedInterface(active);
+		if (!interfaceSupported(iface)) {
+			throw new UnsupportedVersion(incompatibleMessage(installed, iface));
+		}
+		if (installed.isSupported()) return active;
 	}
 
 	if (!fs.existsSync(INSTALL_DIR) || fs.readdirSync(INSTALL_DIR).length === 0) {
@@ -1072,21 +1192,18 @@ export async function ensureCamoufoxInstalled(): Promise<string> {
 }
 
 /**
- * Get the path to a file in the camoufox directory.
- *
- * `baseDir` (the directory of an explicit/sandbox executable_path) resolves
- * resources relative to that build instead of the active install, so a sandbox
- * binary doesn't fall back to the cache dir.
+ * A file the build ships, found from its executable: beside it, or in
+ * Contents/Resources when the executable is a macOS app bundle's Contents/MacOS/.
  */
-export function getPath(file: string, baseDir?: string): string {
-	if (baseDir) {
-		// Mac-bundle aware: an executable in Camoufox.app/Contents/MacOS/ keeps
-		// its resources under ../Resources/.
-		if (path.basename(baseDir) === "MacOS") {
-			return path.join(baseDir, "..", "Resources", file);
-		}
-		return path.join(baseDir, file);
-	}
+export function buildFile(executablePath: string, name: string): string {
+	const directory = path.dirname(executablePath);
+	return path.basename(directory) === "MacOS"
+		? path.join(path.dirname(directory), "Resources", name)
+		: path.join(directory, name);
+}
+
+/** Get the path to a file in the camoufox directory. */
+export function getPath(file: string): string {
 	if (OS_NAME === "mac") {
 		return path.resolve(
 			camoufoxPath(),
@@ -1128,6 +1245,31 @@ export function launchPath(browserPath?: string): string {
 	return execPath;
 }
 
+/**
+ * The executable of the installed build `specifier` names (the `browser`
+ * launch option). Like `camoufox set`, it overrides the pairing: it never
+ * downloads, and it warns when the build is not the paired one.
+ */
+export function selectedLaunchPath(specifier: string): string {
+	const installPath = findInstalledVersion(specifier);
+	if (installPath === null) {
+		throw new ValueError(
+			`Browser version '${specifier}' not found. Run \`camoufox list\` to see installed versions.`,
+		);
+	}
+	const version = Version.fromPath(installPath);
+	const iface = installedInterface(installPath);
+	if (!interfaceSupported(iface)) {
+		throw new UnsupportedVersion(incompatibleMessage(version, iface));
+	}
+	warnIfUnpaired(
+		path.basename(path.dirname(installPath)),
+		version.version ?? "",
+		version.build,
+	);
+	return launchPath(installPath);
+}
+
 const formatBytes = (v: number, _: BarOptions, type: string) =>
 	type === "total" || type === "value" ? prettyBytes(v) : String(v);
 
@@ -1137,8 +1279,8 @@ export type ProgressCallback = (downloaded: number, total: number) => void;
  * Download a file from the given URL. Streams into `buffer` when one is given,
  * otherwise accumulates and returns the bytes.
  *
- * One attempt, like the Python twin's requests.get(): an HTTP error raises
- * requests' "<status> Client Error: ... for url: ..." message.
+ * An HTTP error raises requests' "<status> Client Error: ... for url: ..."
+ * message, like the Python twin; see request() for network failures.
  */
 export async function webdl(
 	url: string,
@@ -1147,7 +1289,7 @@ export async function webdl(
 	buffer: Writable | null = null,
 	{ progressCallback }: { progressCallback?: ProgressCallback } = {},
 ): Promise<Buffer> {
-	const response = await fetch(url, { headers: githubHeaders(url) });
+	const response = await request(url, { headers: githubHeaders(url) });
 	raiseForStatus(response, url);
 
 	const totalSize = Number.parseInt(
