@@ -444,9 +444,10 @@ The goal is a browser that behaves exactly like stock Firefox, except that it
 reports a different machine. A value is spoofed when it identifies the host
 machine or the network. Anything else stays as Firefox has it, because
 something stock Firefox never does, such as noise, is a fingerprint in its own
-right. The exceptions are audio and canvas, which carry noise seeded per
-identity (canvas only where it is not covered), accepting that tell to keep
-identities on one host from being linked by them.
+right. The exceptions are audio and canvas, which carry noise, accepting that
+tell to keep identities on one host from being linked by them. The audio seed
+follows the identity. The canvas seed is drawn at random per launch and per
+context, and only where canvas is not covered.
 
 | Trait | What a page sees | Why it is spoofed | Where |
 |---|---|---|---|
