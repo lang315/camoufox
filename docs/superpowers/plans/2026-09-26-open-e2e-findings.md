@@ -22,6 +22,50 @@ entry flips to `FIXED?`, or a non-strict one stays green on 3 dispatches.
 **Spec:** `docs/superpowers/specs/2026-09-26-open-e2e-findings-design.md`.
 Read it first. The root-cause table there is what every task argues from.
 
+## FF156 re-baseline (2026-10-12)
+
+This plan was written against `c6e0ae9`, which shipped Firefox 152. PR #179,
+merged as `644ee9d`, moved the fork to FF156 and rewrote large parts of
+`pythonlib/camoufox/utils.py` and `fingerprints.py`. This section records what
+still holds. Where it disagrees with a task body below, this section wins.
+
+**Measured on FF156, Linux.** The e2e job of main run 36891250380 (`644ee9d`)
+reported 96 passed and 0 failed:
+- **#163 still reproduces.** Both strict `(pkg|pw)` checks stayed red, so no
+  `FIXED?` fired.
+- **#166 (go upload/download, go socks5) still reproduces.** Both ran as
+  strict xfail.
+- **#171 did not reproduce in that run.** `test_fifty_contexts_in_a_row[pkg|pw]`
+  xpassed. The entry is not strict and the bug is intermittent, so it stays.
+- **#164, #165 and #166-screen are not measured.** Their entries are not
+  strict, and pytest hides the stdout of a passing test, so the run cannot say
+  whether they fired.
+- **#162 on a Linux host is fixed for go** by #179's goapi fontconfig port
+  (`637cd18` retired those entries). pkg and pw never had Linux-host entries.
+
+**Darwin and Windows have not been measured on FF156.** Builds 38252267206
+(macos-arm64) and 38252271224 (windows-x86_64) on `644ee9d` are the inputs.
+Dispatch with `gh workflow run e2e.yml --repo lang315/camoufox -f run_id=<id>`;
+a leg whose artifact the run lacks now skips. Every
+`-f release=v152.0.4-beta.31-fork.1` below means an FF156 `run_id` instead,
+because the fork.1 release is FF152.
+
+| Task | Status on `644ee9d` |
+|---|---|
+| 0, 1, 2 (W0) | Valid. Still last, and Task 2 is still gated on the maintainer's explicit go-ahead. |
+| 3 `Download.Path` | Valid as written. Anchors unchanged; the bug is at `download.go:61` and `:149`. |
+| 4 window / voices | Valid. Update the pythonlib cites in the Go comments: `utils.py:1606`, `fingerprints.py:864` (`fix_screen_no_taskbar`) and `:996` (`clamp_window_dimensions`). |
+| 5 `Goto` | Valid. `Goto` is at `page.go:196-216`, and the `NewPage` select is at `:78-84`. The `err :=` to `err =` step is not needed. |
+| 6 goapi fonts and `webrtc_ip` | **Partly superseded.** Part (a) is done by `goapi/fontconfig.go` (`fontconfigEnv`, wired at `launch.go:272`). Drop `fontenv.go`, `linuxFontconfig`, its test, the Step 4 env wiring and the `utils.py:315` comment edit. Keep `genericFontPrefs` and its test. Derive the OS with `uaOSDir(cfg.NavigatorUserAgent, hostOS)` in place of a new `spoofedOS`. Wire the prefs after the `systemUIFont` block, now `launch.go:242-249`, and before the caller merge at `:250`. Keep Step 5 (`webrtc_ip`): `e2edriver/main.go:36` and `e2e/drivers/go.py:78`. |
+| 7 W2 ledger | **Trimmed.** The Linux go #162 entries and Step 4 are gone (`637cd18`). Dispatch with FF156 `run_id`s, not fork.1. |
+| 8 pythonlib generic prefs | Valid. The fonts block is now `utils.py:1342-1362`, and `target_os` is at `:1276`. |
+| 9 `setWebRTCIPv4("")` | Valid, at `fingerprints.py:1671-1674`. **But** `tests/test_webrtc_ipv6_spoofing.py:34-37` (`test_no_webrtc_ip_clears_v4_setter_only`) asserts the clear on purpose. Read why before inverting it, against the fork's per-context WebRTC model that the sync kept (D1). |
+| 10 context geometry | Valid. `_reassemble_camou_config` is gone; use `_launch_config` (`utils.py:784`). `NewContext` is at `sync_api.py:176` and `AsyncNewContext` at `async_api.py:200`. The viewport block is at `fingerprints.py:1875-1884`. |
+| 11 bare Playwright `no_viewport` | Rewrite Step 1. Neither README mentions `launch_options`; add the note under `## Usage` (`README.md:388`, `pythonlib/README.md:313`). The driver is now at `playwright_drivers.py:76-90` and `:128-143`. |
+| 12 W3 ledger | Valid. |
+| 13-17 (W1) | The patch anchors exist (`webrtc-ip-spoofing2.patch`, `ShouldSpoofCandidateIP`). Line numbers inside the tree can only be re-derived from an FF156 `make dir`. Task 14 must also be read against #184 (the static `spoofedCandidate` in `webrtc-ip-spoofing.patch`) and #181. Do not reopen D1. |
+| 18, 19 (W4) | Valid. They measure. |
+
 ## Global Constraints
 
 - Pass `--repo lang315/camoufox` on every `gh` call.
@@ -719,9 +763,9 @@ Expected: PASS.
 
 **Interfaces:**
 - Produces: `genericFontPrefs(targetOS string) map[string]string` and
-  `spoofedOS(platform string) string` in package `camoufox`. W4 Task 16 adds
+  `spoofedOS(platform string) string` in package `camoufox`. W4 Task 18 adds
   `font.name-list.emoji` to the same table.
-- The table must match pythonlib's `GENERIC_FONT_FAMILIES` (Task 7) exactly.
+- The table must match pythonlib's `GENERIC_FONT_FAMILIES` (Task 8) exactly.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -960,8 +1004,6 @@ once with it set.
   - **Expect `FIXED?`, then delete:**
     - The `test_upload_and_download[go]` RAISES entry.
     - The Windows `go-linux` `voices_no_foreign_os` entry.
-    - The Linux `test_fingerprint_is_coherent[go-` #162 entries. These need
-      a Linux leg; see Step 4.
   - **Expect green for 3 dispatches, then delete** the non-strict go #166
     `screen_contains_viewport` entry.
   - **Also expect `FIXED?` from goapi's generic prefs (B):**
@@ -972,9 +1014,7 @@ once with it set.
     runs, and leaks until W1. Add it to the existing #163 entries by widening
     their regex from `\[(pkg|pw)\]` to `\[(pkg|pw|go)\]`, strict, on every
     host where it was measured red.
-- [ ] **Step 4: The Linux leg.** The fork.1 release has no Linux asset. Use the PR
-  gate's e2e job, which builds Linux, as the Linux measurement.
-- [ ] **Step 5:** Commit the ledger, run the gate plus one more dispatch, then merge.
+- [ ] **Step 4:** Commit the ledger, run the gate plus one more dispatch, then merge.
 
 ---
 
