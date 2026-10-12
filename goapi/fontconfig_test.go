@@ -1,6 +1,7 @@
 package camoufox
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -369,5 +370,34 @@ func TestLaunchEnvFailsOnBrokenBundle(t *testing.T) {
 	}
 	if _, err := launchEnv(&launchConfig{executablePath: exe}, generatedConfig(t, "macos"), nil, "linux"); err == nil {
 		t.Fatal("a bundle without fonts.conf must fail the launch")
+	}
+}
+
+func TestGenericFontPrefsNameOnlyFamiliesTheSpoofedOSShips(t *testing.T) {
+	raw, err := os.ReadFile("pkg/fingerprint/data/fonts.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lists map[string][]string
+	if err := json.Unmarshal(raw, &lists); err != nil {
+		t.Fatal(err)
+	}
+	key := map[string]string{"windows": "win", "macos": "mac", "linux": "lin"}
+	for osName, k := range key {
+		ships := map[string]bool{}
+		for _, f := range lists[k] {
+			ships[f] = true
+		}
+		prefs := genericFontPrefs(osName)
+		if len(prefs) == 0 {
+			t.Fatalf("%s: no generic prefs", osName)
+		}
+		for pref, v := range prefs {
+			for _, fam := range strings.Split(v, ",") {
+				if fam = strings.TrimSpace(fam); !ships[fam] {
+					t.Errorf("%s %s names %q, which %s's font list does not ship", osName, pref, fam, osName)
+				}
+			}
+		}
 	}
 }

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	camoufox "github.com/lang315/camoufox/goapi"
+	"github.com/lang315/camoufox/goapi/pkg/config"
 	"github.com/lang315/camoufox/goapi/pkg/proxy"
 )
 
@@ -36,6 +37,7 @@ type reply struct {
 type args struct {
 	Binary   string         `json:"binary"`
 	OS       string         `json:"os"`
+	WebRTCIP string         `json:"webrtc_ip"`
 	Headless bool           `json:"headless"`
 	Proxy    *proxy.Proxy   `json:"proxy"`
 	Prefs    map[string]any `json:"prefs"`
@@ -125,6 +127,10 @@ func (s *state) do(ctx context.Context, r request) (any, error) {
 		}
 		if a.Proxy != nil {
 			opts = append(opts, camoufox.WithProxy(*a.Proxy))
+		}
+		if a.WebRTCIP != "" {
+			// What geoip= sets: launch-level webrtc:ipv4 (#163).
+			opts = append(opts, camoufox.WithConfig(&config.Config{WebRTCIPv4: a.WebRTCIP}))
 		}
 		for k, v := range a.Prefs {
 			opts = append(opts, camoufox.WithFirefoxUserPref(k, v))
