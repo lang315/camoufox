@@ -12,7 +12,6 @@ import asyncio
 import re
 from unittest import mock
 
-import orjson
 import pytest
 
 from camoufox import utils
@@ -85,9 +84,7 @@ def launch(os):
 
 
 def launch_config(browser):
-    env = browser.options["env"]
-    chunks = sorted((int(k.rsplit("_", 1)[1]), v) for k, v in env.items() if k.startswith("CAMOU_CONFIG_"))
-    return orjson.loads("".join(v for _, v in chunks))
+    return utils._launch_config(browser.options)
 
 
 def context_seeds(browser):
@@ -112,6 +109,19 @@ def test_a_covered_launch_seeds_no_context():
     NewContext(browser)
     NewContext(browser, os=OTHER)
     assert context_seeds(browser) == [[], []]
+
+
+def test_a_browser_launched_without_newbrowser_is_seeded():
+    """Playwright keeps no launch options, so a raw firefox.launch() or connect()
+    browser carries no covered record. Its contexts are seeded: on a covered
+    launch the placeholder answers every read before the perturb, while skipping
+    the seed would drop the noise of an uncovered one."""
+    browser = FakePlaywright().launch(
+        **utils.launch_options(os=OTHER, headless=True, i_know_what_im_doing=True)
+    )
+    NewContext(browser)
+    [[seed]] = context_seeds(browser)
+    assert int(seed) >= 1
 
 
 def test_another_os_on_an_uncovered_browser_raises():

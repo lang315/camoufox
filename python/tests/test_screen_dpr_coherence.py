@@ -58,10 +58,7 @@ def real_dpr1_screens(preset_key):
 
 
 def _cfg(w=960, h=540):
-    return {
-        "screen.width": w, "screen.height": h,
-        "screen.availWidth": w, "screen.availHeight": h - 25,
-    }
+    return {"screen.width": w, "screen.height": h}
 
 
 # ---------------------------------------------------------------------------

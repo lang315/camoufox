@@ -11,11 +11,12 @@ from typing_extensions import Literal
 from camoufox.virtdisplay import VirtualDisplay
 
 from .fingerprints import generate_context_fingerprint
-from .host_rendering import has_canvas_placeholder
 from .ip import Proxy, proxy_exit_geo
 from .utils import (
+    attach_canvas_cover,
     attach_context_defaults,
     attach_launch_fonts,
+    context_canvas_seed,
     context_identity,
     host_identity,
     launch_options,
@@ -150,8 +151,7 @@ def NewBrowser(
             attach_context_defaults(browser, no_viewport_default)
             attach_launch_fonts(browser, from_options)
             browser._camoufox_host_identity = identity
-            # Its contexts seed the fork's canvas noise only where the placeholder is off.
-            browser._camoufox_canvas_covered = has_canvas_placeholder(from_options.get('firefox_user_prefs', {}))
+            attach_canvas_cover(browser, from_options)
             return sync_attach_vd(browser, virtual_display)
         finally:
             if pid:
@@ -216,7 +216,7 @@ def NewContext(
     os, webgl_config = context_identity(browser, os, preset)
     fp = generate_context_fingerprint(
         preset=preset, os=os, ff_version=ff_version, webrtc_ip=webrtc_ip, webgl_config=webgl_config,
-        canvas_seed=not vars(browser).get('_camoufox_canvas_covered'),
+        canvas_seed=context_canvas_seed(browser),
     )
 
     warn_fonts_excluded_by_launch(browser, fp['config'].get('fonts'))

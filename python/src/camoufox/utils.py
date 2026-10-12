@@ -914,6 +914,22 @@ def context_identity(
     return host_name, gpu
 
 
+def attach_canvas_cover(browser: Any, from_options: Dict[str, Any]) -> None:
+    """Record whether the launch prefs carry the canvas placeholder, the pref
+    launch_options() writes when plan_rendering covers the canvas."""
+    browser._camoufox_canvas_covered = has_canvas_placeholder(from_options.get('firefox_user_prefs', {}))
+
+
+def context_canvas_seed(browser: Any) -> bool:
+    """Whether a new context on `browser` seeds the fork's canvas noise: only
+    where the launch left the canvas uncovered. Playwright keeps no launch
+    options, so a browser NewBrowser did not launch (firefox.launch(), connect())
+    has no record and is seeded: on a covered one the placeholder answers every
+    read before the perturb, while skipping would drop the noise of an
+    uncovered one."""
+    return not vars(browser).get('_camoufox_canvas_covered', False)
+
+
 def new_context_options(
     fingerprint: Dict[str, Any],
     context_kwargs: Dict[str, Any],
