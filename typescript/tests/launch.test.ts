@@ -320,6 +320,52 @@ describe("test_launch_environment: prefs", () => {
 		});
 	});
 
+	// test_generic_font_prefs.py (#162)
+	describe("the spoofed OS's generic fonts are named in prefs", () => {
+		const generics = (prefs: Record<string, any>) =>
+			Object.fromEntries(
+				Object.entries(prefs).filter(([k]) => k.startsWith("font.name-list.")),
+			);
+		const expected = (mono: string, serif: string, sans: string) =>
+			Object.fromEntries(
+				["x-western", "x-unicode"].flatMap((lang) => [
+					[`font.name-list.monospace.${lang}`, mono],
+					[`font.name-list.serif.${lang}`, serif],
+					[`font.name-list.sans-serif.${lang}`, sans],
+				]),
+			);
+		it.each([
+			[
+				"windows",
+				WIN_UA,
+				expected("Consolas, Courier New", "Times New Roman", "Arial"),
+			],
+			["macos", MAC_UA, expected("Menlo, Courier New", "Times", "Helvetica")],
+			["linux", LINUX_UA, expected("Cousine", "Tinos", "Arimo")],
+		])("%s", async (_os, u, want) => {
+			const got = generics(await prefsFor(ua(u)));
+			expect(got).toEqual(want);
+			// CAMOU_PREFS is compared byte for byte with Python's: same key order.
+			expect(Object.keys(got)).toEqual(Object.keys(want));
+		});
+		it("the test hook turns them off", async () => {
+			process.env.CAMOUFOX_NO_GENERIC_PREFS = "1";
+			try {
+				expect(generics(await prefsFor(ua(WIN_UA)))).toEqual({});
+			} finally {
+				delete process.env.CAMOUFOX_NO_GENERIC_PREFS;
+			}
+		});
+		it("a caller pref wins", async () => {
+			const PREF = "font.name-list.monospace.x-western";
+			const prefs = await prefsFor({
+				...ua(WIN_UA),
+				firefox_user_prefs: { [PREF]: "Courier New" },
+			});
+			expect(prefs[PREF]).toBe("Courier New");
+		});
+	});
+
 	describe("storage quota follows the host disk", () => {
 		const PREF = "dom.quotaManager.temporaryStorage.fixedLimit";
 		/** The real probe (isolateLaunch stubs it), over a stubbed disk. */
