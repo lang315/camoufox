@@ -27,6 +27,37 @@ type Options struct {
 var ffVersionRE = regexp.MustCompile(`Firefox/\d+\.0`)
 var rvVersionRE = regexp.MustCompile(`rv:\d+\.0`)
 
+// applyWindow mirrors pythonlib's fix_screen_no_taskbar and
+// clamp_window_dimensions (pythonlib/camoufox/fingerprints.py:864, :996): a
+// maximised window on the sampled screen, so outer <= avail <= screen with a
+// visible taskbar. Presets carry no window size, and without this the browser
+// keeps browser-init.patch's 1280x1040 on any screen (#166). Inner is left to
+// the browser, which lays it out inside the real window.
+func applyWindow(cfg *config.Config, targetOS string) {
+	if cfg.ScreenWidth == nil || cfg.ScreenHeight == nil {
+		return
+	}
+	sw, sh := *cfg.ScreenWidth, *cfg.ScreenHeight
+	aw, ah := sw, sh
+	if cfg.ScreenAvailWidth != nil {
+		aw = min(*cfg.ScreenAvailWidth, sw)
+	}
+	if cfg.ScreenAvailHeight != nil {
+		ah = min(*cfg.ScreenAvailHeight, sh)
+	}
+	if ah == sh {
+		taskbar := map[string]uint32{"windows": 40, "macos": 25, "linux": 27}[targetOS]
+		ah = sh - taskbar
+	}
+	cfg.ScreenAvailWidth, cfg.ScreenAvailHeight = config.Uint32(aw), config.Uint32(ah)
+	if cfg.WindowOuterWidth == nil || *cfg.WindowOuterWidth > aw {
+		cfg.WindowOuterWidth = config.Uint32(aw)
+	}
+	if cfg.WindowOuterHeight == nil || *cfg.WindowOuterHeight > ah {
+		cfg.WindowOuterHeight = config.Uint32(ah)
+	}
+}
+
 // Generate samples a preset and writes it onto the provided Config.
 // Fields already populated on cfg are not overwritten — preset values
 // are applied as defaults. This mirrors merge_into() semantics from
@@ -43,6 +74,13 @@ func Generate(cfg *config.Config, opts Options) error {
 	applyPreset(cfg, preset, opts.FirefoxVersion)
 
 	targetOS := osFromPlatform(preset.Navigator.Platform)
+	applyWindow(cfg, targetOS)
+	// Mirrors pythonlib utils.py:1606: the block is pinned explicitly, so
+	// an empty voice list (linux ships none) cannot fall through to the host's
+	// native voices (#166).
+	if cfg.VoicesBlockIfNotDefined == nil {
+		cfg.VoicesBlockIfNotDefined = config.Bool(true)
+	}
 	if len(cfg.Fonts) == 0 {
 		fonts, err := RandomFontSubset(targetOS, rng)
 		if err != nil {

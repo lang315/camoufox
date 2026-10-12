@@ -753,7 +753,7 @@ describe("identity salt and seed (test_identity_salt.py)", () => {
 });
 
 describe("buildInitScript", () => {
-	it("guards every setter and always clears the WebRTC IP", () => {
+	it("guards every setter and sets no WebRTC IP without one", () => {
 		const script = buildInitScript({
 			navigatorPlatform: "Win32",
 			hardwareConcurrency: 8,
@@ -767,7 +767,9 @@ describe("buildInitScript", () => {
 				/^ {2}if \(typeof w\.\w+ === "function"\) w\.\w+\(.*\);$/,
 			);
 		}
-		expect(script).toContain('w.setWebRTCIPv4("")');
+		// Juggler seals every setter before page script runs, so the empty call is no longer needed (#163).
+		expect(script).not.toContain("setWebRTCIPv4");
+		expect(script).not.toContain("setWebRTCIPv6");
 		expect(buildInitScript({})).not.toContain("setFontList");
 	});
 

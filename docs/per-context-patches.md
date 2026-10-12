@@ -218,14 +218,14 @@ The User-Agent's version is rewritten to the running browser's.
 | Value | Source |
 |---|---|
 | UA, platform, cores, oscpu | fpgen or the preset; UA version set to the browser's |
-| Screen, color depth | fpgen or the preset |
+| Screen, color depth | fpgen or the preset. Viewport: the launch window's inner size when the launch set one; otherwise screen height -28px for browser chrome, clamped inside the launch outer window (#164) |
 | WebGL | One GPU fpgen recorded for Firefox on that OS, weighted by its share and checked against the machine (`coherence.gpu_fits_machine()`); `webgl_for_gpu()` adds its parameters, extensions and shader precisions |
 | Fonts | `_generate_random_font_subset()`: one OS-version base plus measured additions ([FONTS.md](FONTS.md)); never from presets |
 | Voices | `_generate_random_voice_subset()`, from `voice-manifests.json`, seeded by the identity; never from presets |
 | Audio seed | Derived from the identity (`NewBrowser`) or random (`NewContext`), never 0 |
 | Canvas seed | Random per launch and per context, only where the launch leaves the canvas uncovered (`plan_rendering`); none on a covered launch. A browser `NewBrowser` did not launch is seeded |
 | Timezone | The preset, or `timezone` in `CAMOU_CONFIG` (from geoip); with a proxy, `NewContext` looks it up from the exit IP |
-| WebRTC IP | `NewContext`'s `webrtc_ip` or the proxy's exit IP, to the IPv4 or IPv6 setter; an invalid address raises `InvalidIP` |
+| WebRTC IP | `NewContext`'s `webrtc_ip` or the proxy's exit IP, to the IPv4 or IPv6 setter; an invalid address raises `InvalidIP`. Without one, the init script calls no WebRTC setter, so the launch-level `webrtc:ipv4` (set by `geoip=`) stands once the browser-side fallback lands (W1, #163); until then #163 still reproduces |
 | Geolocation | The `geolocation` argument, via Playwright |
 
 ## Known limitations

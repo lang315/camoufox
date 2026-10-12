@@ -16,6 +16,9 @@ type BrowserContext struct {
 
 	pagesMu sync.Mutex
 	pages   []*Page
+
+	dlMu         sync.Mutex
+	downloadsDir string // from SetDownloadOptions; the browser saves downloads here as <uuid>
 }
 
 // NewContext creates a fresh browser context. The context is removed

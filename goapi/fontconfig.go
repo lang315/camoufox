@@ -167,3 +167,32 @@ func isDir(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && st.IsDir()
 }
+
+// genericFamilies names each spoofed OS's generics: monospace, serif,
+// sans-serif. Without these, generics resolve through the HOST's
+// font.name-list.* prefs (Menlo on a mac host, Consolas on a Windows host),
+// which the launch font mask refuses, so monospace fell to the first allowed
+// family: Arial or Arimo (#162). Every family must be in every drawn font subset
+// (TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims). Kept identical to
+// pythonlib's GENERIC_FONT_FAMILIES.
+// ponytail: x-western and x-unicode only; other lang groups keep the host
+// default until the browser-side fix (#162, W1) lands.
+var genericFamilies = map[string][3]string{
+	"windows": {"Consolas, Courier New", "Times New Roman", "Arial"},
+	"macos":   {"Menlo, Courier New", "Times", "Helvetica"},
+	"linux":   {"Cousine", "Tinos", "Arimo"},
+}
+
+func genericFontPrefs(targetOS string) map[string]string {
+	f, ok := genericFamilies[targetOS]
+	if !ok {
+		return nil
+	}
+	out := map[string]string{}
+	for _, lang := range []string{"x-western", "x-unicode"} {
+		out["font.name-list.monospace."+lang] = f[0]
+		out["font.name-list.serif."+lang] = f[1]
+		out["font.name-list.sans-serif."+lang] = f[2]
+	}
+	return out
+}
