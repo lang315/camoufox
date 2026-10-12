@@ -39,7 +39,8 @@ What PASS means:
       and still work when called;
     * no setter, setCanvasSeed, setWebRTCIPv4 and setWebRTCIPv6 included,
       stays on window in a context whose init script calls only
-      setNavigatorPlatform, on its first document and after a navigation;
+      setNavigatorPlatform, on its first document and after a navigation,
+      and the platform that init script set is the one the page reads;
     * sealing did not cost the spoofing. Two contexts asking for different
       operating systems each get their own fingerprint, and an init script
       registered after the page already exists still applies on the next
@@ -142,8 +143,8 @@ def main():
                 fp = generate_context_fingerprint(os=target)
                 ctx = browser.new_context(**fp["context_options"])
                 ctx.add_init_script(fp["init_script"])
-                want = (fp["config"].get("navigator.platform"),
-                        fp["config"].get("screen.width"))
+                want = {"platform": fp["config"].get("navigator.platform"),
+                        "width": fp["config"].get("screen.width")}
                 results.append((tag, probe(ctx, url), want))
 
             # A context whose init script runs but calls none of the setters
@@ -154,15 +155,20 @@ def main():
             # the resolve hook after the seal deleted it. Every setter name is
             # checked, so an upstream one leaking here is read too. Read on the
             # first document and on the one a navigation brings, which is a
-            # fresh window.
+            # fresh window. That a reverted fork gate re-offers its name is
+            # read from the code; this arm has not been run with one reverted.
+            # The platform it sets differs from the launch's, so an init script
+            # that never ran cannot pass as a repeat of the default-launch arm.
+            target = "MacIntel" if results[0][1]["platform"] == "Win32" else "Win32"
             ctx = browser.new_context()
             ctx.add_init_script('if (typeof window.setNavigatorPlatform === "function") '
-                                'window.setNavigatorPlatform("Win32");')
+                                f'window.setNavigatorPlatform({json.dumps(target)});')
             page = ctx.new_page()
             for step in ("first document", "after a navigation"):
                 page.goto(url)
                 page.wait_for_function("document.title !== 'pending'", timeout=10000)
-                results.append((f"setters unset / {step}", json.loads(page.title()), None))
+                results.append((f"setters unset / {step}", json.loads(page.title()),
+                                {"platform": target}))
 
             # add_init_script() registered *after* the page exists. The initial
             # about:blank has already been sealed by then, and the script only
@@ -176,8 +182,8 @@ def main():
             page.wait_for_function("document.title !== 'pending'", timeout=10000)
             late = json.loads(page.title())
             results.append(("late add_init_script", late,
-                            (fp["config"].get("navigator.platform"),
-                             fp["config"].get("screen.width"))))
+                            {"platform": fp["config"].get("navigator.platform"),
+                             "width": fp["config"].get("screen.width")}))
     finally:
         httpd.shutdown()
 
@@ -190,7 +196,7 @@ def main():
             if leaked:
                 failures.append(f"{label}: {field} leaked {leaked}")
         if want is not None:
-            got = (r["platform"], r["width"])
+            got = {k: r[k] for k in want}
             ok = got == want
             print(f"  [{'PASS' if ok else 'FAIL'}] {label}: fingerprint applied "
                   f"want={want} got={got}")

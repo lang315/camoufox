@@ -28,9 +28,9 @@ source port is inside that OS's range. No arrivals at all is SETUP-INVALID, not
 a pass: nothing was measured.
 
 On a Linux host the Linux arm is not a control, since the host range is the
-claimed range; the Windows and macOS arms are the test. The red proof is main's
-browser, which lacks the CreateSocket hunk: its Windows arm reports ports below
-49152.
+claimed range; the Windows and macOS arms are the test. A browser without the
+CreateSocket hunk (main's, for instance) should turn those arms red with ports
+below 49152 on a Linux host; that red run has not been made.
 
     python browser/tests/playwright/patches/webrtc-port-range.py
 """
