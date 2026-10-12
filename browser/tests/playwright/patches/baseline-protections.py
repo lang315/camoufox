@@ -37,7 +37,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+from helpers import check, resolve_binary  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 sys.path.insert(0, str(REPO_ROOT / "python" / "src"))
@@ -102,13 +102,6 @@ async def probe(binary: Path, platform: str, prefs: Dict[str, Any]) -> Dict[str,
             return json.loads(await result.json_value())
         finally:
             await browser.close()
-
-
-def check(failures: List[str], label: str, got: Any, want: Any) -> None:
-    ok = got == want
-    print(f"    [{'ok  ' if ok else 'FAIL'}] {label}: {got}" + ("" if ok else f" (expected {want})"))
-    if not ok:
-        failures.append(label)
 
 
 async def main() -> int:

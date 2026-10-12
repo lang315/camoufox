@@ -69,6 +69,15 @@ def launch_kwargs(**overrides: Any) -> Dict[str, Any]:
     return {"headless": True, "executable_path": str(resolve_binary()), **overrides}
 
 
+def check(failures: List[str], label: str, got: Any, want: Any) -> None:
+    """Print one check and register it in `failures` when it fails; the guard
+    triages the list at the end, so every arm still runs."""
+    ok = got == want
+    print(f"    [{'ok  ' if ok else 'FAIL'}] {label}: {got}" + ("" if ok else f" (expected {want})"))
+    if not ok:
+        failures.append(label)
+
+
 @contextlib.contextmanager
 def hidden_display() -> Iterator[str]:
     """A private Xvfb display for the duration of the block.
