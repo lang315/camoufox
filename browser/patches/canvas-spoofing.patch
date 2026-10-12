@@ -1,23 +1,21 @@
 diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
 new file mode 100644
-index 0000000000..f83ffb1860
+index 0000000000..0007463b91
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.cpp
-@@ -0,0 +1,162 @@
+@@ -0,0 +1,118 @@
 +#include "CanvasSeedManager.h"
-+#include "nsPrintfCString.h"
 +#include "MaskConfig.hpp"
 +#include "mozilla/HashFunctions.h"
-+#include "nsGlobalWindowInner.h"
-+#include "xpcpublic.h"
-+#include "mozilla/dom/BrowsingContext.h"
++#include "mozilla/Logging.h"
 +#include "mozilla/dom/Document.h"
-+#include "nsDocShell.h"
-+#include "nsPIDOMWindow.h"
-+#include "nsPIDOMWindowInlines.h"
 +
 +namespace mozilla {
 +namespace dom {
++
++// Camoufox: guards read these lines to tell a perturbed read from one that
++// was not, which the pixels alone cannot show.
++static LazyLogModule sCamouCanvasLog("CamouCanvas");
 +
 +/* static */ nsString
 +CanvasSeedManager::KeyForUserContext(uint32_t userContextId) {
@@ -27,19 +25,13 @@ index 0000000000..f83ffb1860
 +  return key;
 +}
 +
-+/* static */ nsString
-+CanvasSeedManager::DisabledKeyForUserContext(uint32_t userContextId) {
-+  nsString key;
-+  key.AppendLiteral(u"canvas_seed_disabled_");
-+  key.AppendInt(userContextId);
-+  return key;
-+}
-+
 +/* static */ void
 +CanvasSeedManager::SetSeed(uint32_t userContextId, uint32_t seed) {
 +  nsString key = KeyForUserContext(userContextId);
 +  RoverfoxStorageManager::PutUint(key, seed);
 +  DisableFunction(userContextId);
++  MOZ_LOG(sCamouCanvasLog, LogLevel::Debug,
++          ("CAMOU-CANVAS set ctx=%u seed=%u", userContextId, seed));
 +}
 +
 +/* static */ uint32_t
@@ -56,42 +48,14 @@ index 0000000000..f83ffb1860
 +  return 0;
 +}
 +
-+/* static */ bool
-+CanvasSeedManager::HasSeed(uint32_t userContextId) {
-+  nsString key = KeyForUserContext(userContextId);
-+  uint32_t seed = 0;
-+  return RoverfoxStorageManager::GetUint(key, seed);
-+}
-+
-+/* static */ bool
-+CanvasSeedManager::IsFunctionDisabled(uint32_t userContextId) {
-+  nsString key = DisabledKeyForUserContext(userContextId);
-+  bool disabled = false;
-+  return RoverfoxStorageManager::GetBool(key, disabled) && disabled;
-+}
-+
 +/* static */ void
 +CanvasSeedManager::DisableFunction(uint32_t userContextId) {
-+  nsString key = DisabledKeyForUserContext(userContextId);
-+  RoverfoxStorageManager::PutBool(key, true);
++  RoverfoxStorageManager::MarkSetterUsed("canvas", userContextId);
 +}
 +
 +/* static */ bool
 +CanvasSeedManager::IsFunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj) {
-+  nsGlobalWindowInner* win = xpc::WindowOrNull(aObj);
-+  if (!win) {
-+    return false;
-+  }
-+  // Camoufox: sealed once this window's init scripts have run, so page
-+  // script never sees the setter (FrameTree -> camouSealFingerprintSetters).
-+  if (win->CamouSettersSealed()) return false;
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = win->GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
-+  bool disabled = false;
-+  RoverfoxStorageManager::GetBool(DisabledKeyForUserContext(userContextId), disabled);
-+  return !disabled;
++  return RoverfoxStorageManager::IsSetterOffered(aObj, "canvas");
 +}
 +
 +// Hash of the first kHashBytes of buf (or the whole buf if smaller).
@@ -110,6 +74,8 @@ index 0000000000..f83ffb1860
 +  if (seed == 0 || data == nullptr || length < 4 || density <= 0.0) {
 +    return;
 +  }
++  MOZ_LOG(sCamouCanvasLog, LogLevel::Debug,
++          ("CAMOU-CANVAS perturb seed=%u bytes=%zu", seed, length));
 +  // Mix seed with content. Keeps noise deterministic per (seed, content).
 +  uint32_t s = seed ^ HashContent(data, length);
 +  if (s == 0) {
@@ -150,35 +116,25 @@ index 0000000000..f83ffb1860
 +}
 +
 +/* static */ uint32_t
-+CanvasSeedManager::SeedFromWindow(nsPIDOMWindowInner* aWin) {
-+  if (!aWin) return 0;
-+  if (BrowsingContext* bc = aWin->GetBrowsingContext()) {
-+    return GetSeed(bc->OriginAttributesRef().mUserContextId);
-+  }
-+  return 0;
-+}
-+
-+/* static */ uint32_t
 +CanvasSeedManager::SeedFromDocument(Document* aDoc) {
-+  if (!aDoc) return 0;
-+  return SeedFromWindow(aDoc->GetInnerWindow());
++  return aDoc ? GetSeed(RoverfoxStorageManager::UserContextId(aDoc)) : 0;
 +}
 +
 +} // namespace dom
 +} // namespace mozilla
 diff --git a/dom/base/CanvasSeedManager.h b/dom/base/CanvasSeedManager.h
 new file mode 100644
-index 0000000000..4866f7d9a5
+index 0000000000..5e59fc391d
 --- /dev/null
 +++ b/dom/base/CanvasSeedManager.h
-@@ -0,0 +1,66 @@
+@@ -0,0 +1,63 @@
 +#ifndef mozilla_dom_CanvasSeedManager_h
 +#define mozilla_dom_CanvasSeedManager_h
 +
 +#include "nsString.h"
 +#include "RoverfoxStorageManager.h"
 +
-+class nsPIDOMWindowInner;
++struct JSContext;
 +
 +namespace mozilla {
 +namespace dom {
@@ -202,9 +158,7 @@ index 0000000000..4866f7d9a5
 + public:
 +  static void SetSeed(uint32_t userContextId, uint32_t seed);
 +  static uint32_t GetSeed(uint32_t userContextId);
-+  static bool HasSeed(uint32_t userContextId);
 +
-+  static bool IsFunctionDisabled(uint32_t userContextId);
 +  static void DisableFunction(uint32_t userContextId);
 +  static bool IsFunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj);
 +
@@ -224,14 +178,13 @@ index 0000000000..4866f7d9a5
 +  static double GetNoiseDensity();
 +  static uint32_t GetNoiseStrength();
 +
-+  // Resolve the active seed for a window/document, walking the
-+  // BrowsingContext to its userContextId.
-+  static uint32_t SeedFromWindow(nsPIDOMWindowInner* aWin);
++  // The active seed for a document's context, read from its principal, so a
++  // document without a browsing context (DOMParser, createHTMLDocument) finds
++  // its creator's seed.
 +  static uint32_t SeedFromDocument(Document* aDoc);
 +
 + private:
 +  static nsString KeyForUserContext(uint32_t userContextId);
-+  static nsString DisabledKeyForUserContext(uint32_t userContextId);
 +};
 +
 +}  // namespace dom
@@ -239,7 +192,7 @@ index 0000000000..4866f7d9a5
 +
 +#endif  // mozilla_dom_CanvasSeedManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index e8f35ff5c4..f104f5e03f 100644
+index ad24dc91a2..af5abf9a37 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
 @@ -152,6 +152,7 @@ EXPORTS.mozilla.dom += [
@@ -250,7 +203,7 @@ index e8f35ff5c4..f104f5e03f 100644
      "CCGCScheduler.h",
      "CharacterData.h",
      "CharacterDataBuffer.h",
-@@ -357,6 +358,7 @@ UNIFIED_SOURCES += [
+@@ -356,6 +357,7 @@ UNIFIED_SOURCES += [
      "BodyConsumer.cpp",
      "BodyUtil.cpp",
      "BorrowedAttrInfo.cpp",
@@ -259,74 +212,57 @@ index e8f35ff5c4..f104f5e03f 100644
      "CharacterData.cpp",
      "CharacterDataBuffer.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index fb3a1f640d..feaaab0feb 100644
+index 8fd79e9868..ba36325c1c 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -242,6 +242,7 @@
- #include "nsICookieService.h"
- #include "nsID.h"
- #include "nsIDOMStorageManager.h"
+@@ -89,6 +89,7 @@
+ #include "mozilla/dom/AudioContext.h"
+ #include "AudioFingerprintManager.h"
+ #include "RoverfoxStorageManager.h"
 +#include "CanvasSeedManager.h"
- #include "nsDocShell.h"
- #include "mozilla/OriginAttributes.h"
- #include "nsIDOMXULControlElement.h"
-@@ -7803,6 +7804,25 @@ void nsGlobalWindowInner::SetAudioFingerprintSeed(uint32_t seed,
-   }
+ #include "mozilla/dom/AutoEntryScript.h"
+ #include "mozilla/dom/BarProps.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+@@ -7786,6 +7787,11 @@ void nsGlobalWindowInner::SetAudioFingerprintSeed(uint32_t seed,
+   RoverfoxStorageManager::RemoveSetter("setAudioFingerprintSeed");
  }
  
 +void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
-+  uint32_t userContextId = 0;
-+  if (BrowsingContext* bc = GetBrowsingContext()) {
-+    userContextId = bc->OriginAttributesRef().mUserContextId;
-+  }
-+
-+  CanvasSeedManager::SetSeed(userContextId, seed);
-+
-+  // Self-destruct so page JS can't detect the setter via typeof.
-+  if (JSContext* cx = nsContentUtils::GetCurrentJSContext()) {
-+    JS::Rooted<JSObject*> global(cx, JS::CurrentGlobalOrNull(cx));
-+    if (global) {
-+      JS::Rooted<JS::Value> undef(cx, JS::UndefinedValue());
-+      JS_SetProperty(cx, global, "setCanvasSeed", undef);
-+      JS_DeleteProperty(cx, global, "setCanvasSeed");
-+    }
-+  }
++  CanvasSeedManager::SetSeed(RoverfoxStorageManager::UserContextId(this), seed);
++  RoverfoxStorageManager::RemoveSetter("setCanvasSeed");
 +}
 +
  RefPtr<GenericPromise> nsGlobalWindowInner::StorageAccessPermissionChanged(
      bool aGranted) {
    // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index eec89694f8..d0c76a97b4 100644
+index eec89694f8..e9bc8f7026 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -685,6 +685,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
- 
-   mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
+@@ -681,6 +681,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+   // Audio fingerprint seed for per-context audio fingerprinting
+   void SetAudioFingerprintSeed(uint32_t seed, mozilla::ErrorResult& aRv);
  
 +  // Canvas pixel perturbation seed for privacy-preserving canvas readback
 +  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
 +
-   void StoreSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
+   void GetWebExposedLocales(nsTArray<nsString>& aLocales);
  
-   void ForgetSharedWorker(mozilla::dom::SharedWorker* aSharedWorker);
+   mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
-index 0553126dbf..300ec4781c 100644
+index 0553126dbf..c2548eb43b 100644
 --- a/dom/canvas/CanvasRenderingContext2D.cpp
 +++ b/dom/canvas/CanvasRenderingContext2D.cpp
-@@ -59,6 +59,11 @@
+@@ -59,6 +59,8 @@
  #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
  #include "mozilla/dom/DOMMatrix.h"
  #include "mozilla/dom/Document.h"
 +#include "mozilla/dom/CanvasSeedManager.h"
-+#include "AccessObserver.hpp"
-+#include "mozilla/OriginAttributes.h"
-+#include "prtime.h"
-+#include "mozilla/dom/BrowsingContext.h"
++#include "AccessObserverDom.hpp"
  #include "mozilla/dom/FontFaceSet.h"
  #include "mozilla/dom/FontFaceSetImpl.h"
  #include "mozilla/dom/GeneratePlaceholderCanvasData.h"
-@@ -2260,6 +2265,22 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
+@@ -2260,6 +2262,22 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
    return NS_OK;
  }
  
@@ -349,39 +285,35 @@ index 0553126dbf..300ec4781c 100644
  UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
      mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
      int32_t* out_format, gfx::IntSize* out_imageSize) {
-@@ -2279,6 +2300,31 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+@@ -2279,6 +2297,27 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
        *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
        *out_imageSize = data->GetSize();
        ret = SurfaceToPackedBGRA(data);
 +      // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
 +      // Covers toDataURL / toBlob / OffscreenCanvas.convertToBlob (BGRA packed).
-+      Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
-+      // Camoufox tracking-observer: record the read (no-op when disarmed).
-+      if (camoufox::AccessObserver::IsArmed() && seedDoc) {
-+        uint32_t uctx = 0;
-+        nsAutoCString baseDomain;
-+        if (nsIPrincipal* p = seedDoc->NodePrincipal()) {
-+          p->GetBaseDomain(baseDomain);
-+          mozilla::OriginAttributes oa = p->OriginAttributesRef();
-+          uctx = oa.mUserContextId;
++      // toBlob still asks for the buffer under the placeholder and then
++      // discards it, so that read is neither noised nor recorded.
++      if (aExtractionBehavior != CanvasUtils::ImageExtraction::Placeholder) {
++        Document* seedDoc =
++            CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++        if (camoufox::AccessObserver::IsArmed()) {
++          camoufox::RecordSurfaceFromDocument(seedDoc,
++                                              camoufox::SurfaceId::Canvas);
 +        }
-+        camoufox::AccessObserver::Record(
-+            uctx, std::string(baseDomain.get()),
-+            camoufox::SurfaceId::Canvas,
-+            static_cast<uint64_t>(PR_Now() / 1000));
-+      }
-+      uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
-+      if (seed != 0 && ret) {
-+        CanvasSeedManager::Perturb(
-+            ret.get(),
-+            static_cast<size_t>(out_imageSize->width) * out_imageSize->height * 4,
-+            seed, CanvasSeedManager::GetNoiseDensity(),
-+            CanvasSeedManager::GetNoiseStrength());
++        uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++        if (seed != 0 && ret) {
++          CanvasSeedManager::Perturb(
++              ret.get(),
++              static_cast<size_t>(out_imageSize->width) *
++                  out_imageSize->height * 4,
++              seed, CanvasSeedManager::GetNoiseDensity(),
++              CanvasSeedManager::GetNoiseStrength());
++        }
 +      }
      }
    }
  
-@@ -6803,6 +6849,30 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+@@ -6803,6 +6842,20 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
      }
@@ -390,18 +322,8 @@ index 0553126dbf..300ec4781c 100644
 +    // seed == 0. Placeholder path already broke out above, so it is untouched.
 +    Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
 +    // Camoufox tracking-observer: record the read (no-op when disarmed).
-+    if (camoufox::AccessObserver::IsArmed() && seedDoc) {
-+      uint32_t uctx = 0;
-+      nsAutoCString baseDomain;
-+      if (nsIPrincipal* p = seedDoc->NodePrincipal()) {
-+        p->GetBaseDomain(baseDomain);
-+        mozilla::OriginAttributes oa = p->OriginAttributesRef();
-+        uctx = oa.mUserContextId;
-+      }
-+      camoufox::AccessObserver::Record(
-+          uctx, std::string(baseDomain.get()),
-+          camoufox::SurfaceId::Canvas,
-+          static_cast<uint64_t>(PR_Now() / 1000));
++    if (camoufox::AccessObserver::IsArmed()) {
++      camoufox::RecordSurfaceFromDocument(seedDoc, camoufox::SurfaceId::Canvas);
 +    }
 +    uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
 +    if (seed != 0) {
@@ -413,41 +335,32 @@ index 0553126dbf..300ec4781c 100644
  
    readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index 5aaa4279fd..500792ec94 100644
+index 5aaa4279fd..8cd6dbad57 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
-@@ -16,6 +16,10 @@
+@@ -16,6 +16,8 @@
  #include "WebGLMethodDispatcher.h"
  #include "WebGLTextureUpload.h"
  #include "WebGLValidateStrings.h"
 +#include "mozilla/dom/CanvasSeedManager.h"
-+#include "AccessObserver.hpp"
-+#include "mozilla/OriginAttributes.h"
-+#include "prtime.h"
++#include "AccessObserverDom.hpp"
  #include "gfxCrashReporterUtils.h"
  #include "js/PropertyAndElement.h"  // JS_DefineElement
  #include "js/ScalarType.h"          // js::Scalar::Type
-@@ -5477,6 +5481,33 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+@@ -5477,6 +5479,26 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
                range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
                alphaChannelOffset, hasAlphaChannel);
          }
 +        // camoufox: deterministic per-seed WebGL readback perturbation.
-+        // RFP is disabled in camoufox, so the Randomize branch above is inert.
++        // A launch the RFP canvas targets cover reads the placeholder above
++        // instead, and its launcher sets no seed, so only an uncovered launch
++        // is perturbed.
 +        // Offscreen/worker contexts have no owner document and stay unperturbed.
 +        if (dom::Document* seedDoc = GetOwnerDoc()) {
 +          // Camoufox tracking-observer: record the read (no-op when disarmed).
-+          if (camoufox::AccessObserver::IsArmed() && seedDoc) {
-+            uint32_t uctx = 0;
-+            nsAutoCString baseDomain;
-+            if (nsIPrincipal* p = seedDoc->NodePrincipal()) {
-+              p->GetBaseDomain(baseDomain);
-+              mozilla::OriginAttributes oa = p->OriginAttributesRef();
-+              uctx = oa.mUserContextId;
-+            }
-+            camoufox::AccessObserver::Record(
-+                uctx, std::string(baseDomain.get()),
-+                camoufox::SurfaceId::WebGL,
-+                static_cast<uint64_t>(PR_Now() / 1000));
++          if (camoufox::AccessObserver::IsArmed()) {
++            camoufox::RecordSurfaceFromDocument(seedDoc,
++                                                camoufox::SurfaceId::WebGL);
 +          }
 +          const uint32_t seed =
 +              dom::CanvasSeedManager::SeedFromDocument(seedDoc);
