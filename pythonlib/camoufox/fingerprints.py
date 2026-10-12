@@ -1700,6 +1700,7 @@ def generate_context_fingerprint(
     timezone: Optional[str] = None,
     locale: Optional[str] = None,
     config_overrides: Optional[Dict[str, Any]] = None,
+    launch_window: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate fingerprint values for a single per-context identity.
@@ -1717,6 +1718,10 @@ def generate_context_fingerprint(
             context_options['locale'] for Playwright.
         config_overrides: Dict of CAMOU_CONFIG keys to override after config
             is built but before init_script is rendered (e.g. {'audio:seed': 7}).
+        launch_window: The browser's launch window, as attach_launch_window records it
+            ({'outer': (w, h), 'inner': (w|None, h|None), 'screen': (w, h)}). The window is
+            process-wide, so the context's viewport becomes the launch inner size (or no
+            viewport when the launch set none) and its screen is made to hold the window.
     """
     if preset is not None:
         # Use real fingerprint preset
@@ -1826,6 +1831,17 @@ def generate_context_fingerprint(
     # Fork-only canvas noise seed (patches/canvas-spoofing.patch); neither source above carries one
     config.setdefault('canvas:seed', randint(1, 4_294_967_295))  # nosec
 
+    # #164: the launch window is process-wide, so a context's screen must hold
+    # it. When the drawn screen cannot, claim the launch's own screen, which
+    # launch_options already made hold the window.
+    if launch_window:
+        ow, oh = launch_window['outer']
+        sw0, sh0 = screen.get('width'), screen.get('height')
+        lsw, lsh = launch_window['screen']
+        if not (sw0 and sh0 and sw0 >= ow and sh0 >= oh) and lsw and lsh:
+            screen = {**screen, 'width': lsw, 'height': lsh}
+            config['screen.width'], config['screen.height'] = lsw, lsh
+
     # Inject explicit timezone/locale into config (takes priority over preset)
     if timezone:
         config['timezone'] = timezone
@@ -1871,12 +1887,19 @@ def generate_context_fingerprint(
     sw = screen.get('width')
     sh = screen.get('height')
     if sw and sh:
-        context_options['viewport'] = {
-            'width': sw,
-            'height': max(sh - 28, 600),
-        }
+        inner = (launch_window or {}).get('inner') or (None, None)
+        if all(inner):
+            # The launch window's own inner size: inner <= outer by construction.
+            context_options['viewport'] = {'width': inner[0], 'height': inner[1]}
+        elif launch_window:
+            context_options['no_viewport'] = True
+        else:
+            # ponytail: a browser NewBrowser did not launch carries no record, so the
+            # old preset-sized viewport stays and #164 can still happen there.
+            context_options['viewport'] = {'width': sw, 'height': max(sh - 28, 600)}
     dpr = screen.get('devicePixelRatio')
-    if dpr:
+    # Playwright rejects deviceScaleFactor with a null viewport.
+    if dpr and not context_options.get('no_viewport'):
         context_options['device_scale_factor'] = dpr
     tz = config.get('timezone')
     if not tz and isinstance(preset, dict):

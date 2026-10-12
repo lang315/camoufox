@@ -836,6 +836,26 @@ def attach_launch_fonts(target: Any, from_options: Optional[Dict[str, Any]]) -> 
     return target
 
 
+def attach_launch_window(target: Any, from_options: Optional[Dict[str, Any]]) -> Any:
+    """Record the launch window and screen on the browser for NewContext (#164).
+
+    The launch window is process-wide (browser-init.patch resizes the real window
+    once), so every context shares it; a context can only claim a viewport inside
+    it and a screen that holds it. 1280x1040 is browser-init.patch's default when
+    the config sets no outer size.
+    """
+    cfg = _launch_config(from_options)
+    try:
+        target._camoufox_launch_window = {
+            'outer': (cfg.get('window.outerWidth') or 1280, cfg.get('window.outerHeight') or 1040),
+            'inner': (cfg.get('window.innerWidth'), cfg.get('window.innerHeight')),
+            'screen': (cfg.get('screen.width'), cfg.get('screen.height')),
+        }
+    except AttributeError:
+        pass  # a Playwright object that does not accept attributes
+    return target
+
+
 def warn_fonts_excluded_by_launch(browser: Any, context_fonts: Optional[List[str]]) -> None:
     """Warn when a context's fonts cannot appear because the launch whitelist dropped them."""
     launch_fonts = getattr(browser, '_camoufox_launch_fonts', None)
