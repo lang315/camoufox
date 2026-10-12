@@ -264,7 +264,9 @@ CoreText for the user UI font, Helvetica, with no provider, so the per-context
 gate answers at context 0. The entry this produces, `mDefaultFontEntry`, is
 read only at `gfxTextRun.cpp:2213`, after the gated pass and the logged
 `default-unfiltered` tail have both failed. The probe counts these lines apart,
-as "startup".
+as "startup": a context-0 `allowed=1` line counts as a fail-open only after a
+list has reached that process, which the setter's process logs as `CAMOU-FL set`
+and every other process as `CAMOU-FL flush`.
 
 **A context's list reached only its first content process (#149, fixed).**
 This was found here but is not macOS-specific. `setFontList` stores the list in a
@@ -277,8 +279,11 @@ same shape. The fork first fixed it by keeping the flag per process. Since the
 upstream sync (#188), both lists live in the same shared store as the flag,
 and each process parses them on first use. When a font list reaches a process
 that already exists, RoverfoxStorageManager's pref callback flushes that
-process's font caches (`CAMOU-FL flush`). Lookups made there before the list
-arrived answered without it, and those are the answers the flush drops.
+process's platform font-list memos (`CAMOU-FL flush`): the codepoint cache and
+the font-name caches, which may hold answers made before the list arrived.
+Font groups that had already resolved their fonts are not flushed. That the
+callback fires before the lists are needed is established by reading the code;
+the measurement is pending CI.
 `tests/patches/context-list-every-process.py` guards it: every page of one
 context, across two origins, must refuse a family that only the launch holds.
 It was red on main's browser and is green on the fix, both on Linux CI. Every

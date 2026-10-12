@@ -33,8 +33,14 @@ How this guard measures it:
     line's prefix, since several processes can share one log file: every
     process with a hasList=0 lookup for A must log an arrival after it, and no
     process may log a hasList=0 lookup for A after its arrival. At least one
-    `set` line for A must be read, or the reader measured nothing. Whether a
-    later process's first lookup already had the list is printed per process.
+    `set` line for A must be read, or the reader measured nothing, and at
+    least one `flush` line, or the callback never ran. Whether a later
+    process's first lookup already had the list is printed per process. The
+    arm checks ordering only: a stale memo answers above the gate and writes
+    no `gate` line, so a leak through one is read by the refusal checks above,
+    not here. "Without the list after its arrival" counts main-thread lookups
+    only, because a worker's gate line can be written after a flush line it
+    was computed before.
 
 Rendered versus refused is read under two fallbacks whose widths differ: a
 family that renders measures the same under both.
@@ -110,18 +116,23 @@ def process_lines(logdir):
 
 def flush_arm(logdir, ctx):
     """False when a process answered context `ctx` without its list after the
-    list had arrived there, or never received it after answering without it."""
+    list had arrived there, or never received it after answering without it,
+    or when no set or flush line for `ctx` was read at all."""
     ok = True
-    sets = 0
+    sets = flushes = 0
     for pid, msgs in sorted(process_lines(logdir).items()):
         arrivals = [i for i, m in enumerate(msgs) if re.match(rf"CAMOU-FL (set|flush) ctx={ctx}\b", m)]
-        lookups = [(i, "hasList=1" in m) for i, m in enumerate(msgs)
+        lookups = [(i, "hasList=1" in m, m.endswith(" main=1")) for i, m in enumerate(msgs)
                    if re.match(rf"CAMOU-FL gate ctx={ctx} ", m)]
         sets += sum(m.startswith(f"CAMOU-FL set ctx={ctx} ") for m in msgs)
+        flushes += sum(m.startswith(f"CAMOU-FL flush ctx={ctx} ") for m in msgs)
         if not lookups and not arrivals:
             continue
         first = arrivals[0] if arrivals else None
-        blind = [i for i, has in lookups if not has]
+        blind = [i for i, has, _ in lookups if not has]
+        # Main thread only: a worker's gate line can be written after a flush
+        # line it was computed before.
+        blind_main = [i for i, has, main in lookups if not has and main]
         print(f"  pid {pid}: lookups {len(lookups)}, without the list {len(blind)}, "
               f"first lookup had the list: {lookups[0][1] if lookups else '-'}, "
               f"arrival before first lookup: "
@@ -131,13 +142,17 @@ def flush_arm(logdir, ctx):
             print(f"  FAIL flush: pid {pid} answered context {ctx} without its list and never "
                   f"received it, so its memoized answers were never flushed")
             ok = False
-        elif first is not None and any(i > first for i in blind):
+        elif first is not None and any(i > first for i in blind_main):
             print(f"  FAIL flush: pid {pid} answered context {ctx} without its list after the "
                   f"list had arrived")
             ok = False
     if sets == 0:
         print(f"  FAIL flush: no CAMOU-FL set line for context {ctx} was read, so this arm "
               f"measured nothing")
+        ok = False
+    if flushes == 0:
+        print(f"  FAIL flush: no CAMOU-FL flush line for context {ctx} was read: the storage "
+              f"pref callback never ran, so no process that already existed was flushed")
         ok = False
     return ok
 
