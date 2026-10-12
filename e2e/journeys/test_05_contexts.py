@@ -69,6 +69,10 @@ def test_two_browsers_at_once(drv, site, check):
 
 
 # Two reads of one unchanged canvas: equal on a browser that does not resist fingerprinting.
+# getImageData is asserted beside toDataURL (the only read the rule's evidence quotes) because
+# CanvasRenderingContext2D::GetImageDataArray (Firefox 156, dom/canvas/CanvasRenderingContext2D.cpp)
+# takes the same ImageExtractionResult placeholder branch and calls
+# TryToGenerateRandomDataForPlaceholderCanvasData() on every read, so two reads differ.
 TWO_READS = """(() => {
   const c = document.createElement("canvas"); c.width = 220; c.height = 30;
   const x = c.getContext("2d");
