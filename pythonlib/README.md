@@ -319,9 +319,13 @@ All of the latest stable documentation is available at [camoufox.com/python](htt
 > **Open contexts with `no_viewport=True`.** Playwright's default viewport is 1280x720 whatever
 > window the fingerprint spoofs, so a spoofed window smaller than that gives a page
 > `innerWidth > outerWidth`, which no real browser can report (#164). `NewBrowser` and
-> `Camoufox()` default to it for you:
+> `Camoufox()` default to it for you when the fingerprint spoofs the window size:
 >
 > ```python
-> browser = playwright.firefox.launch(**launch_options(os="macos"))
-> page = browser.new_context(no_viewport=True).new_page()
+> from camoufox.utils import launch_options
+> from playwright.sync_api import sync_playwright
+>
+> with sync_playwright() as p:
+>     browser = p.firefox.launch(**launch_options(os="macos"))
+>     page = browser.new_context(no_viewport=True).new_page()
 > ```
