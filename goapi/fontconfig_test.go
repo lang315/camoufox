@@ -1,6 +1,7 @@
 package camoufox
 
 import (
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -369,5 +370,30 @@ func TestLaunchEnvFailsOnBrokenBundle(t *testing.T) {
 	}
 	if _, err := launchEnv(&launchConfig{executablePath: exe}, generatedConfig(t, "macos"), nil, "linux"); err == nil {
 		t.Fatal("a bundle without fonts.conf must fail the launch")
+	}
+}
+
+func TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims(t *testing.T) {
+	// A generic named outside the drawn subset is refused by the launch mask, so
+	// it falls to the same family as the others (e2e Linux go-macos: monospace
+	// and serif floors both 342 when the draw left out Times).
+	for _, osName := range []string{"windows", "macos", "linux"} {
+		prefs := genericFontPrefs(osName)
+		if len(prefs) == 0 {
+			t.Fatalf("%s: no generic prefs", osName)
+		}
+		for seed := range uint64(200) {
+			fonts, err := fingerprint.RandomFontSubset(osName, rand.New(rand.NewPCG(seed, 0)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for pref, v := range prefs {
+				for _, fam := range strings.Split(v, ",") {
+					if fam = strings.TrimSpace(fam); !slices.Contains(fonts, fam) {
+						t.Fatalf("%s seed %d: %s names %q, which the drawn font subset does not claim", osName, seed, pref, fam)
+					}
+				}
+			}
+		}
 	}
 }

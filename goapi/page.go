@@ -75,12 +75,9 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 	c.b.conn.ReplaySession(att.SessionID)
 	// Wait for the main-world execution context so the first
 	// Evaluate doesn't fail. about:blank fires this within ms.
-	select {
-	case <-p.contextReadyCh:
-	case <-time.After(5 * time.Second):
-		// Continue anyway; some callers may only want navigate.
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	if _, err := p.awaitMainContext(ctx, 30*time.Second); err != nil {
+		_ = p.Close(ctx)
+		return nil, fmt.Errorf("camoufox: new page's main execution context: %w", err)
 	}
 	return p, nil
 }
@@ -151,7 +148,7 @@ func (p *Page) subscribe() {
 		defer p.mu.Unlock()
 		if d.ExecutionContextID == p.mainContextID {
 			p.mainContextID = ""
-			p.contextReadyCh = make(chan struct{})
+			p.rearmContextReadyLocked()
 		}
 	}))
 
@@ -162,8 +159,20 @@ func (p *Page) subscribe() {
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		p.mainContextID = ""
-		p.contextReadyCh = make(chan struct{})
+		p.rearmContextReadyLocked()
 	}))
+}
+
+// rearmContextReadyLocked gives later waiters a fresh channel, but only once
+// the current one has fired: an open channel may already be held by a waiter,
+// and replacing it would strand that waiter (a new page is cleared before its
+// first context is created, #166).
+func (p *Page) rearmContextReadyLocked() {
+	select {
+	case <-p.contextReadyCh:
+		p.contextReadyCh = make(chan struct{})
+	default:
+	}
 }
 
 // TargetID returns the underlying juggler targetId.
@@ -192,30 +201,29 @@ type GotoOptions struct {
 	Referer   string
 }
 
-// Goto navigates the main frame to url. Default waits for load.
-func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error {
-	frame := p.MainFrameID()
-	if frame == "" {
-		// Force a value: targetId doubles as frameId only when the
-		// frame is already attached; otherwise wait briefly for it.
-		deadline := time.NewTimer(2 * time.Second)
-		defer deadline.Stop()
-	wait:
-		for frame == "" {
-			select {
-			case <-time.After(20 * time.Millisecond):
-				frame = p.MainFrameID()
-			case <-deadline.C:
-				break wait
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+// waitMainFrame returns the main frame id once get reports one, bounded by
+// timeout. Under load the browser attaches the frame late (#166).
+func waitMainFrame(ctx context.Context, get func() string, timeout time.Duration) (string, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if f := get(); f != "" {
+			return f, nil
 		}
-		if frame == "" {
-			return errors.New("camoufox: main frame not attached")
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			return "", fmt.Errorf("camoufox: main frame not attached after %s", timeout)
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
 	}
+}
 
+// Goto navigates the main frame to url. Default waits for load.
+func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error {
 	opt := GotoOptions{WaitUntil: WaitUntilLoad, Timeout: 30 * time.Second}
 	if len(opts) > 0 {
 		if opts[0].WaitUntil != "" {
@@ -225,6 +233,11 @@ func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error 
 			opt.Timeout = opts[0].Timeout
 		}
 		opt.Referer = opts[0].Referer
+	}
+
+	frame, err := waitMainFrame(ctx, p.MainFrameID, opt.Timeout)
+	if err != nil {
+		return err
 	}
 
 	conn := p.bc.b.conn
@@ -449,30 +462,26 @@ func (p *Page) AddInitScript(ctx context.Context, script string) error {
 
 // awaitMainContext returns the current main-world execution context
 // id, waiting up to d for one to appear if the page is mid-navigation.
+// A context can be destroyed between the wake-up and the read (a new
+// page swaps its first about:blank context at once), so keep waiting.
 func (p *Page) awaitMainContext(ctx context.Context, d time.Duration) (string, error) {
-	p.mu.Lock()
-	if p.mainContextID != "" {
-		id := p.mainContextID
-		p.mu.Unlock()
-		return id, nil
-	}
-	ch := p.contextReadyCh
-	p.mu.Unlock()
 	timer := time.NewTimer(d)
 	defer timer.Stop()
-	select {
-	case <-ch:
-	case <-timer.C:
-		return "", errors.New("camoufox: timed out waiting for execution context")
-	case <-ctx.Done():
-		return "", ctx.Err()
+	for {
+		p.mu.Lock()
+		id, ch := p.mainContextID, p.contextReadyCh
+		p.mu.Unlock()
+		if id != "" {
+			return id, nil
+		}
+		select {
+		case <-ch:
+		case <-timer.C:
+			return "", errors.New("camoufox: timed out waiting for execution context")
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.mainContextID == "" {
-		return "", errors.New("camoufox: execution context appeared and vanished")
-	}
-	return p.mainContextID, nil
 }
 
 // isContextGone matches "Failed to find execution context" errors
