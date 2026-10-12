@@ -2250,8 +2250,10 @@ jobs:
           # the memo between win's render and it. Two things flush it: a
           # `CAMOU-FL set` (SetFontList in the setter's process) and a
           # `CAMOU-FL flush` (RoverfoxStorageManager's pref callback, in every
-          # process the list reaches, including a second, asynchronous flush in
-          # the setter's own). ClearFontNameCaches is process-wide, so either
+          # process the list reaches; the setter's own process may run it too,
+          # asynchronously after its set -- reasoned from the code, not
+          # measured, and nothing below depends on it).
+          # ClearFontNameCaches is process-wide, so either
           # line for ANY context after the re-probe mark wipes win's entries:
           # mac would re-resolve through its own gate, the pattern would be
           # unchanged and this arm would print GREEN having measured nothing.
