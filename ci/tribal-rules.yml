@@ -498,6 +498,7 @@ rules:
     evidence:
       - "PR #749 (7911f4a): setters a fingerprint never called stayed on window, and a launch with no init script leaked all of them"
       - "browser/patches/window-setter-seal.patch"
+      - "browser/tests/native/test_tribal_rules.py: every Func= setter in a Window.webidl hunk is on kCamouFingerprintSetters and in the guard's SETTERS"
     rationale: >-
       The setters are configuration API for the automation side, not page API.
       A window starts sealed; juggler unseals it, runs the init scripts that
