@@ -31,9 +31,10 @@ def test_ipv4_webrtc_ip_still_calls_v4_setter_not_v6():
     assert 'setWebRTCIPv6' not in script
 
 
-def test_no_webrtc_ip_clears_v4_setter_only():
+def test_no_webrtc_ip_emits_no_v4_setter():
+    # Juggler seals every setter before page script runs, so the empty call is no longer needed (#163).
     script = _build_init_script({})
-    assert 'setWebRTCIPv4("")' in script
+    assert 'setWebRTCIPv4' not in script
     assert 'setWebRTCIPv6' not in script
 
 
@@ -43,3 +44,11 @@ def test_generate_context_fingerprint_wires_ipv6_end_to_end():
     fp = generate_context_fingerprint(os='linux', webrtc_ip=IPV6_ADDR)
     assert f'setWebRTCIPv6("{IPV6_ADDR}")' in fp['init_script']
     assert 'setWebRTCIPv4' not in fp['init_script']
+
+
+def test_no_webrtc_ip_emits_no_setter():
+    # An empty stored value switched spoofing on with "" and hid the launch-level
+    # webrtc:ipv4 that geoip= sets (#163).
+    from camoufox.fingerprints import generate_context_fingerprint
+    script = generate_context_fingerprint(os="windows")["init_script"]
+    assert "setWebRTCIPv4" not in script and "setWebRTCIPv6" not in script

@@ -868,6 +868,30 @@ export function warnManualConfig(config: Record<string, any>): void {
 	}
 }
 
+// #162 (B): each spoofed OS's generics (monospace, serif, sans-serif). Without
+// them, generics resolve through the HOST's font.name-list.* prefs, which the
+// launch font mask refuses. Kept identical to pythonlib's GENERIC_FONT_FAMILIES
+// (the launch golden compares CAMOU_PREFS byte for byte, key order included).
+// ponytail: x-western and x-unicode only; other lang groups keep the host
+// default until the browser-side fix (W1) lands.
+export const GENERIC_FONT_FAMILIES: Record<string, [string, string, string]> = {
+	win: ["Consolas, Courier New", "Times New Roman", "Arial"],
+	mac: ["Menlo, Courier New", "Times", "Helvetica"],
+	lin: ["Cousine", "Tinos", "Arimo"],
+};
+
+export function genericFontPrefs(targetOs: string): Record<string, string> {
+	const families = GENERIC_FONT_FAMILIES[targetOs];
+	if (!families) return {};
+	const prefs: Record<string, string> = {};
+	for (const lang of ["x-western", "x-unicode"]) {
+		["monospace", "serif", "sans-serif"].forEach((generic, i) => {
+			prefs[`font.name-list.${generic}.${lang}`] = families[i];
+		});
+	}
+	return prefs;
+}
+
 const WINDOW_DIM_KEYS = [
 	"window.outerWidth",
 	"window.outerHeight",
@@ -1478,6 +1502,14 @@ export async function launchOptions({
 				config["navigator.userAgent"],
 			);
 			updateFonts(config, targetOs);
+		}
+	}
+
+	// CAMOUFOX_NO_GENERIC_PREFS=1 is a test hook: it lets the browser-side #162
+	// fix be measured without these prefs hiding it.
+	if (process.env.CAMOUFOX_NO_GENERIC_PREFS !== "1") {
+		for (const [key, value] of Object.entries(genericFontPrefs(targetOs))) {
+			setInto(firefox_user_prefs, key, value);
 		}
 	}
 
