@@ -376,12 +376,13 @@ rules:
 
   - id: context-font-list-lives-in-the-shared-store
     title: A context's font list lives in the shared store, and every process flushes its font caches when the list arrives
-    check: manual   # measured-pending: the flush arm has not run on CI yet (#188)
+    check: manual
     evidence:
       - "upstream 914b575: the per-context font list moved into RoverfoxStorageManager, read by every process"
       - "browser/patches/cross-process-storage.patch: OnStoragePrefChanged calls FontListManager::OnFontListStored for each roverfox.s.fontlist_<id> pref, after MirrorPref releases the cache mutex; EnsureMirror registers it on the main thread, from ContentChild::InitXPCOM in every content process"
       - "browser/patches/font-list-spoofing.patch: OnFontListStored runs ClearCodepointsWithNoFonts (#81) and ClearFontNameCaches (#83), logging `CAMOU-FL flush ctx=<id> fontlist=<0|1>`"
       - "browser/tests/playwright/patches/context-list-every-process.py: flush_arm"
+      - "CI run 38299426185 (head e91d24e): context-list-every-process passed, flush arm included"
     rationale: >-
       A context's documents land in any content process, and only the first
       one calls setFontList. Every other process reads the list from upstream's
@@ -399,7 +400,6 @@ rules:
       flush arm fails a process that answered a context without its list and
       never received it, or answered without it after it arrived, and fails
       the run when no content process logged a flush with a live font list.
-      It has not yet run on a CI build.
 
   # -------------------------------------------------------------------------
   # Teardown
@@ -572,12 +572,13 @@ rules:
 
   - id: webrtc-fork-model
     title: WebRTC keeps the fork's model, per-context IP with no srflx fabrication and no_host on, and its guards measure that model
-    check: manual   # measured-pending: neither adapted guard has run on CI yet (#188)
+    check: manual
     evidence:
       - "#178 D1: keep the per-context WebRTCIPManager (browser/patches/webrtc-ip-spoofing.patch, webrtc-ip-spoofing2.patch); do not take upstream's srflx fabrication"
       - "browser/settings/camoufox.cfg: defaultPref(\"media.peerconnection.ice.no_host\", true)"
       - "CI run 38299426185: upstream's webrtc-context-ip and webrtc-port-range read the srflx candidate upstream fabricates against a silent STUN server, and saw no candidates on the fork"
       - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
+      - "CI run 38310314782 (head f031a4a): both adapted guards passed, patch guards spoofing 22/22"
     rationale: >-
       The fork's WebRTC model diverges from upstream's. A context's IP masks the
       srflx candidate a real STUN answer produces, no srflx candidate is made up,
@@ -587,5 +588,5 @@ rules:
       webrtc-context-ip runs an answering STUN server and reads each context's
       srflx candidate, with an unmasked context as the control. Both serve STUN
       on the default-route address, because nICEr skips a loopback STUN server
-      under the shipped prefs. Neither has run on a CI build yet. The launch-level
+      under the shipped prefs. The launch-level
       webrtc:ipv4 key is not asserted, because no browser code reads it (#163).
