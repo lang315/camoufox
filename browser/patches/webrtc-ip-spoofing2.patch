@@ -1,5 +1,5 @@
 diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
-index 8834c93e4b..312b5c03e1 100644
+index 520fd6887f..30d97a4510 100644
 --- a/dom/base/WebRTCIPManager.cpp
 +++ b/dom/base/WebRTCIPManager.cpp
 @@ -1,6 +1,7 @@
@@ -8,9 +8,9 @@ index 8834c93e4b..312b5c03e1 100644
  #include "RoverfoxStorageManager.h"
 +#include "MaskConfig.hpp"
  #include "nsPrintfCString.h"
- #include "nsGlobalWindowInner.h"
  #include "nsDocShell.h"
-@@ -28,6 +29,22 @@ WebRTCIPManager::IPv6KeyForUserContext(uint32_t userContextId) {
+ 
+@@ -23,6 +24,22 @@ WebRTCIPManager::IPv6KeyForUserContext(uint32_t userContextId) {
    return key;
  }
  
@@ -30,10 +30,10 @@ index 8834c93e4b..312b5c03e1 100644
 +  return key;
 +}
 +
- /* static */ nsString
- WebRTCIPManager::IPv4DisabledKeyForUserContext(uint32_t userContextId) {
-   nsString key;
-@@ -70,6 +87,44 @@ WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
+ 
+ 
+ /* static */ void
+@@ -49,6 +66,44 @@ WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
    DisableIPv6Function(userContextId);
  }
  
@@ -79,7 +79,7 @@ index 8834c93e4b..312b5c03e1 100644
  WebRTCIPManager::GetIPv6(uint32_t userContextId, nsAString& outIPv6) {
    nsString key = IPv6KeyForUserContext(userContextId);
 diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
-index c9810a06d2..84a10ec909 100644
+index c67d7be269..bee318767d 100644
 --- a/dom/base/WebRTCIPManager.h
 +++ b/dom/base/WebRTCIPManager.h
 @@ -44,6 +44,13 @@ public:
@@ -96,20 +96,20 @@ index c9810a06d2..84a10ec909 100644
  
  
    /**
-@@ -95,6 +102,8 @@ public:
+@@ -81,6 +88,8 @@ public:
  private:
    static nsString IPv4KeyForUserContext(uint32_t userContextId);
    static nsString IPv6KeyForUserContext(uint32_t userContextId);
 +  static nsString LocalIPv4KeyForUserContext(uint32_t userContextId);
 +  static nsString LocalIPv6KeyForUserContext(uint32_t userContextId);
-   static nsString IPv4DisabledKeyForUserContext(uint32_t userContextId);
-   static nsString IPv6DisabledKeyForUserContext(uint32_t userContextId);
  };
+ 
+ } // namespace dom
 diff --git a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp b/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
-index 4bc44d8ccf..d112ee8f19 100644
+index 3467d41fea..3fcb15fe0b 100644
 --- a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
 +++ b/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
-@@ -103,6 +103,7 @@
+@@ -104,6 +104,7 @@
  #include "MaskConfig.hpp"
  #include "AccessObserverDom.hpp"
  #include "mozilla/RustRegex.h"
@@ -117,7 +117,7 @@ index 4bc44d8ccf..d112ee8f19 100644
  #include "WebRTCIPManager.h"
  #include "nsDocShell.h"
  #include "nsContentUtils.h"
-@@ -3480,8 +3481,36 @@ bool isSpecialIP(const std::string& ip) {
+@@ -3474,8 +3475,36 @@ bool isSpecialIP(const std::string& ip) {
    // Check if an IP should not be masked (special addresses)
    return (ip == "0.0.0.0" || ip == "127.0.0.1" || 
            ip == "::" || ip == "::1" || 
@@ -156,7 +156,7 @@ index 4bc44d8ccf..d112ee8f19 100644
  }
  
  bool isPrivateIP(const std::string& ip) {
-@@ -3511,21 +3540,32 @@ std::string getMaskForIP(const std::string& ip, uint32_t userContextId) {
+@@ -3505,21 +3534,32 @@ std::string getMaskForIP(const std::string& ip, uint32_t userContextId) {
    if (isSpecialIP(ip)) {
      return ip;  // dont mask special IPs
    }
