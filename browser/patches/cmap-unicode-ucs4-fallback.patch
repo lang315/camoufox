@@ -1,5 +1,5 @@
 diff --git a/gfx/thebes/gfxFontUtils.cpp b/gfx/thebes/gfxFontUtils.cpp
-index e4e2d989e7..7c6f9f3d0f 100644
+index e4e2d989e7..cb86fe5e9d 100644
 --- a/gfx/thebes/gfxFontUtils.cpp
 +++ b/gfx/thebes/gfxFontUtils.cpp
 @@ -420,8 +420,33 @@ nsresult gfxFontUtils::ReadCMAPTableFormat14(const uint8_t* aBuf,
@@ -12,7 +12,7 @@ index e4e2d989e7..7c6f9f3d0f 100644
 +// Upstream's non-macOS branch takes format 10/12/13 only at (3, 10), so a
 +// face whose only subtable is a non-UVS Unicode-platform one -- in this
 +// bundle (0, 3) and (0, 4): Geneva, Apple Symbols,
-+// .LastResort, Heiti TC/SC, all shipped in bundle/fonts/macos/ -- gets
++// .LastResort, Heiti TC/SC, all shipped in browser/bundle/fonts/macos/ -- gets
 +// keepFormat 0, ReadCMAP returns NS_ERROR_FAILURE, and the font entry is
 +// given an EMPTY character map: listed in the font list, never selected for
 +// any text run. The XP_MACOSX branch above has accepted platform-0 UCS4
@@ -22,9 +22,9 @@ index e4e2d989e7..7c6f9f3d0f 100644
 +// a fingerprinting tell. See #95.
 +//
 +// The `!(k)` term bounds this to when nothing else has been accepted yet:
-+// no face in bundle/fonts/ changes which subtable it resolves through (574
-+// simulated, 7 rescued, 0 changed). That bound relies on OpenType's
-+// requirement that encoding records be sorted by platformID then
++// no face in browser/bundle/fonts/ changes which subtable it resolves
++// through (574 simulated, 7 rescued, 0 changed). That bound relies on
++// OpenType's requirement that encoding records be sorted by platformID then
 +// encodingID: within platform 0 the UCS4 record precedes any UVS record
 +// (encoding 5), so accepting it here does not trip the break below
 +// (platformID > PLATFORM_ID_UNICODE || !aUVSTableOffset ||
