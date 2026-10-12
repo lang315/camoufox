@@ -61,8 +61,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "${{ inputs.run_id }}" ]; then
-            gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
-              -n "CamoufoxBuilds-${{ matrix.target }}" -D .ci-work/artifact
+            # A single-target build run holds one platform; the other legs have nothing to test.
+            if ! gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
+              -n "CamoufoxBuilds-${{ matrix.target }}" -D .ci-work/artifact; then
+              echo "::notice::run ${{ inputs.run_id }} has no CamoufoxBuilds-${{ matrix.target }}; nothing to test on this leg"
+              echo "E2E_SKIP=1" >> "$GITHUB_ENV"
+              exit 0
+            fi
             zip="$(ls .ci-work/artifact/*.zip | head -1)"
             echo "E2E_BROWSER=--zip=$zip" >> "$GITHUB_ENV"
           elif [ -n "${{ inputs.release }}" ]; then
