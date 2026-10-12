@@ -138,6 +138,7 @@ beforeAll(async () => {
 	// The mmdb files only have to exist and be fresh; the fake reader answers.
 	fs.mkdirSync(mods.geolocation.MMDB_DIR, { recursive: true });
 	for (const name of [
+		"geoip aio by daijro-combined.mmdb",
 		"maxmind geolite2-ipv4.mmdb",
 		"maxmind geolite2-ipv6.mmdb",
 	]) {
@@ -153,6 +154,7 @@ beforeAll(async () => {
 		realFix(config, canPin, { cpuCount: HOST.cpu_count, canPinHost: true });
 	deps.stockProfileDiskCapacityKb = () => HOST.disk_capacity_kb;
 	deps.hostOsKey = () => HOST.host_os_key;
+	deps.hostGpu = async () => HOST.host_gpu;
 	deps.largestDisplay = () => ({
 		width: HOST.display[0],
 		height: HOST.display[1],
@@ -231,6 +233,20 @@ async function replay(scenario: any) {
 		}) as any;
 		restore.push(() => {
 			deps.getRandomPreset = before;
+		});
+	}
+	if (special.host_gpu) {
+		const before = deps.hostGpu;
+		deps.hostGpu = async (executablePath, headless) => {
+			calls.push({
+				fn: "host_gpu",
+				executable_path: executablePath,
+				headless,
+			});
+			return special.host_gpu;
+		};
+		restore.push(() => {
+			deps.hostGpu = before;
 		});
 	}
 	for (const [k, v] of Object.entries(special.process_env ?? {})) {

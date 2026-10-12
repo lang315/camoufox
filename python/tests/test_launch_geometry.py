@@ -1,0 +1,153 @@
+"""
+Launch-level guards for the display clamp in launch_options().
+
+Run with:
+    cd python && python -m pytest tests/test_launch_geometry.py -v
+"""
+
+import os
+import tempfile
+from pathlib import Path
+from contextlib import contextmanager
+from unittest import mock
+
+import orjson
+import pytest
+from camoufox.fingerprints import Screen
+
+from camoufox import utils
+from conftest import repo_get_path
+
+# What get_screen_cons() reports under the Xvfb that headless='virtual' starts:
+# virtdisplay.py sizes it "1x1x24", and launch_options mutates os.environ's
+# DISPLAY, so the parent process enumerates that stub as its only monitor.
+XVFB_STUB = Screen(max_width=1, max_height=1)
+
+
+@contextmanager
+def host(screen_cons):
+    """Run launch_options() against a stubbed host, without touching the disk."""
+    # get_env_vars() writes the generated fonts-<hash>.conf under INSTALL_DIR;
+    # keep it out of the real user cache.
+    with tempfile.TemporaryDirectory() as cache, (
+        mock.patch.object(utils, "INSTALL_DIR", Path(cache))
+    ), mock.patch.object(utils, "get_screen_cons", lambda headless: screen_cons), (
+        # launch_options guards get_screen_cons() with has_display(), so stubbing
+        # only the former left the result depending on the ambient display.
+        mock.patch.object(utils, "has_display", lambda env: True)
+    ), (
+        mock.patch.object(utils, "installed_verstr", lambda: "150.0.2")
+    ), mock.patch.object(utils, "launch_path", lambda **kwargs: "/nonexistent/camoufox"), (
+        # executable_path stays None here, so validate_config()'s
+        # _load_properties() falls to get_path("properties.json"), which
+        # otherwise reaches CamoufoxFetcher (#108). Read it straight from the
+        # repo instead of a managed install. get_env_vars() also resolves the
+        # Linux fontconfig bundle through get_path (utils.py:319), so the stub
+        # has to route fontconfig/fonts to bundle/, not settings/ -- see
+        # conftest.repo_get_path.
+        mock.patch.object(utils, "get_path", repo_get_path)
+    ), (
+        # The addon download would trip the fetcher guard (#110).
+        mock.patch.object(utils, "add_default_addons", lambda *_a, **_k: None)
+    ):
+        yield
+
+
+def config_of(options):
+    """Reassemble the chunked CAMOU_CONFIG_<n> env vars into a dict."""
+    env = options["env"]
+    chunks = sorted(
+        (int(k.rsplit("_", 1)[1]), v) for k, v in env.items() if k.startswith("CAMOU_CONFIG_")
+    )
+    return orjson.loads("".join(chunk for _, chunk in chunks))
+
+
+def launch(**kwargs):
+    kwargs.setdefault("os", "windows")
+    kwargs.setdefault("i_know_what_im_doing", True)
+    return config_of(utils.launch_options(**kwargs))
+
+
+class TestVirtualDisplayIsNotAScreen:
+    """headless='virtual' arrives here as headless=False (async_api rewrites it),
+    so the headful gate alone would clamp the fingerprint to the 1x1 Xvfb."""
+
+    def test_fingerprint_is_not_shrunk_to_the_xvfb(self):
+        with host(XVFB_STUB):
+            config = launch(headless=False, virtual_display=":99")
+
+        assert config["screen.width"] > 1
+        assert config["screen.height"] > 1
+        assert config["window.outerWidth"] > 1
+
+    def test_screen_dimensions_stay_valid(self):
+        """Clamping to 1x1 drives availHeight negative once the taskbar is
+        subtracted, which validate_config rejects as a uint."""
+        with host(XVFB_STUB):
+            config = launch(headless=False, virtual_display=":99")
+
+        for key, value in config.items():
+            if key.startswith("screen.") or key.startswith("window.outer"):
+                assert value >= 0, f"{key} is negative: {value}"
+
+
+# A 1920x1080 panel at 150% Windows scaling, in CSS pixels
+SCALED_DISPLAY = Screen(max_width=1280, max_height=720)
+
+# Config key -> the display bound it must respect
+BOUNDED_BY = {
+    "screen.width": "max_width",
+    "screen.height": "max_height",
+    "window.outerWidth": "max_width",
+    "window.outerHeight": "max_height",
+}
+
+
+class TestHeadfulFitsOnDisplay:
+    """The generator drops a screen constraint it cannot satisfy, so assert the
+    outcome rather than trusting the constraint to have been honoured."""
+
+    @pytest.mark.parametrize("attempt", range(15))
+    def test_generated_geometry_never_exceeds_the_display(self, attempt):
+        with host(SCALED_DISPLAY):
+            config = launch(headless=False)
+
+        for key, bound in BOUNDED_BY.items():
+            limit = getattr(SCALED_DISPLAY, bound)
+            assert config[key] <= limit, f"{key}={config[key]} exceeds {limit}"
+
+    def test_geometry_stays_internally_consistent(self):
+        with host(SCALED_DISPLAY):
+            config = launch(headless=False)
+
+        assert config["screen.availWidth"] <= config["screen.width"]
+        assert config["screen.availHeight"] < config["screen.height"]  # taskbar
+        assert config["window.outerWidth"] <= config["screen.availWidth"]
+        assert config["window.outerHeight"] <= config["screen.availHeight"]
+
+    def test_unprobeable_display_is_not_clamped(self):
+        """A host we cannot measure must not silently shrink the fingerprint."""
+        with host(None), mock.patch.object(utils, "clamp_screen_to_display") as clamp:
+            launch(headless=False)
+
+        clamp.assert_not_called()
+
+class TestViewportOperationsDoNotDeadlock:
+    """The window's inner dimensions must stay real.
+
+    Playwright's setViewportSize resizes the window and then waits for the page
+    to report the size it asked for. A spoofed innerWidth/innerHeight never
+    changes, so that wait never ends -- the same trap no_viewport exists for
+    (#666), reached through an explicit call instead.
+
+    Mapping fpgen's real inner dimensions hung
+    browser/tests/playwright/patches/humanize-edge-deadlock.py for the full 600s
+    CI timeout.
+    """
+
+    def test_inner_dimensions_are_never_spoofed(self):
+        for os_name in ("linux", "windows", "macos"):
+            for _ in range(5):
+                config = launch(os=os_name)
+                assert "window.innerWidth" not in config, os_name
+                assert "window.innerHeight" not in config, os_name
