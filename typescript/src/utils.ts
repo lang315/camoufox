@@ -848,8 +848,9 @@ function warnManualConfig(config: Record<string, any>): void {
 
 // #162 (B): each spoofed OS's generics (monospace, serif, sans-serif). Without
 // them, generics resolve through the HOST's font.name-list.* prefs, which the
-// launch font mask refuses. Kept identical to pythonlib's GENERIC_FONT_FAMILIES
-// (the launch golden compares CAMOU_PREFS byte for byte, key order included).
+// launch font mask refuses. Kept identical to GENERIC_FONT_FAMILIES in
+// python/src/camoufox/utils.py (the launch golden compares CAMOU_PREFS byte
+// for byte, key order included).
 // ponytail: x-western and x-unicode only; other lang groups keep the host
 // default until the browser-side fix (W1) lands.
 export const GENERIC_FONT_FAMILIES: Record<string, [string, string, string]> = {

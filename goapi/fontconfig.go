@@ -174,7 +174,7 @@ func isDir(p string) bool {
 // which the launch font mask refuses, so monospace fell to the first allowed
 // family: Arial or Arimo (#162). Every family must be in every drawn font subset
 // (TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims). Kept identical to
-// pythonlib's GENERIC_FONT_FAMILIES.
+// GENERIC_FONT_FAMILIES in python/src/camoufox/utils.py.
 // ponytail: x-western and x-unicode only; other lang groups keep the host
 // default until the browser-side fix (#162, W1) lands.
 var genericFamilies = map[string][3]string{
