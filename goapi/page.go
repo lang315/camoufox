@@ -77,8 +77,9 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 	// Evaluate doesn't fail. about:blank fires this within ms.
 	select {
 	case <-p.contextReadyCh:
-	case <-time.After(5 * time.Second):
-		// Continue anyway; some callers may only want navigate.
+	case <-time.After(30 * time.Second):
+		_ = p.Close(ctx)
+		return nil, errors.New("camoufox: new page's main execution context never became ready (30s)")
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -192,30 +193,29 @@ type GotoOptions struct {
 	Referer   string
 }
 
-// Goto navigates the main frame to url. Default waits for load.
-func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error {
-	frame := p.MainFrameID()
-	if frame == "" {
-		// Force a value: targetId doubles as frameId only when the
-		// frame is already attached; otherwise wait briefly for it.
-		deadline := time.NewTimer(2 * time.Second)
-		defer deadline.Stop()
-	wait:
-		for frame == "" {
-			select {
-			case <-time.After(20 * time.Millisecond):
-				frame = p.MainFrameID()
-			case <-deadline.C:
-				break wait
-			case <-ctx.Done():
-				return ctx.Err()
-			}
+// waitMainFrame returns the main frame id once get reports one, bounded by
+// timeout. Under load the browser attaches the frame late (#166).
+func waitMainFrame(ctx context.Context, get func() string, timeout time.Duration) (string, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	tick := time.NewTicker(20 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if f := get(); f != "" {
+			return f, nil
 		}
-		if frame == "" {
-			return errors.New("camoufox: main frame not attached")
+		select {
+		case <-tick.C:
+		case <-deadline.C:
+			return "", fmt.Errorf("camoufox: main frame not attached after %s", timeout)
+		case <-ctx.Done():
+			return "", ctx.Err()
 		}
 	}
+}
 
+// Goto navigates the main frame to url. Default waits for load.
+func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error {
 	opt := GotoOptions{WaitUntil: WaitUntilLoad, Timeout: 30 * time.Second}
 	if len(opts) > 0 {
 		if opts[0].WaitUntil != "" {
@@ -225,6 +225,11 @@ func (p *Page) Goto(ctx context.Context, url string, opts ...GotoOptions) error 
 			opt.Timeout = opts[0].Timeout
 		}
 		opt.Referer = opts[0].Referer
+	}
+
+	frame, err := waitMainFrame(ctx, p.MainFrameID, opt.Timeout)
+	if err != nil {
+		return err
 	}
 
 	conn := p.bc.b.conn
