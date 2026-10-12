@@ -68,7 +68,8 @@ jobs:
               echo "E2E_SKIP=1" >> "$GITHUB_ENV"
               exit 0
             fi
-            zip="$(ls .ci-work/artifact/*.zip | head -1)"
+            # Absolute: the Run step works from e2e/, where a relative path does not resolve.
+            zip="$PWD/$(ls .ci-work/artifact/*.zip | head -1)"
             echo "E2E_BROWSER=--zip=$zip" >> "$GITHUB_ENV"
           elif [ -n "${{ inputs.release }}" ]; then
             # A release need not carry every platform (fork.1 has no Linux build);
