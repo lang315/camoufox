@@ -177,20 +177,21 @@ index a1162b29e3..eec89694f8 100644
  
    mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
 diff --git a/dom/media/webaudio/AnalyserNode.cpp b/dom/media/webaudio/AnalyserNode.cpp
-index 3c80514a1d..28374e9780 100644
+index 3c80514a1d..6629015128 100644
 --- a/dom/media/webaudio/AnalyserNode.cpp
 +++ b/dom/media/webaudio/AnalyserNode.cpp
-@@ -11,6 +11,9 @@
+@@ -11,6 +11,10 @@
  #include "mozilla/PodOperations.h"
  #include "mozilla/dom/AnalyserNodeBinding.h"
  #include "nsMathUtils.h"
 +#include "AudioFingerprintManager.h"
 +#include "nsPIDOMWindow.h"
 +#include "nsIGlobalObject.h"
++#include "AccessObserverDom.hpp"
  
  namespace mozilla {
  
-@@ -208,18 +211,41 @@ void AnalyserNode::SetSmoothingTimeConstant(double aValue, ErrorResult& aRv) {
+@@ -208,18 +212,51 @@ void AnalyserNode::SetSmoothingTimeConstant(double aValue, ErrorResult& aRv) {
    mSmoothingTimeConstant = aValue;
  }
  
@@ -200,10 +201,20 @@ index 3c80514a1d..28374e9780 100644
 +  return global ? global->GetAsInnerWindow() : nullptr;
 +}
 +
++// Camoufox tracking-observer: record an analyser read (no-op when disarmed).
++static void RecordAudioRead(AudioContext* aContext) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    nsPIDOMWindowInner* win = OwnerWindow(aContext);
++    camoufox::RecordSurfaceFromDocument(win ? win->GetExtantDoc() : nullptr,
++                                        camoufox::SurfaceId::Audio);
++  }
++}
++
 +// Camoufox: the frequency data with the context's audio noise, as a copy.
 +// mOutputBuffer is the smoothing state the next FFTAnalysis() blends into, so
 +// noising it in place compounded the noise with every read.
 +const float* AnalyserNode::NoisedOutput(AlignedTArray<float>& aScratch) const {
++  RecordAudioRead(GetParentObject());
 +  uint32_t seed =
 +      AudioFingerprintManager::GetSeed(OwnerWindow(GetParentObject()));
 +  if (!seed || !aScratch.SetLength(mOutputBuffer.Length(), fallible)) {
@@ -233,7 +244,7 @@ index 3c80514a1d..28374e9780 100644
      }
    });
  }
-@@ -230,14 +256,16 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
+@@ -230,14 +267,16 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
      return;
    }
  
@@ -252,7 +263,12 @@ index 3c80514a1d..28374e9780 100644
        // scale down the value to the range of [0, UCHAR_MAX]
        const double scaled = std::max(
            0.0,
-@@ -253,6 +281,10 @@ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
+@@ -249,14 +288,20 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
+ }
+ 
+ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
++  RecordAudioRead(GetParentObject());
+   aArray.ProcessData([&](const Span<float>& aData, JS::AutoCheckCannotGC&&) {
      size_t length = std::min(aData.Length(), size_t(FftSize()));
  
      GetTimeDomainData(aData.Elements(), length);
@@ -263,7 +279,12 @@ index 3c80514a1d..28374e9780 100644
    });
  }
  
-@@ -267,6 +299,10 @@ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
+ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
++  RecordAudioRead(GetParentObject());
+   aArray.ProcessData([&](const Span<uint8_t>& aData, JS::AutoCheckCannotGC&&) {
+     size_t length = std::min(aData.Length(), size_t(FftSize()));
+ 
+@@ -267,6 +312,10 @@ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
  
      GetTimeDomainData(tmpBuffer.Elements(), length);
  
