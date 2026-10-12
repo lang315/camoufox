@@ -102,6 +102,8 @@ class GoDriver:
 
 
 class GoBrowser:
+    canvas_covered = False  # goapi has no rendering plan (#196): it never turns the placeholder on
+
     def __init__(self, d: GoDriver, h: str) -> None:
         self.d, self.h = d, h
 
