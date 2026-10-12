@@ -9,6 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { inspect } from "node:util";
 import { ensureModel } from "fpgen-js";
+import * as random from "python-random";
 import { UAParser } from "ua-parser-js";
 import { addDefaultAddons, confirmPaths, type DefaultAddon } from "./addons.js";
 import * as coherence from "./coherence.js";
@@ -86,7 +87,6 @@ import {
 	pyTypeName,
 	ValueError,
 } from "./pycompat.js";
-import { pyRandom } from "./pyrandom.js";
 import type { VirtualDisplay } from "./virtdisplay.js";
 import { FallbackWarning, LeakWarning, warn } from "./warnings.js";
 import { firefoxGpus, sampleWebglForScreen, webglForGpu } from "./webgl.js";
@@ -1087,6 +1087,28 @@ export function contextIdentity(
 	return [hostName, gpu];
 }
 
+/** Record whether the launch prefs carry the canvas placeholder, the pref
+ * launchOptions() writes when planRendering covers the canvas. */
+export function attachCanvasCover(
+	browser: any,
+	fromOptions: Record<string, any>,
+): void {
+	browser._camoufoxCanvasCovered = hasCanvasPlaceholder(
+		fromOptions.firefoxUserPrefs ?? {},
+	);
+}
+
+/**
+ * Whether a new context on `browser` seeds the fork's canvas noise: only where
+ * the launch left the canvas uncovered. Playwright keeps no launch options, so
+ * a browser NewBrowser did not launch (firefox.launch(), connect()) has no
+ * record and is seeded: on a covered one the placeholder answers every read
+ * before the perturb, while skipping would drop the noise of an uncovered one.
+ */
+export function contextCanvasSeed(browser: any): boolean {
+	return !browser._camoufoxCanvasCovered;
+}
+
 /**
  * Normalise a context-options object onto the JS API's `viewport: null`,
  * defaulting to it when the caller expressed no preference. Playwright-Python
@@ -1637,11 +1659,6 @@ export async function launchOptions({
 		);
 	}
 
-	// The canvas noise seed is fork-only (patches/canvas-spoofing.patch) and is
-	// drawn per launch, so two launches on one preset still render different
-	// canvases. 0 disables the noise.
-	setInto(config, "canvas:seed", pyRandom.randint(1, 4_294_967_295));
-
 	// Set geolocation
 	if (pyTruthy(geoip)) {
 		geoipAllowed(); // Assert that geoip is allowed
@@ -1813,6 +1830,11 @@ export async function launchOptions({
 	if (coverCanvas) {
 		addCanvasPlaceholder(firefox_user_prefs);
 		LeakWarning.warn("canvas_noise", i_know_what_im_doing);
+	} else {
+		// The fork's canvas noise (canvas-spoofing.patch), drawn per launch so two
+		// launches on one host render different canvases. Only where the placeholder
+		// does not cover the canvas: without a seed the patch is inert.
+		setInto(config, "canvas:seed", random.randint(1, 4_294_967_295));
 	}
 
 	if (block_webgl) {

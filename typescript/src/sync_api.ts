@@ -21,10 +21,12 @@ import { generateContextFingerprint } from "./fingerprints.js";
 import { type ProxyConfig, ProxyHelper, proxyExitGeo } from "./ip.js";
 import {
 	applyNoViewport,
+	attachCanvasCover,
 	attachDesktopOnlyWarning,
 	attachNoViewportDefault,
 	attachStockMediaDefaults,
 	attachVirtualDisplay,
+	contextCanvasSeed,
 	contextIdentity,
 	driverPid,
 	hostIdentity,
@@ -206,6 +208,7 @@ async function launchWith(
 	attachStockMediaDefaults(browser);
 	attachDesktopOnlyWarning(browser);
 	(browser as any)._camoufoxHostIdentity = identity;
+	attachCanvasCover(browser, fromOptions);
 	return attachVirtualDisplay(browser, virtualDisplay);
 }
 
@@ -283,6 +286,7 @@ export async function NewContext(
 		ff_version: ffVersion,
 		webrtc_ip: webrtcIp,
 		webgl_config: webglConfig,
+		canvas_seed: contextCanvasSeed(browser),
 	});
 
 	// Merge the generated context options with user overrides (user wins). They
