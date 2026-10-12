@@ -2074,8 +2074,9 @@ jobs:
           # #83 log slice. The question this answers is the one arm (b2)'s
           # measurement cannot: when the win context rendered, which ctx= did
           # the gate see, and which font group served it. The `group` line
-          # carries hop= (which link of provider -> document -> inner window ->
-          # BrowsingContext produced the id, or where it broke) and uri= (which
+          # carries hop= (principal: the document's principal produced the id;
+          # worker: the worker's origin attributes did; provider-null / doc-null:
+          # where the lookup broke) and uri= (which
           # context, via probe()'s marker); the `gate` histogram says which id
           # CamouIsFontAllowed was actually asked about. ctx=0 in either is the
           # fail-open case: CamouIsFontAllowed treats 0 as "no per-context
@@ -2339,8 +2340,8 @@ jobs:
               #     with MAC_ONLY intact, and would otherwise print this same
               #     message.
               # The discriminator is already captured: the re-probe's own
-              # `group` lines. hop=bc with a non-zero ctx means the context id
-              # chain resolved and the fail-open did not happen.
+              # `group` lines. hop=principal or hop=worker with a non-zero ctx
+              # means the context id resolved and the fail-open did not happen.
               _shape = ("BOTH directions" if b2_lost and b2_gained
                         else "GAINED-ONLY" if b2_gained else "LOST-ONLY")
               b2_failures.append(
@@ -2355,8 +2356,8 @@ jobs:
                   f"re-probe page (CLAUDE.md lesson 5), which produces GAINED-ONLY with the "
                   f"macOS families intact. Decide it on the re-probe's own font groups: "
                   f"{b2_reprobe_hops or 'NONE CAPTURED -- neither reading is supported'} "
-                  f"(hop=bc with a non-zero ctx rules out the fail-open; ctx=0 or a "
-                  f"hop=*-null is the fail-open).")
+                  f"(hop=principal or hop=worker with a non-zero ctx rules out the "
+                  f"fail-open; ctx=0 or a hop=*-null is the fail-open).")
           print(f"  (b2) donor-alive per-context leak (#83):  "
                 f"{'RED' if b2_failures else 'GREEN'} -- "
                 f"{b2_failures or 'win correctly saw none of macOS-only families with the donor still open, and the donor re-probed after win with its own pattern unchanged'}")

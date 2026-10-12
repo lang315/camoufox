@@ -273,7 +273,12 @@ per-process static, while its "already called" flag went through
 which Fission puts in a new process, never got the list and was answered by the
 launch mask. Measured with six pages of one context: the first refused a family
 that only the launch list holds, and the other five rendered it. Voices had the
-same shape. The flag is now per process for both setters.
+same shape. The fork first fixed it by keeping the flag per process. Since the
+upstream sync (#188), both lists live in the same shared store as the flag,
+and each process parses them on first use. When a font list reaches a process
+that already exists, RoverfoxStorageManager's pref callback flushes that
+process's font caches (`CAMOU-FL flush`). Lookups made there before the list
+arrived answered without it, and those are the answers the flush drops.
 `tests/patches/context-list-every-process.py` guards it: every page of one
 context, across two origins, must refuse a family that only the launch holds.
 It was red on main's browser and is green on the fix, both on Linux CI. Every

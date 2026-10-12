@@ -2,12 +2,12 @@
 Verify a context's own font and voice lists reach every content process that
 renders one of its pages (#149).
 
-setFontList / setSpeechVoices store the list in a per-process table. With
-Fission every new page gets its own process, so each process has to receive the
-list through that context's own init script. Before #149 the setter's
-"already called" flag was stored cross-process, so it hid the setter from every
-later process and only a context's first page carried its list. Every later page
-fell back to the launch-level list.
+With Fission every new page of a context can get its own process, but only the
+first document calls setFontList / setSpeechVoices: the setter's "already
+called" flag is shared by every process. Before #149 the list itself was kept
+per process, so only a context's first page carried it, and every later page
+fell back to the launch-level list. The list now lives in the same shared
+store (RoverfoxStorageManager), and each process parses it on first use.
 
 How this guard measures it:
 
@@ -25,6 +25,16 @@ How this guard measures it:
     plainly ran in several.
   * getVoices() must return the same count on every page of A, when the host has
     voices at all.
+  * Flush arm. A lookup that ran in a process before A's list reached it
+    answered without the list (`CAMOU-FL gate ... hasList=0`), and the font
+    caches memoized that answer. The list arrives through `CAMOU-FL set` in the
+    setter's process, and through RoverfoxStorageManager's pref callback,
+    `CAMOU-FL flush`, everywhere else. Read per process, from the pid in each
+    line's prefix, since several processes can share one log file: every
+    process with a hasList=0 lookup for A must log an arrival after it, and no
+    process may log a hasList=0 lookup for A after its arrival. At least one
+    `set` line for A must be read, or the reader measured nothing. Whether a
+    later process's first lookup already had the list is printed per process.
 
 Rendered versus refused is read under two fallbacks whose widths differ: a
 family that renders measures the same under both.
@@ -84,6 +94,52 @@ def context_processes(logdir, path):
         for ctx in set(re.findall(r"CAMOU-FL group \S+ ctx=(\d+) hop=\S+ uri=\S+" + re.escape(path), text)):
             by_ctx.setdefault(ctx, []).append(text)
     return by_ctx
+
+
+def process_lines(logdir):
+    """{pid: [CAMOU-FL message, ...]} in log order. The pid comes from each
+    line's prefix, since several processes can share one log file."""
+    by_pid = {}
+    for f in sorted(logdir.glob("cfx*")):
+        for line in f.read_text(errors="replace").splitlines():
+            m = re.search(r"\[(?:Child|Parent) (\d+):[^\]]*\]: \S+ (CAMOU-FL .*)", line)
+            if m:
+                by_pid.setdefault(m.group(1), []).append(m.group(2))
+    return by_pid
+
+
+def flush_arm(logdir, ctx):
+    """False when a process answered context `ctx` without its list after the
+    list had arrived there, or never received it after answering without it."""
+    ok = True
+    sets = 0
+    for pid, msgs in sorted(process_lines(logdir).items()):
+        arrivals = [i for i, m in enumerate(msgs) if re.match(rf"CAMOU-FL (set|flush) ctx={ctx}\b", m)]
+        lookups = [(i, "hasList=1" in m) for i, m in enumerate(msgs)
+                   if re.match(rf"CAMOU-FL gate ctx={ctx} ", m)]
+        sets += sum(m.startswith(f"CAMOU-FL set ctx={ctx} ") for m in msgs)
+        if not lookups and not arrivals:
+            continue
+        first = arrivals[0] if arrivals else None
+        blind = [i for i, has in lookups if not has]
+        print(f"  pid {pid}: lookups {len(lookups)}, without the list {len(blind)}, "
+              f"first lookup had the list: {lookups[0][1] if lookups else '-'}, "
+              f"arrival before first lookup: "
+              f"{'-' if not lookups else first is not None and first < lookups[0][0]} "
+              f"({'set' if any(msgs[i].startswith('CAMOU-FL set') for i in arrivals) else 'flush' if arrivals else 'none'})")
+        if blind and first is None:
+            print(f"  FAIL flush: pid {pid} answered context {ctx} without its list and never "
+                  f"received it, so its memoized answers were never flushed")
+            ok = False
+        elif first is not None and any(i > first for i in blind):
+            print(f"  FAIL flush: pid {pid} answered context {ctx} without its list after the "
+                  f"list had arrived")
+            ok = False
+    if sets == 0:
+        print(f"  FAIL flush: no CAMOU-FL set line for context {ctx} was read, so this arm "
+              f"measured nothing")
+        ok = False
+    return ok
 
 
 async def main() -> int:
@@ -155,7 +211,8 @@ async def main() -> int:
     ctx, texts = next(iter(procs.items()))
     installed = sum(bool(re.search(rf"CAMOU-FL set ctx={ctx} ", t)) for t in texts)
     print(f"  context A is ctx={ctx}; content logs that carry it: {len(texts)}, "
-          f"with its list installed: {installed} (informational)")
+          f"with its list installed by the setter: {installed} (informational; only the "
+          f"setter's process installs it, the others read it from the shared store)")
 
     parent = "".join(f.read_text(errors="replace") for f in logdir.glob("cfx-main*"))
     isolated = {}
@@ -168,6 +225,9 @@ async def main() -> int:
             b & {"Parent", "Anywhere"} for b in isolated.values()):
         print("  FAIL: the parent log does not show A's two origins isolated apart, so this "
               "run cannot see #149")
+        ok = False
+
+    if not flush_arm(logdir, ctx):
         ok = False
 
     counts = {r["voices"] for _, r in rows}
