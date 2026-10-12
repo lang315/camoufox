@@ -222,8 +222,6 @@ def NewContext(
 
     # Merge generated context options with user overrides (user wins)
     opts: Dict[str, Any] = {**fp['context_options'], **context_kwargs}
-    if 'viewport' in context_kwargs and 'no_viewport' not in context_kwargs:
-        opts.pop('no_viewport', None)  # #164: an explicit viewport beats the launch-window default
     if context_kwargs.get('no_viewport'):
         # An explicit no_viewport beats the fingerprint's viewport, and Playwright rejects
         # deviceScaleFactor with a null viewport.
