@@ -27,8 +27,8 @@ type Options struct {
 var ffVersionRE = regexp.MustCompile(`Firefox/\d+\.0`)
 var rvVersionRE = regexp.MustCompile(`rv:\d+\.0`)
 
-// applyWindow mirrors pythonlib's fix_screen_no_taskbar and
-// clamp_window_dimensions (pythonlib/camoufox/fingerprints.py:864, :996): a
+// applyWindow mirrors clamp_window_dimensions
+// (python/src/camoufox/fingerprints.py:859): a
 // maximised window on the sampled screen, so outer <= avail <= screen with a
 // visible taskbar. Presets carry no window size, and without this the browser
 // keeps browser-init.patch's 1280x1040 on any screen (#166). Inner is left to
@@ -75,7 +75,7 @@ func Generate(cfg *config.Config, opts Options) error {
 
 	targetOS := osFromPlatform(preset.Navigator.Platform)
 	applyWindow(cfg, targetOS)
-	// Mirrors pythonlib utils.py:1606: the block is pinned explicitly, so
+	// Mirrors python/src/camoufox/utils.py:1675: the block is pinned explicitly, so
 	// an empty voice list (linux ships none) cannot fall through to the host's
 	// native voices (#166).
 	if cfg.VoicesBlockIfNotDefined == nil {
