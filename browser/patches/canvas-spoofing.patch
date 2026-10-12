@@ -250,7 +250,7 @@ index eec89694f8..e9bc8f7026 100644
  
    mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
-index 0553126dbf..c2548eb43b 100644
+index 0553126dbf..09587eddc3 100644
 --- a/dom/canvas/CanvasRenderingContext2D.cpp
 +++ b/dom/canvas/CanvasRenderingContext2D.cpp
 @@ -59,6 +59,8 @@
@@ -285,21 +285,22 @@ index 0553126dbf..c2548eb43b 100644
  UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
      mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
      int32_t* out_format, gfx::IntSize* out_imageSize) {
-@@ -2279,6 +2297,27 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+@@ -2279,6 +2297,28 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
        *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
        *out_imageSize = data->GetSize();
        ret = SurfaceToPackedBGRA(data);
 +      // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
 +      // Covers toDataURL / toBlob / OffscreenCanvas.convertToBlob (BGRA packed).
 +      // toBlob still asks for the buffer under the placeholder and then
-+      // discards it, so that read is neither noised nor recorded.
++      // discards it, so that read is not noised. It is still recorded: the
++      // observer records the read the page made, whatever answered it.
++      Document* seedDoc =
++          CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++      if (camoufox::AccessObserver::IsArmed()) {
++        camoufox::RecordSurfaceFromDocument(seedDoc,
++                                            camoufox::SurfaceId::Canvas);
++      }
 +      if (aExtractionBehavior != CanvasUtils::ImageExtraction::Placeholder) {
-+        Document* seedDoc =
-+            CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
-+        if (camoufox::AccessObserver::IsArmed()) {
-+          camoufox::RecordSurfaceFromDocument(seedDoc,
-+                                              camoufox::SurfaceId::Canvas);
-+        }
 +        uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
 +        if (seed != 0 && ret) {
 +          CanvasSeedManager::Perturb(
@@ -313,7 +314,7 @@ index 0553126dbf..c2548eb43b 100644
      }
    }
  
-@@ -6803,6 +6842,20 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+@@ -6803,6 +6843,20 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
      }
