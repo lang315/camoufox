@@ -144,3 +144,20 @@ def test_a_negative_control_is_never_matched_against_the_ledger(monkeypatch):
     assert c.failed == []
     c(False, "voices_no_foreign_os: its negative control went red (else VACUOUS)", ledger=False)
     assert c.failed, "a control that did not go red fails even under a ledgered check"
+
+
+def test_goapi_canvas_gap_is_ledgered_only_for_its_own_checks(monkeypatch):
+    import known
+    from util import Checks
+
+    monkeypatch.setattr(known, "HOST", "Linux")
+    node = "journeys/test_05_contexts.py::test_a_covered_launch_reads_the_canvas_placeholder[go]"
+    gap = Checks(node)
+    gap(False, "canvas readback is the placeholder: toDataURL differs between two reads")
+    assert gap.failed == []
+    control = Checks(node)
+    control(False, "toDataURL of the reference Firefox is equal between two reads (else VACUOUS)", ledger=False)
+    assert control.failed, "the probe's control is never excused by the goapi gap"
+    python = Checks(node.replace("[go]", "[pkg]"))
+    python(False, "canvas readback is the placeholder: toDataURL differs between two reads")
+    assert python.failed, "only goapi lacks the rendering plan"

@@ -1,5 +1,7 @@
 """Journey 5: contexts and browsers keep users apart."""
 
+import platform
+
 from oracle.docs import cite
 from util import wait_for, wait_out
 
@@ -17,8 +19,11 @@ def fp_of(page, site):
     return wait_out(page)
 
 
-def identity(fp):
-    return (fp["canvas"], fp["main"]["ua"], fp["screen"]["w"], fp["screen"]["h"], str(fp.get("webgl")))
+def identity(fp, covered=False):
+    # A covered launch reads RFP's random placeholder, which never agrees with itself and
+    # differs from every other read: it can say neither "same" nor "different".
+    canvas = () if covered else (fp["canvas"],)
+    return (*canvas, fp["main"]["ua"], fp["screen"]["w"], fp["screen"]["h"], str(fp.get("webgl")))
 
 
 def test_two_contexts_share_nothing(drv, site, check):
@@ -41,8 +46,9 @@ def test_new_context_gives_each_context_its_own_identity(drv, site, check):
     a, c = b.new_identity_context(), b.new_identity_context()
     pa = a.new_page()
     fa, fc = fp_of(pa, site), fp_of(c.new_page(), site)
-    check(identity(fa) != identity(fc), "the two contexts have different fingerprints")
-    check(identity(fp_of(a.new_page(), site)) == identity(fa), "two pages of one context agree")
+    covered = b.canvas_covered
+    check(identity(fa, covered) != identity(fc, covered), "the two contexts have different fingerprints")
+    check(identity(fp_of(a.new_page(), site), covered) == identity(fa, covered), "two pages of one context agree")
     b.close()
     check.done()
 
@@ -54,7 +60,39 @@ def test_two_browsers_at_once(drv, site, check):
     p2.goto(site.url("/account"))
     check(p2.eval("location.pathname") == "/login", "the second browser is signed out")
     f1, f2 = fp_of(p1, site), fp_of(p2, site)
-    check(identity(f1) != identity(f2), f"two launches differ in fingerprint ({identity(f1)[:2]} vs {identity(f2)[:2]})")
+    covered = b1.canvas_covered or b2.canvas_covered
+    check(identity(f1, covered) != identity(f2, covered),
+          f"two launches differ in fingerprint ({identity(f1, covered)[:2]} vs {identity(f2, covered)[:2]})")
     b1.close()
     b2.close()
+    check.done()
+
+
+# Two reads of one unchanged canvas: equal on a browser that does not resist fingerprinting.
+TWO_READS = """(() => {
+  const c = document.createElement("canvas"); c.width = 220; c.height = 30;
+  const x = c.getContext("2d");
+  x.fillStyle = "#f60"; x.fillRect(10, 1, 62, 20); x.fillStyle = "#069"; x.fillRect(80, 5, 40, 20);
+  const px = () => x.getImageData(0, 0, 220, 30).data.join();
+  return {toDataURL: c.toDataURL() === c.toDataURL(), getImageData: px() === px()};
+})()"""
+
+
+def two_reads(browser, site):
+    page = browser.new_context().new_page()
+    page.goto(site.url("/"))
+    return page.eval(TWO_READS)
+
+
+def test_a_covered_launch_reads_the_canvas_placeholder(drv, ref, site, check):
+    print(cite("canvas_placeholder"))
+    # Not the host's OS, so the launch is covered whatever GPU the host has.
+    b = drv.launch(os="linux" if platform.system() == "Windows" else "windows")
+    got, plain = two_reads(b, site), two_reads(ref.launch(), site)
+    # The probe is only comparable if an uncovered browser reads the same canvas twice alike.
+    for api, same in plain.items():
+        check(same, f"{api} of the reference Firefox is equal between two reads (else VACUOUS)", ledger=False)
+    for api, same in got.items():
+        check(not same, f"canvas readback is the placeholder: {api} differs between two reads")
+    b.close()
     check.done()

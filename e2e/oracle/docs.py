@@ -19,6 +19,7 @@ CLAIMS = {
     "virtual": ("python/src/camoufox/utils.py", "passing headless='virtual' to Camoufox, AsyncCamoufox"),
     "webrtc": ("README.md", "ICE candidates, SDP and `getStats()` rewritten to the proxy IP"),
     "unique_context": ("python/src/camoufox/sync_api.py", "Creates a new browser context with a unique fingerprint identity."),
+    "canvas_placeholder": ("ci/tribal-rules.yml", "on another OS or GPU canvas readback is RFP's random placeholder"),
 }
 
 
