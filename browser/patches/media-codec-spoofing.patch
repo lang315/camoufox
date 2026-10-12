@@ -1,15 +1,16 @@
 diff --git a/dom/media/mediacapabilities/MediaCapabilities.cpp b/dom/media/mediacapabilities/MediaCapabilities.cpp
+index d1545d92c6..4d082f3d13 100644
 --- a/dom/media/mediacapabilities/MediaCapabilities.cpp
 +++ b/dom/media/mediacapabilities/MediaCapabilities.cpp
-@@ -35,6 +35,7 @@
- #include "mozilla/media/MediaUtils.h"
+@@ -36,6 +36,7 @@
  #include "mozilla/media/webrtc/CodecInfo.h"
+ #include "mozilla/media/webrtc/H264FmtpParser.h"
  #include "nsContentUtils.h"
 +#include "MaskConfig.hpp"
  #include "nsIPrincipal.h"
-
+ 
  namespace mozilla::dom {
-@@ -711,6 +712,31 @@
+@@ -819,6 +820,31 @@ void MediaCapabilities::CreateMediaCapabilitiesDecodingInfo(
      const MediaDecodingConfiguration& aConfiguration, ErrorResult& aRv,
      Promise* aPromise, const mediacaps::BehaviorConfig& aBehavior) {
    LOG("Processing {}", aConfiguration);
@@ -38,35 +39,35 @@ diff --git a/dom/media/mediacapabilities/MediaCapabilities.cpp b/dom/media/media
 +    }
 +  }
 +
-
+ 
    const bool isWebRTC =
        mediacaps::IsMediaTypeWebRTC(AsVariant(aConfiguration.mType));
 diff --git a/dom/media/mediacapabilities/moz.build b/dom/media/mediacapabilities/moz.build
-index 786b87a..e0cc052 100644
+index 786b87a910..e0cc052b66 100644
 --- a/dom/media/mediacapabilities/moz.build
 +++ b/dom/media/mediacapabilities/moz.build
 @@ -13,4 +13,6 @@ UNIFIED_SOURCES += [
-
+ 
  include("/ipc/chromium/chromium-config.mozbuild")
-
+ 
 +LOCAL_INCLUDES += ["/camoucfg"]
 +
  FINAL_LIBRARY = "xul"
 diff --git a/dom/media/mediaelement/HTMLMediaElement.cpp b/dom/media/mediaelement/HTMLMediaElement.cpp
-index df8c944..1bbd6bd 100644
+index 7244927def..66686629d2 100644
 --- a/dom/media/mediaelement/HTMLMediaElement.cpp
 +++ b/dom/media/mediaelement/HTMLMediaElement.cpp
-@@ -136,6 +136,7 @@
+@@ -138,6 +138,7 @@
  #  include "objbase.h"
  #endif
  #include "xpcpublic.h"
 +#include "MaskConfig.hpp"
-
+ 
  mozilla::LazyLogModule gMediaElementLog("HTMLMediaElement");
  mozilla::LazyLogModule gMediaElementEventsLog("HTMLMediaElementEvents");
-@@ -5543,6 +5544,13 @@ CanPlayStatus HTMLMediaElement::GetCanPlay(
+@@ -5794,6 +5795,13 @@ CanPlayStatus HTMLMediaElement::GetCanPlay(
  }
-
+ 
  void HTMLMediaElement::CanPlayType(const nsAString& aType, nsAString& aResult) {
 +  // camoufox: answer from the per-OS codec config when present, so a
 +  // cross-OS profile does not leak the host's real decoder support (#6).
@@ -79,18 +80,18 @@ index df8c944..1bbd6bd 100644
    CanPlayStatus canPlay = GetCanPlay(aType, &diagnostics);
    diagnostics.StoreFormatDiagnostics(OwnerDoc(), aType, canPlay != CANPLAY_NO,
 diff --git a/dom/media/mediaelement/moz.build b/dom/media/mediaelement/moz.build
-index 34f3798..152e14f 100644
+index 34f3798b2c..152e14f28c 100644
 --- a/dom/media/mediaelement/moz.build
 +++ b/dom/media/mediaelement/moz.build
 @@ -35,4 +35,6 @@ LOCAL_INCLUDES += [
      "/third_party/libwebrtc",
  ]
-
+ 
 +LOCAL_INCLUDES += ["/camoucfg"]
 +
  FINAL_LIBRARY = "xul"
 diff --git a/dom/media/mediasource/MediaSource.cpp b/dom/media/mediasource/MediaSource.cpp
-index a6eaa23..441f979 100644
+index 172ee9e0e7..1ae52f41c3 100644
 --- a/dom/media/mediasource/MediaSource.cpp
 +++ b/dom/media/mediasource/MediaSource.cpp
 @@ -32,6 +32,7 @@
@@ -98,13 +99,13 @@ index a6eaa23..441f979 100644
  #include "nsString.h"
  #include "nsThreadUtils.h"
 +#include "MaskConfig.hpp"
-
+ 
  struct JSContext;
  class JSObject;
 @@ -136,6 +137,16 @@ void MediaSource::IsTypeSupported(const nsAString& aType,
      return aRv.ThrowTypeError("Empty type");
    }
-
+ 
 +  // camoufox: answer from the per-OS codec config so isTypeSupported stays
 +  // coherent with canPlayType; "" => unsupported (#6).
 +  if (auto spoof = MaskConfig::GetMediaCanPlayType(
@@ -119,13 +120,13 @@ index a6eaa23..441f979 100644
    if (!containerType) {
      return aRv.ThrowNotSupportedError("Unknown type");
 diff --git a/dom/media/mediasource/moz.build b/dom/media/mediasource/moz.build
-index 60574eb..616777c 100644
+index 60574eb5eb..616777c26f 100644
 --- a/dom/media/mediasource/moz.build
 +++ b/dom/media/mediasource/moz.build
 @@ -41,4 +41,6 @@ TEST_DIRS += [
-
+ 
  include("/ipc/chromium/chromium-config.mozbuild")
-
+ 
 +LOCAL_INCLUDES += ["/camoucfg"]
 +
  FINAL_LIBRARY = "xul"
