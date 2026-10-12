@@ -94,7 +94,7 @@ func TestProducerSchemaDrift(t *testing.T) {
 // TestProducerSchemaDrift above only compares TOP-LEVEL Config keys against
 // properties.json, so nested object fields were checked against nothing. That
 // gap shipped a real bug: config.go emitted "voiceURI" (mirroring
-// settings/camoucfg.jvv, which was itself wrong) while MVoices reads
+// the since-deleted settings/camoucfg.jvv, which was itself wrong) while MVoices reads
 // "voiceUri". JSON keys are case-sensitive, MVoices skips any entry missing a
 // required field, so every goapi-configured voice was dropped and the host's
 // own voices stayed exposed. CI passed throughout: the runtime subtest only

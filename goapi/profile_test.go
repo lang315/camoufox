@@ -19,7 +19,7 @@ import (
 //
 // The probe used to be dom.w3c_touch_events.enabled read back as
 // window.TouchEvent. That measures nothing since
-// patches/touchscreen-fingerprint-spoofing.patch: TouchEvent::PrefEnabled now
+// browser/patches/touchscreen-fingerprint-spoofing.patch: TouchEvent::PrefEnabled now
 // answers from the CAMOU config whenever navigator.maxTouchPoints is *present*
 // (MaskConfig::HasKey is presence-only, browser/additions/camoucfg/MaskConfig.hpp), and
 // every one of the 123 fingerprint presets carries that key -- so for a default
