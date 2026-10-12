@@ -1,21 +1,34 @@
 diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
-index 7af722b926..3850d52706 100644
+index 7af722b926..767adbd9dd 100644
 --- a/dom/base/Navigator.cpp
 +++ b/dom/base/Navigator.cpp
-@@ -4,6 +4,9 @@
+@@ -4,6 +4,10 @@
  
  // Needs to be first.
  #include "Navigator.h"
 +// Camoufox: per-context + global navigator spoofing
 +#include "NavigatorManager.h"
 +#include "MaskConfig.hpp"
++#include "AccessObserverDom.hpp"
  
  #include "Geolocation.h"
  #include "base/basictypes.h"
-@@ -270,6 +273,16 @@ void Navigator::Invalidate() {
+@@ -268,8 +272,28 @@ void Navigator::Invalidate() {
+   mClipboard = nullptr;
+ }
  
++// Camoufox tracking-observer: record a navigator read (no-op when disarmed).
++static void RecordNavigatorRead(nsPIDOMWindowInner* aWindow) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(
++        aWindow ? aWindow->GetExtantDoc() : nullptr,
++        camoufox::SurfaceId::Navigator);
++  }
++}
++
  void Navigator::GetUserAgent(nsAString& aUserAgent, CallerType aCallerType,
                               ErrorResult& aRv) const {
++  RecordNavigatorRead(mWindow);
 +  // Camoufox: per-context user agent
 +  if (mWindow) {
 +    const uint32_t userContextId =
@@ -29,7 +42,7 @@ index 7af722b926..3850d52706 100644
    nsCOMPtr<nsPIDOMWindowInner> window;
  
    if (mWindow) {
-@@ -317,6 +330,11 @@ void Navigator::GetAppCodeName(nsAString& aAppCodeName, ErrorResult& aRv) {
+@@ -317,6 +341,11 @@ void Navigator::GetAppCodeName(nsAString& aAppCodeName, ErrorResult& aRv) {
  
  void Navigator::GetAppVersion(nsAString& aAppVersion, CallerType aCallerType,
                                ErrorResult& aRv) const {
@@ -41,10 +54,11 @@ index 7af722b926..3850d52706 100644
    nsCOMPtr<Document> doc = mWindow->GetExtantDoc();
  
    nsresult rv = GetAppVersion(
-@@ -432,6 +450,21 @@ void Navigator::GetLanguages(nsTArray<nsString>& aLanguages) {
+@@ -432,6 +461,22 @@ void Navigator::GetLanguages(nsTArray<nsString>& aLanguages) {
  
  void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
                              ErrorResult& aRv) const {
++  RecordNavigatorRead(mWindow);
 +  // Camoufox: per-context navigator platform
 +  if (mWindow) {
 +    const uint32_t userContextId =
@@ -63,10 +77,11 @@ index 7af722b926..3850d52706 100644
    if (mWindow) {
      BrowsingContext* bc = mWindow->GetBrowsingContext();
      nsString customPlatform;
-@@ -457,6 +490,21 @@ void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
+@@ -457,6 +502,22 @@ void Navigator::GetPlatform(nsAString& aPlatform, CallerType aCallerType,
  
  void Navigator::GetOscpu(nsAString& aOSCPU, CallerType aCallerType,
                           ErrorResult& aRv) const {
++  RecordNavigatorRead(mWindow);
 +  // Camoufox: per-context navigator oscpu
 +  if (mWindow) {
 +    const uint32_t userContextId =
@@ -85,7 +100,7 @@ index 7af722b926..3850d52706 100644
    if (aCallerType != CallerType::System) {
      // If fingerprinting resistance is on, we will spoof this value. See
      // nsRFPService.h for details about spoofed values.
-@@ -685,6 +733,15 @@ void Navigator::GetDoNotTrack(nsAString& aResult) {
+@@ -685,6 +746,15 @@ void Navigator::GetDoNotTrack(nsAString& aResult) {
  }
  
  bool Navigator::GlobalPrivacyControl() {
@@ -101,10 +116,11 @@ index 7af722b926..3850d52706 100644
    bool gpcStatus = StaticPrefs::privacy_globalprivacycontrol_enabled();
    if (!gpcStatus) {
      nsCOMPtr<nsILoadContext> loadContext = do_GetInterface(mWindow);
-@@ -696,6 +753,19 @@ bool Navigator::GlobalPrivacyControl() {
+@@ -696,6 +766,20 @@ bool Navigator::GlobalPrivacyControl() {
  }
  
  uint64_t Navigator::HardwareConcurrency() {
++  RecordNavigatorRead(mWindow);
 +  // Camoufox: per-context hardware concurrency
 +  if (mWindow) {
 +    const uint32_t userContextId =
@@ -271,10 +287,10 @@ index 0000000000..7ecad32bb4
 +
 +#endif  // mozilla_dom_NavigatorManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index fa277ae122..b0973412be 100644
+index 63864220e6..b39f4a712d 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -223,6 +223,7 @@ EXPORTS.mozilla.dom += [
+@@ -224,6 +224,7 @@ EXPORTS.mozilla.dom += [
      "MutationObservers.h",
      "NameSpaceConstants.h",
      "Navigator.h",
@@ -282,7 +298,7 @@ index fa277ae122..b0973412be 100644
      "NodeInfo.h",
      "NodeInfoInlines.h",
      "NodeIterator.h",
-@@ -561,6 +562,10 @@ SOURCES += [
+@@ -563,6 +564,10 @@ SOURCES += [
      "nsPluginArray.cpp",
  ]
  
@@ -294,7 +310,7 @@ index fa277ae122..b0973412be 100644
  SOURCES += ["FontListManager.cpp"]
  
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 466785f591..1f133b6ed6 100644
+index 0754c86c20..013cb357e0 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
 @@ -4,6 +4,7 @@
@@ -305,7 +321,7 @@ index 466785f591..1f133b6ed6 100644
  
  #include <inttypes.h>
  #include <stdio.h>
-@@ -7810,6 +7811,36 @@ void nsGlobalWindowInner::SetFontList(const nsAString& aFontList,
+@@ -7816,6 +7817,36 @@ void nsGlobalWindowInner::SetFontList(const nsAString& aFontList,
    RoverfoxStorageManager::RemoveSetter("setFontList");
  }
  
@@ -343,10 +359,10 @@ index 466785f591..1f133b6ed6 100644
      bool aGranted) {
    // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index e7cf0601f4..9616144511 100644
+index c530548b52..6f24829c65 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -696,6 +696,14 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -699,6 +699,14 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
    // Per-context font list spoofing
    void SetFontList(const nsAString& aFontList, mozilla::ErrorResult& aRv);
  
@@ -362,7 +378,7 @@ index e7cf0601f4..9616144511 100644
    void Alert(nsIPrincipal& aSubjectPrincipal, mozilla::ErrorResult& aError);
    void Alert(const nsAString& aMessage, nsIPrincipal& aSubjectPrincipal,
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index 38227acada..bfb0332a1c 100644
+index c8c45aaa24..9b750aa4d2 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
 @@ -958,6 +958,30 @@ partial interface Window {
