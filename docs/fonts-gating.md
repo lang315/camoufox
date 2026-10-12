@@ -6,8 +6,9 @@ keeps a short lesson 5; the first section below is its full text, which is what
 code comments citing "CLAUDE.md lesson 5" (smoke.yml, probe_windows_fonts.py)
 lean on.
 
-> **Line numbers below are beta.31 (Firefox 152).** The tree is now Firefox 156
-> (beta.32) and they have not been re-measured; re-anchor before citing one.
+> **Line numbers below are beta.31 (Firefox 152), except where labelled
+> beta.32.** The tree is now Firefox 156 (beta.32) and the unlabelled ones have
+> not been re-measured; re-anchor before citing one.
 
 ## The per-context gate fails open (lesson 5)
 
@@ -27,17 +28,17 @@ not a hop). Fixing individual hops does not close the class — but the class is
 narrower than this paragraph first read (#105, smoke run 34698688879 on build
 34578327006, arm `(ctx105)`). On the beta.32 tree four sites ask this gate with
 no `MaskedFontListBlocks` beside it — both `GetFontList` branches
-(`gfxPlatformFontList.cpp:1426`, `:1444`), `GetFontFamilyList` (`:1467`) and
-`CommonFontFallback`'s non-shared branch (`:1730`) — and under a launch mask
+(beta.32 `gfxPlatformFontList.cpp:1426`, `:1444`), `GetFontFamilyList`
+(beta.32 `:1467`) and `CommonFontFallback`'s non-shared branch (beta.32 `:1730`) — and under a launch mask
 none of them can serve a masked family to a page: `GetFontList` is reached only
 by the chrome font enumerator, and `GetFontFamilyList` and the non-shared branch
 are dormant while `gfx.e10s.font-list.shared` is true (default `true`, beta.32
 `StaticPrefList.yaml:7770-7773`, `mirror: once`, overridden nowhere in
 `browser/settings/`, `browser/additions/`, `browser/assets/`, `python/src/` or
 `typescript/src/`). The fifth site of the beta.31 reading,
-`LookupInSharedFaceNameList` (`:1144`), asks both halves through
+`LookupInSharedFaceNameList` (beta.32 `:1144`), asks both halves through
 `CamouIsFamilyAllowed` since #150, which also let `local()` reach it:
-`gfxUserFontSet.cpp:483-493` drops a `local()` face whose resolved family the
+beta.32 `gfxUserFontSet.cpp:483-493` drops a `local()` face whose resolved family the
 launch mask blocks. Every *other* live lookup
 site pairs the gate with `MaskedFontListBlocks`, which answers from the document's
 `FontVisibilityProvider` and never from the context id, and asks *first* —

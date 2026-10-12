@@ -366,10 +366,11 @@ rules:
       and the name-keyed memos in front of the gate (#83). So each process
       flushes both when the fontlist_<id> pref reaches it, from the storage
       pref callback on the main thread. fontlist=0 means that process has no
-      font list yet, so there is nothing to flush. The flush is not done in
-      EnsureFontList, the lazy parse on the lookup path: that runs under
-      gfxPlatformFontList's mLock, and every gated read takes mLock before
-      sFontListMutex, so flushing there would invert the order. The guard's
+      font list yet, so there is nothing to flush. The flush never runs while
+      sFontListMutex is held: it takes gfxPlatformFontList's mLock, and every
+      gated read takes mLock before sFontListMutex, so flushing under
+      sFontListMutex would invert that order. That rules out flushing from
+      EnsureFontList, the lazy parse on the lookup path. The guard's
       flush arm fails a process that answered a context without its list and
       never received it, or answered without it after it arrived, and fails
       the run when no content process logged a flush with a live font list.

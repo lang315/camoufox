@@ -472,9 +472,9 @@ That is the default. These options override it:
 
 | Override | Result |
 |---|---|
-| `canvas_noise=False` on another OS | 🔴 Stock Firefox, but the pixels show the real OS |
+| `canvas_noise=False` on another OS | 🔴 Not stock Firefox either: the pixels show the real OS, with this fork's seeded canvas noise on them |
 | `canvas_noise=True` on the host's OS | 🟡 Looks like LibreWolf with no need to |
-| `webgl_config` naming a GPU other than the host's | 🟡 Canvas noise is turned on, as on another OS; with `canvas_noise=False`, 🔴 WebGL reports one GPU while the pixels come from another |
+| `webgl_config` naming a GPU other than the host's | 🟡 Canvas noise is turned on, as on another OS; with `canvas_noise=False`, 🔴 WebGL reports one GPU while the pixels come from another, with this fork's seeded canvas noise on them |
 
 `canvas_noise` is set per browser, not per context. Without it, every `NewContext()`
 claims the host's OS. Details are in

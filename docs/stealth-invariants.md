@@ -63,9 +63,10 @@ it is the 15/15 case.
 So a window is created sealed (`window-setter-seal.patch`). Juggler unseals it
 with `ChromeUtils.camouUnsealFingerprintSetters` just before the init-script
 loop and seals it again with `ChromeUtils.camouSealFingerprintSetters`
-immediately after (`browser/additions/juggler/content/FrameTree.js`): measured
-as the right slot, init scripts run at 52ms and the page's own inline script at
-55ms on the same time origin.
+immediately after (`browser/additions/juggler/content/FrameTree.js`). That slot
+was measured for the earlier teardown, which the seal replaced in the same
+place: init scripts ran at 52ms and the page's own inline script at 55ms on the
+same time origin.
 
 The seal is a per-window flag that every setter's WebIDL `Func` guard consults
 (`RoverfoxStorageManager::IsSetterOffered`), next to the per-context "used" flag
@@ -83,15 +84,19 @@ per-context storage before `MaskConfig`, and `ClientWebGLContext::GetParameter`
 does the same for the renderer. Reversing that order would silently make the
 launch value win everywhere.
 
-**Clobbering on the next navigation.** The timezone override is per realm
-(`JS::SetRealmTimeZoneOverride`), and every navigation creates a new realm. So
-`nsGlobalWindowOuter::SetNewDocument` re-applies the context's stored timezone
-to the new document's realm; without that, the next page reports the launch
-value. The
-smoke guard asserts both directions for exactly this reason.
+**Clobbering on the next navigation.** Every navigation creates a new realm.
+`nsGlobalWindowOuter::SetNewDocument` gives the new document's realm the
+context's stored timezone (`JS::SetRealmTimeZoneOverride`), but only when that
+zone differs from the process-wide one, because a realm override releases all
+JIT code; without it, the next page reports the launch value. The smoke guard
+asserts both directions for exactly this reason.
 
-The remaining limit is inherent to a process-global override: with two contexts
-on different timezones, whichever navigated last owns the global.
+The remaining limit comes from that skip. `setTimezone` also sets the
+process-wide zone (`JS::SetTimeZoneOverride`), so the process zone belongs to
+the last `setTimezone` call in that process, or to the launch's `timezone`
+before any. A document whose zone equalled the process zone when it loaded
+carries no realm override, so it follows the process zone if another context
+later sets a different one.
 
 ## Spoof state must not outlive the process
 
