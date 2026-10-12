@@ -34,7 +34,7 @@ SCREEN_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_SIZE"
 # version, not on the browser:
 #
 #   Playwright <=1.57: record_video_dir -> Browser.setVideoRecordingOptions ->
-#     PageTarget._startVideoRecording (additions/juggler/TargetRegistry.js) ->
+#     PageTarget._startVideoRecording (browser/additions/juggler/TargetRegistry.js) ->
 #     the native screencast recorder, with no headless check. Under Xvfb that is
 #     libwebrtc's X11 window capturer, which delivers no frames without
 #     Composite.

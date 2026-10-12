@@ -1741,7 +1741,7 @@ export function generateContextFingerprint({
 		resolvedPreset = { navigator: nav, screen, webgl };
 	}
 
-	// Fork-only canvas noise seed (patches/canvas-spoofing.patch); neither
+	// Fork-only canvas noise seed (browser/patches/canvas-spoofing.patch); neither
 	// source above carries one.
 	if (canvas_seed && !("canvas:seed" in config))
 		config["canvas:seed"] = random.randint(1, 4_294_967_295);
