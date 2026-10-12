@@ -1,16 +1,17 @@
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 42b2b42650..b0aac2e38a 100644
+index 5bae865326..4b7a823d7c 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -30,6 +30,7 @@
+@@ -31,6 +31,8 @@
  #include "mozilla/dom/ContentProcessMessageManager.h"
  #include "mozilla/dom/Document.h"
  #include "mozilla/dom/FontListManager.h"
 +#include "mozilla/dom/NavigatorManager.h"
++#include "mozilla/dom/WorkerPrivate.h"
  #include "mozilla/gfx/2D.h"
  #include "mozilla/gfx/Logging.h"
  #include "mozilla/glean/GfxMetrics.h"
-@@ -2298,9 +2299,57 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
+@@ -2658,9 +2660,66 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
    }
  }
  
@@ -30,8 +31,17 @@ index 42b2b42650..b0aac2e38a 100644
 +  const mozilla::dom::Document* doc =
 +      aFontVisibilityProvider ? aFontVisibilityProvider->GetDocument()
 +                              : nullptr;
-+  const auto os = mozilla::dom::NavigatorManager::GetSpoofedOS(
-+      mozilla::dom::RoverfoxStorageManager::UserContextId(doc));
++  uint32_t userContextId =
++      mozilla::dom::RoverfoxStorageManager::UserContextId(doc);
++  // A worker has no document. Its origin attributes carry the context of the
++  // document that spawned it, so its system-ui matches its page's.
++  if (!doc) {
++    if (mozilla::dom::WorkerPrivate* wp =
++            mozilla::dom::GetCurrentThreadWorkerPrivate()) {
++      userContextId = wp->GetOriginAttributes().mUserContextId;
++    }
++  }
++  const auto os = mozilla::dom::NavigatorManager::GetSpoofedOS(userContextId);
 +  switch (os) {
 +#ifndef XP_MACOSX
 +    case SpoofedOS::MacOS:
@@ -68,7 +78,7 @@ index 42b2b42650..b0aac2e38a 100644
    // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
    // code below ends up using [NSFont systemFontOfSize: 0.0].
    nsFont systemFont;
-@@ -2428,12 +2477,23 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2802,17 +2861,49 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    }
  
    auto index = static_cast<size_t>(aGenericType);
@@ -87,6 +97,7 @@ index 42b2b42650..b0aac2e38a 100644
 +  PrefFontList* prefFonts = cached.get();
    if (MOZ_UNLIKELY(!prefFonts)) {
      prefFonts = new PrefFontList;
+     mozilla::dom::AutoFontListContext camouUnfiltered(0);
      ResolveGenericFontNames(aFontVisibilityProvider, aGenericType, aPrefLang,
                              prefFonts);
 -    mLangGroupPrefFonts[aPrefLang][index].reset(prefFonts);
@@ -94,7 +105,59 @@ index 42b2b42650..b0aac2e38a 100644
    }
    return prefFonts;
  }
-@@ -3028,6 +3088,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
+ 
++// Camoufox (#131): whether system-ui, for a context with its own font list,
++// is the family GetSystemUIFontFamilies names for the OS the context presents.
++// AddGenericFonts' per-context table step would otherwise answer it with the
++// sans-serif row and return before GetPrefFontsLangGroupLocked reaches the
++// hook. A family the context's list refuses leaves the answer to the table.
++// aKey receives the family's lowercased key for the log line.
++static bool CamouSystemUIFromHook(
++    FontVisibilityProvider* aFontVisibilityProvider,
++    StyleGenericFontFamily aGenericType, nsAtom* aLangGroup, nsACString& aKey) {
++  if (aGenericType != StyleGenericFontFamily::SystemUi ||
++      SystemUISpoofedOS(aFontVisibilityProvider) ==
++          MaskConfig::SpoofedOS::None) {
++    return false;
++  }
++  AutoTArray<nsCString, 1> families;
++  GetSystemUIFontFamilies(aFontVisibilityProvider, aLangGroup, families);
++  return !families.IsEmpty() &&
++         gfxPlatformFontList::CamouIsFamilyAllowed(aFontVisibilityProvider,
++                                                   families[0], &aKey);
++}
++
+ void gfxPlatformFontList::AddGenericFonts(
+     FontVisibilityProvider* aFontVisibilityProvider,
+     StyleGenericFontFamily aGenericType, nsAtom* aLanguage,
+@@ -2847,8 +2938,24 @@ void gfxPlatformFontList::AddGenericFonts(
+   // declines or its key resolves empty.
+   {
+     const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
+-    if (camouCtx != 0 &&
+-        mozilla::dom::FontListManager::HasFontList(camouCtx)) {
++    const bool camouHasList =
++        camouCtx != 0 && mozilla::dom::FontListManager::HasFontList(camouCtx);
++    nsAutoCString camouSysKey;
++    AutoTArray<FamilyAndGeneric, 1> camouSysFamilies;
++    // The name must also resolve to a face the list allows: a Windows launch's
++    // fontconfig rewrites Helvetica to Arial before the gate.
++    if (camouHasList &&
++        CamouSystemUIFromHook(aFontVisibilityProvider, aGenericType, langGroup,
++                              camouSysKey) &&
++        FindAndAddFamiliesLocked(aFontVisibilityProvider,
++                                 StyleGenericFontFamily::None, camouSysKey,
++                                 &camouSysFamilies, FindFamiliesFlags(0)) &&
++        !camouSysFamilies.IsEmpty()) {
++      // Answered by the pref path below, from the per-OS system-ui cell.
++      LOG_FONTLIST(
++          ("CAMOU-FL generic-map ctx=%u generic=%d step=system-ui key=%s",
++           camouCtx, int(aGenericType), camouSysKey.get()));
++    } else if (camouHasList) {
+       nsAutoCString camouKey, camouStep;
+       bool camouAnswered = false;
+       if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
+@@ -3528,6 +3635,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
        pref = nullptr;
      }
    }
@@ -107,10 +170,10 @@ index 42b2b42650..b0aac2e38a 100644
  
    // Create a new FontPrefs and replace the existing one.
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index bdd4b52666..f8a5f8b748 100644
+index bcb7977c0f..5bc0152be6 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
-@@ -1077,6 +1077,12 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -1189,6 +1189,12 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                         eFontPrefLang_Count>
        mLangGroupPrefFonts MOZ_GUARDED_BY(mLock);
    mozilla::UniquePtr<PrefFontList> mEmojiPrefFont MOZ_GUARDED_BY(mLock);
