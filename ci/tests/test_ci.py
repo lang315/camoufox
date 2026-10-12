@@ -1901,6 +1901,7 @@ def _required_suites(browser_changed: str, has_sundial: str) -> set:
     block = text[start:end]
     block = block.replace("${{ needs.resolve.outputs.browser_changed }}", browser_changed)
     block = block.replace("${{ needs.resolve.outputs.has_sundial }}", has_sundial)
+    block = block.replace("${{ github.repository }}", "daijro/camoufox")
     proc = subprocess.run(
         ["bash", "-c", block + '\necho "$required"'],
         capture_output=True, text=True,
