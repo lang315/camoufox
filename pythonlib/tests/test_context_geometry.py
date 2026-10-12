@@ -60,3 +60,44 @@ def test_new_context_passes_the_launch_window_and_an_explicit_viewport_wins():
     assert b.opts.get("no_viewport") is True and "viewport" not in b.opts
     NewContext(b, os="windows", viewport={"width": 800, "height": 600})
     assert b.opts["viewport"] == {"width": 800, "height": 600} and "no_viewport" not in b.opts
+
+
+def test_a_mock_or_malformed_launch_window_behaves_as_none():
+    from unittest import mock
+
+    def shape(fp):
+        o = fp["context_options"]
+        return {k: o.get(k) is not None for k in ("viewport", "no_viewport", "device_scale_factor")}
+
+    base = shape(generate_context_fingerprint(os="windows", launch_window=None))
+    for bad in (mock.MagicMock(), {"outer": (1, 2)}, {"outer": 1, "inner": 2, "screen": 3}, "x"):
+        assert shape(generate_context_fingerprint(os="windows", launch_window=bad)) == base
+
+
+def test_new_context_with_a_mock_browser_does_not_crash():
+    from unittest import mock
+    from camoufox.sync_api import NewContext
+
+    b = mock.MagicMock()
+    b.version = "156.0"
+    NewContext(b, os="windows")
+    assert "viewport" in b.new_context.call_args.kwargs
+
+
+def test_explicit_no_viewport_drops_the_generated_viewport_and_scale_factor():
+    import asyncio
+    from unittest import mock
+    from camoufox.async_api import AsyncNewContext
+    from camoufox.sync_api import NewContext
+
+    sb = mock.MagicMock(version="156.0", _camoufox_launch_window=LW)
+    NewContext(sb, os="windows", no_viewport=True)
+    o = sb.new_context.call_args.kwargs
+    assert o["no_viewport"] is True and "viewport" not in o and "device_scale_factor" not in o
+
+    ab = mock.MagicMock(version="156.0", _camoufox_launch_window=LW)
+    ab.new_context = mock.AsyncMock()
+    ab.new_context.return_value.add_init_script = mock.AsyncMock()
+    asyncio.run(AsyncNewContext(ab, os="windows", no_viewport=True))
+    o = ab.new_context.call_args.kwargs
+    assert o["no_viewport"] is True and "viewport" not in o and "device_scale_factor" not in o

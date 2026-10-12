@@ -1723,6 +1723,13 @@ def generate_context_fingerprint(
             process-wide, so the context's viewport becomes the launch inner size (or no
             viewport when the launch set none) and its screen is made to hold the window.
     """
+    # Only a well-formed record counts; anything else (a mock, a half-built dict) is no record.
+    if not (
+        isinstance(launch_window, dict)
+        and all(isinstance(launch_window.get(k), (tuple, list)) and len(launch_window[k]) == 2
+                for k in ('outer', 'inner', 'screen'))
+    ):
+        launch_window = None
     if preset is not None:
         # Use real fingerprint preset
         config = from_preset(preset, ff_version)
