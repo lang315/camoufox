@@ -57,18 +57,24 @@ func TestProducerSchemaDrift(t *testing.T) {
 	}
 	var props []struct {
 		Property string `json:"property"`
+		Removed  string `json:"removed"`
 	}
 	if err := json.Unmarshal(data, &props); err != nil {
 		t.Fatalf("parse properties.json: %v", err)
 	}
 	schema := map[string]bool{}
+	live := map[string]bool{}
 	for _, p := range props {
 		schema[p.Property] = true
+		// A removed key is kept so launchers can say "removed in X"; it has no effect, so no producer field.
+		if p.Removed == "" {
+			live[p.Property] = true
+		}
 	}
 	cfg := configJSONKeys()
 
-	// Every schema property must have a config.go field.
-	for k := range schema {
+	// Every live schema property must have a config.go field.
+	for k := range live {
 		if !cfg[k] {
 			t.Errorf("properties.json key %q has no config.go field (producer cannot emit it)", k)
 		}
