@@ -21,15 +21,15 @@ is not a real monitor and must not drive Screen constraints. Headless is the
 remaining case: no display exists, so nothing should be derived from the host.
 
 Run with:
-    cd camoufox && PYTHONPATH=pythonlib python3 -m pytest \
-        pythonlib/tests/test_headless_screen_host_leak.py -v
+    cd camoufox && PYTHONPATH=python/src python3 -m pytest \
+        python/tests/test_headless_screen_host_leak.py -v
 """
 import os
 import sys
 from types import SimpleNamespace
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest  # noqa: E402
 

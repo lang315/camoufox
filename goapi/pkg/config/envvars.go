@@ -6,7 +6,7 @@ import (
 	"runtime"
 )
 
-// Chunk size limits mirror pythonlib/camoufox/utils.py:get_env_vars:
+// Chunk size limits mirror python/src/camoufox/utils.py:get_env_vars:
 //
 //	chunk_size = 2047 if OS_NAME == 'win' else 32767
 //

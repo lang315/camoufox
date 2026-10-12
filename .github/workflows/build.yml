@@ -201,7 +201,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.mozbuild
-          key: mozbuild-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh') }}
+          key: mozbuild-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('browser/upstream.sh') }}
           restore-keys: |
             mozbuild-${{ matrix.target }}-${{ matrix.arch }}-
             mozbuild-${{ matrix.target }}-
@@ -213,7 +213,7 @@ jobs:
           # ccache is content-addressed, so a stale restore is safe and still
           # gives a high hit rate — restore-keys fall back to the newest ccache
           # for this leg even when patches (and thus the exact key) change.
-          key: ccache-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('upstream.sh') }}
+          key: ccache-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('browser/upstream.sh') }}
           restore-keys: |
             ccache-${{ matrix.target }}-${{ matrix.arch }}-
             ccache-${{ matrix.target }}-
@@ -221,23 +221,24 @@ jobs:
       - name: Cache Firefox source tarball
         uses: actions/cache@v6
         with:
-          path: firefox-*.source.tar.xz
-          key: firefox-source-${{ hashFiles('upstream.sh') }}
+          path: browser/firefox-*.source.tar.xz
+          key: firefox-source-${{ hashFiles('browser/upstream.sh') }}
 
       - name: List patches (sanity)
         run: |
           echo "Patches that will be applied (alphabetical):"
-          find patches -maxdepth 1 -name '*.patch' | sort
+          find browser/patches -maxdepth 1 -name '*.patch' | sort
           echo "---"
           # Catch alphabetical-ordering footguns where an extension patch
           # would apply before its base patch.
-          first_webrtc=$(find patches -maxdepth 1 -name 'webrtc-ip-spoofing*.patch' | sort | head -1)
+          first_webrtc=$(find browser/patches -maxdepth 1 -name 'webrtc-ip-spoofing*.patch' | sort | head -1)
           if [ -n "$first_webrtc" ] && [ "$(basename "$first_webrtc")" != "webrtc-ip-spoofing.patch" ]; then
             echo "::error::webrtc-ip-spoofing.patch must sort first among its family"
             exit 1
           fi
 
       - name: Fetch source
+        working-directory: browser
         run: make fetch
 
       - name: Configure git identity
@@ -246,6 +247,7 @@ jobs:
           git config --global user.name "Camoufox CI"
 
       - name: Setup and bootstrap
+        working-directory: browser
         env:
           BUILD_TARGET: ${{ matrix.target }},${{ matrix.arch }}
         run: |
@@ -277,6 +279,7 @@ jobs:
           free -h
 
       - name: Build
+        working-directory: browser
         env:
           # Cap Rust parallelism to lower peak memory (avoids OOM/SIGTERM).
           # Tune to taste: higher = faster but more RAM.
@@ -289,13 +292,13 @@ jobs:
 
       - name: List build artifacts
         if: always()
-        run: ls -lah dist/ || true
+        run: ls -lah browser/dist/ || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: CamoufoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
-          path: dist/*
+          path: browser/dist/*
           if-no-files-found: error
           retention-days: 14
 

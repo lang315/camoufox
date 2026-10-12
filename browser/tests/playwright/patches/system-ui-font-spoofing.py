@@ -118,7 +118,7 @@ async def test_os(target_os: str) -> bool:
 # to the #92 sans row).
 #
 # Font universe this arm runs in (CLAUDE.md lesson 8): a Windows launch on a
-# Linux host. utils._generate_fontconfig hands fontconfig bundle/fontconfig/
+# Linux host. utils._generate_fontconfig hands fontconfig browser/bundle/fontconfig/
 # windows/fonts.conf and ONLY the groups `readBy.win` lists (LMW+LW+MW+W), so the
 # macOS-only faces (Helvetica, Helvetica Neue, Menlo) are not on the search path,
 # and that conf rewrites the name Helvetica to Arial (a GDI FontSubstitutes
@@ -157,7 +157,7 @@ async def test_mixed_os_context(max_attempts: int = 15) -> bool:
 
     # Not /tmp: the Linux content sandbox gives content processes their own
     # view of it, so their per-process logs would not land where this reads.
-    work = Path(__file__).resolve().parents[2] / ".ci-work"
+    work = Path(__file__).resolve().parents[4] / ".ci-work"
     work.mkdir(exist_ok=True)
     logdir = Path(tempfile.mkdtemp(prefix="sysui138-log-", dir=work))
     os.environ["MOZ_LOG"] = "fontlist:4,sync,append"

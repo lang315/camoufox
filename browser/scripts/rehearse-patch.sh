@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# FETCH="curl -fsSL" scripts/rehearse-patch.sh <patch-basename>
+# FETCH="curl -fsSL" browser/scripts/rehearse-patch.sh <patch-basename>
 set -euo pipefail; shopt -s globstar
 command -v gpatch >/dev/null || { echo "need gpatch"; exit 3; }
 [ "${BASH_VERSINFO:-0}" -ge 4 ] || { echo "need bash>=4"; exit 3; }
 : "${FETCH:?set FETCH, e.g. FETCH='curl -fsSL'}"
 PATCH="${1:?usage: rehearse-patch.sh <patch-basename>}"
-ROOT="$(git rev-parse --show-toplevel)"; PDIR="$ROOT/patches"
+ROOT="$(git rev-parse --show-toplevel)"; PDIR="$ROOT/browser/patches"
 WORK="$ROOT/.rehearse/$PATCH"; TREE="$WORK/tree"
 # shellcheck disable=SC1091
-source "$ROOT/upstream.sh"   # single source of the FF pin (version=X.Y.Z, release=...)
+source "$ROOT/browser/upstream.sh"   # single source of the FF pin (version=X.Y.Z, release=...)
 HG="https://hg.mozilla.org/releases/mozilla-release/raw-file/FIREFOX_${version//./_}_RELEASE"
 PB="${CAMOU_PATCH:-gpatch}"
 pf(){ local n="$1"; [ -f "$PDIR/$n" ] && echo "$PDIR/$n" || find "$PDIR" -name "$n" | head -1; }

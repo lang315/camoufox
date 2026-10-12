@@ -7,15 +7,15 @@ install and raises CamoufoxNotInstalled when there is none. The version is
 available in the build's own bundle, in application.ini.
 
 Run with:
-    cd pythonlib && python -m pytest tests/test_bundle_verstr.py -v
+    cd python && python -m pytest tests/test_bundle_verstr.py -v
 """
 
 import os
 import sys
 import warnings
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest  # noqa: E402
 

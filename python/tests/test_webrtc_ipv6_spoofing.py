@@ -5,13 +5,13 @@ so an IPv6 address was silently fed to the v4 setter and setWebRTCIPv6()
 (implemented C++-side by patches/webrtc-ip-spoofing.patch) was never called.
 
 Run with:
-    cd camoufox && PYTHONPATH=pythonlib python3 -m pytest pythonlib/tests/test_webrtc_ipv6_spoofing.py -v
+    cd camoufox && PYTHONPATH=python/src python3 -m pytest python/tests/test_webrtc_ipv6_spoofing.py -v
 """
 import os
 import sys
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox.fingerprints import _build_init_script, generate_context_fingerprint  # noqa: E402
 

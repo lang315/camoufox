@@ -21,7 +21,7 @@ import (
 // window.TouchEvent. That measures nothing since
 // patches/touchscreen-fingerprint-spoofing.patch: TouchEvent::PrefEnabled now
 // answers from the CAMOU config whenever navigator.maxTouchPoints is *present*
-// (MaskConfig::HasKey is presence-only, additions/camoucfg/MaskConfig.hpp), and
+// (MaskConfig::HasKey is presence-only, browser/additions/camoucfg/MaskConfig.hpp), and
 // every one of the 123 fingerprint presets carries that key -- so for a default
 // Launch the pref never reaches window.TouchEvent at all. The 22 Windows
 // presets that report a digitizer turned the assertion red (smoke runs

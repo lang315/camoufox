@@ -1,4 +1,4 @@
-// Package proxy mirrors pythonlib/camoufox/ip.py: a small proxy
+// Package proxy mirrors python/src/camoufox/ip.py: a small proxy
 // dataclass plus a helper to resolve the visible egress IP and
 // timezone through that proxy.
 package proxy

@@ -8,7 +8,7 @@ of failing with a clear error. This preflight check must raise before the
 browser is spawned.
 
 Run with:
-    cd pythonlib && python -m pytest tests/test_readonly_fs.py -v
+    cd python && python -m pytest tests/test_readonly_fs.py -v
 """
 
 import os
@@ -16,8 +16,8 @@ import sys
 
 import pytest
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox import utils  # noqa: E402
 from camoufox.exceptions import NotWritableError  # noqa: E402

@@ -17,15 +17,15 @@ the `config` dict; the glyph-spacing seed no longer exists (D2).
   the test locks the existing (correct) behavior in as a regression guard.
 
 Run with:
-    cd camoufox && PYTHONPATH=pythonlib python3 -m pytest pythonlib/tests/test_seed_pinning.py -v
+    cd camoufox && PYTHONPATH=python/src python3 -m pytest python/tests/test_seed_pinning.py -v
 """
 import json
 import os
 import sys
 from pathlib import Path
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox import utils  # noqa: E402
 from camoufox.addons import DefaultAddons  # noqa: E402
@@ -52,7 +52,7 @@ def test_from_preset_draws_a_fresh_audio_seed_each_call():
 
 def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parent.parent.parent
-    props_src = repo_root / 'settings' / 'properties.json'
+    props_src = repo_root / 'browser' / 'settings' / 'properties.json'
     (tmp_path / 'properties.json').write_bytes(props_src.read_bytes())
     fake_exe = tmp_path / 'camoufox-bin'
     fake_exe.write_bytes(b'')

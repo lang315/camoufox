@@ -17,7 +17,7 @@ utils.get_screen_cons and the launch_options call site that we exercise with a
 monkeypatched camoufox.display.largest_display(). Those run on any platform.
 
 Run with:
-    cd pythonlib && python -m pytest tests/test_virtdisplay_render.py -v
+    cd python && python -m pytest tests/test_virtdisplay_render.py -v
 """
 
 import os
@@ -26,8 +26,8 @@ from types import SimpleNamespace
 
 import pytest
 
-# Make `import camoufox` resolve to the in-tree pythonlib without an install.
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox import display, utils  # noqa: E402
 from camoufox.exceptions import VirtualDisplayNotSupported  # noqa: E402

@@ -29,16 +29,16 @@ fingerprints actually report at dpr~1 (observed data, not a hand-written table):
 
 Not a split-brain: the getter and matchMedia agree at dpr=1. Forcing
 `window.devicePixelRatio` to match is what causes that failure mode, and is
-strictly worse — see build-tester/observer/probe_split.py.
+strictly worse — see browser/tests/build-tester/observer/probe_split.py.
 
 Run with:
-    cd camoufox && PYTHONPATH=pythonlib python3 -m pytest \
-        pythonlib/tests/test_screen_dpr_coherence.py -v
+    cd camoufox && PYTHONPATH=python/src python3 -m pytest \
+        python/tests/test_screen_dpr_coherence.py -v
 """
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 import pytest  # noqa: E402
 

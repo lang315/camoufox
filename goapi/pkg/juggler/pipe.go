@@ -3,7 +3,7 @@
 //
 // Wire format (one direction): a stream of UTF-8 JSON messages each
 // terminated by a single NUL byte (0x00). Reference:
-// additions/juggler/pipe/nsRemoteDebuggingPipe.cpp (SendMessage and ReaderLoop).
+// browser/additions/juggler/pipe/nsRemoteDebuggingPipe.cpp (SendMessage and ReaderLoop).
 package juggler
 
 import (

@@ -17,7 +17,7 @@ type Options struct {
 	OS string
 	// FirefoxVersion, if non-empty, is patched into the preset UA
 	// (replaces Firefox/<n> and rv:<n>) — matches from_preset() in
-	// pythonlib/camoufox/fingerprints.py.
+	// python/src/camoufox/fingerprints.py.
 	FirefoxVersion string
 	// Rand controls all sampling. Pass nil for a fresh PRNG seeded
 	// from the global source.
@@ -30,7 +30,7 @@ var rvVersionRE = regexp.MustCompile(`rv:\d+\.0`)
 // Generate samples a preset and writes it onto the provided Config.
 // Fields already populated on cfg are not overwritten — preset values
 // are applied as defaults. This mirrors merge_into() semantics from
-// pythonlib/camoufox/utils.py.
+// python/src/camoufox/utils.py.
 func Generate(cfg *config.Config, opts Options) error {
 	rng := opts.Rand
 	if rng == nil {

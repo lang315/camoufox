@@ -843,7 +843,7 @@ def resample_screen_for_dpr1(
     Only meaningful when the run will report dpr=1; the caller decides that.
     Forcing window.devicePixelRatio to match instead is NOT viable -- it patches the
     JS getter while matchMedia keeps reporting the host DPI, a page-verifiable
-    split-brain that is strictly worse (see build-tester/observer/probe_split.py).
+    split-brain that is strictly worse (see browser/tests/build-tester/observer/probe_split.py).
     """
     if not source_dpr or abs(source_dpr - 1) < 0.02:
         return

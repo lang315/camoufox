@@ -13,7 +13,7 @@ import (
 
 // fontconfigEnv returns the FONTCONFIG_FILE=<path> entry that confines the
 // browser to the bundled fonts of the identity's OS, or "" off Linux (the other
-// hosts render with their own font stack). It ports pythonlib/camoufox/utils.py
+// hosts render with their own font stack). It ports python/src/camoufox/utils.py
 // get_env_vars + _generate_fontconfig: without it a Linux launch resolves
 // against the host's fontconfig and renders host fonts under a foreign-OS
 // identity.

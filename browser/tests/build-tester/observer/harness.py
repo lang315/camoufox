@@ -22,7 +22,7 @@ def default_binary():
 LAUNCH_DIFFERS_FROM_SHIPPED = [
     "no CAMOU_CONFIG: Session.__enter__ unsets it, so the site is served the real "
     "host UA, platform and screen -- and Meta selects the JS it serves on what it sees",
-    "no addons: pythonlib/camoufox/utils.py:1079 calls add_default_addons (uBlock "
+    "no addons: python/src/camoufox/utils.py:1079 calls add_default_addons (uBlock "
     "Origin, addons.py:19) on the shipped launch path; a bare Marionette launch loads none",
     "no BrowserForge fingerprint (pythonlib path only)",
     "no generated fontconfig (pythonlib path only)",
