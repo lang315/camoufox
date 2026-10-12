@@ -1,16 +1,16 @@
 diff --git a/dom/base/ScreenOrientation.cpp b/dom/base/ScreenOrientation.cpp
-index b2490af..2a2c497 100644
+index c803dfc7df..9e5235aede 100644
 --- a/dom/base/ScreenOrientation.cpp
 +++ b/dom/base/ScreenOrientation.cpp
-@@ -17,6 +17,7 @@
- #include "nsIDocShell.h"
+@@ -18,6 +18,7 @@
+ #include "nsPIDOMWindowInlines.h"
  #include "nsSandboxFlags.h"
  #include "nsScreen.h"
 +#include "MaskConfig.hpp"
  
  using namespace mozilla;
  using namespace mozilla::dom;
-@@ -721,6 +722,14 @@ uint16_t ScreenOrientation::DeviceAngle(CallerType aCallerType) const {
+@@ -738,6 +739,14 @@ uint16_t ScreenOrientation::DeviceAngle(CallerType aCallerType) const {
  
  OrientationType ScreenOrientation::GetType(CallerType aCallerType,
                                             ErrorResult& aRv) const {
@@ -25,7 +25,7 @@ index b2490af..2a2c497 100644
    Document* doc = GetResponsibleDocument();
    BrowsingContext* bc = doc ? doc->GetBrowsingContext() : nullptr;
    if (!bc) {
-@@ -739,6 +748,10 @@ OrientationType ScreenOrientation::GetType(CallerType aCallerType,
+@@ -757,6 +766,10 @@ OrientationType ScreenOrientation::GetType(CallerType aCallerType,
  
  uint16_t ScreenOrientation::GetAngle(CallerType aCallerType,
                                       ErrorResult& aRv) const {
