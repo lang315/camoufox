@@ -421,6 +421,12 @@ jobs:
     # real `camoufox fetch`, with TMPDIR on its own tmpfs so a rename from the
     # temporary directory into the cache fails here as it fails for users
     # (EXDEV). See ci/run_install.py.
+    #
+    # Fork (lang315/camoufox#188): daijro/camoufox only. run_install pins the
+    # newest release on this repository whose tag matches `v<ver>-<prefix>.<n>`,
+    # and fork tags end in `-fork.<n>`, so on a fork it would fail every run.
+    # summary and gate treat the skip as expected.
+    if: github.repository == 'daijro/camoufox'
     needs: [resolve, static]
     runs-on: ubuntu-24.04
     permissions:
@@ -1273,6 +1279,10 @@ jobs:
           if [ "${{ needs.resolve.outputs.browser_changed }}" = "true" ]; then
             required="$required build"
           fi
+          # The install job runs on daijro/camoufox only (see its `if`).
+          if [ "${{ github.repository }}" != "daijro/camoufox" ]; then
+            required=${required/ install / }
+          fi
           if [ "${{ needs.resolve.outputs.has_sundial }}" = "true" ]; then
             required="$required sundial"
           fi
@@ -1330,7 +1340,7 @@ jobs:
     # A job that was legitimately not applicable is allowed to be skipped -- the
     # build when the browser was fetched instead, the fetch when it was built,
     # the stealth check on a fork pull request with no credentials or while it is
-    # disabled in ci/sundial.yml. Anything else
+    # disabled in ci/sundial.yml, the install tier off daijro/camoufox. Anything else
     # that is not `success`, including `skipped`, fails the gate: a suite that
     # did not run has not passed, and silently skipping one is the cheapest way
     # to a green tick.
@@ -1346,6 +1356,7 @@ jobs:
           RESULTS: ${{ toJSON(needs) }}
           BROWSER_CHANGED: ${{ needs.resolve.outputs.browser_changed }}
           HAS_SUNDIAL: ${{ needs.resolve.outputs.has_sundial }}
+          REPOSITORY: ${{ github.repository }}
         run: |
           python3 - <<'PY'
           import json, os, sys
@@ -1358,6 +1369,7 @@ jobs:
               "build": not built,
               "fetch-browser": built,
               "sundial": os.environ.get("HAS_SUNDIAL") != "true",
+              "install": os.environ.get("REPOSITORY") != "daijro/camoufox",
           }
 
           problems = []

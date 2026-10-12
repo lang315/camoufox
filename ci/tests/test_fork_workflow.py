@@ -76,3 +76,55 @@ def test_the_fork_guard_check_catches_a_broken_guard(line):
     broken = _drop_first_guard_line(WORKFLOW.read_text(encoding="utf-8"), line)
     with pytest.raises(AssertionError):
         _check_fork_guard(_scope_commands(broken))
+
+
+# --- the install job on a fork -----------------------------------------------
+
+
+def _job_block(text: str, job: str) -> str:
+    """One top-level job's YAML, from its key to the next job's key."""
+    head = f"\n  {job}:\n"
+    body = text.split(head, 1)[1]
+    return body.split("\n  # ----", 1)[0]
+
+
+def _summary_required(repository: str) -> set:
+    """Run the summary step's own `required=` assembly for `repository`."""
+    import subprocess
+
+    text = WORKFLOW.read_text(encoding="utf-8")
+    start = text.index('required="pythonlib')
+    end = text.index("python3 -m ci.summarize", start)
+    block = (
+        text[start:end]
+        .replace("${{ needs.resolve.outputs.browser_changed }}", "true")
+        .replace("${{ needs.resolve.outputs.has_sundial }}", "false")
+        .replace("${{ github.repository }}", repository)
+    )
+    proc = subprocess.run(
+        ["bash", "-c", block + '\necho "$required"'], capture_output=True, text=True
+    )
+    assert proc.returncode == 0, proc.stderr
+    return set(proc.stdout.split())
+
+
+def test_install_runs_only_on_daijro_camoufox():
+    """ci/run_install.py pins the newest release on GITHUB_REPOSITORY whose tag
+    matches `^v<ver>-<prefix>.<n>$` (ci/release.py). Fork tags carry a `-fork.N`
+    suffix, so they never match and the job would fail every fork pull request."""
+    install = _job_block(WORKFLOW.read_text(encoding="utf-8"), "install")
+    assert "if: github.repository == 'daijro/camoufox'" in install
+
+
+def test_install_is_required_on_daijro_and_not_on_a_fork():
+    """A skipped job writes no result, so a required `install` would fail the
+    summary on a fork; dropping it on daijro would silently stop requiring it."""
+    assert "install" in _summary_required("daijro/camoufox")
+    assert "install" not in _summary_required("lang315/camoufox")
+
+
+def test_the_gate_lets_install_skip_on_a_fork_only():
+    """The gate fails any skipped job that may_skip does not excuse."""
+    gate = _job_block(WORKFLOW.read_text(encoding="utf-8"), "gate")
+    assert '"install": os.environ.get("REPOSITORY") != "daijro/camoufox"' in gate
+    assert "REPOSITORY: ${{ github.repository }}" in gate
