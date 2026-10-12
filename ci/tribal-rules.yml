@@ -544,3 +544,23 @@ rules:
       which answers plain GETs and cannot open the CONNECT tunnel the upgrade
       needs. A real proxy handles CONNECT, as every https:// site needs it to.
       Those tests are skiplisted rather than passed by changing the browser.
+
+  - id: webrtc-fork-model
+    title: WebRTC keeps the fork's model, per-context IP with no srflx fabrication and no_host on, and its guards measure that model
+    check: manual   # measured-pending: neither adapted guard has run on CI yet (#188)
+    evidence:
+      - "#178 D1: keep the per-context WebRTCIPManager (browser/patches/webrtc-ip-spoofing.patch, webrtc-ip-spoofing2.patch); do not take upstream's srflx fabrication"
+      - "browser/settings/camoufox.cfg: defaultPref(\"media.peerconnection.ice.no_host\", true)"
+      - "CI run 38299426185: upstream's webrtc-context-ip and webrtc-port-range read the srflx candidate upstream fabricates against a silent STUN server, and saw no candidates on the fork"
+      - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
+    rationale: >-
+      The fork's WebRTC model diverges from upstream's. A context's IP masks the
+      srflx candidate a real STUN answer produces, no srflx candidate is made up,
+      and no_host keeps host candidates off the page. So the two upstream guards
+      were adapted, not dropped. webrtc-port-range reads each socket's bound port
+      as the source port of its Binding Request at the STUN socket.
+      webrtc-context-ip runs an answering STUN server and reads each context's
+      srflx candidate, with an unmasked context as the control. Both serve STUN
+      on the default-route address, because nICEr skips a loopback STUN server
+      under the shipped prefs. Neither has run on a CI build yet. The launch-level
+      webrtc:ipv4 key is not asserted, because no browser code reads it (#163).

@@ -41,11 +41,10 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import launch_kwargs  # noqa: E402
+from helpers import default_route_ipv4, is_binding_request, launch_kwargs  # noqa: E402
 
 RANGES = {"windows": (49152, 65535), "macos": (49152, 65535), "linux": (32768, 60999)}
 CONNECTIONS = 12
-STUN_COOKIE = b"\x21\x12\xa4\x42"
 
 PROBE = """async ([stun, count]) => {
   const gather = async () => {
@@ -64,15 +63,9 @@ PROBE = """async ([stun, count]) => {
 
 
 def silent_stun_server() -> socket.socket:
-    """A UDP socket on the default-route address that never answers. Connecting
-    a throwaway socket to a routed address sends nothing; it only picks the
-    source address, as nICEr's default-address lookup does."""
-    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    probe.connect(("8.8.8.8", 53))
-    addr = probe.getsockname()[0]
-    probe.close()
+    """A UDP socket on the default-route address that never answers."""
     server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server.bind((addr, 0))
+    server.bind((default_route_ipv4(), 0))
     server.setblocking(False)
     return server
 
@@ -85,7 +78,7 @@ def drain_binding_requests(server: socket.socket) -> list:
             data, (_, port) = server.recvfrom(2048)
         except BlockingIOError:
             return ports
-        if data[:2] == b"\x00\x01" and data[4:8] == STUN_COOKIE:
+        if is_binding_request(data):
             ports.append(port)
 
 

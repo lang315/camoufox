@@ -111,6 +111,37 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
+# --- a local STUN server for the WebRTC guards ----------------------------------
+#
+# nICEr skips a loopback STUN server unless media.peerconnection.ice.loopback is
+# set, so the server listens on the default-route address and the browser keeps
+# the prefs it ships.
+
+STUN_COOKIE = b"\x21\x12\xa4\x42"
+
+
+def default_route_ipv4() -> str:
+    """The address nICEr's default-address lookup picks. Connecting a UDP socket
+    sends nothing; it only selects the source address."""
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect(("8.8.8.8", 53))
+        return s.getsockname()[0]
+
+
+def is_binding_request(data: bytes) -> bool:
+    return data[:2] == b"\x00\x01" and data[4:8] == STUN_COOKIE
+
+
+def binding_success(request: bytes, source: tuple) -> bytes:
+    """RFC 5389 Binding Success Response to `request`, whose only attribute is an
+    XOR-MAPPED-ADDRESS carrying the request's IPv4 source address and port."""
+    ip, port = source
+    xport = (port ^ 0x2112).to_bytes(2, "big")
+    xaddr = bytes(a ^ b for a, b in zip(socket.inet_aton(ip), STUN_COOKIE))
+    attr = b"\x00\x20\x00\x08\x00\x01" + xport + xaddr
+    return b"\x01\x01" + len(attr).to_bytes(2, "big") + STUN_COOKIE + request[8:20] + attr
+
+
 class Marionette:
     """Minimal Marionette client: length-prefixed JSON over TCP, chrome context."""
 
