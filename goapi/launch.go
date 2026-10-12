@@ -247,6 +247,13 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 			prefs[k] = sf
 		}
 	}
+	// #162: see genericFamilies. CAMOUFOX_NO_GENERIC_PREFS=1 is a test hook, so
+	// the browser-side fix can be measured without these prefs hiding it.
+	if os.Getenv("CAMOUFOX_NO_GENERIC_PREFS") != "1" {
+		for k, v := range genericFontPrefs(uaOSDir(cfg.NavigatorUserAgent, config.HostOS())) {
+			prefs[k] = v
+		}
+	}
 	for k, v := range lc.firefoxUserPrefs {
 		prefs[k] = v
 	}

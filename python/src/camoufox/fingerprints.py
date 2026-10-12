@@ -1494,10 +1494,6 @@ def _build_init_script(values: Dict[str, Any]) -> str:
         lines.append(
             f'  if (typeof w.{fn_name} === "function") w.{fn_name}({_json.dumps(ip)});'
         )
-    else:
-        lines.append(
-            '  if (typeof w.setWebRTCIPv4 === "function") w.setWebRTCIPv4("");'
-        )
 
     # Font list (comma-separated)
     font_list = values.get('fontList')
@@ -1532,6 +1528,7 @@ def generate_context_fingerprint(
     config_overrides: Optional[Dict[str, Any]] = None,
     webgl_config: Optional[Tuple[str, str]] = None,
     canvas_seed: bool = True,
+    launch_window: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Generate fingerprint values for a single per-context identity.
@@ -1553,7 +1550,19 @@ def generate_context_fingerprint(
             drawing one.
         canvas_seed: Draw a canvas noise seed for setCanvasSeed(). NewContext
             passes False on a browser whose canvas the RFP placeholder covers.
+        launch_window: The browser's launch window, as attach_launch_window records it
+            ({'outer': (w, h), 'inner': (w|None, h|None), 'screen': (w, h)}). The window is
+            process-wide, so the context's viewport becomes the launch inner size (or, when
+            the launch set none, the preset viewport clamped inside the launch outer window)
+            and its screen is made to hold the window.
     """
+    # Only a well-formed record counts; anything else (a mock, a half-built dict) is no record.
+    if not (
+        isinstance(launch_window, dict)
+        and all(isinstance(launch_window.get(k), (tuple, list)) and len(launch_window[k]) == 2
+                for k in ('outer', 'inner', 'screen'))
+    ):
+        launch_window = None
     if preset is not None:
         # Use real fingerprint preset
         config = from_preset(preset, ff_version)
@@ -1642,6 +1651,17 @@ def generate_context_fingerprint(
     if canvas_seed:
         config.setdefault('canvas:seed', randint(1, 4_294_967_295))  # nosec
 
+    # #164: the launch window is process-wide, so a context's screen must hold
+    # it. When the drawn screen cannot, claim the launch's own screen, which
+    # launch_options already made hold the window.
+    if launch_window:
+        ow, oh = launch_window['outer']
+        sw0, sh0 = screen.get('width'), screen.get('height')
+        lsw, lsh = launch_window['screen']
+        if not (sw0 and sh0 and sw0 >= ow and sh0 >= oh) and lsw and lsh:
+            screen = {**screen, 'width': lsw, 'height': lsh}
+            config['screen.width'], config['screen.height'] = lsw, lsh
+
     # Inject explicit timezone/locale into config (takes priority over preset)
     if timezone:
         config['timezone'] = timezone
@@ -1687,10 +1707,26 @@ def generate_context_fingerprint(
     sw = screen.get('width')
     sh = screen.get('height')
     if sw and sh:
-        context_options['viewport'] = {
-            'width': sw,
-            'height': max(sh - 28, 600),
-        }
+        inner = (launch_window or {}).get('inner') or (None, None)
+        if all(inner):
+            # The launch window's own inner size: inner <= outer by construction.
+            context_options['viewport'] = {'width': inner[0], 'height': inner[1]}
+        elif launch_window:
+            # No launch inner (fpgen leaves window.inner* unmapped, so the default): the
+            # preset viewport, held inside the launch outer window by
+            # clamp_window_dimensions' inner <= outer rule.
+            win = {
+                'window.outerWidth': launch_window['outer'][0],
+                'window.outerHeight': launch_window['outer'][1],
+                'window.innerWidth': sw,
+                'window.innerHeight': max(sh - 28, 600),
+            }
+            clamp_window_dimensions(win)
+            context_options['viewport'] = {'width': win['window.innerWidth'], 'height': win['window.innerHeight']}
+        else:
+            # ponytail: a browser NewBrowser did not launch carries no record, so the
+            # old preset-sized viewport stays and #164 can still happen there.
+            context_options['viewport'] = {'width': sw, 'height': max(sh - 28, 600)}
     dpr = screen.get('devicePixelRatio')
     if dpr:
         context_options['device_scale_factor'] = dpr

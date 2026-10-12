@@ -14,7 +14,7 @@ var (
 // Essential fonts per OS that must always be included.
 var (
 	essentialMacOS = []string{
-		"Arial", "Helvetica", "Times New Roman", "Courier New", "Verdana",
+		"Arial", "Helvetica", "Times", "Times New Roman", "Courier New", "Verdana",
 		"Georgia", "Trebuchet MS", "Tahoma", "Helvetica Neue", "Lucida Grande",
 		"Menlo", "Monaco", "Geneva", "PingFang HK", "PingFang SC", "PingFang TC",
 	}

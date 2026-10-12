@@ -16,6 +16,7 @@ from .utils import (
     attach_canvas_cover,
     attach_context_defaults,
     attach_launch_fonts,
+    attach_launch_window,
     context_canvas_seed,
     context_identity,
     host_identity,
@@ -150,6 +151,7 @@ def NewBrowser(
             browser = playwright.firefox.launch(**from_options)
             attach_context_defaults(browser, no_viewport_default)
             attach_launch_fonts(browser, from_options)
+            attach_launch_window(browser, from_options)
             browser._camoufox_host_identity = identity
             attach_canvas_cover(browser, from_options)
             return sync_attach_vd(browser, virtual_display)
@@ -217,6 +219,7 @@ def NewContext(
     fp = generate_context_fingerprint(
         preset=preset, os=os, ff_version=ff_version, webrtc_ip=webrtc_ip, webgl_config=webgl_config,
         canvas_seed=context_canvas_seed(browser),
+        launch_window=getattr(browser, '_camoufox_launch_window', None),
     )
 
     warn_fonts_excluded_by_launch(browser, fp['config'].get('fonts'))

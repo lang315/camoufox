@@ -200,8 +200,14 @@ with sync_playwright() as playwright:
     browser.close()
 
     browser = playwright.firefox.launch(**launch_options(os="linux", headless=True))
+    page = browser.new_context(no_viewport=True).new_page()
     browser.close()
 ```
+
+Open a bare-launched browser's contexts with `no_viewport=True`. Playwright's
+default viewport is 1280x720 whatever window the fingerprint spoofs, so a
+spoofed window smaller than that gives a page `innerWidth > outerWidth`, which
+no real browser can report (#164).
 
 Prefer `NewBrowser()`: it also defaults new pages to `no_viewport` when the
 window size is spoofed, and to the host's own color scheme and motion settings.
