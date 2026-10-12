@@ -36,8 +36,8 @@ of them:
 A DOMParser document has no channel, parent or opener, so
 Document::RecomputeResistFingerprinting may not carry the launch's baseline
 overrides into it. A red on the DOMParser half is therefore a real finding,
-not a guard bug: a page escapes the RFP placeholder, which the launchers rely
-on to cover cross-OS canvas readback (C1), by drawing in a DOMParser document.
+not a guard bug. Cross-OS canvas readback is covered by the RFP placeholder,
+and a page that draws in a DOMParser document would escape it.
 
 Perturbation is read from the patch's own CAMOU-CANVAS log lines, never from
 pixels: the placeholder is random, so its pixels cannot show whether noise was
