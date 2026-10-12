@@ -64,7 +64,7 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   build-tester currently runs **headless**. Headless Firefox has no GL context
   and the WebGL checks fail *open* — `passed: true` on "WebGL not available" —
   so every run scores 5 checks for free and drops 12 more from the denominator
-  (issue #75). A follow-up issue tracks it.
+  (issue #75). #195 tracks it.
 - **`browser/tests/playwright/patches/`** — one standalone guard per shipped spoofing behaviour
   (isolated evaluate, trusted events, fonts, mouse trajectories, touchscreen).
   The most direct evidence a Firefox bump did not neuter a patch that still
