@@ -1,17 +1,16 @@
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 5bae865326..4b7a823d7c 100644
+index 5bae865326..b86816a727 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -31,6 +31,8 @@
+@@ -31,6 +31,7 @@
  #include "mozilla/dom/ContentProcessMessageManager.h"
  #include "mozilla/dom/Document.h"
  #include "mozilla/dom/FontListManager.h"
 +#include "mozilla/dom/NavigatorManager.h"
-+#include "mozilla/dom/WorkerPrivate.h"
  #include "mozilla/gfx/2D.h"
  #include "mozilla/gfx/Logging.h"
  #include "mozilla/glean/GfxMetrics.h"
-@@ -2658,9 +2660,66 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
+@@ -2658,9 +2659,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
    }
  }
  
@@ -28,20 +27,10 @@ index 5bae865326..4b7a823d7c 100644
 +  if (aFontVisibilityProvider && aFontVisibilityProvider->IsChrome()) {
 +    return SpoofedOS::None;
 +  }
-+  const mozilla::dom::Document* doc =
-+      aFontVisibilityProvider ? aFontVisibilityProvider->GetDocument()
-+                              : nullptr;
-+  uint32_t userContextId =
-+      mozilla::dom::RoverfoxStorageManager::UserContextId(doc);
-+  // A worker has no document. Its origin attributes carry the context of the
-+  // document that spawned it, so its system-ui matches its page's.
-+  if (!doc) {
-+    if (mozilla::dom::WorkerPrivate* wp =
-+            mozilla::dom::GetCurrentThreadWorkerPrivate()) {
-+      userContextId = wp->GetOriginAttributes().mUserContextId;
-+    }
-+  }
-+  const auto os = mozilla::dom::NavigatorManager::GetSpoofedOS(userContextId);
++  // A worker's provider has no document; ContextIdFor asks the worker, so its
++  // system-ui matches its page's.
++  const auto os = mozilla::dom::NavigatorManager::GetSpoofedOS(
++      mozilla::dom::FontListManager::ContextIdFor(aFontVisibilityProvider));
 +  switch (os) {
 +#ifndef XP_MACOSX
 +    case SpoofedOS::MacOS:
@@ -78,7 +67,7 @@ index 5bae865326..4b7a823d7c 100644
    // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
    // code below ends up using [NSFont systemFontOfSize: 0.0].
    nsFont systemFont;
-@@ -2802,17 +2861,49 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2802,17 +2850,53 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    }
  
    auto index = static_cast<size_t>(aGenericType);
@@ -107,18 +96,22 @@ index 5bae865326..4b7a823d7c 100644
  }
  
 +// Camoufox (#131): whether system-ui, for a context with its own font list,
-+// is the family GetSystemUIFontFamilies names for the OS the context presents.
-+// AddGenericFonts' per-context table step would otherwise answer it with the
-+// sans-serif row and return before GetPrefFontsLangGroupLocked reaches the
-+// hook. A family the context's list refuses leaves the answer to the table.
-+// aKey receives the family's lowercased key for the log line.
-+static bool CamouSystemUIFromHook(
++// skips AddGenericFonts' per-context table step and is answered by the pref
++// path as in stock. The table would otherwise answer it with the sans-serif
++// row and return before GetPrefFontsLangGroupLocked reaches the system-ui
++// hook. A native identity always takes the pref path: stock's own family,
++// gated by the read filter like every pref font. A spoofed OS takes it when
++// the context's list allows the family GetSystemUIFontFamilies names, whose
++// lowercased key aKey then receives; a refused family leaves it to the table.
++static bool CamouSystemUIFromPrefs(
 +    FontVisibilityProvider* aFontVisibilityProvider,
 +    StyleGenericFontFamily aGenericType, nsAtom* aLangGroup, nsACString& aKey) {
-+  if (aGenericType != StyleGenericFontFamily::SystemUi ||
-+      SystemUISpoofedOS(aFontVisibilityProvider) ==
-+          MaskConfig::SpoofedOS::None) {
++  if (aGenericType != StyleGenericFontFamily::SystemUi) {
 +    return false;
++  }
++  if (SystemUISpoofedOS(aFontVisibilityProvider) ==
++      MaskConfig::SpoofedOS::None) {
++    return true;
 +  }
 +  AutoTArray<nsCString, 1> families;
 +  GetSystemUIFontFamilies(aFontVisibilityProvider, aLangGroup, families);
@@ -130,8 +123,11 @@ index 5bae865326..4b7a823d7c 100644
  void gfxPlatformFontList::AddGenericFonts(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGenericType, nsAtom* aLanguage,
-@@ -2847,8 +2938,24 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2845,10 +2929,25 @@ void gfxPlatformFontList::AddGenericFonts(
+   // Placed AFTER the math remap above so the row asked for is the row the
+   // caller ends up wanting. Falls through to the pref memo when the helper
    // declines or its key resolves empty.
++  bool camouSystemUI = false;
    {
      const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
 -    if (camouCtx != 0 &&
@@ -140,24 +136,51 @@ index 5bae865326..4b7a823d7c 100644
 +        camouCtx != 0 && mozilla::dom::FontListManager::HasFontList(camouCtx);
 +    nsAutoCString camouSysKey;
 +    AutoTArray<FamilyAndGeneric, 1> camouSysFamilies;
-+    // The name must also resolve to a face the list allows: a Windows launch's
-+    // fontconfig rewrites Helvetica to Arial before the gate.
-+    if (camouHasList &&
-+        CamouSystemUIFromHook(aFontVisibilityProvider, aGenericType, langGroup,
-+                              camouSysKey) &&
-+        FindAndAddFamiliesLocked(aFontVisibilityProvider,
-+                                 StyleGenericFontFamily::None, camouSysKey,
-+                                 &camouSysFamilies, FindFamiliesFlags(0)) &&
-+        !camouSysFamilies.IsEmpty()) {
-+      // Answered by the pref path below, from the per-OS system-ui cell.
-+      LOG_FONTLIST(
-+          ("CAMOU-FL generic-map ctx=%u generic=%d step=system-ui key=%s",
-+           camouCtx, int(aGenericType), camouSysKey.get()));
-+    } else if (camouHasList) {
++    // A spoofed OS's family must also resolve to a face the list allows: a
++    // Windows launch's fontconfig rewrites Helvetica to Arial before the gate.
++    camouSystemUI =
++        camouHasList &&
++        CamouSystemUIFromPrefs(aFontVisibilityProvider, aGenericType, langGroup,
++                               camouSysKey) &&
++        (camouSysKey.IsEmpty() ||
++         (FindAndAddFamiliesLocked(aFontVisibilityProvider,
++                                   StyleGenericFontFamily::None, camouSysKey,
++                                   &camouSysFamilies, FindFamiliesFlags(0)) &&
++          !camouSysFamilies.IsEmpty()));
++    if (camouHasList && !camouSystemUI) {
        nsAutoCString camouKey, camouStep;
        bool camouAnswered = false;
        if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
-@@ -3528,6 +3635,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
+@@ -2878,6 +2977,7 @@ void gfxPlatformFontList::AddGenericFonts(
+   PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
+                                                         aGenericType, prefLang);
+ 
++  nsAutoCString camouSysAnswer;
+   if (!prefFonts->IsEmpty()) {
+     aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
+     for (auto& f : *prefFonts) {
+@@ -2900,9 +3000,20 @@ void gfxPlatformFontList::AddGenericFonts(
+       if (!camouAllowed) {
+         continue;
+       }
++      if (camouSystemUI && camouSysAnswer.IsEmpty()) {
++        camouSysAnswer = camouKey;
++      }
+       aFamilyList.AppendElement(FamilyAndGeneric(f, aGenericType));
+     }
+   }
++  // Camoufox (#131): the family system-ui actually got from the pref path, or
++  // none when the read filter refused all of them.
++  if (camouSystemUI) {
++    LOG_FONTLIST(
++        ("CAMOU-FL generic-map ctx=%u generic=%d step=system-ui key=%s",
++         mozilla::dom::FontListManager::GetCurrentContext(), int(aGenericType),
++         camouSysAnswer.IsEmpty() ? "none" : camouSysAnswer.get()));
++  }
+ }
+ 
+ static nsAtom* PrefLangToLangGroups(uint32_t aIndex) {
+@@ -3528,6 +3639,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
        pref = nullptr;
      }
    }
