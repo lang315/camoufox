@@ -339,11 +339,13 @@ async def test_two_browsers_get_different_fingerprints(binary):
     assert a["audio"] != b["audio"], f"both launches rendered audio hash {a['audio']}"
 
 
-# A hash of a canvas readback. Every launch draws its own 32-bit canvas:seed
-# (python/src/camoufox/utils.py), so two launches differ here even when they draw
-# the same preset. The seven PROBES above are coarse -- Win32, 2560x1440, 8
-# cores, UTC, en-US is a common draw -- and two launches matched on all of them
-# on PR #152 (run 35823906083).
+# A hash of a canvas's pixels. A launch whose canvas the RFP placeholder does
+# not cover draws its own 32-bit canvas:seed (python/src/camoufox/utils.py), so
+# two such launches differ here even when they draw the same preset. The seven
+# PROBES above are coarse -- Win32, 2560x1440, 8 cores, UTC, en-US is a common
+# draw -- and two launches matched on all of them on PR #152 (run 35823906083).
+# getImageData, not toDataURL: stock Firefox gives every session's PNG exports
+# its own deBG chunk (ci/tribal-rules.yml), so exports differ without any seed.
 CANVAS_HASH = """(() => {
   const c = document.createElement('canvas'); c.width = 200; c.height = 50;
   const x = c.getContext('2d');
@@ -351,9 +353,9 @@ CANVAS_HASH = """(() => {
   g.addColorStop(0, '#f60'); g.addColorStop(1, '#069');
   x.fillStyle = g; x.fillRect(0, 0, 200, 50);
   x.fillStyle = '#fff'; x.font = '18px serif'; x.fillText('Camoufox 149', 10, 30);
-  const s = c.toDataURL();
+  const d = x.getImageData(0, 0, 200, 50).data;
   let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  for (let i = 0; i < d.length; i++) h = (h * 31 + d[i]) | 0;
   return h;
 })()"""
 
@@ -373,12 +375,14 @@ async def _launch_probe(binary, **launch) -> dict:
 async def test_two_browsers_on_one_preset_still_differ(binary):
     """The per-launch seeds are what separate two launches that drew the same
     preset. With the preset pinned, the coarse probes agree by construction,
-    so this is the canvas seed's contract alone."""
+    so this is the canvas seed's contract alone. A preset names its GPU, so its
+    canvas is covered (random readback) unless canvas_noise=False; with it the
+    seed is the only thing that can tell the two canvases apart."""
     from camoufox.fingerprints import get_random_preset
 
     preset = get_random_preset(os="windows")
-    a, b = await asyncio.gather(_launch_probe(binary, fingerprint_preset=preset, os="windows"),
-                                _launch_probe(binary, fingerprint_preset=preset, os="windows"))
+    launch = dict(fingerprint_preset=preset, os="windows", canvas_noise=False)
+    a, b = await asyncio.gather(_launch_probe(binary, **launch), _launch_probe(binary, **launch))
     same = [k for k in PROBES if a.get(k) == b.get(k)]
     assert a["canvas"] != b["canvas"], (
         f"two launches on one preset drew the same canvas; coarse probes equal: {same}")
