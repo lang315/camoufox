@@ -19,6 +19,7 @@ MAX_AGE_DAYS = 30
 SOURCES = [repo["name"] for repo in geolocation._load_geoip_repos()[0] if not repo.get("deprecated")]
 
 
+@pytest.mark.network
 @pytest.mark.parametrize("name", SOURCES)
 def test_source_serves_a_current_build(name, tmp_path, monkeypatch):
     monkeypatch.setattr(geolocation, "GEOIP_DIR", tmp_path)

@@ -788,9 +788,6 @@ def follow_baseline_protection(config: Dict[str, Any], target_os: str) -> None:
 
 
 _DPR1_SCREENS: Dict[Tuple[Path, str], List[Dict[str, Any]]] = {}
-# Smallest menu bar observed in browserforge's macOS availTop values; used only for the
-# few pool devices whose screen leaves no vertical gap at all.
-_MACOS_MENUBAR_PX = 25
 
 
 def _real_dpr1_screens(target_os: str, ff_version: Optional[Any] = None) -> List[Dict[str, Any]]:
@@ -813,7 +810,6 @@ def _real_dpr1_screens(target_os: str, ff_version: Optional[Any] = None) -> List
             s
             for s in (p.get('screen', {}) for p in presets.get('presets', {}).get(cache_key[1], []))
             if s.get('width')
-            and s.get('availWidth')
             and s.get('devicePixelRatio')
             and abs(s['devicePixelRatio'] - 1) < 0.02
         ]
@@ -841,6 +837,8 @@ def resample_screen_for_dpr1(
     is correct by construction instead.
 
     Only meaningful when the run will report dpr=1; the caller decides that.
+    Only the screen size is swapped: the available screen follows the browser's
+    baseline protection (follow_baseline_protection), which runs afterwards.
     Forcing window.devicePixelRatio to match instead is NOT viable -- it patches the
     JS getter while matchMedia keeps reporting the host DPI, a page-verifiable
     split-brain that is strictly worse (see browser/tests/build-tester/observer/probe_split.py).
@@ -854,32 +852,8 @@ def resample_screen_for_dpr1(
         return  # no bundled presets: leave the config as-is rather than invent one
     # Seeded by the caller for a pinned identity, so it reproduces (identity_seed).
     screen = (rng or Random()).choice(pool)  # nosec - cosmetic variety, not a security decision
-    # Take the whole block from ONE real device, so avail stays coherent with screen.
     config['screen.width'] = screen['width']
     config['screen.height'] = screen['height']
-    config['screen.availWidth'] = screen['availWidth']
-    config['screen.availHeight'] = screen['availHeight']
-    # availTop/availLeft are NOT in the preset block (no preset carries one), so left
-    # alone they keep pointing at the discarded device and give
-    # availTop + availHeight > screen.height.
-    #
-    # Keep BrowserForge's own availTop rather than deriving one: its values are real
-    # menu-bar heights (33/30/34/25 dominate) and a constant would be a fleet-level
-    # tell of its own. Only clamp it to what the new screen leaves free. macOS always
-    # reserves a menu bar, so availTop=0 there is impossible -- in that case take the
-    # menu bar out of availHeight instead of reporting no menu bar at all.
-    if 'screen.availTop' in config:
-        top = config.get('screen.availTop') or 0
-        if target_os in ('mac', 'macos') and top <= 0:
-            top = _MACOS_MENUBAR_PX
-        config['screen.availTop'] = top
-        # Shrink availHeight to fit rather than clamping availTop down to the gap:
-        # clamping distorts the menu-bar distribution (it piles draws onto whatever
-        # the gap happens to be), whereas the few pixels lost here are invisible.
-        if top + config['screen.availHeight'] > config['screen.height']:
-            config['screen.availHeight'] = config['screen.height'] - top
-    if 'screen.availLeft' in config:
-        config['screen.availLeft'] = 0
 
 
 def clamp_window_dimensions(config: Dict[str, Any]) -> None:
@@ -1557,6 +1531,7 @@ def generate_context_fingerprint(
     locale: Optional[str] = None,
     config_overrides: Optional[Dict[str, Any]] = None,
     webgl_config: Optional[Tuple[str, str]] = None,
+    canvas_seed: bool = True,
 ) -> Dict[str, Any]:
     """
     Generate fingerprint values for a single per-context identity.
@@ -1576,6 +1551,8 @@ def generate_context_fingerprint(
             is built but before init_script is rendered (e.g. {'audio:seed': 7}).
         webgl_config: The (vendor, renderer) a drawn identity claims, instead of
             drawing one.
+        canvas_seed: Draw a canvas noise seed for setCanvasSeed(). NewContext
+            passes False on a browser whose canvas the RFP placeholder covers.
     """
     if preset is not None:
         # Use real fingerprint preset
@@ -1661,8 +1638,9 @@ def generate_context_fingerprint(
         }
         preset = {'navigator': nav, 'screen': screen, 'webgl': webgl}
 
-    # Fork-only canvas noise seed (patches/canvas-spoofing.patch); neither source above carries one
-    config.setdefault('canvas:seed', randint(1, 4_294_967_295))  # nosec
+    # Fork-only canvas noise seed (browser/patches/canvas-spoofing.patch); neither source above carries one
+    if canvas_seed:
+        config.setdefault('canvas:seed', randint(1, 4_294_967_295))  # nosec
 
     # Inject explicit timezone/locale into config (takes priority over preset)
     if timezone:

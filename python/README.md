@@ -152,6 +152,12 @@ come from the real OS, driver and GPU, whatever the identity claims.
 `canvas_noise=True` turns the protection on for any OS, `canvas_noise=False`
 never.
 
+Where the protection is off, this fork adds seeded canvas noise instead, so two
+browsers or two contexts on one host do not render the same canvas: each launch
+sends its own `canvas:seed`, and each `NewContext()` its own seed through
+`setCanvasSeed`. Where the protection is on, no seed is sent, because the
+readback is random already.
+
 WebGPU follows the same rule. `navigator.gpu` exists only where Firefox on the
 claimed device has it (Windows and Apple Silicon Macs), and the adapter is the
 host's only when the identity claims the host's GPU. Otherwise

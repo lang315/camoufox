@@ -100,28 +100,33 @@ class TestPinnedIdentityIsStable:
 
 
 class TestCanvasSeed:
-    """The fork keeps canvas noise (patches/canvas-spoofing.patch), seeded per
-    launch and per context. A launcher that drops the seed leaves the noise
-    off, so two browsers on one preset render the same canvas."""
+    """The fork keeps canvas noise (browser/patches/canvas-spoofing.patch),
+    seeded per launch and per context, wherever the RFP placeholder does not
+    cover the canvas (test_canvas_seed_follows_rendering_plan.py). A launcher
+    that drops the seed there leaves the noise off, so two browsers on one host
+    render the same canvas."""
+
+    HOST = fp.OS_NAMES[utils._host_os_key()]
 
     def test_every_launch_draws_its_own_seed(self):
-        seeds = [launch()["canvas:seed"] for _ in range(40)]
+        seeds = [launch(os=self.HOST)["canvas:seed"] for _ in range(40)]
         assert all(1 <= s <= 0xFFFFFFFF for s in seeds)
         assert len(set(seeds)) == len(seeds)
 
     def test_one_preset_still_draws_a_seed_per_launch(self):
+        # A preset names its GPU, so only canvas_noise=False leaves its canvas uncovered.
         preset = fp.get_random_preset(os="windows", ff_version="150")
         if not preset:
             pytest.skip("no presets bundled")
-        first = launch(os="windows", fingerprint_preset=preset)
-        second = launch(os="windows", fingerprint_preset=preset)
+        first = launch(os="windows", fingerprint_preset=preset, canvas_noise=False)
+        second = launch(os="windows", fingerprint_preset=preset, canvas_noise=False)
         assert first["canvas:seed"] != second["canvas:seed"]
 
     def test_caller_seed_is_kept(self):
-        assert launch(config={"canvas:seed": 9})["canvas:seed"] == 9
+        assert launch(os=self.HOST, config={"canvas:seed": 9})["canvas:seed"] == 9
 
     def test_the_seed_is_a_declared_key(self, capsys):
-        launch()
+        assert "canvas:seed" in launch(os=self.HOST)
         assert "Skipping unknown patch" not in capsys.readouterr().out
 
     def test_context_fingerprint_seeds_the_canvas_setter(self):

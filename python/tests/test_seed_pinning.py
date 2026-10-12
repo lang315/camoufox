@@ -67,11 +67,8 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
     (tmp_path / 'fonts').mkdir()
     # The generated runtime conf goes to the cache dir; keep it out of the real one.
     monkeypatch.setattr(utils, 'INSTALL_DIR', tmp_path / 'cache')
-    # fake_exe has no application.ini beside it, so _bundle_verstr() can't
-    # read a version from it and launch_options() falls through to
-    # installed_verstr() -- and from there to the managed install / fetcher
-    # (#108) -- despite executable_path being set.
-    monkeypatch.setattr(utils, 'installed_verstr', lambda: '150.0.2')
+    # resolve_verstr() reads the supplied build's own version, and raises without one.
+    (tmp_path / 'application.ini').write_text('[App]\nVersion=150.0.2-beta.25\n')
 
     result = launch_options(
         config={'audio:seed': 333444, 'canvas:seed': 555666},

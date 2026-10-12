@@ -78,40 +78,6 @@ def test_resampled_screen_is_one_real_devices_report_at_1x(os_key, preset_key):
         assert (c["screen.width"], c["screen.height"]) in valid
 
 
-def real_dpr1_blocks(preset_key):
-    """Full (w, h, availW, availH) tuples, so avail can be checked as belonging to
-    the SAME device as the screen rather than by a size heuristic."""
-    presets = load_presets(152)["presets"]
-    return {
-        (s["width"], s["height"], s["availWidth"], s["availHeight"])
-        for s in (p.get("screen", {}) for p in presets[preset_key])
-        if s.get("width") and s.get("availWidth") and s.get("devicePixelRatio")
-        and abs(s["devicePixelRatio"] - 1) < 0.02
-    }
-
-
-def test_avail_comes_from_the_same_real_screen():
-    """avail must not be left over from the discarded screen.
-
-    Checked by whole-block membership, not by a delta heuristic: a real macOS
-    menubar is ~25px, so "availHeight differs from height by 25" is indistinguishable
-    from leftover data and cannot be used as the test.
-
-    Scope note: verbatim block membership holds only when the config carries no
-    screen.availTop, as here. With one present, availHeight is deliberately shrunk to
-    fit the real menu bar (see test_macos_availtop_is_a_plausible_menu_bar), so the
-    block is no longer byte-identical to a scraped device. Do not "fix" the code to
-    satisfy a stricter reading of this test.
-    """
-    valid = real_dpr1_blocks("macos")
-    for _ in range(20):
-        c = _cfg()
-        resample_screen_for_dpr1(c, "mac", source_dpr=2, ff_version=152)
-        block = (c["screen.width"], c["screen.height"],
-                 c["screen.availWidth"], c["screen.availHeight"])
-        assert block in valid, f"screen/avail are not one real device's pair: {block}"
-
-
 def test_pool_keeps_duplicates_so_sampling_tracks_real_prevalence():
     """The pool is a LIST with duplicates, so choice() weights by how often a
     resolution actually occurs. A future set()/dict.fromkeys() 'cleanup' would
@@ -135,34 +101,6 @@ def scaled_macos_configs():
         dpr = preset.get("screen", {}).get("devicePixelRatio")
         if dpr and abs(dpr - 1) >= 0.02:
             yield from_preset(preset, "152"), dpr
-
-
-def test_macos_availtop_is_a_plausible_menu_bar():
-    """Removing the availTop impossibility must not replace it with an implausible
-    value: macOS always reserves a menu bar, and it is tens of pixels, not hundreds."""
-    seen = 0
-    for cfg, dpr in scaled_macos_configs():
-        # No bundled preset carries an availTop; give it a real menu bar's.
-        cfg.setdefault("screen.availTop", 33)
-        resample_screen_for_dpr1(cfg, "mac", dpr, 152)
-        top = cfg["screen.availTop"]
-        seen += 1
-        assert 0 < top <= 60, f"availTop={top} is not a macOS menu bar"
-        assert top + cfg["screen.availHeight"] <= cfg["screen.height"]
-    assert seen, "no scaled-display macOS presets"
-
-
-def test_macos_never_reports_a_zero_menu_bar():
-    """macOS always reserves a menu bar, so availTop=0 with availHeight < height is
-    not a real Mac. BrowserForge never emits 0 today, so this branch is unreachable
-    from the default path -- but it is a stated guarantee, and the two other
-    unreachable-but-stated guarantees in this file both survived mutation testing
-    until they were pinned here."""
-    c = _cfg()
-    c["screen.availTop"] = 0
-    resample_screen_for_dpr1(c, "mac", source_dpr=2, ff_version=152)
-    assert c["screen.availTop"] > 0
-    assert c["screen.availTop"] + c["screen.availHeight"] <= c["screen.height"]
 
 
 def test_960x540_at_dpr1_never_survives():
@@ -230,30 +168,29 @@ def test_empty_pool_for_one_version_does_not_poison_another():
 
 
 # ---------------------------------------------------------------------------
-# Composition. Every test above drives a hand-built 4-key dict; that is what let a
-# real availTop incoherence through review. These run the resample over a genuine
-# from_browserforge config, alongside the fixups that follow it in launch_options.
+# Composition. Every test above drives a hand-built 4-key dict. This runs the
+# resample over genuine from_preset configs, alongside the fixups that follow it
+# in launch_options.
 # ---------------------------------------------------------------------------
 
 
-def test_avail_offsets_do_not_survive_the_swapped_screen():
-    """availTop/availLeft are not in the preset block, so a naive swap leaves them
-    pointing at the discarded device: availTop + availHeight > screen.height."""
-    from camoufox.fingerprints import clamp_window_dimensions, fix_screen_no_taskbar
+def test_the_swapped_screen_takes_the_baseline_avail_and_fits_the_window():
+    """The resample swaps only the screen size; follow_baseline_protection then
+    claims the avail the browser reports for that screen, and the window clamp
+    fits inside it."""
+    from camoufox.fingerprints import (
+        BASELINE_TASKBAR_HEIGHT, clamp_window_dimensions, follow_baseline_protection,
+    )
 
     seen = 0
     for cfg, dpr in scaled_macos_configs():
         resample_screen_for_dpr1(cfg, "mac", dpr, 152)
-        fix_screen_no_taskbar(cfg, "mac")
+        follow_baseline_protection(cfg, "mac")
         clamp_window_dimensions(cfg)
         seen += 1
 
-        top = cfg.get("screen.availTop", 0) or 0
-        assert top + cfg["screen.availHeight"] <= cfg["screen.height"], (
-            f"availTop={top} left over from the discarded device: "
-            f"{top}+{cfg['screen.availHeight']} > {cfg['screen.height']}"
-        )
-        assert cfg.get("screen.availLeft", 0) + cfg["screen.availWidth"] <= cfg["screen.width"]
+        assert cfg["screen.availWidth"] == cfg["screen.width"]
+        assert cfg["screen.availHeight"] == cfg["screen.height"] - BASELINE_TASKBAR_HEIGHT["mac"]
         inner, outer = cfg.get("window.innerWidth"), cfg.get("window.outerWidth")
         if inner and outer:
             assert inner <= outer <= cfg["screen.availWidth"]
