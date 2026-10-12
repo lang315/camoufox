@@ -236,6 +236,16 @@ rules:
   # noise) is deliberately NOT carried here. The fork re-added canvas noise in
   # e1b227c (browser/patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
   # so the rule and its native test were removed rather than left red.
+  # The noise runs only where upstream's rendering plan leaves the canvas
+  # uncovered. The launcher draws the launch's `canvas:seed`, and NewContext calls
+  # setCanvasSeed, only when plan_rendering does not cover canvas
+  # (python/src/camoufox/utils.py: launch_options, attach_canvas_cover,
+  # context_canvas_seed; typescript/src/utils.ts: launchOptions,
+  # attachCanvasCover, contextCanvasSeed). A browser launched outside NewBrowser (firefox.launch(),
+  # connect()) carries no record and is seeded by default. With no seed the patch
+  # is inert. python/tests/test_canvas_seed_follows_rendering_plan.py asserts that
+  # a covered launch sends no seed, in place of upstream's
+  # test_no_canvas_seed_is_declared_or_sent.
 
   - id: cross-os-canvas-is-the-rfp-placeholder
     title: On the host's OS the identity claims the host's GPU; on another OS or GPU canvas readback is RFP's random placeholder
@@ -334,6 +344,36 @@ rules:
       the stability check compared the same prefix between two collections, so
       it passed on PNG headers and could not have noticed non-deterministic
       output. getImageData is the surface a fingerprinter reads; hash that.
+
+  # -------------------------------------------------------------------------
+  # Fonts
+  # -------------------------------------------------------------------------
+
+  - id: context-font-list-lives-in-the-shared-store
+    title: A context's font list lives in the shared store, and every process flushes its font caches when the list arrives
+    check: manual   # measured-pending: the flush arm has not run on CI yet (#188)
+    evidence:
+      - "upstream 914b575: the per-context font list moved into RoverfoxStorageManager, read by every process"
+      - "browser/patches/cross-process-storage.patch: OnStoragePrefChanged calls FontListManager::OnFontListStored for each roverfox.s.fontlist_<id> pref, after MirrorPref releases the cache mutex; EnsureMirror registers it on the main thread, from ContentChild::InitXPCOM in every content process"
+      - "browser/patches/font-list-spoofing.patch: OnFontListStored runs ClearCodepointsWithNoFonts (#81) and ClearFontNameCaches (#83), logging `CAMOU-FL flush ctx=<id> fontlist=<0|1>`"
+      - "browser/tests/playwright/patches/context-list-every-process.py: flush_arm"
+    rationale: >-
+      A context's documents land in any content process, and only the first
+      one calls setFontList. Every other process reads the list from upstream's
+      shared store, so each one can answer a lookup for that context before the
+      list reaches it. Such an answer is made with no list, which allows every
+      family, and the font caches memoize it: the codepoint-miss cache (#81)
+      and the name-keyed memos in front of the gate (#83). So each process
+      flushes both when the fontlist_<id> pref reaches it, from the storage
+      pref callback on the main thread. fontlist=0 means that process has no
+      font list yet, so there is nothing to flush. The flush is not done in
+      EnsureFontList, the lazy parse on the lookup path: that runs under
+      gfxPlatformFontList's mLock, and every gated read takes mLock before
+      sFontListMutex, so flushing there would invert the order. The guard's
+      flush arm fails a process that answered a context without its list and
+      never received it, or answered without it after it arrived, and fails
+      the run when no content process logged a flush with a live font list.
+      It has not yet run on a CI build.
 
   # -------------------------------------------------------------------------
   # Teardown
