@@ -21,6 +21,7 @@ Written by daijro.
 #include <cstddef>
 #include <vector>
 #include <algorithm>
+#include <cctype>
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -324,7 +325,7 @@ inline std::optional<nlohmann::json> GetNested(const std::string& domain,
                                                std::string keyStr) {
   // GetJson() returns a reference to the process-wide parsed config; binding it
   // with `auto` copies the whole tree on every call, and this runs on every
-  // GLParam/MParamGL/GetAttribute -- i.e. every WebGL getParameter() a page
+  // GLParam/MParamGL -- i.e. every WebGL getParameter() a page
   // makes. Every other GetJson() caller in this file already uses const auto&.
   const auto& data = GetJson();
   if (!data.contains(domain)) return std::nullopt;
