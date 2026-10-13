@@ -83,11 +83,11 @@ class PwBrowser:
     def new_context(self) -> PwCtx:
         return PwCtx(self.b.new_context(**self._ctx_kwargs))
 
-    def new_identity_context(self) -> PwCtx:
+    def new_identity_context(self, **kw) -> PwCtx:
         """camoufox.sync_api.NewContext: a context with its own fingerprint (pkg only)."""
         if self._identity_context is None:
             pytest.skip("no per-context identity API on this entry point")
-        return PwCtx(self._identity_context(self.b))
+        return PwCtx(self._identity_context(self.b, **kw))
 
     def close(self) -> None:
         self.b.close()
@@ -123,7 +123,8 @@ class PkgDriver(_Base):
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
                   config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
         browser = NewBrowser(playwright(), **{k: v for k, v in kw.items() if v is not None})
-        b = PwBrowser(browser, lambda br: NewContext(br, os=os, webrtc_ip=webrtc_ip),
+        launch_webrtc_ip = webrtc_ip
+        b = PwBrowser(browser, lambda br, webrtc_ip=None: NewContext(br, os=os, webrtc_ip=webrtc_ip or launch_webrtc_ip),
                       canvas_covered=browser._camoufox_canvas_covered)
         self.browsers.append(b)
         return b

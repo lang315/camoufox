@@ -324,7 +324,7 @@ index 3bc45920a2..c8c45aaa24 100644
  // finding on a page.
  partial interface Window {
 diff --git a/gfx/thebes/gfxFcPlatformFontList.cpp b/gfx/thebes/gfxFcPlatformFontList.cpp
-index f821fb91fa..33bb220830 100644
+index f821fb91fa..488105c7cb 100644
 --- a/gfx/thebes/gfxFcPlatformFontList.cpp
 +++ b/gfx/thebes/gfxFcPlatformFontList.cpp
 @@ -11,6 +11,7 @@
@@ -362,7 +362,7 @@ index f821fb91fa..33bb220830 100644
      if (cached->IsEmpty()) {
        return false;
      }
-@@ -2789,10 +2809,91 @@ gfxPlatformFontList::PrefFontList* gfxFcPlatformFontList::FindGenericFamilies(
+@@ -2789,10 +2809,90 @@ gfxPlatformFontList::PrefFontList* gfxFcPlatformFontList::FindGenericFamilies(
      }
    }
  
@@ -405,8 +405,7 @@ index f821fb91fa..33bb220830 100644
 +          // mFcSubstituteCache.
 +          const uint32_t camouCtx =
 +              mozilla::dom::FontListManager::GetCurrentContext();
-+          if (camouCtx != 0 &&
-+              mozilla::dom::FontListManager::HasFontList(camouCtx)) {
++          if (CamouGenericTableApplies(aFontVisibilityProvider)) {
 +            // FIRST statement in this block, before CamouGenericCandidate is
 +            // called. That helper is MOZ_REQUIRES(mLock), and clang's
 +            // thread-safety analysis does not carry an enclosing function's
@@ -476,7 +475,7 @@ index a8f8103d24..07082b08f3 100644
    void GetSampleLangForGroup(nsAtom* aLanguage, nsACString& aLangStr);
  
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 039316b8d6..5bae865326 100644
+index 039316b8d6..c3bbff7628 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -19,6 +19,7 @@
@@ -556,7 +555,7 @@ index 039316b8d6..5bae865326 100644
    RefPtr<gfxFontEntry> fe = CreateFontEntry(face, family);
    if (fe) {
      fe->mIsLocalUserFont = true;
-@@ -1206,6 +1248,164 @@ bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
+@@ -1206,6 +1248,171 @@ bool gfxPlatformFontList::IsVisibleToCSS(const fontlist::Family& aFamily,
    return aFamily.Visibility() <= aVisibility || IsFontFamilyWhitelistActive();
  }
  
@@ -638,6 +637,14 @@ index 039316b8d6..5bae865326 100644
 +    "Noto Serif",
 +    nullptr};
 +
++/* static */
++bool gfxPlatformFontList::CamouGenericTableApplies(
++    FontVisibilityProvider* aFontVisibilityProvider) {
++  const uint32_t ctx = mozilla::dom::FontListManager::GetCurrentContext();
++  return (ctx != 0 && mozilla::dom::FontListManager::HasFontList(ctx)) ||
++         MaskedFontListAppliesTo(aFontVisibilityProvider);
++}
++
 +bool gfxPlatformFontList::CamouGenericCandidate(
 +    FontVisibilityProvider* aFontVisibilityProvider,
 +    StyleGenericFontFamily aGeneric, nsACString& aKeyOut,
@@ -645,11 +652,10 @@ index 039316b8d6..5bae865326 100644
 +  aKeyOut.Truncate();
 +  aStepOut.AssignLiteral("none");
 +
-+  // A context with no list of its own keeps upstream behaviour exactly. This
-+  // is the context-0 fail-open (CLAUDE.md lesson 5) and is unchanged here.
-+  const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
-+  if (camouCtx == 0 ||
-+      !mozilla::dom::FontListManager::HasFontList(camouCtx)) {
++  // No list of its own and no launch mask over this provider: upstream
++  // behaviour exactly. This is the context-0 fail-open (CLAUDE.md lesson 5)
++  // and is unchanged here.
++  if (!CamouGenericTableApplies(aFontVisibilityProvider)) {
 +    return false;
 +  }
 +
@@ -721,7 +727,7 @@ index 039316b8d6..5bae865326 100644
  void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
                                        const nsACString& aGenericFamily,
                                        nsTArray<nsString>& aListOfFonts) {
-@@ -1220,6 +1420,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
+@@ -1220,6 +1427,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
          if (!IsVisibleToCSS(f, FontVisibility::User) || f.IsAltLocaleFamily()) {
            continue;
          }
@@ -733,7 +739,7 @@ index 039316b8d6..5bae865326 100644
          // XXX TODO: filter families for aGenericFamily, if supported by
          // platform
          aListOfFonts.AppendElement(
-@@ -1233,6 +1438,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
+@@ -1233,6 +1445,11 @@ void gfxPlatformFontList::GetFontList(nsAtom* aLangGroup,
      if (!IsVisibleToCSS(*family, FontVisibility::User)) {
        continue;
      }
@@ -745,7 +751,7 @@ index 039316b8d6..5bae865326 100644
      if (family->FilterForFontList(aLangGroup, aGenericFamily)) {
        nsAutoCString localizedFamilyName;
        family->LocalizedName(localizedFamilyName);
-@@ -1251,8 +1461,22 @@ void gfxPlatformFontList::GetFontFamilyList(
+@@ -1251,8 +1468,22 @@ void gfxPlatformFontList::GetFontFamilyList(
    // This doesn't use ToArray, because the caller passes an AutoTArray.
    aFamilyArray.SetCapacity(mFontFamilies.Count());
    for (const auto& family : mFontFamilies.Values()) {
@@ -768,7 +774,7 @@ index 039316b8d6..5bae865326 100644
  }
  
  already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
-@@ -1263,7 +1487,16 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
+@@ -1263,7 +1494,16 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
    FontVisibility level = aFontVisibilityProvider
                               ? aFontVisibilityProvider->GetFontVisibility()
                               : FontVisibility::User;
@@ -786,7 +792,7 @@ index 039316b8d6..5bae865326 100644
               "don't call for codepoints already known to be unsupported");
  
    // Try to short-circuit font fallback for U+FFFD, used to represent
-@@ -1285,6 +1518,57 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
+@@ -1285,6 +1525,57 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
        *aVisibility = fallbackFamily.mUnshared->Visibility();
      }
  
@@ -844,7 +850,7 @@ index 039316b8d6..5bae865326 100644
      // this should never fail, as we must have found U+FFFD in order to set
      // mReplacementCharFallbackFamily[...] at all, but better play it safe
      if (fontEntry && fontEntry->HasCharacter(aCh)) {
-@@ -1345,7 +1629,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
+@@ -1345,7 +1636,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
  
    // no match? add to set of non-matching codepoints
    if (!font) {
@@ -867,7 +873,7 @@ index 039316b8d6..5bae865326 100644
    } else {
      *aVisibility = fallbackFamily.mShared
                         ? fallbackFamily.mShared->Visibility()
-@@ -1426,6 +1724,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
+@@ -1426,6 +1731,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
        if (!fallback || !IsVisibleToCSS(*fallback, level)) {
          continue;
        }
@@ -879,7 +885,7 @@ index 039316b8d6..5bae865326 100644
        fallback->FindFontForChar(&data);
        if (data.mBestMatch) {
          RefPtr<gfxFont> font = check(data.mBestMatch, FontFamily(fallback));
-@@ -1468,15 +1771,42 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1468,15 +1778,42 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
    FontVisibility level = aFontVisibilityProvider
                               ? aFontVisibilityProvider->GetFontVisibility()
                               : FontVisibility::User;
@@ -925,7 +931,7 @@ index 039316b8d6..5bae865326 100644
        nsAutoCString fallbackKey;
        if (aMatchedFamily.mShared) {
          fallbackKey = aMatchedFamily.mShared->Key().AsString(SharedFontList());
-@@ -1485,9 +1815,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1485,9 +1822,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        }
        fallbackBlocked =
            !fallbackKey.IsEmpty() &&
@@ -940,7 +946,7 @@ index 039316b8d6..5bae865326 100644
        if (aMatchedFamily.mShared) {
          if (IsVisibleToCSS(*aMatchedFamily.mShared, level)) {
            RefPtr<gfxFont> font = fe->FindOrMakeFont(aMatchStyle);
-@@ -1518,6 +1852,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1518,6 +1859,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      }
    }
  
@@ -952,7 +958,7 @@ index 039316b8d6..5bae865326 100644
    // otherwise, try to find it among local fonts
    GlobalFontMatch data(aCh, aNextCh, *aMatchStyle, aPresentation);
    if (SharedFontList()) {
-@@ -1526,11 +1865,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1526,11 +1872,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        for (uint32_t i = 0; i < SharedFontList()->NumFamilies(); i++) {
          fontlist::Family& family = families[i];
          if (!IsVisibleToCSS(family, level)) {
@@ -974,7 +980,7 @@ index 039316b8d6..5bae865326 100644
            continue;
          }
          if (!family.IsFullyInitialized() &&
-@@ -1538,8 +1887,10 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1538,8 +1894,10 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
              !XRE_IsParentProcess()) {
            // Start loading all the missing charmaps; but this is async,
            // so for now we just continue, ignoring this family.
@@ -985,7 +991,7 @@ index 039316b8d6..5bae865326 100644
            family.SearchAllFontsForChar(SharedFontList(), &data);
            if (data.mMatchDistance == 0.0) {
              // no better style match is possible, so stop searching
-@@ -1549,6 +1900,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1549,6 +1907,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        }
        if (data.mBestMatch) {
          aMatchedFamily = FontFamily(data.mMatchedSharedFamily);
@@ -993,7 +999,7 @@ index 039316b8d6..5bae865326 100644
          return data.mBestMatch->FindOrMakeFont(aMatchStyle);
        }
      }
-@@ -1557,16 +1909,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1557,16 +1916,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      // character
      for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
        if (!IsVisibleToCSS(*family, level)) {
@@ -1020,7 +1026,7 @@ index 039316b8d6..5bae865326 100644
        family->FindFontForChar(&data);
        if (data.mMatchDistance == 0.0) {
          // no better style match is possible, so stop searching
-@@ -1577,6 +1939,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1577,6 +1946,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      aCmapCount = data.mCmapsTested;
      if (data.mBestMatch) {
        aMatchedFamily = FontFamily(data.mMatchedFamily);
@@ -1028,7 +1034,7 @@ index 039316b8d6..5bae865326 100644
        return data.mBestMatch->FindOrMakeFont(aMatchStyle);
      }
    }
-@@ -1799,6 +2162,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -1799,6 +2169,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      return false;
    }
  
@@ -1043,7 +1049,7 @@ index 039316b8d6..5bae865326 100644
    // If this font lookup is the result of resolving a CSS generic (not a direct
    // font-family request by the page), and RFP settings allow generics to be
    // unrestricted, bump the effective visibility level applied here so as to
-@@ -2404,12 +2775,26 @@ gfxPlatformFontList::PrefFontList*
+@@ -2404,12 +2782,26 @@ gfxPlatformFontList::PrefFontList*
  gfxPlatformFontList::GetPrefFontsLangGroupLocked(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGenericType, eFontPrefLang aPrefLang) {
@@ -1070,7 +1076,7 @@ index 039316b8d6..5bae865326 100644
        ResolveEmojiFontNames(aFontVisibilityProvider, prefFonts);
        mEmojiPrefFont.reset(prefFonts);
      }
-@@ -2420,6 +2805,7 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2420,6 +2812,7 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    PrefFontList* prefFonts = mLangGroupPrefFonts[aPrefLang][index].get();
    if (MOZ_UNLIKELY(!prefFonts)) {
      prefFonts = new PrefFontList;
@@ -1078,7 +1084,7 @@ index 039316b8d6..5bae865326 100644
      ResolveGenericFontNames(aFontVisibilityProvider, aGenericType, aPrefLang,
                              prefFonts);
      mLangGroupPrefFonts[aPrefLang][index].reset(prefFonts);
-@@ -2448,6 +2834,46 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2448,6 +2841,45 @@ void gfxPlatformFontList::AddGenericFonts(
    // langGroup ==> prefLang
    eFontPrefLang prefLang = GetFontPrefLangFor(langGroup);
  
@@ -1095,8 +1101,7 @@ index 039316b8d6..5bae865326 100644
 +  // declines or its key resolves empty.
 +  {
 +    const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
-+    if (camouCtx != 0 &&
-+        mozilla::dom::FontListManager::HasFontList(camouCtx)) {
++    if (CamouGenericTableApplies(aFontVisibilityProvider)) {
 +      nsAutoCString camouKey, camouStep;
 +      bool camouAnswered = false;
 +      if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
@@ -1125,7 +1130,7 @@ index 039316b8d6..5bae865326 100644
    // lookup pref fonts
    PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
                                                          aGenericType, prefLang);
-@@ -2455,6 +2881,25 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2455,6 +2887,25 @@ void gfxPlatformFontList::AddGenericFonts(
    if (!prefFonts->IsEmpty()) {
      aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
      for (auto& f : *prefFonts) {
@@ -1151,7 +1156,7 @@ index 039316b8d6..5bae865326 100644
        aFamilyList.AppendElement(FamilyAndGeneric(f, aGenericType));
      }
    }
-@@ -2723,14 +3168,80 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
+@@ -2723,14 +3174,79 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
    if (!family.IsNull()) {
      return family;
    }
@@ -1162,8 +1167,7 @@ index 039316b8d6..5bae865326 100644
 +  // not a StyleGenericFontFamily -- it takes the sans-serif row.
 +  {
 +    const uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
-+    if (camouCtx != 0 &&
-+        mozilla::dom::FontListManager::HasFontList(camouCtx)) {
++    if (CamouGenericTableApplies(aFontVisibilityProvider)) {
 +      nsAutoCString camouKey, camouStep;
 +      bool camouAnswered = false;
 +      if (CamouGenericCandidate(aFontVisibilityProvider,
@@ -1234,13 +1238,21 @@ index 039316b8d6..5bae865326 100644
  }
  
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index bdd4b52666..bcb7977c0f 100644
+index bdd4b52666..a26464adde 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
-@@ -662,6 +662,56 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -662,6 +662,65 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
        FontVisibilityProvider* aFontVisibilityProvider,
        const nsACString& aLowercaseFamily);
  
++  // Camoufox (#162): whether the generic table (CamouGenericCandidate) answers
++  // -- for a context with a list of its own, and for a launch-level "fonts"
++  // mask over this provider. Under the mask alone a generic resolved through
++  // the HOST's font.name-list pref, which the mask refuses when the spoofed OS
++  // differs from the host, so monospace fell to a proportional face.
++  static bool CamouGenericTableApplies(
++      FontVisibilityProvider* aFontVisibilityProvider);
++
 +  // Camoufox (#94/#92/#88): the two-gate, fail-closed family test every read
 +  // filter this round adds asks. Identical in meaning to the one the U+FFFD
 +  // cache read already performs inline (gfxPlatformFontList.cpp:1415-1417):
@@ -1264,8 +1276,9 @@ index bdd4b52666..bcb7977c0f 100644
 +  // Camoufox (#92/#88): a per-context generic -> family answer.
 +  //
 +  // Returns false -- and the caller keeps upstream behaviour untouched -- when
-+  // the thread-local context has no list (id 0, or no list installed). With a
-+  // list, it answers in three steps and says which one answered through
++  // CamouGenericTableApplies is false: the thread-local context has no list
++  // (id 0, or no list installed) and no launch mask covers the provider.
++  // Otherwise it answers in three steps and says which one answered through
 +  // aStepOut:
 +  //   "row"  the ordered row for the generic itself, first key both gates allow
 +  //   "rows" the OTHER two rows, in QUERY-RELATIVE order, so a proportional
@@ -1294,7 +1307,7 @@ index bdd4b52666..bcb7977c0f 100644
    static void FontWhitelistPrefChanged(const char* aPref, void* aClosure);
  
    bool AddWithLegacyFamilyName(const nsACString& aLegacyName,
-@@ -671,11 +721,73 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -671,11 +730,73 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
    static const char* GetGenericName(
        mozilla::StyleGenericFontFamily aGenericType);
  
@@ -1369,7 +1382,7 @@ index bdd4b52666..bcb7977c0f 100644
    // Return whether the given font-family record should be visible to CSS,
    // in a context with the given FontVisibility setting.
    bool IsVisibleToCSS(const gfxFontFamily& aFamily,
-@@ -1084,6 +1196,31 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -1084,6 +1205,31 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                             size_t(FontVisibility::Count)>
        mCodepointsWithNoFonts MOZ_GUARDED_BY(mLock);
  

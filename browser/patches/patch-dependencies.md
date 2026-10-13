@@ -54,8 +54,9 @@ be listed there.
 | `touchscreen-fingerprint-spoofing.patch` | `navigator.maxTouchPoints` |
 | `voice-spoofing.patch` | `voices`, `voices:blockIfNotDefined` |
 | `webgl-spoofing.patch` | `webGl:*`, `webGl2:*` |
-| `webrtc-ip-spoofing.patch` | `navigator.platform` (the host socket's port range). The per-context addresses are `webrtc_ipv4_<ctx>` and `webrtc_ipv6_<ctx>` in `RoverfoxStorageManager`, set by `setWebRTCIPv4`/`setWebRTCIPv6`; the `webrtc:ipv4`/`webrtc:ipv6` config keys have no reader yet (#163) |
+| `webrtc-ip-spoofing.patch` | `navigator.platform` (the host socket's port range). The per-context addresses are `webrtc_ipv4_<ctx>` and `webrtc_ipv6_<ctx>` in `RoverfoxStorageManager`, set by `setWebRTCIPv4`/`setWebRTCIPv6` |
 | `webrtc-ip-spoofing2.patch` | `webrtc:localipv4`, `webrtc:localipv6` |
+| `webrtc-launch-ip-fallback.patch` | `webrtc:ipv4`, `webrtc:ipv6`, read when a context set no address of its own (#163) |
 
 To regenerate the list: `grep -l 'MaskConfig::' patches/*.patch`.
 
