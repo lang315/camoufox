@@ -397,3 +397,21 @@ func TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims(t *testing.T) {
 		}
 	}
 }
+
+func TestSyncFontFallbackUnlessTheIdentityIsTheHostsMacOrWin(t *testing.T) {
+	for _, c := range []struct {
+		target, host string
+		want         bool
+	}{
+		{"windows", "macos", true},
+		{"linux", "macos", true},
+		{"linux", "linux", true},
+		{"macos", "linux", true},
+		{"macos", "macos", false},
+		{"windows", "windows", false},
+	} {
+		if got := syncFontFallback(c.target, c.host); got != c.want {
+			t.Errorf("%s identity on a %s host: sync fallback %v, want %v", c.target, c.host, got, c.want)
+		}
+	}
+}
