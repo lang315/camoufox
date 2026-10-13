@@ -2,7 +2,8 @@
 
     python3 e2e/probes/emoji_timing.py --binary BIN --os windows [--emoji-pref] [--mozlog DIR]
 
-Prints one row per fresh context: measureText('😃') at 0, 0.3, 0.8, 1.5 and 3 s.
+Prints one row per fresh context: measureText('😃') at 0, 0.3, 0.8, 1.5 and 3 s,
+then the hexbox width (unassigned U+50000) it must not equal.
 --emoji-pref sets font.name-list.emoji to the spoofed OS's emoji families.
 --mozlog DIR captures MOZ_LOG=timestamp,fontlist:4 for the run.
 """
@@ -15,7 +16,9 @@ from camoufox.sync_api import Camoufox
 
 EMOJI = {"windows": "Segoe UI Emoji, Twemoji Mozilla", "macos": "Apple Color Emoji", "linux": "Twemoji Mozilla"}
 AT = [0, 0.3, 0.8, 1.5, 3]
-JS = "(() => { const x = document.createElement('canvas').getContext('2d'); x.font = '16px Arial'; return x.measureText('\\u{1F603}').width; })()"
+# U+50000 is unassigned, so no font has it: its width is the hexbox's, the
+# reference that tells a missing emoji from a real face.
+JS = "(cp) => { const x = document.createElement('canvas').getContext('2d'); x.font = '16px Arial'; return x.measureText(String.fromCodePoint(cp)).width; }"
 
 
 def main() -> int:
@@ -39,11 +42,12 @@ def main() -> int:
             t0, row = time.monotonic(), []
             for t in AT:
                 time.sleep(max(0, t - (time.monotonic() - t0)))
-                row.append(round(page.evaluate(JS), 2))
-            steady += len(set(row)) == 1
-            print(f"context {i}: {row}", flush=True)
+                row.append(round(page.evaluate(JS, 0x1F603), 2))
+            hexbox = round(page.evaluate(JS, 0x50000), 2)
+            steady += len(set(row)) == 1 and hexbox not in row
+            print(f"context {i}: {row} hexbox {hexbox}", flush=True)
             page.context.close()
-    print(f"constant in {steady}/{args.contexts} contexts (emoji pref {'on' if args.emoji_pref else 'off'})")
+    print(f"constant and not a hexbox in {steady}/{args.contexts} contexts (emoji pref {'on' if args.emoji_pref else 'off'})")
     return 0
 
 
