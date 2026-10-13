@@ -186,16 +186,19 @@ describe("test_launch_environment: prefs", () => {
 		config: { "navigator.userAgent": u, ...config },
 	});
 
-	describe("font fallback async pref (Linux only)", () => {
+	// test_launch_environment.py TestFontFallbackAsyncPref (#165)
+	describe("font fallback is synchronous unless the identity is the host's mac or win", () => {
 		const PREF = "gfx.font_rendering.fallback.async";
-		it("linux disables it", async () => {
-			expect((await prefsFor(ua(LINUX_UA)))[PREF]).toBe(false);
-		});
-		it("macOS keeps it", async () => {
-			expect(PREF in (await prefsFor(ua(MAC_UA)))).toBe(false);
-		});
-		it("windows keeps it", async () => {
-			expect(PREF in (await prefsFor(ua(WIN_UA)))).toBe(false);
+		it.each([
+			["mac", WIN_UA, false],
+			["mac", LINUX_UA, false],
+			["lin", LINUX_UA, false],
+			["lin", MAC_UA, false],
+			["mac", MAC_UA, undefined],
+			["win", WIN_UA, undefined],
+		])("%s host, %s", async (host, u, want) => {
+			deps.hostOsKey = () => host as "mac" | "win" | "lin";
+			expect((await prefsFor(ua(u)))[PREF]).toBe(want);
 		});
 		it("the caller's pref wins", async () => {
 			const prefs = await prefsFor({

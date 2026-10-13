@@ -109,9 +109,12 @@ class TestFontFallbackAsyncPref:
     every fallback (UseCmapsDuringSystemFallback), so the font-hijacker change
     that restored this on macOS cannot reach it there.
 
-    macOS must NOT get the pref: it uses the CoreText fallback, and forcing the
-    synchronous scan changed the face picked for U+1E9E in Futura (stock 21.733
-    -> 27.267), measured on a real Mac mini.
+    A mac identity on a mac host must NOT get the pref: it uses the CoreText
+    fallback, and forcing the synchronous scan changed the face picked for
+    U+1E9E in Futura (stock 21.733 -> 27.267), measured on a real Mac mini. Any
+    identity of another OS than the host's gets it: the host's own fallback is
+    masked, so on a mac host a windows identity's first context drew U+1F603,
+    U+2603 and U+4E2D as hexboxes for 1-10 s (#165).
     """
 
     PREF = "gfx.font_rendering.fallback.async"
@@ -122,21 +125,19 @@ class TestFontFallbackAsyncPref:
             i_know_what_im_doing=True,
         )["firefox_user_prefs"]
 
-    def test_linux_disables_async_font_fallback(self, isolated_launch_dependencies):
-        prefs = self._prefs_for("Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0", None)
-        assert prefs[self.PREF] is False
-
-    def test_macos_keeps_async_font_fallback(self, isolated_launch_dependencies):
-        prefs = self._prefs_for(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0", None
-        )
-        assert self.PREF not in prefs
-
-    def test_windows_keeps_async_font_fallback(self, isolated_launch_dependencies):
-        prefs = self._prefs_for(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0", None
-        )
-        assert self.PREF not in prefs
+    @pytest.mark.parametrize("host_os,ua,want", [
+        ("mac", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0", False),
+        ("mac", "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0", False),
+        ("lin", "Mozilla/5.0 (X11; Linux x86_64; rv:152.0) Gecko/20100101 Firefox/152.0", False),
+        ("lin", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0", False),
+        ("mac", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:152.0) Gecko/20100101 Firefox/152.0", None),
+        ("win", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0", None),
+    ])
+    def test_async_fallback_follows_the_identity_and_the_host(
+        self, monkeypatch, isolated_launch_dependencies, host_os, ua, want
+    ):
+        monkeypatch.setattr(utils, "_host_os_key", lambda: host_os)
+        assert self._prefs_for(ua, None).get(self.PREF) is want
 
     def test_caller_pref_wins(self, isolated_launch_dependencies):
         prefs = utils.launch_options(

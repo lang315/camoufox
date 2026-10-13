@@ -1485,7 +1485,8 @@ def launch_options(
     else:
         firefox_user_prefs.setdefault('ui.useOverlayScrollbars', 1)
 
-    # Per-character font fallback, LINUX ONLY. Gecko's GlobalFontFallback walks
+    # Per-character font fallback, synchronous for a linux identity and for any
+    # identity of another OS than the host's. Gecko's GlobalFontFallback walks
     # the shared font list for a family whose charmap covers the character; in a
     # content process with async fallback on it hits the
     # `!family.IsFullyInitialized()` branch, schedules a cmap load and SKIPS the
@@ -1495,11 +1496,15 @@ def launch_options(
     # the font-hijacker fix that restored this on macOS cannot reach it here.
     # Measured 2026-09-15, 32px canvas `serif`, U+0870: .notdef 19.0 with async
     # on, a real glyph (9.25) with it off; stock Firefox resolves it.
-    # macOS must NOT get this: it uses the platform (CoreText) fallback, where
+    # A mac identity on a mac host must NOT get this: it uses the platform
+    # (CoreText) fallback, where
     # forcing the synchronous scan changed the face picked for U+1E9E in Futura
     # (21.733 stock -> 27.267) -- measured on a stock Mac mini, 1/14 families
-    # regressed. Windows is untested until a Windows build exists.
-    if target_os == 'lin':
+    # regressed. A foreign identity has the host's own fallback masked, so the
+    # skip reaches every codepoint: on a mac host a windows identity's first
+    # context drew U+1F603, U+2603 and U+4E2D as hexboxes for 1-10 s (#165).
+    # A native mac or win identity keeps stock's async default.
+    if target_os == 'lin' or target_os != _host_os_key():
         firefox_user_prefs.setdefault('gfx.font_rendering.fallback.async', False)
 
     # Storage quota, from the host's own disk. A page reads the group limit
