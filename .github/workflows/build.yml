@@ -1,4 +1,4 @@
-name: Build and Release
+name: Build
 
 on:
   workflow_dispatch:
@@ -17,9 +17,6 @@ on:
           - "windows-i686"
           - "macos-x86_64"
           - "macos-arm64"
-  push:
-    tags:
-      - "v*"
 
 jobs:
   matrix:
@@ -31,7 +28,7 @@ jobs:
         env:
           BUILD_TARGET: ${{ inputs.build_target }}
         run: |
-          if [ -z "$BUILD_TARGET" ] || [ "$BUILD_TARGET" = "full" ]; then
+          if [ "$BUILD_TARGET" = "full" ]; then
             # One line: $GITHUB_OUTPUT takes name=value on a single line, or
             # a name<<DELIM heredoc. This wrote raw multi-line JSON, so every
             # dispatch on the DEFAULT input died instantly with
@@ -303,32 +300,3 @@ jobs:
           path: browser/dist/*
           if-no-files-found: error
           retention-days: 14
-
-  release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/')
-    permissions:
-      contents: write
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v8
-        with:
-          path: artifacts
-
-      - name: Flatten artifact dirs
-        run: |
-          mkdir -p release
-          find artifacts -type f -exec cp -v {} release/ \;
-          ls -lah release/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release/*
-          generate_release_notes: true
-          draft: true
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
