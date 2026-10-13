@@ -144,3 +144,20 @@ def test_build_runs_only_when_dispatched():
     # PyYAML reads the bare key `on` as the boolean True.
     assert set(workflow[True]) == {"workflow_dispatch"}
     assert "release" not in workflow["jobs"]
+
+
+def test_every_build_target_is_one_multibuild_builds():
+    # A pair multibuild.py skips uploads nothing, so its leg fails and the run
+    # reports failure (#200: linux i686 in the 'full' matrix).
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location("multibuild", REPO_ROOT / "browser" / "multibuild.py")
+    multibuild = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(multibuild)
+    text = BUILD.read_text(encoding="utf-8")
+    full = json.loads(text.split("echo 'json=", 1)[1].split("'", 1)[0])["include"]
+    options = yaml.safe_load(text)[True]["workflow_dispatch"]["inputs"]["build_target"]["options"]
+    pairs = {(leg["target"], leg["arch"]) for leg in full}
+    pairs |= {tuple(o.split("-", 1)) for o in options if o != "full"}
+    assert not pairs & set(multibuild.UNSUPPORTED), sorted(pairs & set(multibuild.UNSUPPORTED))
