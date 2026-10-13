@@ -116,12 +116,12 @@ class PkgDriver(_Base):
     name = "pkg"
 
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
-               webrtc_ip=None, prefs=None) -> PwBrowser:
+               webrtc_ip=None, prefs=None, env=None) -> PwBrowser:
         from camoufox.sync_api import NewBrowser, NewContext
 
         kw = dict(executable_path=str(self.binary), headless=headless, os=os, humanize=humanize or None,
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
-                  config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
+                  config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None, env=env)
         browser = NewBrowser(playwright(), **{k: v for k, v in kw.items() if v is not None})
         launch_webrtc_ip = webrtc_ip
         b = PwBrowser(browser, lambda br, webrtc_ip=None: NewContext(br, os=os, webrtc_ip=webrtc_ip or launch_webrtc_ip),
@@ -136,7 +136,7 @@ class PwDriver(_Base):
     name = "pw"
 
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
-               webrtc_ip=None, prefs=None) -> PwBrowser:
+               webrtc_ip=None, prefs=None, env=None) -> PwBrowser:
         from camoufox.host_rendering import has_canvas_placeholder
         from camoufox.utils import launch_options
 
@@ -144,7 +144,7 @@ class PwDriver(_Base):
             pytest.skip("pw: no headless='virtual' (the Camoufox class owns the Xvfb)")
         kw = dict(executable_path=str(self.binary), headless=headless, os=os, humanize=humanize or None,
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
-                  config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
+                  config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None, env=env)
         opts = launch_options(**{k: v for k, v in kw.items() if v is not None})
         b = PwBrowser(playwright().firefox.launch(**opts),
                       canvas_covered=has_canvas_placeholder(opts["firefox_user_prefs"]),
