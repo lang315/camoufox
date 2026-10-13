@@ -18,7 +18,7 @@ dependencies for local `make -C browser dir` + bootstrap experimentation.)
 
 **Dispatch a build rather than building locally.** `gh workflow run build.yml
 --repo <fork> -f build_target=macos-arm64` (targets: `full`, `linux-x86_64`,
-`linux-arm64`, `linux-i686`, `windows-x86_64`, `windows-i686`, `macos-x86_64`,
+`linux-arm64`, `windows-x86_64`, `windows-i686`, `macos-x86_64`,
 `macos-arm64`) uploads `CamoufoxBuilds-<target>-<arch>` with a 14-day retention,
 fetched with `gh run download <run-id> -n <name>`. Before dispatching, check
 whether an existing run already covers the commit you care about: a run whose
