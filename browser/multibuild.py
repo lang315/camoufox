@@ -28,6 +28,7 @@ import shutil
 # Constants
 AVAILABLE_TARGETS = ["linux", "windows", "macos"]
 AVAILABLE_ARCHS = ["x86_64", "arm64", "i686"]
+UNSUPPORTED = [("windows", "arm64"), ("macos", "i686"), ("linux", "i686")]
 
 
 def setup_linux_sysroots():
@@ -158,11 +159,7 @@ def main():
     # Run build
     for target in args.target:
         for arch in args.arch:
-            if (target, arch) in [
-                ("windows", "arm64"),
-                ("macos", "i686"),
-                ("linux", "i686"),
-            ]:
+            if (target, arch) in UNSUPPORTED:
                 print(f"Skipping {target} {arch}: Unsupported architecture.")
                 continue
             run_build(target, arch)

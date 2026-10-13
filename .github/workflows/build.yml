@@ -12,7 +12,6 @@ on:
           - "full"
           - "linux-x86_64"
           - "linux-arm64"
-          - "linux-i686"
           - "windows-x86_64"
           - "windows-i686"
           - "macos-x86_64"
@@ -35,7 +34,7 @@ jobs:
             # "Invalid format '  {\"target\":\"linux\"...'". Single-target
             # dispatches took the else branch and worked, which is why it went
             # unnoticed.
-            echo 'json={"include":[{"target":"linux","arch":"x86_64"},{"target":"linux","arch":"arm64"},{"target":"linux","arch":"i686"},{"target":"windows","arch":"x86_64"},{"target":"windows","arch":"i686"},{"target":"macos","arch":"x86_64"},{"target":"macos","arch":"arm64"}]}' >> "$GITHUB_OUTPUT"
+            echo 'json={"include":[{"target":"linux","arch":"x86_64"},{"target":"linux","arch":"arm64"},{"target":"windows","arch":"x86_64"},{"target":"windows","arch":"i686"},{"target":"macos","arch":"x86_64"},{"target":"macos","arch":"arm64"}]}' >> "$GITHUB_OUTPUT"
           else
             os="${BUILD_TARGET%-*}"
             arch="${BUILD_TARGET#*-}"
