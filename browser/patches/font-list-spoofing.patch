@@ -475,7 +475,7 @@ index a8f8103d24..07082b08f3 100644
    void GetSampleLangForGroup(nsAtom* aLanguage, nsACString& aLangStr);
  
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 039316b8d6..c3bbff7628 100644
+index 039316b8d6..978cc54c13 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -19,6 +19,7 @@
@@ -850,11 +850,17 @@ index 039316b8d6..c3bbff7628 100644
      // this should never fail, as we must have found U+FFFD in order to set
      // mReplacementCharFallbackFamily[...] at all, but better play it safe
      if (fontEntry && fontEntry->HasCharacter(aCh)) {
-@@ -1345,7 +1636,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
+@@ -1344,9 +1635,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::SystemFindFontForChar(
+   }
  
    // no match? add to set of non-matching codepoints
-   if (!font) {
+-  if (!font) {
 -    mCodepointsWithNoFonts[level].set(aCh);
+-  } else {
++  // Camoufox (#165): not when the scan skipped a family whose cmap was still
++  // loading. Cached, that miss answered every later lookup in the process with
++  // a hexbox until the parent had loaded every cmap, 1 to 10 s after launch.
++  if (!font && !mCamouFallbackCmapsPending) {
 +    // Camoufox (#82/#81): do not poison the process-wide negative cache from a
 +    // context that has its own list. The miss is a property of THAT context's
 +    // font universe, not of the process, and nothing ever clears this cache --
@@ -870,10 +876,11 @@ index 039316b8d6..c3bbff7628 100644
 +          .LookupOrInsert(NoFontsCacheKey(level, camouCtx))
 +          .set(aCh);
 +    }
-   } else {
++  } else if (font) {
      *aVisibility = fallbackFamily.mShared
                         ? fallbackFamily.mShared->Visibility()
-@@ -1426,6 +1731,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
+                        : fallbackFamily.mUnshared->Visibility();
+@@ -1426,6 +1734,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::CommonFontFallback(
        if (!fallback || !IsVisibleToCSS(*fallback, level)) {
          continue;
        }
@@ -885,7 +892,7 @@ index 039316b8d6..c3bbff7628 100644
        fallback->FindFontForChar(&data);
        if (data.mBestMatch) {
          RefPtr<gfxFont> font = check(data.mBestMatch, FontFamily(fallback));
-@@ -1468,15 +1778,42 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1468,15 +1781,43 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
    FontVisibility level = aFontVisibilityProvider
                               ? aFontVisibilityProvider->GetFontVisibility()
                               : FontVisibility::User;
@@ -905,6 +912,7 @@ index 039316b8d6..c3bbff7628 100644
 +  // declared BEFORE GlobalFontMatch data, so data is destroyed first and drops
 +  // its own reference to the match before the guard reads the name.
 +  uint32_t camouExamined = 0, camouRefused = 0, camouCmapSkipped = 0;
++  mCamouFallbackCmapsPending = false;
 +  RefPtr<gfxFontEntry> camouResolved;
 +  auto camouLogOnExit = mozilla::MakeScopeExit([&] {
 +    LOG_FONTLIST(
@@ -931,7 +939,7 @@ index 039316b8d6..c3bbff7628 100644
        nsAutoCString fallbackKey;
        if (aMatchedFamily.mShared) {
          fallbackKey = aMatchedFamily.mShared->Key().AsString(SharedFontList());
-@@ -1485,9 +1822,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1485,9 +1826,13 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        }
        fallbackBlocked =
            !fallbackKey.IsEmpty() &&
@@ -946,7 +954,7 @@ index 039316b8d6..c3bbff7628 100644
        if (aMatchedFamily.mShared) {
          if (IsVisibleToCSS(*aMatchedFamily.mShared, level)) {
            RefPtr<gfxFont> font = fe->FindOrMakeFont(aMatchStyle);
-@@ -1518,6 +1859,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1518,6 +1863,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      }
    }
  
@@ -958,7 +966,7 @@ index 039316b8d6..c3bbff7628 100644
    // otherwise, try to find it among local fonts
    GlobalFontMatch data(aCh, aNextCh, *aMatchStyle, aPresentation);
    if (SharedFontList()) {
-@@ -1526,11 +1872,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1526,11 +1876,21 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        for (uint32_t i = 0; i < SharedFontList()->NumFamilies(); i++) {
          fontlist::Family& family = families[i];
          if (!IsVisibleToCSS(family, level)) {
@@ -980,18 +988,19 @@ index 039316b8d6..c3bbff7628 100644
            continue;
          }
          if (!family.IsFullyInitialized() &&
-@@ -1538,8 +1894,10 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1538,8 +1898,11 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
              !XRE_IsParentProcess()) {
            // Start loading all the missing charmaps; but this is async,
            // so for now we just continue, ignoring this family.
 +          ++camouCmapSkipped;
++          mCamouFallbackCmapsPending = true;
            StartCmapLoadingFromFamily(i);
          } else {
 +          ++camouExamined;
            family.SearchAllFontsForChar(SharedFontList(), &data);
            if (data.mMatchDistance == 0.0) {
              // no better style match is possible, so stop searching
-@@ -1549,6 +1907,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1549,6 +1912,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
        }
        if (data.mBestMatch) {
          aMatchedFamily = FontFamily(data.mMatchedSharedFamily);
@@ -999,7 +1008,7 @@ index 039316b8d6..c3bbff7628 100644
          return data.mBestMatch->FindOrMakeFont(aMatchStyle);
        }
      }
-@@ -1557,16 +1916,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1557,16 +1921,26 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      // character
      for (const RefPtr<gfxFontFamily>& family : mFontFamilies.Values()) {
        if (!IsVisibleToCSS(*family, level)) {
@@ -1026,7 +1035,7 @@ index 039316b8d6..c3bbff7628 100644
        family->FindFontForChar(&data);
        if (data.mMatchDistance == 0.0) {
          // no better style match is possible, so stop searching
-@@ -1577,6 +1946,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
+@@ -1577,6 +1951,7 @@ already_AddRefed<gfxFont> gfxPlatformFontList::GlobalFontFallback(
      aCmapCount = data.mCmapsTested;
      if (data.mBestMatch) {
        aMatchedFamily = FontFamily(data.mMatchedFamily);
@@ -1034,7 +1043,7 @@ index 039316b8d6..c3bbff7628 100644
        return data.mBestMatch->FindOrMakeFont(aMatchStyle);
      }
    }
-@@ -1799,6 +2169,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -1799,6 +2174,14 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      return false;
    }
  
@@ -1049,7 +1058,7 @@ index 039316b8d6..c3bbff7628 100644
    // If this font lookup is the result of resolving a CSS generic (not a direct
    // font-family request by the page), and RFP settings allow generics to be
    // unrestricted, bump the effective visibility level applied here so as to
-@@ -2404,12 +2782,26 @@ gfxPlatformFontList::PrefFontList*
+@@ -2404,12 +2787,26 @@ gfxPlatformFontList::PrefFontList*
  gfxPlatformFontList::GetPrefFontsLangGroupLocked(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGenericType, eFontPrefLang aPrefLang) {
@@ -1076,7 +1085,7 @@ index 039316b8d6..c3bbff7628 100644
        ResolveEmojiFontNames(aFontVisibilityProvider, prefFonts);
        mEmojiPrefFont.reset(prefFonts);
      }
-@@ -2420,6 +2812,7 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2420,6 +2817,7 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    PrefFontList* prefFonts = mLangGroupPrefFonts[aPrefLang][index].get();
    if (MOZ_UNLIKELY(!prefFonts)) {
      prefFonts = new PrefFontList;
@@ -1084,7 +1093,7 @@ index 039316b8d6..c3bbff7628 100644
      ResolveGenericFontNames(aFontVisibilityProvider, aGenericType, aPrefLang,
                              prefFonts);
      mLangGroupPrefFonts[aPrefLang][index].reset(prefFonts);
-@@ -2448,6 +2841,45 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2448,6 +2846,45 @@ void gfxPlatformFontList::AddGenericFonts(
    // langGroup ==> prefLang
    eFontPrefLang prefLang = GetFontPrefLangFor(langGroup);
  
@@ -1130,7 +1139,7 @@ index 039316b8d6..c3bbff7628 100644
    // lookup pref fonts
    PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
                                                          aGenericType, prefLang);
-@@ -2455,6 +2887,25 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2455,6 +2892,25 @@ void gfxPlatformFontList::AddGenericFonts(
    if (!prefFonts->IsEmpty()) {
      aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
      for (auto& f : *prefFonts) {
@@ -1156,7 +1165,7 @@ index 039316b8d6..c3bbff7628 100644
        aFamilyList.AppendElement(FamilyAndGeneric(f, aGenericType));
      }
    }
-@@ -2723,14 +3174,79 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
+@@ -2723,14 +3179,79 @@ FontFamily gfxPlatformFontList::GetDefaultFontLocked(
    if (!family.IsNull()) {
      return family;
    }
@@ -1238,7 +1247,7 @@ index 039316b8d6..c3bbff7628 100644
  }
  
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index bdd4b52666..a26464adde 100644
+index bdd4b52666..701750be08 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
 @@ -662,6 +662,65 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
@@ -1382,7 +1391,7 @@ index bdd4b52666..a26464adde 100644
    // Return whether the given font-family record should be visible to CSS,
    // in a context with the given FontVisibility setting.
    bool IsVisibleToCSS(const gfxFontFamily& aFamily,
-@@ -1084,6 +1205,31 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -1084,6 +1205,36 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                             size_t(FontVisibility::Count)>
        mCodepointsWithNoFonts MOZ_GUARDED_BY(mLock);
  
@@ -1410,6 +1419,11 @@ index bdd4b52666..a26464adde 100644
 +  // recorded, so a per-context cache can honour upstream's policy without
 +  // inheriting another context's learned miss.
 +  gfxSparseBitSet mCodepointsWithNoFontsInitial MOZ_GUARDED_BY(mLock);
++
++  // Camoufox (#165): set by GlobalFontFallback when its async-cmap branch
++  // skipped a family. A miss from that scan means "not loaded yet", so
++  // SystemFindFontForChar does not cache it.
++  bool mCamouFallbackCmapsPending MOZ_GUARDED_BY(mLock) = false;
 +
    // the family to use for U+FFFD fallback, to avoid expensive search every time
    // on pages with lots of problems
