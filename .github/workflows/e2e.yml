@@ -23,6 +23,13 @@ on:
         description: "Set the launchers' #162 generic font prefs (off = measure the browser fix alone)"
         type: boolean
         default: true
+      k:
+        description: "Only the tests matching this pytest -k expression"
+        required: false
+      mozlog:
+        description: "Capture MOZ_LOG (nsHttp, nsSocketTransport) for the fifty-contexts journey (#171)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -89,6 +96,7 @@ jobs:
             echo "::error::pass release or run_id"; exit 1
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
+          if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
       - name: Run
         if: env.E2E_SKIP != '1'
         shell: bash
@@ -96,8 +104,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           CAMOUFOX_NO_GENERIC_PREFS: ${{ inputs.generic_prefs && '0' || '1' }}
+          E2E_K: ${{ inputs.k }}
         run: |
           # Per-test timeout, as ci/run_e2e.py sets on the gate: one hung test must not hold the job.
           args=($E2E_BROWSER --soak-seconds "${{ inputs.soak_seconds }}" -v -rA --timeout 900)
           if [ -n "${E2E_LIVE:-}" ]; then args+=(-m "live or not live"); fi
+          if [ -n "$E2E_K" ]; then args+=(-k "$E2E_K"); fi
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest "${args[@]}"; else python -m pytest "${args[@]}"; fi
+      - if: always() && inputs.mozlog
+        uses: actions/upload-artifact@v4
+        with:
+          name: mozlog-${{ matrix.target }}
+          path: .ci-work/mozlog
+          retention-days: 7
