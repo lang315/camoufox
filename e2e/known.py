@@ -21,8 +21,6 @@ CHECKS = [
     # Depends on which presets the launch and the context draw: intermittent, so not strict.
     (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
      "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux", "Windows"}),
-    (r"test_02_fingerprint\.py::test_(fingerprint_is_coherent|locale_option_reaches_navigator_and_intl)\[go",
-     "screen_contains_viewport: screen", 166, False, {"Darwin", "Linux", "Windows"}),
     # Timing: depends on how soon the first read lands.
     (r"test_05_contexts\.py::test_new_context_gives_each_context_its_own_identity\[pkg\]",
      "two pages of one context agree", 165, False, {"Darwin", "Linux"}),
