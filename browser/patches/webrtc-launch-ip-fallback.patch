@@ -1,0 +1,42 @@
+diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
+index 42b6333..e644d30 100644
+--- a/dom/base/WebRTCIPManager.cpp
++++ b/dom/base/WebRTCIPManager.cpp
+@@ -52,7 +52,17 @@ WebRTCIPManager::SetIPv4(uint32_t userContextId, const nsAString& ipv4) {
+ /* static */ bool
+ WebRTCIPManager::GetIPv4(uint32_t userContextId, nsAString& outIPv4) {
+   nsString key = IPv4KeyForUserContext(userContextId);
+-  return RoverfoxStorageManager::GetString(key, outIPv4);
++  if (RoverfoxStorageManager::GetString(key, outIPv4) && !outIPv4.IsEmpty()) {
++    return true;
++  }
++  // The launch-level address (what geoip= sets) for a context that set none;
++  // without it the srflx candidate carried the real IP (#163). Not written
++  // back, so a later per-context setWebRTCIPv4 still wins.
++  if (auto v = MaskConfig::GetString("webrtc:ipv4")) {
++    outIPv4.AssignASCII(v.value().c_str());
++    return !outIPv4.IsEmpty();
++  }
++  return false;
+ }
+ 
+ /* static */ void
+@@ -105,7 +115,17 @@ WebRTCIPManager::SetIPv6(uint32_t userContextId, const nsAString& ipv6) {
+ /* static */ bool
+ WebRTCIPManager::GetIPv6(uint32_t userContextId, nsAString& outIPv6) {
+   nsString key = IPv6KeyForUserContext(userContextId);
+-  return RoverfoxStorageManager::GetString(key, outIPv6);
++  if (RoverfoxStorageManager::GetString(key, outIPv6) && !outIPv6.IsEmpty()) {
++    return true;
++  }
++  // The launch-level address (what geoip= sets) for a context that set none;
++  // without it the srflx candidate carried the real IP (#163). Not written
++  // back, so a later per-context setWebRTCIPv6 still wins.
++  if (auto v = MaskConfig::GetString("webrtc:ipv6")) {
++    outIPv6.AssignASCII(v.value().c_str());
++    return !outIPv6.IsEmpty();
++  }
++  return false;
+ }
+ 
+ /* static */ void

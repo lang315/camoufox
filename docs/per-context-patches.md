@@ -225,7 +225,7 @@ The User-Agent's version is rewritten to the running browser's.
 | Audio seed | Derived from the identity (`NewBrowser`) or random (`NewContext`), never 0 |
 | Canvas seed | Random per launch and per context, only where the launch leaves the canvas uncovered (`plan_rendering`); none on a covered launch. A browser `NewBrowser` did not launch is seeded |
 | Timezone | The preset, or `timezone` in `CAMOU_CONFIG` (from geoip); with a proxy, `NewContext` looks it up from the exit IP |
-| WebRTC IP | `NewContext`'s `webrtc_ip` or the proxy's exit IP, to the IPv4 or IPv6 setter; an invalid address raises `InvalidIP`. Without one, the init script calls no WebRTC setter, so the launch-level `webrtc:ipv4` (set by `geoip=`) stands once the browser-side fallback lands (W1, #163); until then #163 still reproduces |
+| WebRTC IP | `NewContext`'s `webrtc_ip` or the proxy's exit IP, to the IPv4 or IPv6 setter; an invalid address raises `InvalidIP`. Without one, the init script calls no WebRTC setter, so the launch-level `webrtc:ipv4` (set by `geoip=`) stands: `webrtc-launch-ip-fallback.patch` reads it for a context that set no address (#163) |
 | Geolocation | The `geolocation` argument, via Playwright |
 
 ## Known limitations

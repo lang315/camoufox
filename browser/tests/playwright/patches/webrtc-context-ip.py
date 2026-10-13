@@ -28,8 +28,9 @@ What PASS means, in one browser:
     * each context gets at least one srflx candidate. None is SETUP-INVALID: the
       responder was not reached and nothing was measured.
 
-The launch-level `webrtc:ipv4` key is not asserted: no browser code reads it, so
-a plain page with only that key still shows the real address (#163, open).
+The launch-level `webrtc:ipv4` fallback (webrtc-launch-ip-fallback.patch, #163)
+is not asserted here; e2e's test_03_network covers it, and that a context's own
+IP still wins over it.
 
     python browser/tests/playwright/patches/webrtc-context-ip.py
 """
