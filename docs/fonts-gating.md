@@ -156,6 +156,17 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   `Sans` also measures 648, so the guard's macOS arm cannot see a leak to
   `Sans` either. A generic under a list still yields one family where
   upstream gave up to three.
+- **The same table under a launch-only mask (#162).** Before #162 the table
+  answered only a context with a list of its own. A context under the
+  launch-level `fonts` mask alone resolved its generics through the host's
+  `font.name-list.*` prefs, which the mask refuses when the spoofed OS differs
+  from the host, so `monospace` fell to a proportional face. All four sites
+  (`CamouGenericCandidate`, `FindGenericFamilies`, `AddGenericFonts`,
+  `GetDefaultFontLocked`) now ask `CamouGenericTableApplies`: a list of its own,
+  or `MaskedFontListAppliesTo` for the provider. A chrome or provider-less
+  lookup is still exempt, as it is from the mask itself. The table
+  answers before the launchers' own #162 prefs, so a launch-only identity now
+  gets the same generic a per-context list gives it.
 - **`gfxFontGroup::GetDefaultFont`'s scope and shared-list walk, plus
   `GetDefaultFontLocked`'s two last resorts (#88).** What is **measured** is
   that a refusing context never reaches `GetDefaultFont` at all (arm (h3), shape
