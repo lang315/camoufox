@@ -4,7 +4,7 @@
 
 Workflow `Build and Release` fail 4/4 run gần nhất. Phân tích:
 
-- **Commit `724ef4b` (goapi parity) KHÔNG gây fail** — CI build C++ Firefox source, không chạm `goapi/` hoặc `plan/`. Run `e1b227c` (cùng đường) cũng fail cùng pattern.
+- **Commit `545aa1c` (goapi parity) KHÔNG gây fail** — CI build C++ Firefox source, không chạm `goapi/` hoặc `plan/`. Run `617474b` (cùng đường) cũng fail cùng pattern.
 - **Lỗi gốc:** `bash ../scripts/copy-additions.sh 146.0.1 beta.25` fail tại dòng đầu:
   ```
   cp: cannot create regular file 'services/settings/dumps/main/search-config.json': No such file or directory
@@ -119,7 +119,7 @@ Sau đó push, gh run list, xác nhận `make set-target` pass.
 
 ### Risk surface
 
-- **Canvas/WebRTC patches** của user trong commit `e1b227c` (`Add Go native client, canvas/WebRTC patches, modernize CI`) áp dụng cho Firefox 146 — có thể conflict khi rebase qua 4 phiên bản Mozilla.
+- **Canvas/WebRTC patches** của user trong commit `617474b` (`Add Go native client, canvas/WebRTC patches, modernize CI`) áp dụng cho Firefox 146 — có thể conflict khi rebase qua 4 phiên bản Mozilla.
 - **Upstream daijro CI cũng đang vỡ** trên 150.0.2 — bump xong vẫn fail, cần fix song song bug khác.
 - **`additions/`, `patches/`, `settings/`** local có thể đã divergent với upstream (Phase 1 ngoài upstream).
 
@@ -154,7 +154,7 @@ Sau đó push, gh run list, xác nhận `make set-target` pass.
    - `goapi/`, `plan/` → giữ nguyên local (upstream không có)
 
 4. **Re-apply user canvas/WebRTC patches lên Firefox 150:**
-   - Đọc commit `e1b227c` xem custom changes
+   - Đọc commit `617474b` xem custom changes
    - Apply qua `git apply` hoặc manual port
    - Test build local nếu có máy mạnh, hoặc dựa CI
 

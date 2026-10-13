@@ -3,8 +3,8 @@
 Scope: 5 fork-only spoofing patches vs upstream daijro/camoufox.
 - `canvas-spoofing.patch` (+490)
 - `webrtc-ip-spoofing2.patch` (+192)
-- `css-media-spoofing.patch` (+63) — rebased FF152 (26d60e7)
-- `media-codec-spoofing.patch` (+131) — rebased FF152 (26d60e7)
+- `css-media-spoofing.patch` (+63) — rebased FF152 (452c96b)
+- `media-codec-spoofing.patch` (+131) — rebased FF152 (452c96b)
 - `screen-orientation-spoofing.patch` (+38)
 
 Patcher applies **every** `patches/**/*.patch` (`scripts/_mixin.py:list_patches`), non-roverfox

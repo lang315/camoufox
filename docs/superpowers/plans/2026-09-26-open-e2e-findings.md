@@ -24,12 +24,12 @@ Read it first. The root-cause table there is what every task argues from.
 
 ## FF156 re-baseline (2026-10-12)
 
-This plan was written against `c6e0ae9`, which shipped Firefox 152. PR #179,
-merged as `644ee9d`, moved the fork to FF156 and rewrote large parts of
+This plan was written against `57ef9c7`, which shipped Firefox 152. PR #179,
+merged as `cd06626`, moved the fork to FF156 and rewrote large parts of
 `pythonlib/camoufox/utils.py` and `fingerprints.py`. This section records what
 still holds. Where it disagrees with a task body below, this section wins.
 
-**Measured on FF156, Linux.** The e2e job of main run 36891250380 (`644ee9d`)
+**Measured on FF156, Linux.** The e2e job of main run 36891250380 (`cd06626`)
 reported 96 passed and 0 failed:
 - **#163 still reproduces.** Both strict `(pkg|pw)` checks stayed red, so no
   `FIXED?` fired.
@@ -41,23 +41,23 @@ reported 96 passed and 0 failed:
   strict, and pytest hides the stdout of a passing test, so the run cannot say
   whether they fired.
 - **#162 on a Linux host is fixed for go** by #179's goapi fontconfig port
-  (`637cd18` retired those entries). pkg and pw never had Linux-host entries.
+  (`83095ec` retired those entries). pkg and pw never had Linux-host entries.
 
 **Darwin and Windows have not been measured on FF156.** Builds 38252267206
-(macos-arm64) and 38252271224 (windows-x86_64) on `644ee9d` are the inputs.
+(macos-arm64) and 38252271224 (windows-x86_64) on `cd06626` are the inputs.
 Dispatch with `gh workflow run e2e.yml --repo lang315/camoufox -f run_id=<id>`;
 a leg whose artifact the run lacks now skips. Every
 `-f release=v152.0.4-beta.31-fork.1` below means an FF156 `run_id` instead,
 because the fork.1 release is FF152.
 
-| Task | Status on `644ee9d` |
+| Task | Status on `cd06626` |
 |---|---|
 | 0, 1, 2 (W0) | Valid. Still last, and Task 2 is still gated on the maintainer's explicit go-ahead. |
 | 3 `Download.Path` | Valid as written. Anchors unchanged; the bug is at `download.go:61` and `:149`. |
 | 4 window / voices | Valid. Update the pythonlib cites in the Go comments: `utils.py:1606`, `fingerprints.py:864` (`fix_screen_no_taskbar`) and `:996` (`clamp_window_dimensions`). |
 | 5 `Goto` | Valid. `Goto` is at `page.go:196-216`, and the `NewPage` select is at `:78-84`. The `err :=` to `err =` step is not needed. |
 | 6 goapi fonts and `webrtc_ip` | **Partly superseded.** Part (a) is done by `goapi/fontconfig.go` (`fontconfigEnv`, wired at `launch.go:272`). Drop `fontenv.go`, `linuxFontconfig`, its test, the Step 4 env wiring and the `utils.py:315` comment edit. Keep `genericFontPrefs` and its test. Derive the OS with `uaOSDir(cfg.NavigatorUserAgent, hostOS)` in place of a new `spoofedOS`. Wire the prefs after the `systemUIFont` block, now `launch.go:242-249`, and before the caller merge at `:250`. Keep Step 5 (`webrtc_ip`): `e2edriver/main.go:36` and `e2e/drivers/go.py:78`. |
-| 7 W2 ledger | **Trimmed.** The Linux go #162 entries and Step 4 are gone (`637cd18`). Dispatch with FF156 `run_id`s, not fork.1. |
+| 7 W2 ledger | **Trimmed.** The Linux go #162 entries and Step 4 are gone (`83095ec`). Dispatch with FF156 `run_id`s, not fork.1. |
 | 8 pythonlib generic prefs | Valid. The fonts block is now `utils.py:1342-1362`, and `target_os` is at `:1276`. |
 | 9 `setWebRTCIPv4("")` | Valid, at `fingerprints.py:1671-1674`. **But** `tests/test_webrtc_ipv6_spoofing.py:34-37` (`test_no_webrtc_ip_clears_v4_setter_only`) asserts the clear on purpose. Read why before inverting it, against the fork's per-context WebRTC model that the sync kept (D1). |
 | 10 context geometry | Valid. `_reassemble_camou_config` is gone; use `_launch_config` (`utils.py:784`). `NewContext` is at `sync_api.py:176` and `AsyncNewContext` at `async_api.py:200`. The viewport block is at `fingerprints.py:1875-1884`. |
@@ -147,9 +147,9 @@ from pathlib import Path
 
 import rewrite_sha_refs as r
 
-OLD = "a9f1682" + "0" * 33
-NEW = "c6e0ae9" + "1" * 33
-UPSTREAM = "e25a16b" + "2" * 33  # unchanged by the rewrite: not in the map
+OLD = "9268adb" + "0" * 33
+NEW = "57ef9c7" + "1" * 33
+UPSTREAM = "cd6b4c0" + "2" * 33  # unchanged by the rewrite: not in the map
 
 
 def write_map(tmp_path: Path) -> Path:
@@ -165,7 +165,7 @@ def write_map(tmp_path: Path) -> Path:
 
 def test_a_short_sha_is_rewritten_at_its_own_length(tmp_path):
     m = r.load_map(write_map(tmp_path))
-    assert r.rewrite_text("fixed in a9f1682, see a9f16820", m) == f"fixed in {NEW[:7]}, see {NEW[:8]}"
+    assert r.rewrite_text("fixed in 9268adb, see a9f16820", m) == f"fixed in {NEW[:7]}, see {NEW[:8]}"
 
 
 def test_unchanged_deleted_and_non_sha_tokens_are_left_alone(tmp_path):
@@ -354,7 +354,7 @@ git rev-list --all --count                                             # expect 
 old_main=$(grep ' refs/heads/main$' ../refs-before.txt | cut -d' ' -f1)
 new_main=$(git rev-parse main)
 git -C ~/GolandProjects/github.com/lang315/camoufox rev-parse "$old_main^{tree}"; git rev-parse "$new_main^{tree}"  # expect identical
-up=$(git -C ~/GolandProjects/github.com/lang315/camoufox rev-parse e1b227c^)   # the last upstream commit before the first rewritten one
+up=$(git -C ~/GolandProjects/github.com/lang315/camoufox rev-parse 617474b^)   # the last upstream commit before the first rewritten one
 git cat-file -e "$up^{commit}" && git merge-base --is-ancestor "$up" main; echo "upstream history unchanged: $?"   # expect 0: same sha, still under main
 ```
 

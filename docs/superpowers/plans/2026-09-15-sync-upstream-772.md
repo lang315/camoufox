@@ -11,7 +11,7 @@
 ## Measured state (2026-09-15)
 
 ```
-main            27d5f7d   upstream.sh release=beta.31   pythonlib 0.5.6
+main            15dee8e   upstream.sh release=beta.31   pythonlib 0.5.6
 upstream/main   52d6746   upstream.sh release=beta.31   pythonlib 0.5.6
 merge-base      571e416a
 main...upstream/main : 466 fork-only / 1 upstream-only
@@ -24,12 +24,12 @@ Trial merge already performed in a scratch worktree: **8 content conflicts, 175 
 
 ### Two browser-layer changes come with this merge
 
-Both auto-merge, and both mean the merged tree is **a different browser** than `27d5f7d`:
+Both auto-merge, and both mean the merged tree is **a different browser** than `15dee8e`:
 
 - `additions/juggler/TargetRegistry.js` — screencast `deviceWidth`/`deviceHeight` now report the viewport the frame depicts rather than the JPEG's own scaled dimensions.
 - `additions/juggler/content/FrameTree.js` — `Cu.nukeSandbox()` on frame destruction. The master sandbox is built over `sandboxPrototype: domWindow` with a system principal, so a destroyed iframe (what an ad stack produces continuously) previously kept the whole document alive.
 
-Consequence for scheduling: the three builds dispatched today on `27d5f7d` (`34936833501` windows-x86_64, `34936841599` macos-x86_64, `34936850063` macos-arm64) are a valid release of `27d5f7d` and must not be cancelled, but they do **not** cover the merged tree. A fresh dispatch is required after the merge, and `build.yml` on the fork is dispatch-only, so nothing will do it automatically.
+Consequence for scheduling: the three builds dispatched today on `15dee8e` (`34936833501` windows-x86_64, `34936841599` macos-x86_64, `34936850063` macos-arm64) are a valid release of `15dee8e` and must not be cancelled, but they do **not** cover the merged tree. A fresh dispatch is required after the merge, and `build.yml` on the fork is dispatch-only, so nothing will do it automatically.
 
 ## Conflict resolution table (measured in the trial merge, all eight verified to compile and pass)
 
@@ -50,11 +50,11 @@ Consequence for scheduling: the three builds dispatched today on `27d5f7d` (`349
 
 ### Why the `playwright==1.55.0` pin is now unsupported — and what to do instead
 
-The pin was added `74c6158` (2026-08-23) with the reason "this juggler's protocol schema rejects `viewport.isMobile`". Upstream's `2b662a8` "Support Playwright 1.61+" landed 2026-08-28, five days later, and is **already in fork `main`** (`additions/juggler/protocol/Protocol.js:81,815` accept `isMobile`; `pythonlib/pyproject.toml` already caps `playwright = "<1.63"`). `memory/build-tester-playwright-pin.md` names the binary its 0/0 Grade F was measured on — `camoufox-152.0.4-beta.25` — which predates `2b662a8` by more than a month, so the measurement is sound and simply describes a browser the fork no longer builds. (Not to be confused with the fork's one published release, `150.0.2-beta.25`: different version line, same beta number.) The pin commit itself names no binary.
+The pin was added `f6404da` (2026-08-23) with the reason "this juggler's protocol schema rejects `viewport.isMobile`". Upstream's `2b662a8` "Support Playwright 1.61+" landed 2026-08-28, five days later, and is **already in fork `main`** (`additions/juggler/protocol/Protocol.js:81,815` accept `isMobile`; `pythonlib/pyproject.toml` already caps `playwright = "<1.63"`). `memory/build-tester-playwright-pin.md` names the binary its 0/0 Grade F was measured on — `camoufox-152.0.4-beta.25` — which predates `2b662a8` by more than a month, so the measurement is sound and simply describes a browser the fork no longer builds. (Not to be confused with the fork's one published release, `150.0.2-beta.25`: different version line, same beta number.) The pin commit itself names no binary.
 
 Note the pin exists in **two** places with different values after the merge: `build-tester/requirements.txt` (upstream's `<1.63`, used by `ci.run_build_tester` in CI) and `build-tester/run_tests.sh:66` (the fork's hardcoded `'playwright==1.55.0'`, used by every local run). Two entry points answering differently is the harness-drift failure the pin was meant to prevent. Unify them on one measured answer.
 
-The measurement does not need the post-merge binary: `2b662a8` is in `27d5f7d`, so today's completed builds are a valid testbed.
+The measurement does not need the post-merge binary: `2b662a8` is in `15dee8e`, so today's completed builds are a valid testbed.
 
 ## Static tier: already run against the resolved merge
 
@@ -77,7 +77,7 @@ The two rule failures were separated with a control: the same subset run on a pr
 
 Upstream's rule says the X Composite extension stays **off**: #93 was a Juggler bug fixed by capturing the screencast from the compositor rather than libwebrtc's X11 window capturer, and with that capturer gone, enabling Composite is neither dangerous nor useful. Their measurement: composite off → a valid 24-frame `.webm`; composite on → SIGSEGV in the X11 capturer.
 
-At the merge base the default was off. The fork flipped it to **on** in `efb0a09` (2026-08-25, "re-enable Composite by default -- it is still required for video"), replacing upstream's table with its own: on a beta.29 Linux build, `headless="virtual"` with Composite off produced a 110-byte empty container while Composite on produced a 54 KB working video, with `headless=True` (no Xvfb, 60 KB) as the control showing `record_video` itself works. Upstream then codified the off state as a rule in #772 (2026-09-14).
+At the merge base the default was off. The fork flipped it to **on** in `2bb5383` (2026-08-25, "re-enable Composite by default -- it is still required for video"), replacing upstream's table with its own: on a beta.29 Linux build, `headless="virtual"` with Composite off produced a 110-byte empty container while Composite on produced a 54 KB working video, with `headless=True` (no Xvfb, 60 KB) as the control showing `record_video` itself works. Upstream then codified the off state as a rule in #772 (2026-09-14).
 
 `virtdisplay.py` auto-merges cleanly and the result is coherent, not a hybrid: the two sides changed different regions — the fork the composite comment and default, upstream the teardown path (cleanup no longer gated on having done the killing, so a crashed Xvfb's socket is still removed). The merged file therefore carries the fork's Composite-on default and upstream's teardown fix, which is why only the rule, and not the code, is red.
 
@@ -85,7 +85,7 @@ The two tables contradict each other, upstream's own text says its numbers were 
 
 - [ ] Re-measure on the post-merge **Linux** build, reproducing the fork's three-row table (headless baseline, virtual+off, virtual+on) with byte sizes.
 - [ ] If Composite is still required for video, keep the fork default and amend `ci/tribal-rules.yml` + `native-tests/test_tribal_rules.py:130` with the new table and a link to this run — the rule's `expect:` block only checks `COMPOSITE_ENV_VAR`'s name, so the `-extension` assertion in the test is the part that must change.
-- [ ] If Composite is no longer required, revert `efb0a09` and record the retraction where its table currently sits.
+- [ ] If Composite is no longer required, revert `2bb5383` and record the retraction where its table currently sits.
 - [ ] Either way, state which binary each table came from. Neither existing table does.
 
 ## CI adoption decisions (the merge brings a pipeline; the fork has to choose how much of it to run)
@@ -101,12 +101,12 @@ The two tables contradict each other, upstream's own text says its numbers were 
 1. **Tracking issue** — open one describing the sync; every PR must close an issue (CONTRIBUTING).
    *Verify:* issue number exists and is referenced by the branch's first commit.
 2. **Branch and worktree** — `sync/upstream-772` off `main` in a fresh worktree. The trial worktree at `scratchpad/mergetest` holds the resolved merge and can seed the resolutions; remove both it and `scratchpad/upstreamctl` (`git worktree remove`) when done.
-   *Verify:* `git worktree list` shows the new tree; `git log -1` on it is `27d5f7d`.
+   *Verify:* `git worktree list` shows the new tree; `git log -1` on it is `15dee8e`.
 3. **Merge and resolve** — `git merge --no-ff upstream/main`, apply the eight resolutions from the table.
    *Verify:* `git diff --name-only --diff-filter=U` is empty; `python3 -c "import ast; ..."` parses both edited Python files.
 4. **Composite decision** — the four checkboxes above. Blocks the PR only if the re-measurement contradicts whichever default the branch ships.
    *Verify:* a three-row byte-size table in the PR body naming the build it came from.
-5. **Unify the Playwright pin** — one value in `build-tester/requirements.txt` and `build-tester/run_tests.sh`, chosen by measurement against build `34936833501` / `34936841599` / `34936850063` (all on `27d5f7d`, which already contains `2b662a8`).
+5. **Unify the Playwright pin** — one value in `build-tester/requirements.txt` and `build-tester/run_tests.sh`, chosen by measurement against build `34936833501` / `34936841599` / `34936850063` (all on `15dee8e`, which already contains `2b662a8`).
    *Verify:* `run_tests.sh` against a completed build scores ≈1050/1064 Grade A on the chosen version. Then update `memory/build-tester-playwright-pin.md` with the run id, or retire it.
 6. **CI adoption** — the five checkboxes above, each recorded in the PR body with its reason.
    *Verify:* `.github/workflows/` contents match the decisions; branch protection's required check list is consistent with whatever gates merges.
@@ -122,7 +122,7 @@ The two tables contradict each other, upstream's own text says its numbers were 
 - Every `gh` invocation needs `--repo lang315/camoufox`; the `upstream` remote otherwise wins and dispatches fail with `HTTP 403: Must have admin rights`.
 - Hand-written patch hunks need balanced leading/trailing context; dry-run with `patch -p1 --forward -l --binary --dry-run < patches/x.patch`. `git apply --check` is not a valid pre-flight.
 - No edits inside `camoufox-*/`; persist as patches.
-- Do not cancel the three in-flight `27d5f7d` builds; they are a valid release of that commit and a valid testbed for task 5.
+- Do not cancel the three in-flight `15dee8e` builds; they are a valid release of that commit and a valid testbed for task 5.
 
 ## What this plan does not cover
 

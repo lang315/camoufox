@@ -22,7 +22,7 @@
 ## Measured state (2026-09-07)
 
 ```
-main            55b4195  upstream.sh release=beta.29  pythonlib 0.5.5
+main            e423c1a  upstream.sh release=beta.29  pythonlib 0.5.5
 upstream/main   eb5dc3b  upstream.sh release=beta.31  pythonlib 0.5.6
 main...upstream/main : 215 fork-only / 50 upstream-only
 ```
@@ -31,22 +31,22 @@ main...upstream/main : 215 fork-only / 50 upstream-only
 
 | File | Upstream side | Fork side | Category / default |
 |---|---|---|---|
-| `additions/camoucfg/MaskConfig.hpp` | `0969a94` adds `FontAllowlist()` / `HasFontAllowlist()` / `IsFontAllowed()` | `fee8712` webgl test config, `8a8940a` per-OS media codec matrix (device-faking #6) | **not convergent -- keep both**; adjacent-line collision |
-| `additions/juggler/Helper.js` | `4132dd5` adds `ensureEventWithin()` + `kEventTimedOut`, imports `setTimeout` | `f458a11`/`67c83c7` `awaitTopic(topic, timeoutMs)` + `EventWatcher` timeouts, same `setTimeout` import | **convergent on the import, additive elsewhere -- keep both**; dedupe the `Timer.sys.mjs` import line |
-| `additions/juggler/content/FrameTree.js` | `7911f4a` `camouUnsealFingerprintSetters(innerWindowId)` before init scripts (C++ seal, `window-setter-seal.patch`); `1e232f9`/`dc201dd` `mw:` world; `2b662a8` PW 1.61+ | `6e9c0e7` (#57) JS teardown: `docShell().disableSpoofSetters()` after init scripts on non-`about:` docs | **semantic -- CONFIRM**; default: take upstream seal, drop fork teardown (Task 4) |
+| `additions/camoucfg/MaskConfig.hpp` | `0969a94` adds `FontAllowlist()` / `HasFontAllowlist()` / `IsFontAllowed()` | `843d468` webgl test config, `36bc3c0` per-OS media codec matrix (device-faking #6) | **not convergent -- keep both**; adjacent-line collision |
+| `additions/juggler/Helper.js` | `4132dd5` adds `ensureEventWithin()` + `kEventTimedOut`, imports `setTimeout` | `ad2d810`/`46d8b93` `awaitTopic(topic, timeoutMs)` + `EventWatcher` timeouts, same `setTimeout` import | **convergent on the import, additive elsewhere -- keep both**; dedupe the `Timer.sys.mjs` import line |
+| `additions/juggler/content/FrameTree.js` | `7911f4a` `camouUnsealFingerprintSetters(innerWindowId)` before init scripts (C++ seal, `window-setter-seal.patch`); `1e232f9`/`dc201dd` `mw:` world; `2b662a8` PW 1.61+ | `034a2d3` (#57) JS teardown: `docShell().disableSpoofSetters()` after init scripts on non-`about:` docs | **semantic -- CONFIRM**; default: take upstream seal, drop fork teardown (Task 4) |
 | `build-tester/requirements.txt` | `17f873a` `playwright<1.63` | `playwright==1.55.0` + `marionette_driver` | **fork wins** (Global Constraints) |
-| `patches/media-codec-spoofing.patch` | `03ac03c` + `17fe73a`: `media:spoof_codecs` gate, FF152 include order | `8a8940a`/`5861e99`/`d04a730`/`26d60e7`: per-OS codec + `mediaCapabilities` matrix, non-EME gate, `LOCAL_INCLUDES` | **semantic add/add -- hand-merge** (Task 5) |
-| `patches/no-search-engines.patch` | `e459dc5` rewrites the stub hunk (`@@ -325`) to search-config **v2** (`recordType: engine`, one inert loopback engine) | `91052d7` two hunks: removes the `throw new Error("Could not find any engines")` (`@@ -245`) and edits the same stub hunk (`@@ -327`) | **partly convergent -- union**: upstream's stub hunk replaces the fork's; the fork's `@@ -245` throw-removal hunk is a different location, keep it (redundant once the stub carries one engine, but harmless; `make dir` gates it) |
-| `pythonlib/camoufox/addons.py` | `6b8b086` re-download on missing manifest | `de7e6e8` Python-layer bug batch | **convergent-ish** -- take upstream, keep any fork-only fix the tests pin |
-| `pythonlib/camoufox/fingerprints.py` | `fff2c73` appVersion from UA, `d6a806e` WebGL/screen coherence | `68661c8` drop `__camoufoxMissingSetters`, `3a22577`/`e0a57b5` availTop/pinned screen | **not convergent -- keep both** |
-| `pythonlib/camoufox/utils.py` | `0e1f9a8` call site `get_screen_cons(headless) if has_display(env) else None`; `a80abb4` touchscreen; `8cb7914` PW floor warn; `fc3392e` bundle from executable_path | fork policy (PR #47): `get_screen_cons(_should_constrain_to_host_display(headless, env, virtual_display))`; `8f36f9b` one browser per OS (#45) | **semantic -- fork policy wins at the call site**, upstream mechanism elsewhere (Task 3) |
-| `pythonlib/tests/test_addons.py` | `6b8b086` | `de7e6e8` | add/add -- **union of tests**; both must pass |
+| `patches/media-codec-spoofing.patch` | `03ac03c` + `17fe73a`: `media:spoof_codecs` gate, FF152 include order | `36bc3c0`/`00de9ca`/`abce3fe`/`452c96b`: per-OS codec + `mediaCapabilities` matrix, non-EME gate, `LOCAL_INCLUDES` | **semantic add/add -- hand-merge** (Task 5) |
+| `patches/no-search-engines.patch` | `e459dc5` rewrites the stub hunk (`@@ -325`) to search-config **v2** (`recordType: engine`, one inert loopback engine) | `b5b8882` two hunks: removes the `throw new Error("Could not find any engines")` (`@@ -245`) and edits the same stub hunk (`@@ -327`) | **partly convergent -- union**: upstream's stub hunk replaces the fork's; the fork's `@@ -245` throw-removal hunk is a different location, keep it (redundant once the stub carries one engine, but harmless; `make dir` gates it) |
+| `pythonlib/camoufox/addons.py` | `6b8b086` re-download on missing manifest | `ae914cc` Python-layer bug batch | **convergent-ish** -- take upstream, keep any fork-only fix the tests pin |
+| `pythonlib/camoufox/fingerprints.py` | `fff2c73` appVersion from UA, `d6a806e` WebGL/screen coherence | `ff27ebe` drop `__camoufoxMissingSetters`, `3ca553f`/`afd8cd2` availTop/pinned screen | **not convergent -- keep both** |
+| `pythonlib/camoufox/utils.py` | `0e1f9a8` call site `get_screen_cons(headless) if has_display(env) else None`; `a80abb4` touchscreen; `8cb7914` PW floor warn; `fc3392e` bundle from executable_path | fork policy (PR #47): `get_screen_cons(_should_constrain_to_host_display(headless, env, virtual_display))`; `2e7b92b` one browser per OS (#45) | **semantic -- fork policy wins at the call site**, upstream mechanism elsewhere (Task 3) |
+| `pythonlib/tests/test_addons.py` | `6b8b086` | `ae914cc` | add/add -- **union of tests**; both must pass |
 
 Auto-merged but semantically live (merge will NOT flag these):
 
-- `patches/anti-font-fingerprinting.patch` -- both sides touched; upstream +67. Fork's `6e9c0e7` removed 17 lines here for #57. Re-read after Task 4 decision.
-- `settings/camoucfg.jvv` -- upstream adds `media:spoof_codecs`, `disableWorldIsolation`; fork renamed `*voiceURI` -> `*voiceUri` (`a49ba82`, #72). Upstream jvv still says `*voiceURI` (line 292) -- confirm the fork's rename survives the auto-merge and that upstream's `voice-spoofing.patch` (+17) does not read the old key.
-- `settings/properties.json` -- goapi `drift_test.go` compares it against `config.go`. New upstream keys without a goapi field turn the gate red (precedent `9440a6f`, `100b39a`).
+- `patches/anti-font-fingerprinting.patch` -- both sides touched; upstream +67. Fork's `034a2d3` removed 17 lines here for #57. Re-read after Task 4 decision.
+- `settings/camoucfg.jvv` -- upstream adds `media:spoof_codecs`, `disableWorldIsolation`; fork renamed `*voiceURI` -> `*voiceUri` (`6275b9a`, #72). Upstream jvv still says `*voiceURI` (line 292) -- confirm the fork's rename survives the auto-merge and that upstream's `voice-spoofing.patch` (+17) does not read the old key.
+- `settings/properties.json` -- goapi `drift_test.go` compares it against `config.go`. New upstream keys without a goapi field turn the gate red (precedent `a0ac8b3`, `5d3a720`).
 - `pythonlib/camoufox/utils.py:773` docstring already says beta.29 restored world isolation and `mw:` works with `main_world_eval=True`; upstream's `disableWorldIsolation` is new. Memory file `ff152-vestigial-configs.md` is stale on this point -- do not "restore" anything from it.
 - `.bak` files: upstream `92d79a8` deletes `patches/ghostery/Disable-Onboarding-Messages.patch.bak`, `patches/librewolf/urlbarprovider-interventions.patch.bak`; fork still has them. Merge deletes them; fine.
 - `check_hunks.py` cited in PR #47 is **not tracked** in the repo (`git ls-files | grep check_hunks` -> 0). Do not cite it; Task 6 replaces it with the real gate.
@@ -71,7 +71,7 @@ Follow-ups this sync may obsolete (check, do not act here): `fix/pin-rust-toolch
 ```bash
 gh issue create -R lang315/camoufox \
   --title "Sync fork with upstream daijro/camoufox (beta.29 -> beta.31)" \
-  --body "Upstream is at eb5dc3b (v152.0.4-beta.31, pythonlib 0.5.6); fork main is at 55b4195 (beta.29, pythonlib 0.5.5). 50 upstream commits, 10 conflicting files. Plan: docs/superpowers/plans/2026-09-07-sync-upstream-beta31.md"
+  --body "Upstream is at eb5dc3b (v152.0.4-beta.31, pythonlib 0.5.6); fork main is at e423c1a (beta.29, pythonlib 0.5.5). 50 upstream commits, 10 conflicting files. Plan: docs/superpowers/plans/2026-09-07-sync-upstream-beta31.md"
 ```
 Expected: prints the new issue URL. Record the number as `ISSUE`. (Opened: #85.)
 
@@ -81,7 +81,7 @@ Expected: prints the new issue URL. Record the number as `ISSUE`. (Opened: #85.)
 git -C /Users/lang/GolandProjects/github.com/lang315/camoufox fetch upstream origin
 git -C /Users/lang/GolandProjects/github.com/lang315/camoufox worktree add .claude/worktrees/sync-upstream-beta31 -b sync/upstream-beta31 main
 cd /Users/lang/GolandProjects/github.com/lang315/camoufox/.claude/worktrees/sync-upstream-beta31
-git log --oneline -1            # expect 55b4195
+git log --oneline -1            # expect e423c1a
 git status --short              # expect empty
 ```
 Note: `build-tester/.venv` is untracked, so the worktree has none; `build-tester/run_tests.sh` creates one on first run, and Task 7 creates one for pytest.
@@ -125,7 +125,7 @@ Expected: `playwright==1.55.0` and `marionette_driver` present. `git add build-t
 
 - [ ] **Step 3: `patches/no-search-engines.patch` -- union of hunks**
 
-Two Firefox-side hunks are in play. Upstream `e459dc5` rewrites the stub hunk (`@@ -325,12 +325,65 @@ export class SearchEngineSelector`) to the search-config v2 shape the Rust selector deserializes (`recordType`, one inert engine whose URL is loopback); the fork's `91052d7` version of that same stub hunk is v1 and is superseded. The fork's other hunk (`@@ -245,12 +245,8 @@`, removes the `throw new Error("Could not find any engines in the filtered configuration")`) is a different location and does not exist upstream; keep it.
+Two Firefox-side hunks are in play. Upstream `e459dc5` rewrites the stub hunk (`@@ -325,12 +325,65 @@ export class SearchEngineSelector`) to the search-config v2 shape the Rust selector deserializes (`recordType`, one inert engine whose URL is loopback); the fork's `b5b8882` version of that same stub hunk is v1 and is superseded. The fork's other hunk (`@@ -245,12 +245,8 @@`, removes the `throw new Error("Could not find any engines in the filtered configuration")`) is a different location and does not exist upstream; keep it.
 
 ```bash
 git diff dbd511b main -- patches/no-search-engines.patch | grep -E '^\+@@'            # fork: -245 and -327 hunks
@@ -161,7 +161,7 @@ Expected: all pass. `git add pythonlib/camoufox/addons.py`.
 
 - [ ] **Step 6: `pythonlib/camoufox/fingerprints.py` -- keep both**
 
-Upstream adds appVersion-from-UA (`fff2c73`) and WebGL/screen coherence (`d6a806e`); fork removed `__camoufoxMissingSetters` (`68661c8`) and keeps browserforge `availTop` (`3a22577`). These touch different functions. Keep both; do **not** reintroduce `__camoufoxMissingSetters` (it reported false positives, #58).
+Upstream adds appVersion-from-UA (`fff2c73`) and WebGL/screen coherence (`d6a806e`); fork removed `__camoufoxMissingSetters` (`ff27ebe`) and keeps browserforge `availTop` (`3ca553f`). These touch different functions. Keep both; do **not** reintroduce `__camoufoxMissingSetters` (it reported false positives, #58).
 
 ```bash
 grep -n '__camoufoxMissingSetters' pythonlib/camoufox/fingerprints.py   # expect no output
@@ -210,7 +210,7 @@ Upstream's fix corrects *its own* inverted guard; the fork never had that bug be
 
 - [ ] **Step 2: Take upstream's additive pieces**
 
-Keep from upstream: touchscreen digitizer plumbing (`a80abb4`), PW-floor warning (`8cb7914`), bundle-from-`executable_path` (`fc3392e`), `NotWritableError`/`ProfileDirectoryError` both (already merged in #47). Keep from fork: one-browser-per-OS (`8f36f9b`, #45).
+Keep from upstream: touchscreen digitizer plumbing (`a80abb4`), PW-floor warning (`8cb7914`), bundle-from-`executable_path` (`fc3392e`), `NotWritableError`/`ProfileDirectoryError` both (already merged in #47). Keep from fork: one-browser-per-OS (`2e7b92b`, #45).
 
 - [ ] **Step 3: Verify**
 
@@ -231,7 +231,7 @@ git add pythonlib/camoufox/utils.py pythonlib/tests
 
 **Files:**
 - Modify: `additions/juggler/content/FrameTree.js`
-- Possibly modify: `patches/navigator-spoofing.patch`, `patches/screen-spoofing.patch`, `patches/playwright/0-playwright.patch`, `patches/anti-font-fingerprinting.patch` (the four `6e9c0e7` hunks that add `disableSpoofSetters`)
+- Possibly modify: `patches/navigator-spoofing.patch`, `patches/screen-spoofing.patch`, `patches/playwright/0-playwright.patch`, `patches/anti-font-fingerprinting.patch` (the four `034a2d3` hunks that add `disableSpoofSetters`)
 
 **Default decision:** take upstream's C++ seal (`window-setter-seal.patch`: window is created sealed; `camouUnsealFingerprintSetters(innerWindowId)` opens it only for init scripts). It closes the same tell as #57 at the C++ level -- the repo's stated design principle -- and covers the about:blank / pre-navigation case the fork's JS guard had to special-case.
 
@@ -248,7 +248,7 @@ git add additions/juggler/content/FrameTree.js
 
 - [ ] **Step 2: The fork's `disableSpoofSetters` C++ hunks -- leave in place ONLY if `make dir` accepts them**
 
-With no JS caller they are dead but harmless *in the patch files*. They are not harmless at the Firefox level: `6e9c0e7` edited the bodies of the Camoufox-created `dom/base/*Manager.cpp` files (the `@@ -0,0 +1,N @@` new-file hunks in `anti-font-fingerprinting`, `navigator-spoofing`, `screen-spoofing`) to consult a disabled flag inside `Is*FunctionEnabledForWebIDL`, and upstream's `window-setter-seal.patch` patches those same functions as *existing* files (`FontListManager.cpp @@ -72`, `NavigatorManager.cpp @@ -31/-43/-55/-67`, `ScreenDimensionManager.cpp @@ -30/-38`, plus Audio/FontSpacingSeed/SpeechVoices/Timezone/WebGLParams/WebRTCIP) expecting upstream's line numbers and context. If the fork's edits shifted those lines, the seal patch rejects in Task 6. The contingency is in Task 6 Step 3; do nothing more here.
+With no JS caller they are dead but harmless *in the patch files*. They are not harmless at the Firefox level: `034a2d3` edited the bodies of the Camoufox-created `dom/base/*Manager.cpp` files (the `@@ -0,0 +1,N @@` new-file hunks in `anti-font-fingerprinting`, `navigator-spoofing`, `screen-spoofing`) to consult a disabled flag inside `Is*FunctionEnabledForWebIDL`, and upstream's `window-setter-seal.patch` patches those same functions as *existing* files (`FontListManager.cpp @@ -72`, `NavigatorManager.cpp @@ -31/-43/-55/-67`, `ScreenDimensionManager.cpp @@ -30/-38`, plus Audio/FontSpacingSeed/SpeechVoices/Timezone/WebGLParams/WebRTCIP) expecting upstream's line numbers and context. If the fork's edits shifted those lines, the seal patch rejects in Task 6. The contingency is in Task 6 Step 3; do nothing more here.
 
 - [ ] **Step 3: The arbiter is the smoke step, not this reasoning**
 
@@ -361,14 +361,14 @@ Expected: `_READY` exists; `find ... -name '*.rej'` prints nothing; `grep -c 'FA
 
 The log names the patch and hunk. Fix it in the patch file (balance context; `patch -p1 --forward -l --binary --dry-run < patches/<name>.patch` from inside `camoufox-*/` against a `make revert`ed tree), then `make revert && python3 scripts/patch.py` (or `make dir` again). Commit each patch fix separately: `fix(patches): <name> -- <what moved>`.
 
-**Expected reject (Task 4 collision):** `window-setter-seal.patch` on one or more of `dom/base/{FontListManager,NavigatorManager,ScreenDimensionManager,...}.cpp` at `Is*FunctionEnabledForWebIDL`. Cause: the fork's `6e9c0e7` disabled-flag lines in those function bodies (now dead -- Task 4 dropped their only caller). Fix **now, in this PR, not as a follow-up**: remove the `6e9c0e7` additions from the new-file hunks in `patches/anti-font-fingerprinting.patch`, `patches/navigator-spoofing.patch`, `patches/screen-spoofing.patch` so the Manager bodies match what the seal hunks expect; recount those `@@ -0,0 +1,N @@` headers; re-run `/tmp/check_hunks.py`; re-run `make dir`. Keep the `nsDocShell::DisableSpoofSetters` / `nsIDocShell.idl` hunks in `0-playwright.patch` only if they still apply cleanly (they are additive); otherwise drop them too. Whatever is removed goes in the PR body under "#57: mechanism replaced by upstream seal".
+**Expected reject (Task 4 collision):** `window-setter-seal.patch` on one or more of `dom/base/{FontListManager,NavigatorManager,ScreenDimensionManager,...}.cpp` at `Is*FunctionEnabledForWebIDL`. Cause: the fork's `034a2d3` disabled-flag lines in those function bodies (now dead -- Task 4 dropped their only caller). Fix **now, in this PR, not as a follow-up**: remove the `034a2d3` additions from the new-file hunks in `patches/anti-font-fingerprinting.patch`, `patches/navigator-spoofing.patch`, `patches/screen-spoofing.patch` so the Manager bodies match what the seal hunks expect; recount those `@@ -0,0 +1,N @@` headers; re-run `/tmp/check_hunks.py`; re-run `make dir`. Keep the `nsDocShell::DisableSpoofSetters` / `nsIDocShell.idl` hunks in `0-playwright.patch` only if they still apply cleanly (they are additive); otherwise drop them too. Whatever is removed goes in the PR body under "#57: mechanism replaced by upstream seal".
 
 - [ ] **Step 4: Confirm the voice key survives**
 
 ```bash
 grep -rn 'voiceUri\|voiceURI' settings/camoucfg.jvv settings/properties.json patches/voice-spoofing.patch camoufox-*/dom/media/webspeech/synth/ 2>/dev/null | head
 ```
-Expected: schema says `*voiceUri` (fork `a49ba82`, #72); no `voiceURI` reader in the applied source. If upstream's `voice-spoofing.patch` reintroduced `voiceURI`, align the patch to `voiceUri` and note it.
+Expected: schema says `*voiceUri` (fork `6275b9a`, #72); no `voiceURI` reader in the applied source. If upstream's `voice-spoofing.patch` reintroduced `voiceURI`, align the patch to `voiceUri` and note it.
 
 ---
 
@@ -386,7 +386,7 @@ Expected: schema says `*voiceUri` (fork `a49ba82`, #72); no `voiceURI` reader in
 ```bash
 cd goapi && go test ./pkg/config/ -run TestProducerSchemaDrift 2>&1 | tail -15; cd ..
 ```
-Expected: FAIL naming `media:spoof_codecs` and `disableWorldIsolation` as schema keys with no producer field (precedent: `9440a6f`, `100b39a`). If it passes already, upstream keys were absorbed via `Extra` -- still add named fields so the API can set them.
+Expected: FAIL naming `media:spoof_codecs` and `disableWorldIsolation` as schema keys with no producer field (precedent: `a0ac8b3`, `5d3a720`). If it passes already, upstream keys were absorbed via `Extra` -- still add named fields so the API can set them.
 
 - [ ] **Step 2: Register the fields**
 

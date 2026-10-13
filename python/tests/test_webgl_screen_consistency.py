@@ -250,7 +250,7 @@ def test_preset_screens_are_never_lifted():
                 and screen["width"] >= 1024
                 and screen["width"] >= screen["height"]
                 # Recorded at dpr~1: a scaled display's CSS size is not a real 1x
-                # screen, and a headless launch swaps it (8c0f03c).
+                # screen, and a headless launch swaps it (306e66b).
                 and abs((screen.get("devicePixelRatio") or 1) - 1) < 0.02
             ):
                 yield node

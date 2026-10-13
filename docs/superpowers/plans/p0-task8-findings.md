@@ -64,7 +64,7 @@ green. The reverted patch is unchanged on the branch.
 
 ## DONE (2026-07-09) — all three defects fixed; make-dir-faithful rehearsal green
 
-Resolved with the post-prereq reconstruction technique proven on canvas Task 7 (commit 55f85bf):
+Resolved with the post-prereq reconstruction technique proven on canvas Task 7 (commit f467f0e):
 generate/anchor against the tree `make dir` actually presents to webrtc2 — vanilla FF152 with the
 earlier patches applied, incl. `webrtc-ip-spoofing.patch` (webrtc1), which CREATES
 `dom/base/WebRTCIPManager.{h,cpp}` and ADDS `isSpecialIP`/`getMaskForIP` to `PeerConnectionImpl.cpp`.

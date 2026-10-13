@@ -25,7 +25,7 @@
 - Modify: `pythonlib/camoufox/utils.py:297` (the warning string, verified present at branch HEAD)
 - Modify: `pythonlib/tests/test_context_os_coherence.py:48,71` (two tests asserting that string)
 
-Branch: `fix/context-os-coherence`, HEAD `76ab1ac`. The commits that introduced the warning are `d28786b` and `c3b7fc0`.
+Branch: `fix/context-os-coherence`, HEAD `b7e1e2b`. The commits that introduced the warning are `e0e0ccb` and `c7cf157`.
 
 **Why this is first:** the branch carries a shipped user-facing warning saying fonts "have no per-context override, so this context will report the ...". The halted execution ledger records that as disproven: `setFontList` exists at `pythonlib/camoufox/fingerprints.py:822` and is provided by `patches/font-list-spoofing.patch`, a fork patch. Two tests assert the false string, so they must change with it. This is the one change here that needs no new measurement.
 
@@ -45,7 +45,7 @@ If it is absent, a later commit already fixed it — stop and skip to Task 2.
 
 The warning's *mechanism* claim is false. Its *symptom* (a context whose OS differs from the launch OS can be incoherent) is unverified until Task 2. Therefore remove the warning entirely rather than reword it — a reworded warning would assert a symptom that has not been measured.
 
-Do NOT use `git revert` on `d28786b`/`c3b7fc0`: `76ab1ac` and `9c70c11` land on top of the same lines and the revert will conflict. Edit the current state directly:
+Do NOT use `git revert` on `e0e0ccb`/`c7cf157`: `b7e1e2b` and `a554407` land on top of the same lines and the revert will conflict. Edit the current state directly:
 
 1. In `pythonlib/camoufox/utils.py`, delete the `warnings.warn(...)` call containing that string, and any now-unused local built solely to construct it.
 2. In `pythonlib/tests/test_context_os_coherence.py`, delete the two tests whose `pytest.warns(RuntimeWarning, match="no per-context override")` blocks assert it (lines 48 and 71). They assert a false claim; they are not evidence of anything.

@@ -18,7 +18,7 @@ can differ with no change to the browser. It is kept only because the previous
 artifact carried it under the misleading name `surfaces_touched`.
 
 The pre-#114 artifact (beta.28, facebook.com only) is preserved in git at blob
-4338898, commit 7506bde. It is NOT a baseline for comparison: the binary that
+4338898, commit 19e2da1. It is NOT a baseline for comparison: the binary that
 produced it no longer exists, it ran unspoofed at n=1 against a live server, and
 its integers are drain-window artifacts. Treat it as carried-over, not measured.
 """

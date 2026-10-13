@@ -54,8 +54,8 @@ SCREEN_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_SIZE"
 # A 4 Hz black/white page confirmed each non-empty cell holds real frames (mean
 # luma swinging ~16-235), and Composite on crashed in neither version.
 #
-# History, so the next reader does not flip this again: efb0a09 turned it on for
-# exactly this failure; e25a16b turned it off after a probe that ran Playwright
+# History, so the next reader does not flip this again: 2bb5383 turned it on for
+# exactly this failure; cd6b4c0 turned it off after a probe that ran Playwright
 # 1.62 -- the path that never needed it -- and read the result as a browser fix.
 # Escape hatch: CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=0 disables it.
 COMPOSITE_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE"

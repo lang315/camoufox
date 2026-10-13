@@ -1392,7 +1392,7 @@ def launch_options(
             raise_screen_to_modern_floor(config)
         # Headless has no display, so Firefox reports dpr=1 whatever dpr the
         # preset's screen was recorded for. Swap in a screen real devices report
-        # AT dpr=1 (8c0f03c). Before the clamps below, which only shrink.
+        # AT dpr=1 (306e66b). Before the clamps below, which only shrink.
         if headless and screen is None:
             resample_screen_for_dpr1(
                 config, target_os, _source_dpr, ff_version_str,

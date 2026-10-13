@@ -22,7 +22,7 @@ would reference undefined symbols → **compile failure**. The build compiled an
 therefore those hunks did **not** apply — they were silently skipped. Same reasoning applies to the
 pre-fix `webrtc-ip-spoofing2.patch` `WebRTCIPManager` hunks (targeted the nonexistent
 `dom/media/webrtc/jsapi/` path → skipped → the local-IP spoof never landed; this is the B1 bug,
-fixed in commit fdb060e).
+fixed in commit 03ed946).
 
 **Net:** the last shipped binary is "green" but its canvas perturbation and webrtc2 local-IP
 replacement never ran. This is exactly the silent-inert failure P0 exists to eliminate, and it
@@ -42,7 +42,7 @@ report `canvasPerturbation.passed=true` + `webrtcLinkLocal.passed=true`.
 ## Runtime validation (2026-07-09) — real macOS-arm64 binary
 
 Ran `build-tester` (8 profiles) against `CamoufoxBuilds-macos-arm64` (run 28953374857,
-HEAD 084d0cb). Overall grade A, 1041/1064. New-collector results:
+HEAD 55c76c9). Overall grade A, 1041/1064. New-collector results:
 
 - **canvasPerturbation: passed=false on ALL 8 profiles** — `seedPresent=true` but every surface
   (getImageData/toDataURL/offscreenBlob/webgl) `perturbed=false, deterministic=true`. The canvas

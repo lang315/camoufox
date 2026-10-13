@@ -1,6 +1,6 @@
 # Fix plan: macOS-arm64 CI build
 
-## Latest failure (run 25784512151, sha 03a5aa1b)
+## Latest failure (run 25784512151, sha ae9123cc)
 
 Step: `Build` (compile leg, 66min into mach build).
 

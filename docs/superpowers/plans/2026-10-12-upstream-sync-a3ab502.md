@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Merge upstream `daijro/camoufox` `a3ab502` into fork `main` (`644ee9d`), keeping every fork feature that still applies on upstream's new `browser/` + `python/` + `typescript/` layout. Upstream's patch stack has been refactored (shared cross-process storage, per-principal context ids, one setter seal), and the fork's patches must be re-ported onto it with zero rejects and the fork's guards still passing.
+**Goal:** Merge upstream `daijro/camoufox` `a3ab502` into fork `main` (`cd06626`), keeping every fork feature that still applies on upstream's new `browser/` + `python/` + `typescript/` layout. Upstream's patch stack has been refactored (shared cross-process storage, per-principal context ids, one setter seal), and the fork's patches must be re-ported onto it with zero rejects and the fork's guards still passing.
 
 **Architecture:** One merge commit (`-X find-renames=30%`) takes the layout move and resolves every conflict textually. For each conflicted patch it takes the side whose delta is larger. The other side's delta is then re-derived on a Firefox 156.0.1 tree, one patch per commit, in `list_patches` order (basename sort), and each patch is regenerated from that tree. Path fixes, launchers, CI and docs follow as separate commits. Then come a GNU-patch run of the full stack, local gates, a Linux build, patch guards, build-tester, Tests, smoke, and a PR merged as a merge commit.
 
@@ -51,7 +51,7 @@
 ```bash
 WT=/Users/lang/GolandProjects/github.com/lang315/camoufox/.claude/worktrees/sync-upstream-a3ab502
 SRC=$WT/camoufox-156.0.1-beta.32   # pristine FF156, git tag `unpatched`; gitignored
-MB=2f30fea; FORK=644ee9d; UP=a3ab502
+MB=2f30fea; FORK=cd06626; UP=a3ab502
 ```
 
 `$SRC` was built from `https://archive.mozilla.org/pub/firefox/releases/156.0.1/source/firefox-156.0.1.source.tar.xz`. It was extracted, then `git init && git add -A && git commit -m unpatched && git tag unpatched`.
@@ -185,7 +185,7 @@ Each step below is: build the tree at that patch's position, prove the baseline,
 ### Task 5: Patch re-ports, `cross-process-storage` through `font-list-spoofing` (fonts)
 
 - [ ] **`cross-process-storage.patch`** (upstream):
-  - Make `RoverfoxStorageManager::EnsureMirror()` public, and call it from `ContentChild::InitXPCOM` (fork 13dc7c4), so a worker's first lookup sees the mirror.
+  - Make `RoverfoxStorageManager::EnsureMirror()` public, and call it from `ContentChild::InitXPCOM` (fork 03223c0), so a worker's first lookup sees the mirror.
   - Add the F1 flush: in the storage-pref callback, after the cache mutex is released and the new key starts with `fontlist_`, call `gfxPlatformFontList::PlatformFontList()->ClearCodepointsWithNoFonts()` and `ClearFontNameCaches()`, and drop the per-process parsed copy of that context's list.
   - Measure whether the callback fires in a second content process before that process's first lookup. Log a `CAMOU-FL flush` line and read it on a two-process run (see the FF156 per-container pools note). If it does not fire first, use the hybrid per-process flag instead, and record which one shipped in the commit body.
 - [ ] **`css-media-spoofing.patch`**: confirm it applies unchanged.

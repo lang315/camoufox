@@ -29,7 +29,7 @@ across the fork's git history (W0).
 
 Three read-only surveys produced these findings. The load-bearing claims were
 re-read by hand, and those are marked (verified). Line numbers are on `main`
-at c6e0ae9 and the beta.31 tree. Re-read each one before editing (CLAUDE.md
+at 57ef9c7 and the beta.31 tree. Re-read each one before editing (CLAUDE.md
 lesson 6).
 
 | # | Cause | Where |
@@ -67,7 +67,7 @@ share the ~40-95 min loop. W4 is measurement that feeds W5.
 
 Scope of those numbers:
 - **Commits:** 561 commits carry one of the first three identities, from
-  e1b227c (2026-05-12) to 53b88db.
+  617474b (2026-05-12) to 53b88db.
 - **Tracked files and commit messages:** no tracked file and no commit message
   contains the name or the email.
 - **Signatures:** 95 of those commits are signed (mostly GitHub web merges).
@@ -84,9 +84,9 @@ nor the address, for the same reason.
 **What a rewrite changes, stated up front, because it is irreversible once
 pushed:**
 
-- **Every commit from e1b227c onward gets a new sha**, on every branch and both
+- **Every commit from 617474b onward gets a new sha**, on every branch and both
   fork tags (including `v152.0.4-beta.31-fork.1`, which the e2e suite fetches
-  releases by). Upstream `daijro` history before e1b227c is untouched, so its
+  releases by). Upstream `daijro` history before 617474b is untouched, so its
   shas and the merge-base with upstream stay the same.
 - **About 105 sha references in 32 tracked files will point at commits that no
   longer exist on any branch.** These are in CLAUDE.md, `docs/fonts-gating.md`,
@@ -341,7 +341,7 @@ any code.
 
 #### W5.165: the first content process's fallback runs before its cmaps load
 
-**Measured** (local macOS arm64; binary from build 38327033839 = 88087b6;
+**Measured** (local macOS arm64; binary from build 38327033839 = cd3404b;
 package launcher, `os="windows"`, headless; 16px Arial canvas `measureText`):
 
 | first context of a launch, t (s) | U+1F603 | U+2603 | U+4E2D | U+50000 (unassigned) |
@@ -415,8 +415,8 @@ cost: a lookup during the load window rescans, which stock does not do.
 Branch fix/165-fallback, stacked on W1.
 
 Option A was the recommendation. Linux-host numbers are still to come. The binary
-carries a26b419 (W1's generic-table change). The same probe is re-run on
-main 84e5fe1's macOS build before this is posted as a finding about main.
+carries 2acd6f3 (W1's generic-table change). The same probe is re-run on
+main 4bf137d's macOS build before this is posted as a finding about main.
 
 ## Order
 

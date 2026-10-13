@@ -1,6 +1,6 @@
 # Fonts round 3 — design
 
-Branch `fix/fonts-round3` off `main` @ `c8c42ef` (PR #93 merged). One PR, one commit per issue.
+Branch `fix/fonts-round3` off `main` @ `0bdc648` (PR #93 merged). One PR, one commit per issue.
 Issues: #82, #87, #88, #90, #91, #92, and #94 (filed from this round's recon).
 Recon: `.superpowers/sdd-fonts3/recon.md` (git-ignored; its verdicts are restated here where they bind).
 
@@ -61,14 +61,14 @@ Recon: `.superpowers/sdd-fonts3/recon.md` (git-ignored; its verdicts are restate
 
 ## B. Guard (`.github/workflows/smoke.yml`)
 
-Phase 0 is workflow-only and runs against Linux build `34432908522` (@`163ee25`, identical patches to `main`) and the PR #84 artifact `34236331658` (@`8990915`, pre-#93). Phase 1 runs against the round-3 build.
+Phase 0 is workflow-only and runs against Linux build `34432908522` (@`e1550c5`, identical patches to `main`) and the PR #84 artifact `34236331658` (@`8990915`, pre-#93). Phase 1 runs against the round-3 build.
 
 ### B0. Launch and triage
 - Every launch sets `FONTCONFIG_FILE` to a `fonts.conf` generated the way `pythonlib/camoufox/utils.py:_generate_fontconfig` (`:58-92`) does it: copy `bundle/fontconfig/linux/fonts.conf` from the extracted artifact with `<dir prefix="cwd">fonts</dir>` replaced by the **absolute** `fonts/` path (cwd is irrelevant after that), `XDG_CACHE_HOME` pointing at a writable dir for `<cachedir prefix="xdg">`. The smoke pins the **Linux** conf (`bundle/fontconfig/linux/fonts.conf`; the artifact carries all three OS confs and `find | head -1` is not a choice) and asserts its text names `Tinos`, `Arimo` and `Cousine`. Consequence stated up front: that file aliases `serif`/`sans-serif`/`monospace` to `Tinos`/`Arimo`/`Cousine`, all refused under a mac or win per-context list, so every generic under such a list is decided by A2, not by fontconfig. What the guard cannot see (lesson 3): `pythonlib/camoufox/utils.py:215-238` selects the conf by the **spoofed** OS, so a shipped mac-fingerprinted session runs with the macOS conf (`Helvetica`/`Times`/`Menlo` — all allowed under a mac list) and fontconfig answers its generics itself; B2's RED is partly an artifact of the Linux conf, and A2 is what answers when the conf's aliases are refused. Written into the PR's NOT-verified list.
 - Phase 0 run 1 re-baselines every existing numeric expectation and settles the recon's open questions as named outputs: which exit answered U+FFFD in the mac context (now readable from `fontlist` + `pref-fallback` + `sys-fallback` lines once A1 lands; on the current binary, from width vs the named candidates), whether any `fffd-cache` line appears at all, and whether the fontconfig `monospace` face on the runner carries U+FFFD. Run 2 adds the new arms.
 - **Launch column.** Each arm below names its `CAMOU_CONFIG`. `{}` = bare launch, only the per-context list gates; `{"fonts": FONTS["win"]}` = the launch mask is asked first at every gate site, so mac fixtures render nothing from their lists there. New mac-fixture arms (B1, B2, B4) launch `{}`; B3 joins arm (h)'s existing `{}` launch (`smoke.yml:2175-2179`); B5 `{}`; B7 `{}`; B8 runs bare and masked by design.
 - Fix the triage routing: an arm whose setup is invalid must report `SETUP-INVALID` (fails the step), never fall into `KNOWN_UNMEASURABLE`. `KNOWN_UNMEASURABLE` is reserved for arms whose entry in that table names the run that established the structural reason.
-- Run ids are read back from `gh run list` before they go into any commit or PR text (lesson 6). Verified for this spec: `git diff 163ee25..c8c42ef -- patches additions settings bundle` is empty, `git diff 8990915..f1b60a6 -- patches additions settings bundle` is empty.
+- Run ids are read back from `gh run list` before they go into any commit or PR text (lesson 6). Verified for this spec: `git diff e1550c5..0bdc648 -- patches additions settings bundle` is empty, `git diff 8990915..d57b511 -- patches additions settings bundle` is empty.
 - New log kinds `pref-fallback` and `generic-map` join the per-kind counter table.
 
 ### B1. #94 arm — RED-first (launch `{}`)
@@ -93,7 +93,7 @@ If B4 on the #84 artifact reports "answered before the cache", a diagnostic comm
 The smoke has no HTTP server today (every navigation is `data:`, an opaque origin from which an `http://` font `url()` is a CORS-blocked cross-origin fetch — both faces would read `error` for the wrong reason). The arm starts a `http.server` thread on `127.0.0.1` serving the page, a 404 path and a real control font file (a bundled face whose metrics differ from the fallback), and navigates to `http://127.0.0.1:<port>/…`. CSS `@font-face` with an allowed family name and `src: url(<404>)`, plus the control face. Score each face from its own `.loaded` promise (`.then`/`.catch`) or by polling until `status !== 'loading'` — `document.fonts.ready` alone does not guarantee a face left `loading`. RED today: 404 face reports `loaded`. GREEN: 404 face `error`, control face `loaded` and its width differs from the fallback (control).
 
 ### B8. #87 arms (native Windows, `build-tester/scripts/probe_windows_fonts.py`; bare and masked launches by design)
-The existing family-name arms (`choose_host_family`, host-only survey, in-list control, bundled-unlisted) run unchanged in the same session against the same two binaries — #87's ask is both halves. Add the codepoint arm: scan the host's cmaps with fontTools, pick a codepoint whose covering host families are all off the launch list and none bundled; tofu floor = a PUA codepoint in the same stack; positive control = a codepoint covered only by an in-list host family renders identically bare vs masked. Run against the Windows baseline build `34450188525` (@`c8c42ef`, pre-fix) — RED there is a #94-shaped finding — and against the round-3 Windows build.
+The existing family-name arms (`choose_host_family`, host-only survey, in-list control, bundled-unlisted) run unchanged in the same session against the same two binaries — #87's ask is both halves. Add the codepoint arm: scan the host's cmaps with fontTools, pick a codepoint whose covering host families are all off the launch list and none bundled; tofu floor = a PUA codepoint in the same stack; positive control = a codepoint covered only by an in-list host family renders identically bare vs masked. Run against the Windows baseline build `34450188525` (@`0bdc648`, pre-fix) — RED there is a #94-shaped finding — and against the round-3 Windows build.
 
 ## C. Evidence and closure
 
@@ -112,8 +112,8 @@ The existing family-name arms (`choose_host_family`, host-only survey, in-list c
 
 ## Outcome
 
-Written after the work landed, against `fix/fonts-round3` at `df0bdad`, the last
-commit of the measurement work and the 37th above `main` at `c8c42ef`. The
+Written after the work landed, against `fix/fonts-round3` at `e582237`, the last
+commit of the measurement work and the 37th above `main` at `0bdc648`. The
 commit carrying this section is the one after it. Where this section and the
 design above disagree, this section is what happened.
 

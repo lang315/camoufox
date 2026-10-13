@@ -5,7 +5,7 @@
 built on turned out to be **measurement artifacts, not bugs**: dpr (draft 1-2) was a
 Marionette-bypasses-Juggler artifact; window geometry (this draft, WS2/WS3) was a
 stale-venv artifact — `cloverlabs-camoufox` shadowed the editable install and ran
-pre-#647/#666 code (commit `643ea83`). On current pythonlib the coherence audit is
+pre-#647/#666 code (commit `ef8a5a1`). On current pythonlib the coherence audit is
 **12/12 PASS** across all OSes. Net delivered: the audit harness (WS1) + the identity
 hygiene doc (WS4). WS2/WS3 need no code; WS5 was skipped. See the PR for the honest
 end-state. The workstream text below is kept for provenance, not as open work.

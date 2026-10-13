@@ -2143,7 +2143,7 @@ jobs:
               return next((t for t in line.split() if t.startswith("ctx=")), None)
 
           # The two contexts' ids, read from their own `set` lines. R8 (from the
-          # re-review of 98e64ed): camou_fl concatenates each FILE's matches in
+          # re-review of 7579d3c): camou_fl concatenates each FILE's matches in
           # filename order, so "the first line" is time order only while both
           # halves land in one log file. Mac's line is identified by TIME
           # instead -- it is the one in the whole-launch window that is not in
@@ -2190,7 +2190,7 @@ jobs:
           # contexts. Collected, never hard-asserted: an AssertionError here
           # would kill the script before arms (e) through (k) ever run.
           #
-          # R6 (re-review of 98e64ed): the preconditions are in TWO groups and
+          # R6 (re-review of 7579d3c): the preconditions are in TWO groups and
           # they gate different verdicts. `b2_leaked` -- this arm's primary #83
           # signal -- is derived from canvas widths alone and depends on the
           # fontlist log for nothing, so only the WIDTH preconditions may
@@ -2232,7 +2232,7 @@ jobs:
                   f"({b2_pids_before} / {b2_pids_after}), so the re-probe cannot be shown "
                   f"to have run where win's memo entries live.")
           elif (b2_pids_after - b2_pids_before) or not b2_pids_before:
-              # R1 (re-review of 1202d8c): `or not b2_pids_before` is the clause
+              # R1 (re-review of f5eabd5): `or not b2_pids_before` is the clause
               # arms (i2)/(j)/(j2) all carry and this one had dropped.
               # tab_pids() returns an empty SET -- not the "ERR:" string --
               # whenever pgrep succeeds but no line's last field is "tab", and
@@ -2559,7 +2559,7 @@ jobs:
                   # "a reference is only a control if it is guaranteed to differ"
                   # failure of CLAUDE.md lesson 4, on the donor side. Geneva in
                   # particular has been the subject of two regression bisects on
-                  # this repo (ca29ceb, fc07cd4), so this is not hypothetical.
+                  # this repo (5aa21ef, 7ac1f30), so this is not hypothetical.
                   b2r_failures.append(
                       f"arm (b2r) setup invalid: the mac donor resolved "
                       f"{b2r['mac']['res']['measure']} -- it never resolved the macOS-only "
@@ -5343,7 +5343,7 @@ jobs:
           # any product code -- redesigning to use one fresh context per
           # cold sample (each getting exactly one setFontList() call, as
           # designed) is deferred until a fix candidate is settled, since
-          # the previous fix (afebedc) this was measuring is itself
+          # the previous fix (2e4c420) this was measuring is itself
           # superseded -- see the Task 4b report.
           # -----------------------------------------------------------
 
@@ -6443,7 +6443,7 @@ jobs:
               print(f"      {_ln}")
 
           n4_failures = []
-          # Keyed on `fontlist` ALONE, not on fffd-cache. 34432908522 @ 163ee25
+          # Keyed on `fontlist` ALONE, not on fffd-cache. 34432908522 @ e1550c5
           # emits fffd-cache but not fontlist, so an `or` here would be flipped
           # true by one fffd-cache line from arm (j) earlier in the run, take
           # the log branch, find no fontlist lines and report SETUP-INVALID on a
@@ -7179,7 +7179,7 @@ jobs:
                       "line naming an in-list family for it",
               "(n4)": "#82, the U+FFFD cache read is gated (PR #93) and this arm is the "
                       "measurement that gate never had. Its RED control is a separate "
-                      "build: commit c7b1ff1 drops only the refusal on the fffd-cache "
+                      "build: commit 6ea29c3 drops only the refusal on the fffd-cache "
                       "hit branch and keeps the log line, and is reverted on this branch "
                       "(see .superpowers/sdd-fonts3/gate-b4.md)",
               "(n7)": "#91, a non-local face reports the status its load produced",
@@ -7230,7 +7230,7 @@ jobs:
               # absence is the point. Its excuse was the `generic-map` kind not
               # existing: without it the arm could only take the
               # `h3_family is None` + no-generic-map branch, a setup-invalid
-              # that observed nothing. A2 (commit 9d0f3b8) adds that kind, so
+              # that observed nothing. A2 (commit b4c7d5b) adds that kind, so
               # the branch this signature named is unreachable and the arm must
               # now reach shape B -- no `default` line for the refusing context
               # AND a generic-map line naming an in-list family for it -- or
@@ -7395,7 +7395,7 @@ jobs:
         # and was known red (runs 34618162525, 34620762155, 34656256911,
         # 34658431749, 34678025310: five runs, three launch draws, same result).
         #
-        # That behaviour is documented as unsupported. Since 8f36f9b (#45/#73)
+        # That behaviour is documented as unsupported. Since 2e7b92b (#45/#73)
         # pythonlib warns at NewContext time that the launch font list is a
         # process-wide mask a per-context list can only narrow, and tells the
         # caller to launch one browser per OS. So the contract is:

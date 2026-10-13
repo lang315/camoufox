@@ -172,7 +172,7 @@ the value under test, and every time the result looked like a finding:
   lands on `about:blank` first, so a one-shot setter is already consumed by the
   time the probe navigates. That produced, and I published, a false conclusion
   that the entire per-context mechanism had never run.
-- The Composite revert (e25a16b) matched smoke's guard in page, viewport and
+- The Composite revert (cd6b4c0) matched smoke's guard in page, viewport and
   duration, and ran Playwright 1.62 where the guard pins 1.55. Those versions
   take different Juggler recording paths (`Page.startScreencast` against
   `Browser.setVideoRecordingOptions`), so the "same axis" table compared two

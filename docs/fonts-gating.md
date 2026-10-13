@@ -148,7 +148,7 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   the context-first read by probe run 35698448037: a macOS context in a
   Windows launch logs `step=system-ui key=helvetica` on build 35696007399
   against `step=row key=helvetica neue` on build 35586323562
-  (`fix/131-system-ui-step` @ `5b0e698`, browser inputs equal to main's), in the
+  (`fix/131-system-ui-step` @ `b07537f`, browser inputs equal to main's), in the
   whole-bundle search path that preceded per-OS grouping.
   The guard's Windows arm cannot discriminate, since Segoe UI is also the
   sans row's first choice there. The proof is the `CAMOU-FL generic-map ...
@@ -234,7 +234,7 @@ pair.
 ## macOS host (#148)
 
 Measured on a native macOS arm64 host against build run 35799717143 (`main` at
-`b8763a2`, whose compiled inputs equal `6e1a9f8`). The build is the packaged
+`781d9dd`, whose compiled inputs equal `72bad59`). The build is the packaged
 app, so the font universe is the one that ships: the host's fonts plus the
 bundled windows and linux sets. Headless. Probe:
 `browser/tests/build-tester/scripts/probe_macos_font_paths.py`.
@@ -335,7 +335,7 @@ result only through `system-ui`.
 
 Measured on the user's Windows build PC: Windows 10.0.19045, native Python
 3.12.14, Playwright 1.55.0, headless. The build is build.yml run 35968080353,
-of `main` at `6fd3130`. Its `BuildID` is `20260924072039` and its `xul.dll`
+of `main` at `d558cd3`. Its `BuildID` is `20260924072039` and its `xul.dll`
 SHA-256 starts `899ECA649CBA961F`. On Windows the win-list families (Arial,
 Georgia, Comic Sans MS) are the host's own fonts, so these rows go through
 `gfxDWriteFontList` and its shared face-name list, not through a bundle.

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-20
 **Status:** Design — approved direction: **observe + spoof**
-**Related:** built-in Tracking Observer (commit `bf5f076`, PR #18); `docs/observer/README.md`; `docs/superpowers/specs/2026-07-10-tracking-observer-design.md`
+**Related:** built-in Tracking Observer (commit `c3b2c25`, PR #18); `docs/observer/README.md`; `docs/superpowers/specs/2026-07-10-tracking-observer-design.md`
 
 ## Goal
 

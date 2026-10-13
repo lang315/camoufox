@@ -1,6 +1,6 @@
 # Fonts round 2 — design
 
-Closes the font issues left open after PR #84 (`fix/44-fonts-h2`, merged as `f1b60a6`):
+Closes the font issues left open after PR #84 (`fix/44-fonts-h2`, merged as `d57b511`):
 #80 (URL web fonts refused), #82 (U+FFFD fallback cache leaks across contexts), #83
 (per-context list not enforced in the process that renders), plus the measurement work
 for #87 (native Windows) and #88 (the 375.7 face), and the admin left on #81 and #89.
@@ -52,7 +52,7 @@ Copied verbatim into the plan; every task inherits them.
    (`gfx/thebes/gfxPlatformFontList.cpp:1403`) after B's clear already ran, and B reads
    tofu for a codepoint its own list covers. The read-path fix lands with #82 (Phase C).
    #81 stays open until that lands and arm (i) plus the new ordering arm are green.
-2. Close #89: the harness fix (`8f8503e`) is in `main`; the final #84 service-tester run
+2. Close #89: the harness fix (`2124b75`) is in `main`; the final #84 service-tester run
    scored 384/384 on it. Note that every earlier claim citing service-tester on a
    camoufox-152 binary remains unsupported.
 3. File one issue: `SpeechVoicesManager` stores its per-context value in a process-local
@@ -69,7 +69,7 @@ Copied verbatim into the plan; every task inherits them.
 ## Phase B — measure without a rebuild
 
 Branch edits to `.github/workflows/smoke.yml` only. Run against build artifact
-`34236331658` (head `8990915`; the delta to `main` `f1b60a6` is documentation only).
+`34236331658` (head `8990915`; the delta to `main` `d57b511` is documentation only).
 Each arm below keeps the existing arm intact and adds a sibling, so the old and new
 shapes are compared in one log.
 
@@ -303,7 +303,7 @@ refused its own, which is not the allow-everything result H1 predicts. Branch B 
 the `MOZ_LOG` layer branch B installed then located the real mechanism:
 `gfxFcPlatformFontList::mFcSubstituteCache`, a process-global name→family memo consulted
 before the base `FindAndAddFamiliesLocked` where the per-context gate lives, keyed without a
-user context id. #83 was fixed in `163ee25` by appending the context id to that memo's key and
+user context id. #83 was fixed in `e1550c5` by appending the context id to that memo's key and
 to `mGenericMappings`', adding a virtual `ClearFontNameCaches()` and flushing it from
 `FontListManager::SetFontList`.
 
@@ -316,13 +316,13 @@ measure it on this bundle: the default font is DejaVu Sans, which covers U+FFFD,
 `SystemFindFontForChar` is never reached and `mReplacementCharFallbackFamily` is neither read
 nor written. Arms `(j)` and `(j2)` are `KNOWN_UNMEASURABLE` and assert nothing.
 
-**Two things landed that this spec does not contain.** The seed restore `4e868c5`, a one-line
+**Two things landed that this spec does not contain.** The seed restore `4ba10d4`, a one-line
 fix for `ClearCodepointsWithNoFonts()` wiping upstream's seeded ranges on every `setFontList`.
 And, as a consequence of keying `mGenericMappings`, generic families under a per-context list
 now fall to the ungated default face — filed as **#92**, disclosed in the PR body, measured on
 Linux CI only.
 
-**Builds.** Three at `a9376f1` (linux, windows, macos) plus two Linux rebuilds at `4e868c5`
-and `163ee25`. The Linux binary under final test is `163ee25`; the Windows and macOS artifacts
-are still `a9376f1`, so the native-Windows probe for #87 covers the lookup-time allowlist flip
+**Builds.** Three at `3363004` (linux, windows, macos) plus two Linux rebuilds at `4ba10d4`
+and `e1550c5`. The Linux binary under final test is `e1550c5`; the Windows and macOS artifacts
+are still `3363004`, so the native-Windows probe for #87 covers the lookup-time allowlist flip
 and nothing later, and both test suites are evidence about the branch minus those two commits.

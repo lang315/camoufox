@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Merge upstream `daijro/camoufox` `2f30fea` into fork `main` (`c6e0ae9`), porting the fork's patch stack from Firefox 152.0.4 (beta.31) to 156.0.1 (beta.32) so every patch applies with zero rejects and the fork's spoofing guards still pass.
+**Goal:** Merge upstream `daijro/camoufox` `2f30fea` into fork `main` (`57ef9c7`), porting the fork's patch stack from Firefox 152.0.4 (beta.31) to 156.0.1 (beta.32) so every patch applies with zero rejects and the fork's spoofing guards still pass.
 
 **Architecture:** One merge commit takes upstream's version of every conflicted patch file and resolves the non-patch files textually. The fork's deltas are then re-derived on a Firefox 156 tree, one patch per commit, in `scripts/patch.py` order (basename sort), and each patch is regenerated from that tree. Nothing is hand-edited inside a `.patch`. After that come a GNU-patch dry run of the full stack, local gates, a Linux build, patch guards and build-tester, and a PR merged as a merge commit.
 
@@ -30,7 +30,7 @@
 WT=/Users/lang/GolandProjects/github.com/lang315/camoufox/.claude/worktrees/sync+upstream-2f30fea
 SRC=$WT/camoufox-156.0.1-beta.32        # created by Task 2; gitignored
 MB=5e59b70                               # merge-base
-FORK=c6e0ae9                             # fork main before the sync
+FORK=57ef9c7                             # fork main before the sync
 UP=2f30fea                               # upstream main
 mkdir -p $WT/.ci-work/bin && ln -sf /opt/homebrew/bin/gpatch $WT/.ci-work/bin/patch
 export PATH=$WT/.ci-work/bin:$PATH       # GNU patch for scripts/patch.py and make targets

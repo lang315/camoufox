@@ -56,7 +56,7 @@ codepoint at all" is the other half of the reported symptom.
 
 Findings are collected and triaged at the end. Nothing asserts mid-run: an
 assert here would erase every later family's reading, which is the defect this
-repo already fixed once in its own guard (`a9f1682`, and the corollary to
+repo already fixed once in its own guard (`9268adb`, and the corollary to
 lesson 9 in CLAUDE.md).
 
 Usage:

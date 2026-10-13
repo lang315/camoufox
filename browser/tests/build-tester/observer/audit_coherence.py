@@ -85,7 +85,7 @@ def main():
     # Sampling breadth GATES the run. An arm that draws one screen across every sample is
     # effectively n=1, and every other check here (nesting, dpr, platform, UA) is satisfiable
     # by a single fake screen -- so it would report a green 12/12 that means almost nothing.
-    # This is not hypothetical: commits a59a98f and ecf15b8 both shipped a passing 12/12
+    # This is not hypothetical: commits 9958675 and 5b956f3 both shipped a passing 12/12
     # whose macOS arm was entirely 960x540. Advisory output was not enough; it must fail.
     collapsed = []
     for o in OSES:

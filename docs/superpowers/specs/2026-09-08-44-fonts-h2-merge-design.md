@@ -4,7 +4,7 @@
 
 ## Context
 
-`fix/44-fonts-h2` (tip `eacfb9f`, 77 commits over `55b4195`) gates four font read
+`fix/44-fonts-h2` (tip `48eff23`, 77 commits over `e423c1a`) gates four font read
 paths per context (CSS `@font-face`, codepoint fallback, worker/OffscreenCanvas,
 face-name lookup) and adds a large smoke-workflow regression guard (arms (a)–(j2)).
 A merge-readiness review on 2026-09-08 (`.superpowers/sdd-sync-beta31/review-fix44.md`)
@@ -86,10 +86,10 @@ with only some of them).
 
 ### C. Bisect cleanup
 
-Smoke run `34193143221` measures attempt 4 (`eacfb9f`). If it reads as the commit
+Smoke run `34193143221` measures attempt 4 (`48eff23`). If it reads as the commit
 predicted (Geneva GREEN, arm (h) RED), the whole bisect series (attempt 0 through
-attempt 4, commits `32fa884`…`eacfb9f`) is reverted in `font-list-spoofing.patch`
-to the pre-bisect state of `ca29ceb`: no cell turned any arm red→green, and the
+attempt 4, commits `f4e00f1`…`48eff23`) is reverted in `font-list-spoofing.patch`
+to the pre-bisect state of `5aa21ef`: no cell turned any arm red→green, and the
 plan's own rule is that a gate whose probe was never red proves nothing. Any other
 result stops the work and goes back to the user.
 

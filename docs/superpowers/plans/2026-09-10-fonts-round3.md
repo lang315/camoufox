@@ -8,7 +8,7 @@
 
 **Tech Stack:** GNU patch (`/opt/homebrew/bin/gpatch`), `make revert` / `make dir` over the Firefox 152.0.4 tree in `camoufox-152.0.4-beta.31/`, `.superpowers/sdd-44/apply_upto.py` for the workspace flow, a fonts3 splice script for the two header-carrying patches, GitHub Actions (`build.yml`, `smoke.yml`, both `workflow_dispatch`), Playwright 1.55.0, fontTools, `gh`, and an SSH session to the Windows build PC.
 
-**Design spec:** `docs/superpowers/specs/2026-09-10-fonts-round3-design.md` at commit `3798c59`.
+**Design spec:** `docs/superpowers/specs/2026-09-10-fonts-round3-design.md` at commit `47e1dbb`.
 **Recon and spec review (untracked):** `.superpowers/sdd-fonts3/recon.md`, `.superpowers/sdd-fonts3/spec-review.md`.
 
 ---
@@ -73,9 +73,9 @@ re-read from `gh run list` before it is quoted anywhere (spec §B0):
 
 | id | target | head sha | property |
 |---|---|---|---|
-| `34432908522` | linux-x86_64 | `163ee25` | `git diff 163ee25..c8c42ef -- patches additions settings bundle` is empty, so its patches are identical to `main`. Phase 0 baseline. |
+| `34432908522` | linux-x86_64 | `e1550c5` | `git diff e1550c5..0bdc648 -- patches additions settings bundle` is empty, so its patches are identical to `main`. Phase 0 baseline. |
 | `34236331658` | linux-x86_64 | `8990915` | PR #84 artifact, pre-#93. `git show 8990915:patches/font-list-spoofing.patch \| grep -c CAMOU-FL` = **0** — this binary emits no `CAMOU-FL` line of any kind. |
-| `34450188525` | windows-x86_64 | `c8c42ef` | Windows baseline on `main`, pre-fix. Task 8's control. |
+| `34450188525` | windows-x86_64 | `0bdc648` | Windows baseline on `main`, pre-fix. Task 8's control. |
 
 **Evidence.** `.superpowers/sdd-fonts3/` (git-ignored). Ledger
 `.superpowers/sdd-fonts3/progress.md`; append one line per completed step.
@@ -113,7 +113,7 @@ rather than as a verdict.
 The dump step is a separate `python3` process with its own hardcoded list; adding a
 kind to one and not the other produces a run whose counter table silently omits it.
 
-The ten kinds that already exist, from `git show 163ee25:patches/font-list-spoofing.patch
+The ten kinds that already exist, from `git show e1550c5:patches/font-list-spoofing.patch
 | grep -o 'CAMOU-FL [a-z-]*' | sort -u`: `default`, `facename`, `fc-subst`,
 `fffd-cache`, `gate`, `global-fallback`, `group`, `scope-switch`, `set`, `sys-fallback`.
 `CAMOU-FL fffd-cache ctx=%u key=%s allowed=%d` has **no `hit=` field** and prints only
@@ -249,8 +249,8 @@ cat >> .superpowers/sdd-fonts3/progress.md <<'EOF'
 # fonts round 3 ledger
 EOF
 ```
-Expected: `fix/fonts-round3` and `3798c59…`. If the branch differs, stop. A later head is
-fine as long as `git log --oneline 3798c59..HEAD` shows only docs commits; anything
+Expected: `fix/fonts-round3` and `47e1dbb…`. If the branch differs, stop. A later head is
+fine as long as `git log --oneline 47e1dbb..HEAD` shows only docs commits; anything
 touching `patches/` or `.github/` means someone else has started, and this plan assumes
 one implementer at a time.
 
@@ -634,14 +634,14 @@ git push origin fix/fonts-round3
 gh run list -w build.yml -R lang315/camoufox -L 10 \
   --json databaseId,headSha,status,conclusion \
   --jq '.[] | select(.databaseId==34432908522) | "\(.databaseId) \(.headSha[0:7]) \(.status) \(.conclusion)"'
-git diff --stat 163ee25..c8c42ef -- patches additions settings bundle
+git diff --stat e1550c5..0bdc648 -- patches additions settings bundle
 gh workflow run smoke.yml -R lang315/camoufox --ref fix/fonts-round3 -f run_id=34432908522
 sleep 20
 gh run list -R lang315/camoufox --workflow=smoke.yml --limit 3 \
   --json databaseId,headSha,status,createdAt \
   --jq '.[] | "\(.databaseId) \(.status) \(.headSha[0:7]) \(.createdAt)"'
 ```
-Expected: the first command prints `34432908522 163ee25 completed success`; the
+Expected: the first command prints `34432908522 e1550c5 completed success`; the
 `git diff --stat` prints **nothing**, which is what makes this artifact a stand-in for
 `main`. Record the newest smoke id as `P0R1` in the ledger.
 
@@ -675,7 +675,7 @@ from `smoke-p0r1-arms.txt` or from the per-kind counter table, never recalled**:
 
 ```markdown
 # Phase 0 run 1 — re-baseline under FONTCONFIG_FILE
-Run: <P0R1>, smoke.yml @ <workflow sha>, binary from build 34432908522 @ 163ee25.
+Run: <P0R1>, smoke.yml @ <workflow sha>, binary from build 34432908522 @ e1550c5.
 
 ## Q1. Which exit answered U+FFFD in the mac context?
 <This binary emits no `fontlist` or `pref-fallback` line -- neither kind exists
@@ -1506,7 +1506,7 @@ Insert immediately after arm (j2)'s tripwire block, i.e. after the
               print(f"      {_ln}")
 
           n4_failures = []
-          # Keyed on `fontlist` ALONE, not on fffd-cache. 34432908522 @ 163ee25
+          # Keyed on `fontlist` ALONE, not on fffd-cache. 34432908522 @ e1550c5
           # emits fffd-cache but not fontlist, so an `or` here would be flipped
           # true by one fffd-cache line from arm (j) earlier in the run, take
           # the log branch, find no fontlist lines and report SETUP-INVALID on a
@@ -2032,7 +2032,7 @@ Expected on `<P0R2>` (build `34432908522`, patches identical to `main`):
 |---|---|---|
 | `(n1)` | RED, `PREF PATH LEAK (width-only, no \`fontlist\` kind in this binary)` — this **is** #94's Phase 0 RED, and Task 9 quotes this line | a `DIAGNOSTIC` line instead means the probe matched neither Tinos nor the tofu floor: some third face answered, and #94 has no RED until the fixture is re-derived |
 | `(n2)` | RED, `GENERIC MISMAPPED` — no `generic-map` kind, so the log half is unavailable and the width check plus its `sans-serif` control carry the verdict | GREEN means #92 does not reproduce under `FONTCONFIG_FILE`; stop and report |
-| `(h3)` | RED, `DEFAULT FONT OUTSIDE THE LIST` (shape A cannot be GREEN here: `monospace` → Cousine and `serif` → Tinos are both refused, so `mFonts` is empty and the `default` line fires) | `DIAGNOSTIC` means the `facename` kind is missing, which contradicts `163ee25`; re-read the counter table |
+| `(h3)` | RED, `DEFAULT FONT OUTSIDE THE LIST` (shape A cannot be GREEN here: `monospace` → Cousine and `serif` → Tinos are both refused, so `mFonts` is empty and the `default` line fires) | `DIAGNOSTIC` means the `facename` kind is missing, which contradicts `e1550c5`; re-read the counter table |
 | `(n4)` | GREEN or `DIAGNOSTIC` — #93's gate is in this binary | RED means #93's gate does not hold and that is a finding of its own |
 | `(n5)` | either; **this is the gate** | `setup invalid` means the binding name or the init-script ordering is wrong — fix the arm, re-dispatch |
 | `(n7)` | RED, `INVENTED LOAD STATUS` | `control invalid` means the HTTP server or the control font is at fault, not #91 |
@@ -2053,7 +2053,7 @@ Task 6 branches on that string and nothing else:
 cat > .superpowers/sdd-fonts3/gate-b5.md <<'EOF'
 # Phase 0 gate — #90 (arm n5)
 
-Run: <P0R2> (smoke.yml @ <workflow sha>, linux binary from build 34432908522 @ 163ee25)
+Run: <P0R2> (smoke.yml @ <workflow sha>, linux binary from build 34432908522 @ e1550c5)
 
 GATE: B5 RED
 # ^ exactly one of: "GATE: B5 RED" | "GATE: B5 GREEN"
@@ -4345,7 +4345,7 @@ beside them.
 
 **Interfaces:**
 - Consumes: `BUILD_WINDOWS` and `FIX_SHA` from Task 7; the Windows baseline build
-  `34450188525` @ `c8c42ef`.
+  `34450188525` @ `0bdc648`.
 - Produces: two JSON result objects, each with the existing keys plus
   `codepoint` (`{"cp", "carriers", "chosen_reason", "control_cp", "control_carriers",
   "host_cmap_families", "bundle_cmap_families"}`) and two new `verdicts` rows whose
@@ -4923,7 +4923,7 @@ nor a browser, so it costs a second.
 directory silently changes the candidate pool (`Makefile:190` — a Windows artifact
 bundles macOS and Linux fonts, never Windows).
 
-For each of the two runs — baseline `34450188525` @ `c8c42ef`, then round 3
+For each of the two runs — baseline `34450188525` @ `0bdc648`, then round 3
 `<BUILD_WINDOWS>` @ `<FIX_SHA>`:
 
 ```bash
@@ -5223,7 +5223,7 @@ pushed branch, and dispatched a duplicate 90-minute build from a misread notific
 | B0, `FONTCONFIG_FILE`, triage routing, counters, run 1's named outputs | 1, Steps 2–8; the signature half of the routing lands in 2, Step 1 |
 | B1 | 2, Step 2 |
 | B2 | 2, Step 3 |
-| B3 | 2, Step 4 — both GREEN shapes, quoted from §B3 at `3798c59` |
+| B3 | 2, Step 4 — both GREEN shapes, quoted from §B3 at `47e1dbb` |
 | B4 | 2, Step 5 |
 | B5 | 2, Step 6 |
 | B6 | 7, Step 5 |
@@ -5286,7 +5286,7 @@ compensates for it.
 
 **No longer a deviation.** Arm (h3)'s two GREEN shapes were written here first, as a
 consequence of A2 removing the `CAMOU-FL default` observable that §B3 originally made the
-whole verdict. Spec commit `3798c59` adopts them, including the "shape (ii) only when
+whole verdict. Spec commit `47e1dbb` adopts them, including the "shape (ii) only when
 `generic-map` lines exist in the run" condition that `kind_total("generic-map")`
 implements, so Task 2 Step 4 now quotes §B3 rather than departing from it. The same commit
 pins the Linux `fonts.conf`, adds the `Tinos`/`Arimo`/`Cousine` assertion and writes the
@@ -5295,12 +5295,12 @@ guard's blind spot into §B0; Task 1 Steps 2–3 and Task 9 Step 4 already carri
 **Resolved in the spec while this plan was being written.** Two, neither requiring a plan
 change beyond the pin:
 
-- `919096e` — §A2's last bullet gave `generic-map` without the `step=` field its own
+- `b696976` — §A2's last bullet gave `generic-map` without the `step=` field its own
   helper bullet requires, the one format the spec review flagged to reconcile at
   patch-writing time. It is now `CAMOU-FL generic-map ctx=%u generic=%d step=%s key=%s`,
   the string this plan's "Log line contract" already carried, so all six emit sites in
   Task 4 and the parser in Task 2 Step 3 agree with the spec as written.
-- `3798c59` — §B3's two GREEN shapes and §B0's pinned Linux conf, `Tinos`/`Arimo`/
+- `47e1dbb` — §B3's two GREEN shapes and §B0's pinned Linux conf, `Tinos`/`Arimo`/
   `Cousine` assertion and stated blind spot, all of which this plan had already
   implemented in response to the plan review. Both passages are now quoted verbatim at
   their implementation sites (Task 1 Step 3, Task 2 Step 4).
@@ -5309,8 +5309,8 @@ change beyond the pin:
 
 ## Outcome
 
-Written after the work landed, against `fix/fonts-round3` at `df0bdad` — the last
-commit of the measurement work, the 37th above `main` at `c8c42ef`, 6 files
+Written after the work landed, against `fix/fonts-round3` at `e582237` — the last
+commit of the measurement work, the 37th above `main` at `0bdc648`, 6 files
 changed, 9,350 insertions and 207 deletions. The commit carrying this section is
 the one after it. Where this section and the plan above disagree, this section is
 what happened.
@@ -5319,14 +5319,14 @@ what happened.
 
 | task | state | commits |
 |---|---|---|
-| 1 — B0 launch, triage, counters, Phase 0 run 1 | complete | `b167dea` … `749eb62` |
-| 2 — six RED-first arms | complete | `2227cd0` … `3a65e60` |
-| 3 — A1 (#94) | complete | `9421a93` |
-| 4 — A2 (#88, #92) | complete | `9d0f3b8` |
-| 5 — A3 (#91) | complete | `261b9fd` |
+| 1 — B0 launch, triage, counters, Phase 0 run 1 | complete | `a813383` … `1a087c7` |
+| 2 — six RED-first arms | complete | `a7f88b4` … `62d67f8` |
+| 3 — A1 (#94) | complete | `faec639` |
+| 4 — A2 (#88, #92) | complete | `b4c7d5b` |
+| 5 — A3 (#91) | complete | `3e2c88e` |
 | 6 — A4 (#90) | **SKIPPED** | — |
-| 7 — builds, smoke, B6 | complete | `c7b1ff1`, `9465029`, `25a04b8`, `b09c695` |
-| 8 — B8 Windows (#87) | complete | `df0bdad` |
+| 7 — builds, smoke, B6 | complete | `6ea29c3`, `9465029`, `f614997`, `1183d22` |
+| 8 — B8 Windows (#87) | complete | `e582237` |
 | 9 — docs, PR, issue comments | this section | — |
 
 **Task 6 was skipped because GATE: B5 came back GREEN.** Run 34513429414 read a
@@ -5342,26 +5342,26 @@ was false because the file discusses all three outcomes.
 `.superpowers/sdd-fonts3/gate-b4-phase0.md`: on both pre-fix binaries the donor
 reached the U+FFFD carrier through `mFonts` at exit 4 and `SystemFindFontForChar`
 was never taken, so neither could supply #82's RED. The diagnostic build
-34534150529 at `c7b1ff1` drops exactly one statement, the RED reproduced on run
-34544937587, and `9465029` reverts it exactly (`git diff 261b9fd 9465029` is empty
+34534150529 at `6ea29c3` drops exactly one statement, the RED reproduced on run
+34544937587, and `9465029` reverts it exactly (`git diff 3e2c88e 9465029` is empty
 over the whole tree).
 
 ### Final run ids
 
 | run | workflow | head sha | conclusion | role |
 |---|---|---|---|---|
-| 34432908522 | Build and Release | `163ee25` | success | the Phase 0 Linux binary, a verified stand-in for `main` |
-| 34496121342 | Smoke Fingerprint | `749eb62` | success | Task 1's green Phase 0 run |
-| 34513429414 | Smoke Fingerprint | `f0aeb0d` | success | GATE: B5 GREEN |
-| 34519345704 | Smoke Fingerprint | `3a65e60` | success | **authoritative Phase 0**, 24/24 |
-| 34531660206 | Build and Release | `261b9fd` | success | BUILD_LINUX |
-| 34531671179 | Build and Release | `261b9fd` | success | BUILD_WINDOWS, never smoked |
-| 34534150529 | Build and Release | `c7b1ff1` | success | BUILD_B6, the diagnostic |
-| 34538378696 | Smoke Fingerprint | `25a04b8` | failure | first Phase 1 attempt |
-| 34543794646 | Smoke Fingerprint | `25a04b8` | failure | first B6 attempt |
-| 34544934746 | Smoke Fingerprint | `b09c695` | **success** | **SMOKE_P1**, on build 34531660206 |
-| 34544937587 | Smoke Fingerprint | `b09c695` | failure, by design | **SMOKE_B6**, on build 34534150529 |
-| 34450188525 | Build and Release | `c8c42ef` | success | the #87 Windows baseline |
+| 34432908522 | Build and Release | `e1550c5` | success | the Phase 0 Linux binary, a verified stand-in for `main` |
+| 34496121342 | Smoke Fingerprint | `1a087c7` | success | Task 1's green Phase 0 run |
+| 34513429414 | Smoke Fingerprint | `ba96862` | success | GATE: B5 GREEN |
+| 34519345704 | Smoke Fingerprint | `62d67f8` | success | **authoritative Phase 0**, 24/24 |
+| 34531660206 | Build and Release | `3e2c88e` | success | BUILD_LINUX |
+| 34531671179 | Build and Release | `3e2c88e` | success | BUILD_WINDOWS, never smoked |
+| 34534150529 | Build and Release | `6ea29c3` | success | BUILD_B6, the diagnostic |
+| 34538378696 | Smoke Fingerprint | `f614997` | failure | first Phase 1 attempt |
+| 34543794646 | Smoke Fingerprint | `f614997` | failure | first B6 attempt |
+| 34544934746 | Smoke Fingerprint | `1183d22` | **success** | **SMOKE_P1**, on build 34531660206 |
+| 34544937587 | Smoke Fingerprint | `1183d22` | failure, by design | **SMOKE_B6**, on build 34534150529 |
+| 34450188525 | Build and Release | `0bdc648` | success | the #87 Windows baseline |
 
 Every id read back with `gh run view <id> --json status,conclusion,headSha`. Which
 build each smoke consumed was read from the `gh run download` argument inside that
@@ -5384,28 +5384,28 @@ DejaVu from the font universe, and four arms had been resting on it:
 
 - Arm (a) and arm (b) both hit a width-reference collision on MS Gothic once the
   fallback face changed. Rule unified in a `collided_families()` helper
-  (`5b22523`, `aa67f7b`, `20085b1`, `c0ced3c`).
+  (`09a7d9e`, `ad9b661`, `c947521`, `7625a07`).
 - Arm (b)'s third macOS-only probe family is now **chosen at runtime** from Optima,
   Palatino and Helvetica by a width-and-pixel precheck, because Geneva turned out
   never to render. The run picked Optima. Issue #95 was filed for Geneva and is not
-  closed by this round (`f0d8ace`).
+  closed by this round (`475a669`).
 - Arm (f) moved its probe codepoint from U+6F22 to U+FF71, which fixed its
   bisection but not its discriminator; it remains known-unmeasurable by advance,
   with U+FFE8 recorded as the candidate fixture for a later round.
 - Arms (i) and (i2) moved from "broken setup" to a verdict, and produced the
   round's sharpest Phase 0 finding: a context whose list refuses every CJK family
   was being served U+FF71 by Microsoft YaHei, named by per-family rasterisation
-  after advance alone could not tell five candidates apart (`11f39c2`, `a79ba89`,
-  `042e44d`).
+  after advance alone could not tell five candidates apart (`b6be813`, `3e2817e`,
+  `5bec00f`).
 
 **Four other fixtures were wrong and were fixed against a run rather than argued**
-(`2ac18e4`, `03bf4fb`, `85c3700`, `372792b`): (n1)'s tofu-floor description, (n2)'s
+(`c83e831`, `864c2fb`, `1668cfb`, `c1a74ed`): (n1)'s tofu-floor description, (n2)'s
 same-kind reference families, (n4)'s carrier (Menlo collides with the floor at 43,
 swapped for Lucida Grande), and (n7)'s bare `await` on `f.loaded`, which raced a
 5-second timer.
 
 **Two controls died of the fixes being correct, and both were repaired in
-`b09c695`** against real failing runs rather than synthetic ones. Arm (h)'s Windows
+`1183d22`** against real failing runs rather than synthetic ones. Arm (h)'s Windows
 positive control: with #92 fixed the win `sans-serif` *is* Segoe UI, so advance and
 pixels cannot separate "resolved the face-name lookup" from "fell back to that
 generic"; the verdict moved to the `CAMOU-FL facename … allowed=0/1` log line,

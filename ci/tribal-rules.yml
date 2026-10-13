@@ -215,8 +215,8 @@ rules:
       - "audio 24 distinct / 24 samples; canvas 16 / 24, values recurring across independent runs"
       - "macOS 7 distinct of 12, Linux 9 of 12; one value seen three times"
       - "matches the rate at which CI flagged cross-profile canvas collisions"
-      - "measured before the fork's canvas seed was restored for FF156 (3e1cd16)"
-      - "re-measured on CI Tests run 38299426185 (head e91d24e), build-tester gate, raw-binary launches seeded per context (no launcher plan): macPerContext.uniqueCanvas 3/3, linuxPerContext.uniqueCanvas 3/3, uniqueAudio 3/3 in both; uniqueness.low_entropy empty; grade A, 1056/1064"
+      - "measured before the fork's canvas seed was restored for FF156 (9b7934c)"
+      - "re-measured on CI Tests run 38299426185 (head 0b4c2bf), build-tester gate, raw-binary launches seeded per context (no launcher plan): macPerContext.uniqueCanvas 3/3, linuxPerContext.uniqueCanvas 3/3, uniqueAudio 3/3 in both; uniqueness.low_entropy empty; grade A, 1056/1064"
       - "in that run's macOS group uniqueFonts and uniqueWebGL were 1/3, so the three canvases differed with fonts and claimed GPU shared"
     rationale: >-
       Audio and canvas are both noised per context, by the same machinery, and
@@ -246,7 +246,7 @@ rules:
   # Fork divergence (lang315/camoufox): upstream's rule `canvas-is-not-noised`
   # (canvas rendered, not noised, no canvas seed; PR #528, e4528a2 disabled canvas
   # noise) is deliberately NOT carried here. The fork re-added canvas noise in
-  # e1b227c (browser/patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
+  # 617474b (browser/patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
   # so the rule and its native test were removed rather than left red.
   # The noise runs only where upstream's rendering plan leaves the canvas
   # uncovered. The launcher draws the launch's `canvas:seed`, and NewContext calls
@@ -268,7 +268,7 @@ rules:
       - "v156.0.1-beta.32: the three RFP canvas targets in privacy.baselineFingerprintingProtection.overrides give RFP's readback (random, toDataURL ~770 bytes) with hardwareConcurrency untouched"
       - "v156.0.1-beta.32: a Linux host with an RTX 5080 and a Ryzen iGPU reported 'AMD, Radeon HD 3200 Graphics, or similar' to WebGL, headless and headed"
       - "v156.0.1-beta.32: a Linux identity whose config claimed availHeight 1053 on a 1080 screen read 1080 (nsRFPService::GetSpoofedScreenAvailSize, no Linux offset)"
-      - "fork: CI Tests run 38299426185 (head e91d24e), build-tester, raw-binary launches seeded per context (no launcher plan): uniqueCanvas 3/3 macOS and 3/3 Linux on a Linux host; only the Linux group is a path the product leaves uncovered (n=3)"
+      - "fork: CI Tests run 38299426185 (head 0b4c2bf), build-tester, raw-binary launches seeded per context (no launcher plan): uniqueCanvas 3/3 macOS and 3/3 Linux on a Linux host; only the Linux group is a path the product leaves uncovered (n=3)"
     rationale: >-
       Canvas and WebGL pixels come from the host's OS, driver and GPU. On the
       host's OS the identity claims the GPU Firefox reports there, read from the
@@ -300,7 +300,7 @@ rules:
       software renderer. That is the trade: a pixel perturbation no current
       Firefox makes by default, taken for cross-context unlinkability on one
       host, which upstream does not address. The evidence is CI Tests run
-      38299426185 (head e91d24e), build-tester's raw-binary launches seeded per
+      38299426185 (head 0b4c2bf), build-tester's raw-binary launches seeded per
       context: no collisions, not a rate. Its product-relevant sample is the
       Linux group on the Linux host, n=3, 3/3 distinct; the macOS group, which
       the launcher would cover there, measures only the seed mechanism. Covered
@@ -382,7 +382,7 @@ rules:
       - "browser/patches/cross-process-storage.patch: OnStoragePrefChanged calls FontListManager::OnFontListStored for each roverfox.s.fontlist_<id> pref, after MirrorPref releases the cache mutex; EnsureMirror registers it on the main thread, from ContentChild::InitXPCOM in every content process"
       - "browser/patches/font-list-spoofing.patch: OnFontListStored runs ClearCodepointsWithNoFonts (#81) and ClearFontNameCaches (#83), logging `CAMOU-FL flush ctx=<id> fontlist=<0|1>`"
       - "browser/tests/playwright/patches/context-list-every-process.py: flush_arm"
-      - "CI run 38299426185 (head e91d24e): context-list-every-process passed, flush arm included"
+      - "CI run 38299426185 (head 0b4c2bf): context-list-every-process passed, flush arm included"
     rationale: >-
       A context's documents land in any content process, and only the first
       one calls setFontList. Every other process reads the list from upstream's
@@ -579,7 +579,7 @@ rules:
       - "browser/settings/camoufox.cfg: defaultPref(\"media.peerconnection.ice.no_host\", true)"
       - "CI run 38299426185: upstream's webrtc-context-ip and webrtc-port-range read the srflx candidate upstream fabricates against a silent STUN server, and saw no candidates on the fork"
       - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
-      - "CI run 38310314782 (head f031a4a): both adapted guards passed, patch guards spoofing 22/22"
+      - "CI run 38310314782 (head 7e03c7e): both adapted guards passed, patch guards spoofing 22/22"
     rationale: >-
       The fork's WebRTC model diverges from upstream's. A context's IP masks the
       srflx candidate a real STUN answer produces, no srflx candidate is made up,
