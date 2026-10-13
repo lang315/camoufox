@@ -108,7 +108,7 @@ def _git(repo, *args):
 @pytest.fixture
 def library_repo(tmp_path):
     """A repo whose last library release, v0.5.7b1, is tagged on HEAD."""
-    for rel in ("pythonlib/camoufox/a.py", "docs/a.md", "patches/a.patch", "upstream.sh"):
+    for rel in ("python/src/camoufox/a.py", "docs/a.md", "browser/patches/a.patch", "browser/upstream.sh"):
         (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
         (tmp_path / rel).write_text("a\n")
     _git(tmp_path, "init", "-q", "-b", "main")
@@ -120,8 +120,8 @@ def library_repo(tmp_path):
 
 @pytest.mark.parametrize("changed, publish", [
     ("docs/a.md", False),
-    ("pythonlib/camoufox/a.py", True),
-    ("patches/a.patch", True),  # a new browser means a new pin
+    ("python/src/camoufox/a.py", True),
+    ("browser/patches/a.patch", True),  # a new browser means a new pin
 ])
 def test_a_library_prerelease_is_published_only_when_what_it_ships_changed(library_repo, changed, publish):
     (library_repo / changed).write_text("b\n")
@@ -135,8 +135,8 @@ def test_the_first_library_prerelease_is_always_published(library_repo):
 
 
 def test_set_build_names_the_tags_release_in_the_working_tree_only(tmp_path, monkeypatch):
-    shutil.copy(release.REPO_ROOT / "upstream.sh", tmp_path / "upstream.sh")
-    monkeypatch.setattr(release, "REPO_ROOT", tmp_path)
+    shutil.copy(release.BROWSER_ROOT / "upstream.sh", tmp_path / "upstream.sh")
+    monkeypatch.setattr(release, "BROWSER_ROOT", tmp_path)
     monkeypatch.setattr(release, "read_upstream_sh",
                         lambda: read_upstream_sh(tmp_path / "upstream.sh"))
     version = read_upstream_sh(tmp_path / "upstream.sh")["version"]
@@ -153,6 +153,7 @@ def _copy_browser_inputs(tmp_path):
         if (browser_inputs.REPO_ROOT / name).is_dir():
             shutil.copytree(browser_inputs.REPO_ROOT / name, root / name)
     for name in browser_inputs.BROWSER_FILES:
+        (root / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(browser_inputs.REPO_ROOT / name, root / name)
     return root
 
@@ -160,11 +161,11 @@ def _copy_browser_inputs(tmp_path):
 def test_the_source_digest_ignores_the_release_number_and_nothing_else(tmp_path):
     root = _copy_browser_inputs(tmp_path)
     before = browser_inputs.source_digest(root)
-    up = root / "upstream.sh"
+    up = root / "browser" / "upstream.sh"
     up.write_text(re.sub(r"^release=.*$", "release=beta.999", up.read_text(), flags=re.M))
     assert browser_inputs.source_digest(root) == before
 
-    juggler = next((root / "additions" / "juggler").rglob("*.js"))
+    juggler = next((root / "browser" / "additions" / "juggler").rglob("*.js"))
     juggler.write_text(juggler.read_text() + "\n")
     assert browser_inputs.source_digest(root) != before, "a packaged resource is a browser source"
 
@@ -196,7 +197,7 @@ def test_the_pin_and_the_launchers_agree_on_its_format(tmp_path, monkeypatch):
     """What stamp writes is what pythonlib's loader reads."""
     import sys
 
-    sys.path.insert(0, str(release.REPO_ROOT / "pythonlib"))
+    sys.path.insert(0, str(release.REPO_ROOT / "python" / "src"))
     from camoufox.browser_pin import load_pin
 
     monkeypatch.setattr(release, "PIN_FILE", tmp_path / "browser-pin.json")
@@ -264,3 +265,79 @@ def test_npm_publish_is_given_a_local_path():
     for run in runs:
         target = re.search(r"npm publish\s+(\S+)", run).group(1)
         assert target.startswith(("./", "/")), f"not a local path to npm: {target}"
+
+
+def _wheel(tmp_path, version, body=b"print('hi')\n"):
+    import zipfile
+
+    path = tmp_path / f"camoufox-{version}-py3-none-any.whl"
+    with zipfile.ZipFile(path, "w") as z:
+        z.writestr("camoufox/__init__.py", body)
+        z.writestr(f"camoufox-{version}.dist-info/METADATA", f"Name: camoufox\nVersion: {version}\n")
+        z.writestr(f"camoufox-{version}.dist-info/RECORD", f"camoufox/__init__.py,sha256={version}\n")
+    return path
+
+
+def _tarball(tmp_path, version, body=b"export {};\n"):
+    import io
+    import tarfile
+
+    path = tmp_path / f"camoufox-camoufox-{version}.tgz"
+    with tarfile.open(path, "w:gz") as t:
+        for name, data in {"package/package.json": f'{{"version": "{version}"}}'.encode(),
+                           "package/dist/index.js": body}.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            t.addfile(info, io.BytesIO(data))
+    return path
+
+
+def test_the_newest_published_version_orders_prereleases_below_their_release():
+    assert release.newest_version(["0.5.6", "0.5.7b1", "0.5.7b10", "0.5.7b2"], release._PY_VERSION) == "0.5.7b10"
+    assert release.newest_version(["0.5.7b3", "0.5.7"], release._PY_VERSION) == "0.5.7"
+    assert release.newest_version(["0.5.6", "0.5.7-beta.2", "0.1.19"], release._NPM_VERSION) == "0.5.7-beta.2"
+    assert release.newest_version([], release._NPM_VERSION) is None
+
+
+@pytest.mark.parametrize("build", [_wheel, _tarball])
+def test_a_package_that_differs_only_in_its_version_is_not_new(tmp_path, build):
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    old = build(tmp_path / "old", "0.5.7b2" if build is _wheel else "0.5.7-beta.2")
+    new = build(tmp_path / "new", "0.5.7b3" if build is _wheel else "0.5.7-beta.3")
+    changed = build(tmp_path / "new", "0.5.7b4" if build is _wheel else "0.5.7-beta.4", body=b"changed\n")
+    spelling = release._PY_VERSION if build is _wheel else release._NPM_VERSION
+    published = ["0.5.6", "0.5.7b2"] if build is _wheel else ["0.5.6", "0.5.7-beta.2"]
+
+    def fetch(version, dest):
+        assert version == published[-1], "compared with the newest published version"
+        return old
+
+    ver = lambda p: p.name.split("-")[1] if build is _wheel else p.name[len("camoufox-camoufox-"):-4]  # noqa: E731
+    assert release.changed_since_published(new, ver(new), published, spelling, fetch, "x")[0] is False
+    is_new, why = release.changed_since_published(changed, ver(changed), published, spelling, fetch, "x")
+    assert is_new and ("__init__.py" in why or "index.js" in why), why
+    assert release.changed_since_published(new, ver(new), [], spelling, fetch, "x")[0] is True
+
+
+def test_each_registry_is_published_only_when_its_own_package_changed():
+    jobs = yaml.safe_load((release.REPO_ROOT / ".github/workflows/release.yml")
+                          .read_text(encoding="utf-8"))["jobs"]
+    assert "outputs.publish_pypi == 'true'" in jobs["publish-pypi"]["if"]
+    assert "outputs.publish_npm == 'true'" in jobs["publish-npm"]["if"]
+    # npm must not depend on PyPI having published: a TypeScript-only change skips PyPI.
+    assert "needs.publish-pypi.result == 'skipped'" in jobs["publish-npm"]["if"]
+    steps = jobs["build-library"]["steps"]
+    assert any("ci.release lib-diff" in s.get("run", "") for s in steps)
+
+
+def test_the_manifest_declares_the_interface_both_libraries_speak():
+    """Python and TypeScript must refuse the same browsers (#835)."""
+    interface = release.browser_interface()
+    assert release.manifest("v1", "d", "0" * 40)["interface"] == interface
+    ts = (release.REPO_ROOT / "typescript" / "src" / "__version__.ts").read_text(encoding="utf-8")
+    assert re.search(rf"^\s*static readonly INTERFACE: number = {interface};$", ts, re.M), "typescript/src/__version__.ts INTERFACE differs"
+    py = (release.REPO_ROOT / "python" / "src" / "camoufox" / "__version__.py").read_text(encoding="utf-8")
+    ts_min = re.search(r"^\s*static readonly MIN_INTERFACE: number = (\d+);$", ts, re.M)
+    py_min = re.search(r"^\s*MIN_INTERFACE = (\d+)$", py, re.M)
+    assert ts_min and py_min and ts_min[1] == py_min[1], "MIN_INTERFACE differs between the libraries"

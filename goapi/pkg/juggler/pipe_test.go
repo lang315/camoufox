@@ -7,7 +7,7 @@ import (
 )
 
 // TestPipeFraming round-trips two messages through Pipe.Send and
-// asserts the NUL framing matches additions/juggler/pipe/
+// asserts the NUL framing matches browser/additions/juggler/pipe/
 // nsRemoteDebuggingPipe.cpp:SendMessage.
 func TestPipeFraming(t *testing.T) {
 	var sent bytes.Buffer

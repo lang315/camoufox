@@ -2,17 +2,16 @@
 /**
  * The `camoufox` CLI.
  *
- * TypeScript twin of pythonlib/camoufox/__main__.py. Every command is present,
- * with the same arguments, output and config/cache files. `gui` drives a
- * PySide6 desktop app with no Node equivalent, so here it only says so. The
- * interactive pickers (`set`, `set --geoip`, `remove --select`) use a numbered
+ * TypeScript twin of python/src/camoufox/__main__.py. Every command is present,
+ * with the same arguments, output and config/cache files. The interactive
+ * pickers (`set`, `set --geoip`, `remove --select`) use a numbered
  * prompt in place of inquirer's arrow-key list.
  */
 import * as fs from "node:fs";
-import { createRequire } from "node:module";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { Argument, Command, Option } from "commander";
+import { ensureModel } from "fpgen-js";
 import { LIBRARY_VERSION } from "./__version__.js";
 import { DefaultAddons, maybeDownloadAddons } from "./addons.js";
 import { effectivePin, loadPin, pinSpec } from "./browser-pin.js";
@@ -24,7 +23,9 @@ import {
 	type GeoIPRepo,
 	getMmdbPath,
 	loadGeoipConfig,
+	loadGeoipRepos,
 	saveGeoipConfig,
+	warnIfDeprecated,
 } from "./geolocation.js";
 import {
 	BROWSERS_DIR,
@@ -46,48 +47,26 @@ import {
 	saveConfig,
 	saveRepoCache,
 } from "./multiversion.js";
+import { INSTALL_DIR, rprint, style } from "./paths.js";
 import {
 	AvailableVersion,
 	CamoufoxFetcher,
 	formatAssetDate,
-	INSTALL_DIR,
+	type IncompatibleBuild,
+	incompatibleMessage,
+	installedPackageVersion,
 	installedVerStr,
+	interfaceSupported,
 	listAvailableVersions,
-	loadYaml,
 	RepoConfig,
-	rprint,
+	resolvedPlaywrightVersionRaw,
+	upgradeMessage,
 	Version,
 } from "./pkgman.js";
 
 // --------------------------------------------------------------------------
 // click-style output + prompts
 // --------------------------------------------------------------------------
-
-const ANSI: Record<string, string> = {
-	red: "31",
-	green: "32",
-	yellow: "33",
-	blue: "34",
-	cyan: "36",
-	bright_black: "90",
-};
-
-function useColor(): boolean {
-	return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-
-/** click.style */
-function style(
-	text: string,
-	{ fg, bold, dim }: { fg?: string | null; bold?: boolean; dim?: boolean } = {},
-): string {
-	if (!useColor()) return text;
-	const codes: string[] = [];
-	if (bold) codes.push("1");
-	if (dim) codes.push("2");
-	if (fg && ANSI[fg]) codes.push(ANSI[fg]);
-	return codes.length ? `\x1b[${codes.join(";")}m${text}\x1b[0m` : text;
-}
 
 /** click.secho */
 function secho(
@@ -235,10 +214,12 @@ async function doSync(spoofOs?: string, spoofArch?: string): Promise<boolean> {
 
 	const cache: {
 		repos: Array<{ name: string; repo: string; versions: CachedVersion[] }>;
+		incompatible: IncompatibleBuild[];
 		spoof_os: string | null;
 		spoof_arch: string | null;
 	} = {
 		repos: [],
+		incompatible: [],
 		spoof_os: spoofOs ?? null,
 		spoof_arch: spoofArch ?? null,
 	};
@@ -246,12 +227,23 @@ async function doSync(spoofOs?: string, spoofArch?: string): Promise<boolean> {
 	for (const repoConfig of RepoConfig.loadRepos()) {
 		rprint(`  ${repoConfig.name}...`, "cyan", false);
 		try {
-			const versions = await listAvailableVersions(
+			const listed = await listAvailableVersions(
 				repoConfig,
 				true,
 				spoofOs,
 				spoofArch,
+				true,
 			);
+			const versions = listed.filter((v) => interfaceSupported(v.interface));
+			for (const v of listed) {
+				if (interfaceSupported(v.interface)) continue;
+				cache.incompatible.push({
+					repo: repoConfig.name,
+					version: v.version.version ?? "",
+					build: v.version.build,
+					interface: v.interface,
+				});
+			}
 			cache.repos.push({
 				name: repoConfig.name,
 				repo: repoConfig.repo,
@@ -267,6 +259,7 @@ async function doSync(spoofOs?: string, spoofArch?: string): Promise<boolean> {
 							asset_updated_at: v.assetUpdatedAt ?? null,
 							sha256: v.sha256 ?? null,
 							created_at: v.assetCreatedAt ?? null,
+							interface: v.interface,
 						}) as unknown as CachedVersion,
 				),
 			});
@@ -277,6 +270,13 @@ async function doSync(spoofOs?: string, spoofArch?: string): Promise<boolean> {
 	}
 
 	saveRepoCache(cache as RepoCache);
+	if (cache.incompatible.length) {
+		const versionOf = (v: IncompatibleBuild) => new Version(v.build, v.version);
+		const newest = cache.incompatible.reduce((a, b) =>
+			versionOf(b).compare(versionOf(a)) > 0 ? b : a,
+		);
+		rprint(upgradeMessage(versionOf(newest), newest.interface), "yellow");
+	}
 	const total = cache.repos.reduce((sum, r) => sum + r.versions.length, 0);
 	const platformStr = spoofOs ? ` (${spoofOs}/${spoofArch})` : "";
 	rprint(
@@ -526,9 +526,9 @@ program
 		let paired = false;
 		const pin = effectivePin(config);
 
+		let spec = "";
 		if (version) {
 			const parts = version.toLowerCase().split("/");
-			let spec: string;
 			if (parts.length === 1) {
 				repoName = RepoConfig.getDefaultName();
 				spec = parts[0];
@@ -580,6 +580,25 @@ program
 		}
 
 		if (!verData || !repo) {
+			const wanted = spec.replace(/^v+/, "");
+			const incompatible = (
+				(cache.incompatible ?? []) as IncompatibleBuild[]
+			).find(
+				(v) =>
+					version &&
+					v.repo.toLowerCase() === (repoName ?? "").toLowerCase() &&
+					`${v.version}-${v.build}` === wanted,
+			);
+			if (incompatible) {
+				rprint(
+					incompatibleMessage(
+						new Version(incompatible.build, incompatible.version),
+						incompatible.interface,
+					),
+					"red",
+				);
+				return;
+			}
 			rprint(
 				`Version '${version || repoName}' not found in cache. Run 'camoufox sync'.`,
 				"red",
@@ -593,6 +612,7 @@ program
 			isPrerelease: verData.is_prerelease ?? false,
 			sha256: verData.sha256 ?? undefined,
 			assetCreatedAt: verData.created_at ?? undefined,
+			interface: verData.interface ?? 1,
 		});
 		const repoConfig = RepoConfig.findByName(repo.name);
 		try {
@@ -614,10 +634,7 @@ program
 			await downloadMmdb();
 		}
 		await maybeDownloadAddons({ ...DefaultAddons });
-		// TS addition: Python's fpgen package ships its model with the wheel;
-		// the TS port fetches the pinned model into the cache, so do it here
-		// rather than on the first launch.
-		const { ensureModel } = await import("./fpgen/index.js");
+		// Fetch the pinned fpgen model now rather than on the first launch.
 		await ensureModel();
 	});
 
@@ -873,7 +890,7 @@ async function interactiveSet(): Promise<void> {
 
 /** Interactive selection of the GeoIP source. */
 async function selectGeoIPSource(): Promise<void> {
-	const repos: GeoIPRepo[] = loadYaml("repos.yml").geoip ?? [];
+	const [repos] = loadGeoipRepos();
 	if (!repos.length) {
 		rprint("No GeoIP sources configured.", "red");
 		return;
@@ -886,15 +903,18 @@ async function selectGeoIPSource(): Promise<void> {
 		// unreadable config: nothing is marked active
 	}
 	const choices: Array<[string, GeoIPRepo]> = repos.map((r) => [
-		r.name + (r.name === current ? " [active]" : ""),
+		r.name +
+			(r.deprecated ? " (deprecated)" : "") +
+			(r.name === current ? " [active]" : ""),
 		r,
 	]);
 
 	const selected = await select(choices, "Select GeoIP source");
 	if (!selected) return;
 
-	saveGeoipConfig(selected);
+	saveGeoipConfig(selected, true);
 	rprint(`GeoIP source: ${selected.name}`, "green");
+	warnIfDeprecated(selected);
 }
 
 program
@@ -1114,47 +1134,9 @@ program
 		await server.close();
 	});
 
-program
-	.command("gui")
-	.description("Launch the Camoufox Manager GUI (requires PySide6)")
-	.option("--debug", "Enable debug options in the GUI.")
-	.action(() => {
-		rprint(
-			"The GUI is a PySide6 app and is only available from the Python package: pip install 'camoufox[gui]'",
-			"red",
-		);
-	});
-
 // --------------------------------------------------------------------------
 // version
 // --------------------------------------------------------------------------
-
-/** Version of an installed npm package, or null. */
-function pkgVersion(name: string): string | null {
-	try {
-		const require = createRequire(import.meta.url);
-		const pkg = JSON.parse(
-			fs.readFileSync(require.resolve(`${name}/package.json`), "utf-8"),
-		);
-		return typeof pkg.version === "string" ? pkg.version : null;
-	} catch {
-		return null;
-	}
-}
-
-/** The TypeScript fpgen port's version, when it exposes one. */
-async function fpgenVersion(): Promise<string | null> {
-	const specifier = "./fpgen/index.js";
-	try {
-		const mod: Record<string, unknown> = await import(specifier);
-		for (const key of ["VERSION", "version", "__version__", "FPGEN_VERSION"]) {
-			if (typeof mod[key] === "string") return mod[key] as string;
-		}
-		return null;
-	} catch {
-		return null;
-	}
-}
 
 class VersionInfo {
 	rows: Array<
@@ -1178,11 +1160,11 @@ class VersionInfo {
 		else this.row(label, "?", "dim");
 	}
 
-	async packages(): Promise<void> {
+	packages(): void {
 		this.header("Packages");
 		this.pkg("Camoufox", LIBRARY_VERSION);
-		this.pkg("fpgen", await fpgenVersion());
-		this.pkg("Playwright", pkgVersion("playwright-core"));
+		this.pkg("fpgen", installedPackageVersion("fpgen-js"));
+		this.pkg("Playwright", resolvedPlaywrightVersionRaw());
 	}
 
 	browser(): void {
@@ -1287,7 +1269,7 @@ class VersionInfo {
 	}
 
 	async printAll(): Promise<void> {
-		await this.packages();
+		this.packages();
 		this.browser();
 		this.geoip();
 		this.storage();

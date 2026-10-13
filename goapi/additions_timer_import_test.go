@@ -27,9 +27,9 @@ import (
 var bareTimerCall = regexp.MustCompile(`(^|[^.\w])(setTimeout|clearTimeout)\s*\(`)
 
 func TestAdditionsImportTimerBeforeUsingIt(t *testing.T) {
-	root := filepath.Join("..", "additions")
+	root := filepath.Join("..", "browser", "additions")
 	if _, err := os.Stat(root); err != nil {
-		t.Skipf("additions/ not present: %v", err)
+		t.Fatalf("browser/additions/ not present: %v", err)
 	}
 
 	var offenders []string

@@ -188,3 +188,28 @@ def prerequisite(name: str, ok: bool, detail: str = "") -> bool:
         raise AssertionError(f"test prerequisite missing in CI: {name} ({detail}); provide it or allow it with a reason")
     print(f"skipping what needs {name} ({detail})", flush=True)
     return False
+
+
+# Two reads of one unchanged canvas: equal on a browser that does not resist fingerprinting.
+# getImageData is asserted beside toDataURL (the only read the rule's evidence quotes) because
+# CanvasRenderingContext2D::GetImageDataArray (Firefox 156, dom/canvas/CanvasRenderingContext2D.cpp)
+# takes the same ImageExtractionResult placeholder branch and calls
+# TryToGenerateRandomDataForPlaceholderCanvasData() on every read, so two reads differ.
+TWO_READS = """(() => {
+  const c = document.createElement("canvas"); c.width = 220; c.height = 30;
+  const x = c.getContext("2d");
+  x.fillStyle = "#f60"; x.fillRect(10, 1, 62, 20); x.fillStyle = "#069"; x.fillRect(80, 5, 40, 20);
+  const px = () => x.getImageData(0, 0, 220, 30).data.join();
+  return {toDataURL: c.toDataURL() === c.toDataURL(), getImageData: px() === px()};
+})()"""
+
+# The WebGL counterpart, for a page on a browser with a GL context (headful): readPixels
+# (ClientWebGLContext.cpp) fills the destination with GeneratePlaceholderCanvasData on every
+# call under the placeholder. "no context" is not a bool, so it never reads as a result.
+TWO_READS_GL = """(() => {
+  const gl = document.createElement("canvas").getContext("webgl");
+  if (!gl) return {readPixels: "no context"};
+  gl.clearColor(0, 0.5, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  const px = () => { const p = new Uint8Array(4 * 16 * 16); gl.readPixels(0, 0, 16, 16, gl.RGBA, gl.UNSIGNED_BYTE, p); return p.join(); };
+  return {readPixels: px() === px()};
+})()"""

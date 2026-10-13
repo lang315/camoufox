@@ -86,7 +86,7 @@ jobs:
           echo "bin=$abs" >> "$GITHUB_OUTPUT"
           # Camoufox (#44 round 3): the fonts step now launches with
           # FONTCONFIG_FILE pointing at the bundle's own fonts.conf, the way
-          # pythonlib/camoufox/utils.py:238 ships it, so the measurement is of
+          # python/src/camoufox/utils.py:238 ships it, so the measurement is of
           # the font universe a shipped Camoufox has rather than of the
           # runner's host fontconfig. Export both paths from here rather than
           # deriving them in Python: the package layout is a property of
@@ -132,8 +132,8 @@ jobs:
           # beta.28 shipped it broken, which is the whole of #51 and #62:
           # TestTouchscreenTouchEvents passed there only by reading a page
           # global that a correctly isolated evaluate() cannot see.
-          pip install --quiet -e pythonlib 'playwright==1.55.0'
-          python tests/patches/isolated-evaluate.py
+          pip install --quiet -e python 'playwright==1.55.0'
+          python browser/tests/playwright/patches/isolated-evaluate.py
         env:
           CAMOUFOX_EXECUTABLE_PATH: ${{ steps.bin.outputs.bin }}
           # pkgman resolves fonts/ and properties.json through the releases API,
@@ -485,7 +485,7 @@ jobs:
           # absent: the guard runs a config launch first in the same Python
           # process, and its init script carries a 574-family list. Test both.
           import pathlib as _pl
-          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          FONTS = json.load(open("python/src/camoufox/fonts.json"))
           BIG = ('(() => { const o = %s.filter(n => typeof window[n] === "function"); '
                  'try { window.setFontList(%s); } catch (e) {} '
                  'const m = () => { try { document.documentElement.setAttribute("data-s", '
@@ -657,7 +657,7 @@ jobs:
           # Until now every launch here ran the raw binary with the runner's
           # host fontconfig, so ubuntu-24.04's fonts -- DejaVu among them --
           # were in every font list and every arm measured a font universe no
-          # shipped Camoufox has (recon open question 4). pythonlib/camoufox/
+          # shipped Camoufox has (recon open question 4). python/src/camoufox/
           # utils.py:238 sets FONTCONFIG_FILE for exactly this reason; this is
           # the same substitution _generate_fontconfig (utils.py:58-92) makes.
           #
@@ -676,7 +676,7 @@ jobs:
           #
           # WHAT THIS GUARD CANNOT SEE (CLAUDE.md lesson 3). It measures the
           # LINUX conf. A shipped Camoufox picks the conf by the SPOOFED os:
-          # pythonlib/camoufox/utils.py:213-231 maps user_agent_os through
+          # python/src/camoufox/utils.py:213-231 maps user_agent_os through
           # {'lin':'linux','mac':'macos','win':'windows'} and reads
           # fontconfig/<os_dir>/fonts.conf. So a real mac-fingerprinted session
           # runs with sans-serif/serif/monospace aliased to
@@ -828,7 +828,7 @@ jobs:
               return out[-limit:]
           # -------------------------------------------------------------------
 
-          FONTS = json.load(open("pythonlib/camoufox/fonts.json"))
+          FONTS = json.load(open("python/src/camoufox/fonts.json"))
           MAC_STRICT = set(FONTS["mac"]) - set(FONTS["win"]) - set(FONTS["lin"])
           WIN_STRICT = set(FONTS["win"]) - set(FONTS["mac"]) - set(FONTS["lin"])
           # ---- #44 round 3: pick MAC_ONLY's third family from THIS RUN ------
@@ -848,7 +848,7 @@ jobs:
           # A probe family this guard cannot render is a reference that is
           # never right (CLAUDE.md lesson 4), so the third slot is chosen BY
           # THIS RUN from three mac-only candidates -- each checked against
-          # pythonlib/camoufox/fonts.json (in `mac`, absent from `win` and
+          # python/src/camoufox/fonts.json (in `mac`, absent from `win` and
           # `lin`) and present in bundle/fonts/macos/. The choice happens in
           # its OWN launch, before PROBES exists: picking it inside the bare
           # launch would leave arm (a) measuring a different probe set from
@@ -2074,8 +2074,9 @@ jobs:
           # #83 log slice. The question this answers is the one arm (b2)'s
           # measurement cannot: when the win context rendered, which ctx= did
           # the gate see, and which font group served it. The `group` line
-          # carries hop= (which link of provider -> document -> inner window ->
-          # BrowsingContext produced the id, or where it broke) and uri= (which
+          # carries hop= (principal: the document's principal produced the id;
+          # worker: the worker's origin attributes did; provider-null / doc-null:
+          # where the lookup broke) and uri= (which
           # context, via probe()'s marker); the `gate` histogram says which id
           # CamouIsFontAllowed was actually asked about. ctx=0 in either is the
           # fail-open case: CamouIsFontAllowed treats 0 as "no per-context
@@ -2153,10 +2154,10 @@ jobs:
           _mac_only_sets = [ln for ln in _mac_sets if ln not in _win_sets]
           b2_mac_ctx = ctx_token(_mac_only_sets[0]) if _mac_only_sets else None
           b2_win_ctx = ctx_token(_win_sets[0]) if _win_sets else None
-          # R2: any re-install of the DONOR's list after the re-probe mark.
-          b2_reinstall = next(
-              (ln for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL set ", limit=None)
-               if b2_mac_ctx and b2_mac_ctx in ln.split()), None)
+          # R2: any font-cache flush after the re-probe mark, for any context.
+          b2_flushed = next(
+              (ln for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL ", limit=None)
+               if "CAMOU-FL set " in ln or "CAMOU-FL flush " in ln), None)
           # R4: did the recipient actually reach a gated read path for these
           # families? R7 (re-review): a `gate` line shows that SOME gated read
           # path ran for that family under that context -- CamouIsFontAllowed
@@ -2176,7 +2177,7 @@ jobs:
               f"{ctx_token(ln)} {next((t for t in ln.split() if t.startswith('hop=')), 'hop=?')}"
               for ln in camou_fl(b2_reprobe_mark, "CAMOU-FL group", "b2-reprobe", limit=None)})
           print(f"  [b2 / mac-after-win] derived: mac {b2_mac_ctx}, win {b2_win_ctx}, "
-                f"donor list re-installed after the mark: {b2_reinstall or 'no'}, "
+                f"font caches flushed after the mark: {b2_flushed or 'no'}, "
                 f"win gate lines on probe families: {len(b2_win_pop)}, "
                 f"re-probe font groups: {b2_reprobe_hops or 'none captured'}")
 
@@ -2246,16 +2247,17 @@ jobs:
                   f"mFcSubstituteCache is a per-process singleton, so an 'unchanged' "
                   f"result from another process is vacuous.")
           # R2 (re-review): the whole re-probe rests on NOTHING having flushed
-          # the memo between win's render and it. setFontList is one-shot per
-          # user context, so the init script on the re-probe page should find
-          # no binding and install nothing -- but that is prose, and if it ever
-          # failed, SetFontList would clear both memos, mac would re-resolve
-          # through its own gate, the pattern would be unchanged and this arm
-          # would print GREEN having measured nothing. The decisive line is
-          # already emitted: a `CAMOU-FL set` line for the MAC context after
-          # the re-probe mark. Qualified by context id, not by the mark alone,
-          # because camou_fl slices by byte offset and the donor is alive by
-          # design.
+          # the memo between win's render and it. Two things flush it: a
+          # `CAMOU-FL set` (SetFontList in the setter's process) and a
+          # `CAMOU-FL flush` (RoverfoxStorageManager's pref callback, in every
+          # process the list reaches; the setter's own process may run it too,
+          # asynchronously after its set -- reasoned from the code, not
+          # measured, and nothing below depends on it).
+          # ClearFontNameCaches is process-wide, so either
+          # line for ANY context after the re-probe mark wipes win's entries:
+          # mac would re-resolve through its own gate, the pattern would be
+          # unchanged and this arm would print GREEN having measured nothing.
+          # Not qualified by context id for that reason.
           #
           # R5, residual: "no new pid appeared" does not rule out two
           # pre-existing tab processes with mac and win split between them and
@@ -2270,13 +2272,13 @@ jobs:
                   f"the re-probe's 'unchanged' result vacuous. Either the fontlist log "
                   f"module did not capture, or this build predates the `CAMOU-FL set` "
                   f"line: check the dump step's `set` count.")
-          elif b2_reinstall:
+          elif b2_flushed:
               b2_reprobe_bad.append(
-                  f"arm (b2) setup invalid (re-probe half only): the donor's list was "
-                  f"RE-INSTALLED after the "
-                  f"re-probe mark ({b2_reinstall!r}). SetFontList flushes both font-name "
-                  f"memos, so mac re-resolved through its own gate and its unchanged "
-                  f"pattern says nothing about the per-context key.")
+                  f"arm (b2) setup invalid (re-probe half only): the font caches were "
+                  f"flushed after the re-probe mark ({b2_flushed!r}). A set or flush for "
+                  f"any context clears both font-name memos process-wide, so mac "
+                  f"re-resolved through its own gate and its unchanged pattern says "
+                  f"nothing about the per-context key.")
           # R4 (re-review): with no win entries in the memo there is nothing for
           # mac's second lookup to hit, so an unchanged donor is guaranteed
           # under a broken key as well as a working one. A `gate` line under
@@ -2339,8 +2341,8 @@ jobs:
               #     with MAC_ONLY intact, and would otherwise print this same
               #     message.
               # The discriminator is already captured: the re-probe's own
-              # `group` lines. hop=bc with a non-zero ctx means the context id
-              # chain resolved and the fail-open did not happen.
+              # `group` lines. hop=principal or hop=worker with a non-zero ctx
+              # means the context id resolved and the fail-open did not happen.
               _shape = ("BOTH directions" if b2_lost and b2_gained
                         else "GAINED-ONLY" if b2_gained else "LOST-ONLY")
               b2_failures.append(
@@ -2355,8 +2357,8 @@ jobs:
                   f"re-probe page (CLAUDE.md lesson 5), which produces GAINED-ONLY with the "
                   f"macOS families intact. Decide it on the re-probe's own font groups: "
                   f"{b2_reprobe_hops or 'NONE CAPTURED -- neither reading is supported'} "
-                  f"(hop=bc with a non-zero ctx rules out the fail-open; ctx=0 or a "
-                  f"hop=*-null is the fail-open).")
+                  f"(hop=principal or hop=worker with a non-zero ctx rules out the "
+                  f"fail-open; ctx=0 or a hop=*-null is the fail-open).")
           print(f"  (b2) donor-alive per-context leak (#83):  "
                 f"{'RED' if b2_failures else 'GREEN'} -- "
                 f"{b2_failures or 'win correctly saw none of macOS-only families with the donor still open, and the donor re-probed after win with its own pattern unchanged'}")
@@ -2377,17 +2379,18 @@ jobs:
           # so the first and only init-script invocation happens on the final
           # document, in the process that will render it.
           #
-          # Hypothesis H1: the per-context list is process-local
-          # (`static nsTHashMap sFontLists`, dom/base/FontListManager.cpp:14)
-          # while the one-shot disable flag is cross-process
-          # (RoverfoxStorageManager, FontListManager.cpp:79-81). A context whose
-          # about:blank lands in P1 and whose real document lands in P2 installs
-          # its list in P1, and P2 finds the setter already disabled, never
-          # receives the list, and renders with HasFontList(ctx) == false --
-          # where CamouIsFontAllowed returns true for every family
-          # (gfxPlatformFontList.cpp:1232-1239). Under H1 this reorder makes the
-          # leak disappear. Under H2 (gfxFontGroup::mUserContextId cached as 0,
-          # gfxTextRun.cpp:1855-1875) ordering is irrelevant and the leak stays.
+          # Hypothesis H1, from when the list was process-local while the
+          # one-shot setter flag was cross-process: a context whose about:blank
+          # lands in P1 and whose real document lands in P2 installs its list in
+          # P1, and P2 finds the setter already used, never receives the list,
+          # and renders with HasFontList(ctx) == false -- where
+          # CamouIsFontAllowed returns true for every family. Now the list sits
+          # in RoverfoxStorageManager next to the flag, and FontListManager's
+          # EnsureFontList parses it in whichever process asks, so H1 can only
+          # recur if that store read misses. Under H1 this reorder makes the
+          # leak disappear. Under H2 (gfxFontGroup::mUserContextId resolving
+          # to 0 in the gfxFontGroup ctor) ordering is irrelevant and the leak
+          # stays.
           #
           # WHAT WOULD MAKE THIS ARM GREEN WRONGLY (CLAUDE.md lesson 4):
           #  * Nothing about "win resolved no mac families" is self-validating.
@@ -3486,7 +3489,7 @@ jobs:
           # one_page() launch is its own process and so its own log file, and
           # every launch emits `CAMOU-FL set ctx=N n=<families>` naming the size
           # of the list it installed. len(FONTS['mac']) and len(FONTS['win'])
-          # differ (574 vs 107 in pythonlib/camoufox/fonts.json), so that count
+          # differ (574 vs 107 in python/src/camoufox/fonts.json), so that count
           # says which context a file belongs to without consulting the answer.
           # Asserted distinct below: if the two lists ever became the same
           # length this would pair files with contexts at random.
@@ -4391,7 +4394,7 @@ jobs:
           def mac_bundle_families():
               from fontTools.ttLib import TTFont, TTCollection
               fams, errs = set(), []
-              root = "bundle/fonts/macos"
+              root = "browser/bundle/fonts/macos"
               for dirpath, _dirnames, filenames in os.walk(root):
                   for fn in filenames:
                       p = os.path.join(dirpath, fn)
@@ -4442,7 +4445,7 @@ jobs:
               hp_families = []
               hp_errs = [f"mac_bundle_families: {type(exc).__name__}: {exc}"]
           print(f"  [arm h' / #88] enumerated {len(hp_families)} family names from "
-                f"bundle/fonts/macos; {len(hp_errs)} file(s) could not be read: {hp_errs}")
+                f"browser/bundle/fonts/macos; {len(hp_errs)} file(s) could not be read: {hp_errs}")
           if not hp_families:
               print("  [arm h' / #88] SKIP: no family names could be extracted -- the "
                     "identification cannot run, #88 falls back to its method 2 (log the "
@@ -7425,7 +7428,7 @@ jobs:
           # used to raise (#97), so reaching the browser is #97's end-to-end proof.
           #
           # xvfb is mandatory: headless returns '(no webgl)' for every renderer.
-          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          pip install --quiet -e python 'playwright==1.55.0'
           xvfb-run -a --server-args="-screen 0 1920x1080x24" python - <<'PY'
           import asyncio, os, warnings
           from camoufox.async_api import AsyncCamoufox, AsyncNewContext
@@ -7701,7 +7704,7 @@ jobs:
               # before its first launch. Say which it is rather than printing
               # an empty section that reads like "the log lines are gone".
               print("NO LOG FILES -- either the guard step never launched a browser, or "
-                    "MOZ_LOG_FILE did not take effect. A build without patches/"
+                    "MOZ_LOG_FILE did not take effect. A build without browser/patches/"
                     "font-list-spoofing.patch has no CAMOU-FL sites at all.")
               sys.exit(0)
 
@@ -7735,7 +7738,7 @@ jobs:
           if not rows:
               print("ZERO matching lines despite non-empty log files: the fontlist module "
                     "logged, but no CAMOU-FL site ran. Check that this artifact carries "
-                    "patches/font-list-spoofing.patch.")
+                    "browser/patches/font-list-spoofing.patch.")
 
           # The full set goes to a file the Upload results step collects, so a
           # reader can re-slice what the cap below drops.
@@ -7832,9 +7835,8 @@ jobs:
           # ffmpeg is a separate playwright download; without it video recording
           # hangs rather than erroring. playwright==1.55.0 is the version this
           # suite's browser interop is known good on.
-          pip install --quiet -e pythonlib 'playwright==1.55.0'
+          pip install --quiet -e python 'playwright==1.55.0'
           python -m playwright install ffmpeg
-          cd pythonlib
           python - <<'PY'
           import os, glob
           from camoufox.sync_api import Camoufox
@@ -7859,7 +7861,7 @@ jobs:
           # pin here would stop guarding anything.
           assert size > 10_000, (
               f"video is {size} bytes -- an empty container. Composite is most likely "
-              "off; see the measurement table in pythonlib/camoufox/virtdisplay.py"
+              "off; see the measurement table in python/src/camoufox/virtdisplay.py"
           )
           PY
         env:

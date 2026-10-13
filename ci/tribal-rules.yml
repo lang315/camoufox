@@ -7,7 +7,7 @@
 # get re-litigated by the next well-meaning contributor, or quietly undone by an
 # agent rebasing patches at 3am.
 #
-# `native-tests/test_tribal_rules.py` asserts every entry that is mechanically
+# `browser/tests/native/test_tribal_rules.py` asserts every entry that is mechanically
 # checkable. An entry with `check: manual` is documentation only.
 #
 # Adding one: cite the issue, PR, or commit. "I think this is how it works" is
@@ -61,7 +61,7 @@ rules:
     check: automated
     evidence:
       - "lang315/camoufox#136: probe run 35622975837, one binary (build 35586323562)"
-      - "pythonlib/camoufox/virtdisplay.py: the measurement table"
+      - "python/src/camoufox/virtdisplay.py: the measurement table"
       - "issue #93: no video under headless='virtual'"
     rationale: >-
       (Fork: reverses upstream's composite-extension-off.) The compositor fix for
@@ -114,7 +114,7 @@ rules:
     title: The display's lock and socket are removed whether or not we killed it
     check: automated
     evidence:
-      - "found by native-tests/test_crash_recovery.py::test_xvfb_sigkill_under_a_virtual_display"
+      - "found by browser/tests/native/test_crash_recovery.py::test_xvfb_sigkill_under_a_virtual_display"
       - "isolated: Xvfb alive -> socket removed; Xvfb already dead -> socket leaked"
     rationale: >-
       kill() used to gate its entire body on `self.proc.poll() is None`, so a
@@ -146,9 +146,9 @@ rules:
     title: Nothing here depends on someone else's camoufox package
     check: automated
     evidence:
-      - "PR #521 (2026-03-15) added `cloverlabs-camoufox` to build-tester/requirements.txt"
+      - "PR #521 (2026-03-15) added `cloverlabs-camoufox` to browser/tests/build-tester/requirements.txt"
       - "the commit's author is the PyPI author of that package"
-      - "build-tester/scripts/presets.py already prints the correct answer in its ImportError handler"
+      - "browser/tests/build-tester/scripts/presets.py already prints the correct answer in its ImportError handler"
     rationale: >-
       build-tester generates its fingerprints with camoufox.fingerprints, so
       whichever distribution provides `camoufox` decides what is actually being
@@ -156,11 +156,11 @@ rules:
       graded against someone else's fingerprint generation, a divergence between
       the two reads as a browser bug, and every CI run pulls an outside package
       into a job holding repository credentials. The only `camoufox` this
-      repository may install is pythonlib/ from this tree.
+      repository may install is python/ from this tree.
     expect:
       no_dependency_matching: "camoufox"
-      except_paths: ["pythonlib/pyproject.toml"]
-      allowed_forms: ["-e ../pythonlib", "-e ./pythonlib", "-e pythonlib"]
+      except_paths: ["python/pyproject.toml"]
+      allowed_forms: ["-e ../../../python", "-e ./python", "-e python"]
 
   # -------------------------------------------------------------------------
   # Measurement
@@ -208,14 +208,16 @@ rules:
       the window setter, the shaper hook and the config key are gone.
 
   - id: canvas-noise-entropy-is-lower-than-audio
-    title: Two contexts share a canvas fingerprint far more often than they should
+    title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)
     check: manual   # an open finding, not a settled decision
     evidence:
       - "24 profiles across 3 runs on v152.0.4-beta.30, once the canvas was actually hashed"
       - "audio 24 distinct / 24 samples; canvas 16 / 24, values recurring across independent runs"
       - "macOS 7 distinct of 12, Linux 9 of 12; one value seen three times"
       - "matches the rate at which CI flagged cross-profile canvas collisions"
-      - "measured before the fork's canvas seed was restored for FF156 (3e1cd16); not yet re-measured since"
+      - "measured before the fork's canvas seed was restored for FF156 (3e1cd16)"
+      - "re-measured on CI Tests run 38299426185 (head e91d24e), build-tester gate, raw-binary launches seeded per context (no launcher plan): macPerContext.uniqueCanvas 3/3, linuxPerContext.uniqueCanvas 3/3, uniqueAudio 3/3 in both; uniqueness.low_entropy empty; grade A, 1056/1064"
+      - "in that run's macOS group uniqueFonts and uniqueWebGL were 1/3, so the three canvases differed with fonts and claimed GPU shared"
     rationale: >-
       Audio and canvas are both noised per context, by the same machinery, and
       were measured in the same runs with the same hash. Audio came back
@@ -230,18 +232,132 @@ rules:
       canvas:seed, in which case the seed is not doing what its name suggests.
       Not gated, because failing one run in three helps nobody, and not dropped,
       because it is real.
+      Re-measured once the seed was restored: six contexts in two groups of
+      three, all six canvases distinct. That shows no collision at n=6. It is
+      not a rate, and it does not show that "far more often" has gone: a 1-in-3
+      collision rate would leave a group of three collision-free some of the
+      time. Its macOS group did differ with fonts and claimed GPU shared, which
+      fits the seed being what separates contexts. Only the Linux group, on a
+      Linux host, is a path the product leaves uncovered; the launcher would
+      cover the macOS group there, so it measures the seed mechanism alone. The
+      run was headless (#195).
+      Kept open until a larger sample settles it.
 
   # Fork divergence (lang315/camoufox): upstream's rule `canvas-is-not-noised`
   # (canvas rendered, not noised, no canvas seed; PR #528, e4528a2 disabled canvas
   # noise) is deliberately NOT carried here. The fork re-added canvas noise in
-  # e1b227c (patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
+  # e1b227c (browser/patches/canvas-spoofing.patch, `canvas:*` keys in properties.json),
   # so the rule and its native test were removed rather than left red.
+  # The noise runs only where upstream's rendering plan leaves the canvas
+  # uncovered. The launcher draws the launch's `canvas:seed`, and NewContext calls
+  # setCanvasSeed, only when plan_rendering does not cover canvas
+  # (python/src/camoufox/utils.py: launch_options, attach_canvas_cover,
+  # context_canvas_seed; typescript/src/utils.ts: launchOptions,
+  # attachCanvasCover, contextCanvasSeed). A browser launched outside NewBrowser (firefox.launch(),
+  # connect()) carries no record and is seeded by default. With no seed the patch
+  # is inert. python/tests/test_canvas_seed_follows_rendering_plan.py asserts that
+  # a covered launch sends no seed, in place of upstream's
+  # test_no_canvas_seed_is_declared_or_sent.
+
+  - id: cross-os-canvas-is-the-rfp-placeholder
+    title: On the host's OS the identity claims the host's GPU; on another OS or GPU canvas readback is RFP's random placeholder
+    check: automated
+    evidence:
+      - "v156.0.1-beta.32, 2026-10-06: getImageData and readPixels identical with privacy.fingerprintingProtection on and off; CanvasUtils.cpp checks EfficientCanvasRandomization (PNG deBG chunk only) before CanvasRandomization"
+      - "LibreWolf librewolf.cfg: privacy.resistFingerprinting true, no canvas prefs of its own; RFP readback without permission is TryToGenerateRandomDataForPlaceholderCanvasData"
+      - "v156.0.1-beta.32: the three RFP canvas targets in privacy.baselineFingerprintingProtection.overrides give RFP's readback (random, toDataURL ~770 bytes) with hardwareConcurrency untouched"
+      - "v156.0.1-beta.32: a Linux host with an RTX 5080 and a Ryzen iGPU reported 'AMD, Radeon HD 3200 Graphics, or similar' to WebGL, headless and headed"
+      - "v156.0.1-beta.32: a Linux identity whose config claimed availHeight 1053 on a 1080 screen read 1080 (nsRFPService::GetSpoofedScreenAvailSize, no Linux offset)"
+      - "fork: CI Tests run 38299426185 (head e91d24e), build-tester, raw-binary launches seeded per context (no launcher plan): uniqueCanvas 3/3 macOS and 3/3 Linux on a Linux host; only the Linux group is a path the product leaves uncovered (n=3)"
+    rationale: >-
+      Canvas and WebGL pixels come from the host's OS, driver and GPU. On the
+      host's OS the identity claims the GPU Firefox reports there, read from the
+      browser itself because Firefox may render on another device than system
+      tools name and sanitizes the name its own way; a software renderer
+      matches any GPU, as a machine whose driver failed to load. On another OS,
+      or with another GPU (one the caller or a preset names, or a host GPU
+      fpgen never recorded, which has no WebGL data to claim), nothing can
+      agree, and Firefox 156's private windows do not hide pixels, so the
+      launchers turn on privacy.resistFingerprinting's canvas targets through
+      the baseline overrides and nothing else. One function in each launcher
+      (plan_rendering, planRendering) makes that decision for the launch and
+      for the host identity its contexts must keep; a covered browser binds
+      no context to the host. The readback is then
+      what LibreWolf, Tor Browser and Mullvad Browser return; stock Firefox
+      does not, so the launch warns. Firefox's older keyed pixel noise
+      (CanvasRandomization) was rejected: no current Firefox produces it by
+      default. Spoofed avail-screen and touch values go through baseline
+      protection like the real ones, for the claimed OS, so the launchers
+      claim them as it reports them (follow_baseline_protection,
+      followBaselineProtection): the available screen is the screen less 48px
+      on Windows, 76px on macOS and nothing on Linux, and more than one touch
+      point is 5. A config claiming fpgen's recorded values read differently
+      on the page.
+
+      Fork divergence: this fork does apply keyed noise, its own
+      canvas-spoofing.patch, seeded per launch and per context, on every launch
+      the plan leaves uncovered, which is the host's OS on its own GPU or a
+      software renderer. That is the trade: a pixel perturbation no current
+      Firefox makes by default, taken for cross-context unlinkability on one
+      host, which upstream does not address. The evidence is CI Tests run
+      38299426185 (head e91d24e), build-tester's raw-binary launches seeded per
+      context: no collisions, not a rate. Its product-relevant sample is the
+      Linux group on the Linux host, n=3, 3/3 distinct; the macOS group, which
+      the launcher would cover there, measures only the seed mechanism. Covered
+      launches get RFP's placeholder and no seed.
+
+  - id: webgpu-follows-the-claimed-device
+    title: navigator.gpu where Firefox on the claimed device has it; the host's adapter only behind the host's own GPU
+    check: automated
+    evidence:
+      - "StaticPrefList.yaml (156.0.1): dom.webgpu.enabled is true on XP_WIN and on aarch64 XP_MACOSX, early-beta only elsewhere"
+      - "fpgen gpuInfo, Firefox: navigator.gpu with no adapter on Windows on the Microsoft Basic Render Driver; no navigator.gpu on Intel and AMD Macs; no navigator.gpu for 97% of Linux"
+      - "dom/webgpu/Adapter.h: GPUAdapterInfo vendor, architecture, device and description are always empty; limits and features are the real adapter's"
+      - "v156.0.1-beta.32, Linux, prefs at startup: gfx.blacklist.webgpu 1 gives a real adapter, 4 (FEATURE_BLOCKED_DEVICE) resolves requestAdapter() to null"
+      - "the same prefs through Playwright's firefox_user_prefs alone arrive after gfxPlatform::InitWebGPUConfig and are ignored"
+    rationale: >-
+      WebGPU hands the page the host's adapter: its limits and features name
+      the real GPU even though Firefox blanks the adapter strings. Exposure
+      follows Firefox's own build rule for the claimed device, so a Linux or
+      Intel Mac identity has no navigator.gpu and a Windows or Apple Silicon one
+      does. The adapter is the host's only when the identity claims the host's
+      hardware GPU; otherwise the launchers set the downloadable blocklist's
+      pref to a blocked device, and requestAdapter() resolves to null as it
+      does for real users on a blocked or software GPU. The pref is read once at
+      startup, so it goes through CAMOU_PREFS. It is written either way,
+      because a persistent profile saves it and the next startup reads it.
+
+  - id: webgl-browser-owned-values-follow-firefox
+    title: WebGL values the browser decides follow the running Firefox and the claimed OS's backend, not fpgen's recording
+    check: automated
+    evidence:
+      - "fpgen model-2/2026 records Firefox 146 (90% of Windows, 89% of macOS, 66% of Linux user agents); Camoufox ships 156.0.1"
+      - "stock 146.0 and 156.0.1 on the same machines, twice each: Windows 11 on Intel Iris Xe and RTX 3050 Ti (headed), M1 Pro (headed), Linux on a Ryzen iGPU (headless); fpgen's records match 146 on the same hardware"
+      - "Windows: 156 exposes EXT_depth_clamp in WebGL1 and WebGL2 on both GPUs, 146 on neither, and no fpgen Windows record has it. third_party/angle/src/libANGLE/renderer/d3d/d3d11/renderer11_utils.cpp:1334 (156, ANGLE chromium/7778) sets depthClampEXT = true on every D3D11 feature level; 146's ANGLE (chromium/5359) never sets it"
+      - "Linux: WebGL1 ALIASED_LINE_WIDTH_RANGE is [1, 2048] on 146 and [1, 1] on 156, WebGL2 [1, 1] on both. 146's dom/canvas/WebGLContext.cpp:324 forced REQUIRE_COMPAT_PROFILE on WebGL1 unless webgl.1.allow-core-profiles, which 146's StaticPrefList.yaml set on macOS only; 156 removed both, and WebGLContextValidate.cpp:211 reads the driver's range only off a core profile, leaving WebGLTypes.h:654's {1, 1}"
+      - "fpgen Linux WebGL2 records: [1, 1] on 97%, the driver's range on the 3% without EXT_depth_clamp (GLES drivers, where Firefox reads it)"
+      - "browser/tests/playwright/patches/stock-gpu-parity.py fails on the 146-style WebGL1 range on Linux, on a hardware GPU and on llvmpipe, and passes with the fix"
+    rationale: >-
+      fpgen's records are right for the Firefox that made them; what goes
+      stale is what that Firefox decided rather than the GPU. Hardware-owned
+      values (the renderer, most limits, the extensions a Linux or macOS
+      driver offers) keep coming from the recording. Browser-owned ones are
+      corrected where the launchers convert a recording (to_config). ANGLE's
+      D3D11 backend gives every Windows GPU EXT_depth_clamp, which takes its
+      place in Firefox's alphabetical extension order. WebGL1 now shares
+      WebGL2's GL profile, so it reports the line width range the same device
+      recorded for WebGL2, which is right for core profiles and GLES drivers
+      alike. Live state that also changed (the stencil masks) is answered by
+      the real context and needs nothing. stock-gpu-parity finds the next
+      drift: it fails where stock Firefox of the recorded release and of the
+      shipped one differ on the same machine and Camoufox does not follow the
+      shipped one.
 
   - id: canvas-fingerprint-is-hashed-not-truncated
     title: The canvas check hashes pixels, not a prefix of the data URL
     check: automated
     evidence:
-      - "build-tester/src/lib/checks/collectors.ts returned canvas.toDataURL().substring(0, 100)"
+      - "browser/tests/build-tester/src/lib/checks/collectors.ts returned canvas.toDataURL().substring(0, 100)"
       - "CI reported two contexts sharing a canvas fingerprint; 8 local runs across two rendering paths never did"
     rationale: >-
       A hundred characters of a data URL is not the image. "data:image/png;base64,"
@@ -253,6 +369,37 @@ rules:
       the stability check compared the same prefix between two collections, so
       it passed on PNG headers and could not have noticed non-deterministic
       output. getImageData is the surface a fingerprinter reads; hash that.
+
+  # -------------------------------------------------------------------------
+  # Fonts
+  # -------------------------------------------------------------------------
+
+  - id: context-font-list-lives-in-the-shared-store
+    title: A context's font list lives in the shared store, and every process flushes its font caches when the list arrives
+    check: manual
+    evidence:
+      - "upstream 914b575: the per-context font list moved into RoverfoxStorageManager, read by every process"
+      - "browser/patches/cross-process-storage.patch: OnStoragePrefChanged calls FontListManager::OnFontListStored for each roverfox.s.fontlist_<id> pref, after MirrorPref releases the cache mutex; EnsureMirror registers it on the main thread, from ContentChild::InitXPCOM in every content process"
+      - "browser/patches/font-list-spoofing.patch: OnFontListStored runs ClearCodepointsWithNoFonts (#81) and ClearFontNameCaches (#83), logging `CAMOU-FL flush ctx=<id> fontlist=<0|1>`"
+      - "browser/tests/playwright/patches/context-list-every-process.py: flush_arm"
+      - "CI run 38299426185 (head e91d24e): context-list-every-process passed, flush arm included"
+    rationale: >-
+      A context's documents land in any content process, and only the first
+      one calls setFontList. Every other process reads the list from upstream's
+      shared store, so each one can answer a lookup for that context before the
+      list reaches it. Such an answer is made with no list, which allows every
+      family, and the font caches memoize it: the codepoint-miss cache (#81)
+      and the name-keyed memos in front of the gate (#83). So each process
+      flushes both when the fontlist_<id> pref reaches it, from the storage
+      pref callback on the main thread. fontlist=0 means that process has no
+      font list yet, so there is nothing to flush. The flush never runs while
+      sFontListMutex is held: it takes gfxPlatformFontList's mLock, and every
+      gated read takes mLock before sFontListMutex, so flushing under
+      sFontListMutex would invert that order. That rules out flushing from
+      EnsureFontList, the lazy parse on the lookup path. The guard's
+      flush arm fails a process that answered a context without its list and
+      never received it, or answered without it after it arrived, and fails
+      the run when no content process logged a flush with a live font list.
 
   # -------------------------------------------------------------------------
   # Teardown
@@ -303,7 +450,7 @@ rules:
     title: A virtual display never clamps the generated screen
     check: automated
     evidence:
-      - "pythonlib/camoufox/utils.py: the `not virtual_display` guards"
+      - "python/src/camoufox/utils.py: the `not virtual_display` guards"
     rationale: >-
       This is what makes the 1x1 default safe. If clamping applied, a 1x1 root
       window would clamp every generated screen down to 1x1 and the fingerprint
@@ -331,7 +478,7 @@ rules:
     title: Anything reset when the document changes is also released when the frame dies
     check: automated
     evidence:
-      - "additions/juggler/content/FrameTree.js: _masterSandbox was cleared in _onGlobalObjectCleared() but not in Frame.dispose()"
+      - "browser/additions/juggler/content/FrameTree.js: _masterSandbox was cleared in _onGlobalObjectCleared() but not in Frame.dispose()"
       - "upstream Playwright's FrameTree.js has no _masterSandbox, and dispose() was inherited from it verbatim"
     rationale: >-
       Frame.dispose() came from upstream, which has no Camoufox-specific
@@ -345,13 +492,33 @@ rules:
       resetting when the document changes is worth releasing when the frame goes
       away, and a sandbox needs nuking rather than just dropping.
 
+  - id: fingerprint-setters-sealed-per-window
+    title: The window.setXxx() fingerprint setters start sealed, and the seal is per window
+    check: manual   # browser/tests/playwright/patches/fingerprint-setter-seal.py
+    evidence:
+      - "PR #749 (7911f4a): setters a fingerprint never called stayed on window, and a launch with no init script leaked all of them"
+      - "browser/patches/window-setter-seal.patch"
+      - "browser/tests/native/test_tribal_rules.py: every Func= setter in a Window.webidl hunk is on kCamouFingerprintSetters and in the guard's SETTERS"
+    rationale: >-
+      The setters are configuration API for the automation side, not page API.
+      A window starts sealed; juggler unseals it, runs the init scripts that
+      apply a per-context fingerprint, and seals it again before page script
+      runs. Sealed is the default so the failure is closed: a window automation
+      never drives (the binary launched as a plain browser) never offers them,
+      instead of offering them permanently to whatever loads. The flag is per
+      window, not per browsing context: every new document needs its own
+      configuration window, and a context-wide flag would seal on the first
+      about:blank and leave every later navigation unable to apply a
+      fingerprint. The Func= guards consult the flag, which is what stops the
+      DOM resolve hook handing a name back after it has been deleted.
+
   # -------------------------------------------------------------------------
   # Input
   # -------------------------------------------------------------------------
 
   - id: input-through-one-chokepoint
     title: Every synthesized input event goes through MouseDispatch.js
-    check: manual   # enforced by scripts/check-input-dispatch.py in CI
+    check: manual   # enforced by browser/scripts/check-input-dispatch.py in CI
     evidence:
       - "docs/input-dispatch.md: four deadlocks between 2026-04 and 2026-09"
       - "issues #225, #677, #751, #752"
@@ -362,3 +529,65 @@ rules:
       rounding accident in the fractional height of spoofed browser chrome. One
       unbounded await for an ack that never arrives wedges input for every tab
       in the process, permanently, at 0% CPU.
+
+  # -------------------------------------------------------------------------
+  # Config schema
+  # -------------------------------------------------------------------------
+
+  - id: config-keys-are-never-deleted
+    title: A key leaves browser/settings/properties.json only by being marked removed
+    check: automated
+    evidence:
+      - "issue #835: camoufox 0.4.11 failed to launch v156.0.1-beta.34 with 'Unknown property navigator.appCodeName in config'"
+      - "#787 (180e655) deleted 35 keys the browser no longer read; every release from v156.0.1-beta.32 shipped without them"
+    rationale: >-
+      properties.json ships inside the browser, and every released library
+      validates its config against the copy in whatever browser it finds.
+      Libraries up to 0.4.x raise on a key they send that the browser does not
+      declare, and they accept every browser release below 1, so they download
+      new releases on their own. Deleting a key therefore breaks launches for
+      everyone on an older library the moment a release ships. A key the
+      browser stops reading is instead kept with a "removed" field: older
+      libraries still validate it, the browser ignores it, and current
+      libraries skip it with a warning that it has no effect.
+
+  # -------------------------------------------------------------------------
+  # Network
+  # -------------------------------------------------------------------------
+
+  - id: https-first-stays-on
+    title: HTTPS-First keeps Firefox's default, on
+    check: manual
+    evidence:
+      - "#638 (restored in 0e4151f) set dom.security.https_first=false in camoufox.cfg so Playwright's GET-only test proxy passed"
+      - "914b575 removed it again; ci/skiplist.yml lists the proxy tests it fails, with the reason"
+      - "measured 2026-10-08 on a v156.0.1-beta.32 build: every proxy test in test_proxy.py and test_browsercontext_proxy.py passes with the pref appended to camoufox.cfg, and fails without it"
+    rationale: >-
+      Stock Firefox tries an http:// navigation as https:// first, and a server
+      sees whether a browser does, so turning it off marks the browser as not
+      stock Firefox. Playwright's own Firefox turns it off (playwright.cfg), and
+      upstream's proxy tests depend on that: their proxy is the test server,
+      which answers plain GETs and cannot open the CONNECT tunnel the upgrade
+      needs. A real proxy handles CONNECT, as every https:// site needs it to.
+      Those tests are skiplisted rather than passed by changing the browser.
+
+  - id: webrtc-fork-model
+    title: WebRTC keeps the fork's model, per-context IP with no srflx fabrication and no_host on, and its guards measure that model
+    check: manual
+    evidence:
+      - "#178 D1: keep the per-context WebRTCIPManager (browser/patches/webrtc-ip-spoofing.patch, webrtc-ip-spoofing2.patch); do not take upstream's srflx fabrication"
+      - "browser/settings/camoufox.cfg: defaultPref(\"media.peerconnection.ice.no_host\", true)"
+      - "CI run 38299426185: upstream's webrtc-context-ip and webrtc-port-range read the srflx candidate upstream fabricates against a silent STUN server, and saw no candidates on the fork"
+      - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
+      - "CI run 38310314782 (head f031a4a): both adapted guards passed, patch guards spoofing 22/22"
+    rationale: >-
+      The fork's WebRTC model diverges from upstream's. A context's IP masks the
+      srflx candidate a real STUN answer produces, no srflx candidate is made up,
+      and no_host keeps host candidates off the page. So the two upstream guards
+      were adapted, not dropped. webrtc-port-range reads each socket's bound port
+      as the source port of its Binding Request at the STUN socket.
+      webrtc-context-ip runs an answering STUN server and reads each context's
+      srflx candidate, with an unmasked context as the control. Both serve STUN
+      on the default-route address, because nICEr skips a loopback STUN server
+      under the shipped prefs. The launch-level
+      webrtc:ipv4 key is not asserted, because no browser code reads it (#163).

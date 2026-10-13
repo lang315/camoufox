@@ -74,8 +74,10 @@ class PwCtx:
 
 
 class PwBrowser:
-    def __init__(self, browser, identity_context=None, context_kwargs=None) -> None:
+    def __init__(self, browser, identity_context=None, canvas_covered=False, context_kwargs=None) -> None:
         self.b, self._identity_context = browser, identity_context
+        # Whether the launch put RFP's canvas placeholder on; a covered canvas reads random.
+        self.canvas_covered = canvas_covered
         self._ctx_kwargs = context_kwargs or {}
 
     def new_context(self) -> PwCtx:
@@ -121,7 +123,8 @@ class PkgDriver(_Base):
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
                   config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
         browser = NewBrowser(playwright(), **{k: v for k, v in kw.items() if v is not None})
-        b = PwBrowser(browser, lambda br: NewContext(br, os=os, webrtc_ip=webrtc_ip))
+        b = PwBrowser(browser, lambda br: NewContext(br, os=os, webrtc_ip=webrtc_ip),
+                      canvas_covered=browser._camoufox_canvas_covered)
         self.browsers.append(b)
         return b
 
@@ -133,6 +136,7 @@ class PwDriver(_Base):
 
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
                webrtc_ip=None, prefs=None) -> PwBrowser:
+        from camoufox.host_rendering import has_canvas_placeholder
         from camoufox.utils import launch_options
 
         if headless == "virtual":
@@ -141,7 +145,9 @@ class PwDriver(_Base):
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
                   config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None)
         opts = launch_options(**{k: v for k, v in kw.items() if v is not None})
-        b = PwBrowser(playwright().firefox.launch(**opts), context_kwargs={"no_viewport": True})
+        b = PwBrowser(playwright().firefox.launch(**opts),
+                      canvas_covered=has_canvas_placeholder(opts["firefox_user_prefs"]),
+                      context_kwargs={"no_viewport": True})
         self.browsers.append(b)
         return b
 

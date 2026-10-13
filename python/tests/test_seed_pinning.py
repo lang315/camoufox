@@ -1,0 +1,89 @@
+"""
+Regression coverage for daijro/camoufox#328: audio:seed and canvas:seed were
+re-randomized on every launch, with no way to pin them. Pinning goes through
+the `config` dict; the glyph-spacing seed no longer exists (D2).
+
+* from_preset() (fingerprints.py ~314-317) had *no* parameter through which a
+  caller could supply these seeds -- it always overwrote them with a fresh
+  random value, unconditionally. This was the actual bug: fixed by adding
+  optional fonts_spacing_seed/audio_seed/canvas_seed kwargs (still random by
+  default, when left unset).
+
+* launch_options()'s config dict (utils.py ~707-709) already only randomizes a
+  seed when the key is *absent*, via set_into(). A caller pre-populating
+  config={'fonts:spacing_seed': N, ...} before calling launch_options()/
+  Camoufox() already survives through both the BrowserForge and preset paths
+  -- verified empirically below. No source change was needed for that half;
+  the test locks the existing (correct) behavior in as a regression guard.
+
+Run with:
+    cd camoufox && PYTHONPATH=python/src python3 -m pytest python/tests/test_seed_pinning.py -v
+"""
+import json
+import os
+import sys
+from pathlib import Path
+
+# Make `import camoufox` resolve to the in-tree python/src without an install.
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from camoufox import utils  # noqa: E402
+from camoufox.addons import DefaultAddons  # noqa: E402
+from camoufox.fingerprints import from_preset  # noqa: E402
+from camoufox.utils import launch_options  # noqa: E402
+
+MINIMAL_PRESET = {
+    'navigator': {
+        'userAgent': 'Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0',
+        'platform': 'Linux x86_64',
+    },
+    'screen': {'width': 1920, 'height': 1080},
+    'webgl': {},
+}
+
+
+# --- from_preset(): audio:seed is drawn per identity ------------------------
+
+def test_from_preset_draws_a_fresh_audio_seed_each_call():
+    assert from_preset(MINIMAL_PRESET)['audio:seed'] != from_preset(MINIMAL_PRESET)['audio:seed']
+
+
+# --- launch_options(): already correct, locked in as a regression guard -----
+
+def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeypatch):
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    props_src = repo_root / 'browser' / 'settings' / 'properties.json'
+    (tmp_path / 'properties.json').write_bytes(props_src.read_bytes())
+    fake_exe = tmp_path / 'camoufox-bin'
+    fake_exe.write_bytes(b'')
+
+    # On Linux, get_env_vars() reads the bundled fontconfig from beside the
+    # supplied binary (upstream fc3392e) instead of from the managed install,
+    # so this fake bundle has to carry one. See test_executable_path_bundle.py.
+    (tmp_path / 'fontconfig' / 'linux').mkdir(parents=True)
+    (tmp_path / 'fontconfig' / 'linux' / 'fonts.conf').write_text(
+        '<?xml version="1.0"?><fontconfig><dir prefix="cwd">fonts</dir></fontconfig>'
+    )
+    (tmp_path / 'fonts').mkdir()
+    # The generated runtime conf goes to the cache dir; keep it out of the real one.
+    monkeypatch.setattr(utils, 'INSTALL_DIR', tmp_path / 'cache')
+    # resolve_verstr() reads the supplied build's own version, and raises without one.
+    (tmp_path / 'application.ini').write_text('[App]\nVersion=150.0.2-beta.25\n')
+
+    result = launch_options(
+        config={'audio:seed': 333444, 'canvas:seed': 555666},
+        headless=True,
+        os='linux',
+        exclude_addons=[DefaultAddons.UBO],  # skip network addon download
+        executable_path=str(fake_exe),  # so get_env_vars() reads the fontconfig bundle above
+        env={},
+    )
+
+    camou_chunks = sorted(
+        ((k, v) for k, v in result['env'].items() if k.startswith('CAMOU_CONFIG')),
+        key=lambda kv: int(kv[0].rsplit('_', 1)[1]),
+    )
+    cfg = json.loads(''.join(v for _, v in camou_chunks))
+
+    assert cfg['audio:seed'] == 333444
+    assert cfg['canvas:seed'] == 555666

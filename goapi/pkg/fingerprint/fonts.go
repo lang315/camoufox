@@ -30,7 +30,7 @@ var (
 	}
 )
 
-// RandomFontSubset mirrors pythonlib/camoufox/fingerprints.py:_generate_random_font_subset.
+// RandomFontSubset mirrors python/src/camoufox/fingerprints.py:_generate_random_font_subset.
 // Picks 30-78% of non-essential fonts at random, always preserves
 // essential + marker fonts.
 func RandomFontSubset(targetOS string, rng *rand.Rand) ([]string, error) {

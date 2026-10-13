@@ -12,7 +12,7 @@ import (
 )
 
 // rawEnvelope captures the union of request, response and event shapes
-// produced by additions/juggler/protocol/Dispatcher.js.
+// produced by browser/additions/juggler/protocol/Dispatcher.js.
 //
 // Request  (client → browser): {id, method, params, sessionId?}
 // Response (browser → client): {id, sessionId, result | error}
