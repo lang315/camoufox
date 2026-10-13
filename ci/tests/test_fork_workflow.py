@@ -1,4 +1,4 @@
-"""Fork-only checks on .github/workflows/tests.yml.
+"""Fork-only checks on .github/workflows/tests.yml and build.yml.
 
 Kept out of test_ci.py on purpose: that file is upstream's (daijro/camoufox),
 and a fork-only assertion there would conflict with every future sync that
@@ -6,10 +6,12 @@ touches it.
 """
 
 import pytest
+import yaml
 
 from ci._util import REPO_ROOT
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
+BUILD = WORKFLOW.with_name("build.yml")
 GUARD = '"${{ github.repository }}" != "daijro/camoufox"'
 
 
@@ -128,3 +130,17 @@ def test_the_gate_lets_install_skip_on_a_fork_only():
     gate = _job_block(WORKFLOW.read_text(encoding="utf-8"), "gate")
     assert '"install": os.environ.get("REPOSITORY") != "daijro/camoufox"' in gate
     assert "REPOSITORY: ${{ github.repository }}" in gate
+
+
+# --- build.yml ---------------------------------------------------------------
+
+
+def test_build_runs_only_when_dispatched():
+    """A fork release is made by hand from dispatched runs, and publishing it
+    creates its tag. A tag trigger then rebuilt all seven targets and, on
+    success, attached them to the already-published release: runs 36006238588
+    and 38362834381 (#203)."""
+    workflow = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
+    # PyYAML reads the bare key `on` as the boolean True.
+    assert set(workflow[True]) == {"workflow_dispatch"}
+    assert "release" not in workflow["jobs"]
