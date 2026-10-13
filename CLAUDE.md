@@ -27,6 +27,12 @@ matches (`browser/patches/`, `browser/additions/`, `browser/settings/`,
 `browser/assets/`, `browser/scripts/`, `browser/bundle/fontconfig/`,
 `browser/upstream.sh`, `browser/Makefile`) is the same browser. A cold macOS leg is ~2h.
 
+**Releasing a fork build is manual.** `release.yml` runs only on `daijro/camoufox`.
+Dispatch `build.yml` from `main` for each target, download the artifacts, then
+`gh release create v<version>-<release>-fork.<n> --target <main sha>` with the
+packages attached. `build.yml` runs only when dispatched, so creating that tag
+starts no build (#203).
+
 ### Patches: hand-written hunks
 
 **Balance the context lines in every hunk you hand-write.** GNU `patch` (what
