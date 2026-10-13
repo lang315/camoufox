@@ -115,19 +115,19 @@ def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     from util import Checks
 
     monkeypatch.setattr(known, "HOST", "Darwin")
-    node = "journeys/test_03_network.py::test_webrtc_does_not_reveal_lan_address[pw]"
+    node = "journeys/test_05_contexts.py::test_a_covered_launch_reads_the_canvas_placeholder[go]"
     red = Checks(node)
-    red(False, "no LAN address ['10.0.0.2'] in candidates or SDP")
+    red(False, "canvas readback is the placeholder: False")
     assert red.failed == []
-    fixed = Checks(node)  # #163 is strict
-    fixed(True, "no LAN address ['10.0.0.2'] in candidates or SDP")
-    assert fixed.failed and "#163" in fixed.failed[0]
+    fixed = Checks(node)  # #196 is strict
+    fixed(True, "canvas readback is the placeholder: True")
+    assert fixed.failed and "#196" in fixed.failed[0]
     other = Checks(node)
-    other(False, "the STUN server was asked")
-    assert other.failed == ["the STUN server was asked"]
+    other(False, "the page loaded")
+    assert other.failed == ["the page loaded"]
     monkeypatch.setattr(known, "HOST", "Plan9")  # a host nobody has measured
     unmeasured = Checks(node)
-    unmeasured(False, "no LAN address ['10.0.0.2'] in candidates or SDP")
+    unmeasured(False, "canvas readback is the placeholder: False")
     assert unmeasured.failed, "a host nobody measured must fail loudly"
 
 

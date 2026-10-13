@@ -18,17 +18,6 @@ CHECKS = [
     # Windows-only marker families, in every driver.
     (r"test_02_fingerprint\.py::test_(new_context_)?fingerprint_is_coherent\[(pkg|pw|go)-(macos|linux)\]",
      "fonts_no_foreign_os: ", 193, True, {"Windows"}),
-    (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
-     "no LAN address", 163, True, {"Darwin", "Linux", "Windows"}),
-    (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[(pkg|pw)\]",
-     "the configured WebRTC IP appears", 163, True, {"Darwin", "Linux", "Windows"}),
-    # goapi passes the IP at launch (CAMOU_CONFIG), not through the setter; same
-    # failure on Firefox 156 (e2e runs 38274475346 Linux, 38281511734 macOS,
-    # 38274480396 Windows).
-    (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[go\]",
-     "no LAN address", 163, True, {"Darwin", "Linux", "Windows"}),
-    (r"test_03_network\.py::test_webrtc_does_not_reveal_lan_address\[go\]",
-     "the configured WebRTC IP appears", 163, True, {"Darwin", "Linux", "Windows"}),
     # Depends on which presets the launch and the context draw: intermittent, so not strict.
     (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
      "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux", "Windows"}),
@@ -48,7 +37,6 @@ CHECKS = [
 
 # Findings that surface as an exception: (node id regex, issue, hosts, exception, strict).
 RAISES = [
-    (r"test_03_network\.py::test_proxy\[go-socks5\]", 166, {"Darwin", "Linux", "Windows"}, RuntimeError, True),
     # Intermittent: stalled at context 4 or 9 in two Linux runs, never on macOS.
     (r"test_08_lifecycle\.py::test_fifty_contexts_in_a_row\[(pkg|pw)\]", 171, {"Linux"}, AssertionError, False),
 ]

@@ -40,8 +40,6 @@ MASKCONFIG_READ = re.compile(r'MaskConfig::(?:Get|Has)\w*\(\s*"([^"]+)"')
 NOT_READ_BY_THE_BROWSER = {
     "locale:script": "the launcher joins it with locale:language/region into the UI locale",
     "navigator.doNotTrack": "the launcher applies it as privacy.donottrackheader.enabled (#760)",
-    "webrtc:ipv4": "declared; the FF156 webrtc-ip-spoofing patch has no reader for it yet (#163, fix planned)",
-    "webrtc:ipv6": "declared; the FF156 webrtc-ip-spoofing patch has no reader for it yet (#163, fix planned)",
 }
 
 # How Juggler and the patches name a key: a quoted string literal.

@@ -7,6 +7,7 @@ from util import header, lan_ips, wait_out
 
 GEOIP_IP = "8.8.8.8"
 SPOOFED_WEBRTC_IP = "203.0.113.7"  # TEST-NET-3: cannot be anyone's real address
+CONTEXT_WEBRTC_IP = "198.51.100.9"  # TEST-NET-2
 
 
 def via_proxy(drv, site, proxy):
@@ -67,4 +68,21 @@ def test_webrtc_does_not_reveal_lan_address(drv, site, stun, check):
     check(stun.seen, f"the STUN server was asked (non-vacuous); {len(got['candidates'])} candidates")
     check(not [ip for ip in lan if ip in text], f"no LAN address {sorted(lan)} in candidates or SDP")
     check(SPOOFED_WEBRTC_IP in text, f"the configured WebRTC IP appears: {got['candidates']}")
+    check.done()
+
+
+def test_context_webrtc_ip_overrides_the_launch_one(drv, site, stun, check):
+    # The launch-level IP is only a fallback (#163): a context's own IP must still win.
+    lan = lan_ips()
+    if not lan:
+        pytest.skip("this host has no non-loopback IPv4 address to leak")
+    b = drv.launch(os="windows", webrtc_ip=SPOOFED_WEBRTC_IP)
+    page = b.new_identity_context(webrtc_ip=CONTEXT_WEBRTC_IP).new_page()
+    page.goto(site.url(f"/webrtc?stun={sorted(lan)[0]}:{stun.port}"))
+    got = wait_out(page, 20)
+    b.close()
+    text = " ".join(got["candidates"]) + got["sdp"]
+    check(stun.seen, f"the STUN server was asked (non-vacuous); {len(got['candidates'])} candidates")
+    check(CONTEXT_WEBRTC_IP in text, f"the context's WebRTC IP appears: {got['candidates']}")
+    check(SPOOFED_WEBRTC_IP not in text, "the launch-level WebRTC IP does not")
     check.done()
