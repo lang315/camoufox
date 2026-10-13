@@ -27,34 +27,33 @@ type Options struct {
 var ffVersionRE = regexp.MustCompile(`Firefox/\d+\.0`)
 var rvVersionRE = regexp.MustCompile(`rv:\d+\.0`)
 
-// applyWindow mirrors clamp_window_dimensions
-// (python/src/camoufox/fingerprints.py:859): a
-// maximised window on the sampled screen, so outer <= avail <= screen with a
-// visible taskbar. Presets carry no window size, and without this the browser
-// keeps browser-init.patch's 1280x1040 on any screen (#166). Inner is left to
-// the browser, which lays it out inside the real window.
+// The browser's baseline protection (nsRFPService) reports the available
+// screen as the whole screen less a fixed taskbar for the claimed OS, and more
+// than one touch point as 5. Twins of python/src/camoufox/launcher-constants.json
+// (TestBaselineConstantsMatchPythonlib).
+var baselineTaskbarHeight = map[string]uint32{"windows": 48, "macos": 76, "linux": 0}
+
+const baselineMultiTouchPoints uint32 = 5
+
+// applyWindow mirrors follow_baseline_protection and clamp_window_dimensions
+// (python/src/camoufox/fingerprints.py): claim the available screen and touch
+// points the browser will report, then fit a maximised window inside that
+// screen. Presets carry no window size, and without this the browser keeps
+// browser-init.patch's 1280x1040 on any screen (#166). Inner is left to the
+// browser, which lays it out inside the real window.
 func applyWindow(cfg *config.Config, targetOS string) {
-	if cfg.ScreenWidth == nil || cfg.ScreenHeight == nil {
-		return
+	if cfg.ScreenWidth != nil && cfg.ScreenHeight != nil {
+		aw, ah := *cfg.ScreenWidth, *cfg.ScreenHeight-baselineTaskbarHeight[targetOS]
+		cfg.ScreenAvailWidth, cfg.ScreenAvailHeight = config.Uint32(aw), config.Uint32(ah)
+		if cfg.WindowOuterWidth == nil || *cfg.WindowOuterWidth > aw {
+			cfg.WindowOuterWidth = config.Uint32(aw)
+		}
+		if cfg.WindowOuterHeight == nil || *cfg.WindowOuterHeight > ah {
+			cfg.WindowOuterHeight = config.Uint32(ah)
+		}
 	}
-	sw, sh := *cfg.ScreenWidth, *cfg.ScreenHeight
-	aw, ah := sw, sh
-	if cfg.ScreenAvailWidth != nil {
-		aw = min(*cfg.ScreenAvailWidth, sw)
-	}
-	if cfg.ScreenAvailHeight != nil {
-		ah = min(*cfg.ScreenAvailHeight, sh)
-	}
-	if ah == sh {
-		taskbar := map[string]uint32{"windows": 40, "macos": 25, "linux": 27}[targetOS]
-		ah = sh - taskbar
-	}
-	cfg.ScreenAvailWidth, cfg.ScreenAvailHeight = config.Uint32(aw), config.Uint32(ah)
-	if cfg.WindowOuterWidth == nil || *cfg.WindowOuterWidth > aw {
-		cfg.WindowOuterWidth = config.Uint32(aw)
-	}
-	if cfg.WindowOuterHeight == nil || *cfg.WindowOuterHeight > ah {
-		cfg.WindowOuterHeight = config.Uint32(ah)
+	if p := cfg.NavigatorMaxTouchPoints; p != nil && *p > 1 {
+		cfg.NavigatorMaxTouchPoints = config.Uint32(baselineMultiTouchPoints)
 	}
 }
 
