@@ -405,7 +405,16 @@ mac host, a case the existing rule never considered.
   retry. The first measurement in each process still reads a hexbox, so this
   narrows the window but does not close it.
 
-Option A is recommended. Linux-host numbers are still to come. The binary
+**Decision:** both A and B. A is narrowed to what has been measured:
+- the pref is set for a linux identity, and for any identity of another OS
+  than the host's;
+- a native mac or win identity keeps stock's async default.
+
+This leaves win-on-win at stock until it is measured. B was chosen knowing its
+cost: a lookup during the load window rescans, which stock does not do.
+Branch fix/165-fallback, stacked on W1.
+
+Option A was the recommendation. Linux-host numbers are still to come. The binary
 carries a26b419 (W1's generic-table change). The same probe is re-run on
 main 84e5fe1's macOS build before this is posted as a finding about main.
 
