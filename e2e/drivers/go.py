@@ -74,8 +74,8 @@ class GoDriver:
         return reply.get("result")
 
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
-               webrtc_ip=None, prefs=None) -> "GoBrowser":
-        for opt, value in (("humanize", humanize), ("geoip", geoip), ("locale", locale)):
+               webrtc_ip=None, prefs=None, env=None) -> "GoBrowser":
+        for opt, value in (("humanize", humanize), ("geoip", geoip), ("locale", locale), ("env", env)):
             if value:
                 pytest.skip(f"go: no {opt}")
         if headless == "virtual":

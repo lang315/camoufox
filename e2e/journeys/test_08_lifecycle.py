@@ -1,5 +1,6 @@
 """Journey 8: long sessions, many contexts, and a browser that dies under you."""
 
+import os
 import threading
 import time
 import urllib.request
@@ -14,7 +15,15 @@ PAGES = ["/login", "/shop", "/upload", "/download", "/fp"]
 
 
 def fifty_contexts(driver, site):
-    b = driver.launch()
+    env = None
+    logdir = os.environ.get("E2E_MOZ_LOG")
+    if logdir:
+        # #171: where does a stalled navigation stop? Per-process logs, timestamped,
+        # so the stall's wall-clock time (printed below) finds it in the file.
+        os.makedirs(logdir, exist_ok=True)
+        env = {**os.environ, "MOZ_LOG": "timestamp,nsHttp:3,nsSocketTransport:3",
+               "MOZ_LOG_FILE": os.path.join(logdir, f"{driver.name}-moz")}
+    b = driver.launch(env=env) if env else driver.launch()
     for i in range(50):
         c = b.new_context()
         p = c.new_page()
@@ -37,7 +46,8 @@ def fifty_contexts(driver, site):
             raise AssertionError(
                 f"{driver.name} context {i}: goto failed after {time.monotonic() - t0:.1f}s; server received "
                 f"{received} /login request(s) for it; server answers a direct GET with {server}; "
-                f"a fresh context: {retry}; threads alive {threading.active_count()}: {e}") from e
+                f"a fresh context: {retry}; threads alive {threading.active_count()}; "
+                f"at {time.strftime('%H:%M:%S', time.gmtime())} UTC, log dir {logdir}: {e}") from e
         assert p.eval("document.title") == "Sign in", f"context {i}"
         c.close()
     b.close()

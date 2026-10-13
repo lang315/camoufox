@@ -100,7 +100,11 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   ```bash
   python3 -m ci.run_e2e --binary /path/to/camoufox-bin      # what CI runs
   gh workflow run e2e.yml --repo <fork> -f release=<tag>    # Linux/macOS/Windows
+  gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f k=fifty_contexts -f mozlog=true
   ```
+  `mozlog=true` uploads a `MOZ_LOG` capture (`mozlog-<target>`) of the
+  fifty-contexts journey (#171). `e2e/probes/` holds one-off measurements run by
+  hand against a binary, not collected by pytest: `emoji_timing.py` is #165's.
 
 ## Verifying spoofing claims (learned the hard way)
 

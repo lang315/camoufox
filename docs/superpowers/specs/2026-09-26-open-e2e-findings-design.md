@@ -339,6 +339,85 @@ the PR.
 Written after W4's data, as an amendment to this document, and reviewed before
 any code.
 
+#### W5.165: the first content process's fallback runs before its cmaps load
+
+**Measured** (local macOS arm64; binary from build 38327033839 = 88087b6;
+package launcher, `os="windows"`, headless; 16px Arial canvas `measureText`):
+
+| first context of a launch, t (s) | U+1F603 | U+2603 | U+4E2D | U+50000 (unassigned) |
+|---|---|---|---|---|
+| 0 and 1, async fallback on (the default here) | 17 | 13 | 13 | 17 |
+| 3 to 10, async fallback on | 21.97 | 14.35 or 16 | | 17 |
+| 0 to 10, `gfx.font_rendering.fallback.async=false` | 21.97 | 14.35 or 16 | 16 | 17 |
+
+Every later context reads 21.97 from t=0. U+50000 has no font anywhere, so
+17 is the hexbox width. The emoji, the snowman and 中 all render as hexboxes
+until some time between 1 s and 10 s after launch. The hypothesis in the
+root-cause table was right, and it is wider than emoji.
+
+**The site**, from a `MOZ_LOG=timestamp,sync,fontlist:4` capture of that
+context. Without `sync`, the first content process's log is cut off about
+0.2 s in, so a capture without it shows no fallback lines at all.
+
+1. At t ≈ 0.1 s: `global-fallback ch=U+1F603 level=3 ctx=6 examined=2
+   refused=479 cmap-skipped=223 resolved=none`.
+   - `gfxPlatformFontList::GlobalFontFallback` skips every family that is not
+     `IsFullyInitialized()` while `gfx.font_rendering.fallback.async` is on.
+   - In that process, 223 families were skipped.
+2. `SystemFindFontForChar` records the miss in the process-wide
+   `mCodepointsWithNoFonts[level]`, because the context has no font list of
+   its own.
+3. Every later lookup in that process returns at
+   `gfxFontGroup::FindFontForChar`'s `SkipFontFallbackForChar` check. That
+   check comes before any CAMOU-FL line, so the log goes silent.
+4. At about 10 s, the bitset is reset after the cmap loads finish. The next
+   lookup reads `cmap-skipped=0 resolved=Segoe UI Emoji`.
+
+Later contexts get their own processes. They see the cmaps that the parent's
+shared list has loaded by then (`cmap-skipped=0`).
+
+**Why the emoji pref is not the fix:**
+- With the pref set, the pref family is found by name in
+  `WhichPrefFontSupportsChar` (step 2 of `FindFontForChar`). So the emoji reads
+  21.97 at t=0 in 10 of 10 contexts.
+- U+2603 and U+4E2D never consult that pref.
+- The family is answered by `gate ctx=0`, so a per-context list could not
+  refuse it.
+
+**The cost of the pref fix:** with async fallback off, the first fallback
+`measureText` of a launch takes 262 to 371 ms, against 67 to 112 ms with it on.
+That is 3 launches each way, and it is paid once per launch.
+
+**The decision this section asks for:** both launchers already set
+`gfx.font_rendering.fallback.async=false`, but only for a linux identity
+(`utils.py:1488-1503`, `utils.ts:1650-1654`). macOS was left out on purpose:
+on a stock Mac mini, the synchronous scan changed the face CoreText fallback
+picks for U+1E9E in Futura (1 of 14 families). That measurement was made with
+a mac identity on a mac host. The table above uses a windows identity on a
+mac host, a case the existing rule never considered.
+
+- **Option A:** set the pref for every identity except a mac identity on a mac
+  host. It is a launcher change, in the existing branch, in both launchers
+  (goapi has no equivalent yet). It needs a Windows-host measurement before
+  it covers win-on-win.
+- **Option B (C++):** make `SystemFindFontForChar` skip recording the miss when
+  `GlobalFontFallback` skipped any family for cmap loading. Later lookups then
+  retry. The first measurement in each process still reads a hexbox, so this
+  narrows the window but does not close it.
+
+**Decision:** both A and B. A is narrowed to what has been measured:
+- the pref is set for a linux identity, and for any identity of another OS
+  than the host's;
+- a native mac or win identity keeps stock's async default.
+
+This leaves win-on-win at stock until it is measured. B was chosen knowing its
+cost: a lookup during the load window rescans, which stock does not do.
+Branch fix/165-fallback, stacked on W1.
+
+Option A was the recommendation. Linux-host numbers are still to come. The binary
+carries a26b419 (W1's generic-table change). The same probe is re-run on
+main 84e5fe1's macOS build before this is posted as a finding about main.
+
 ## Order
 
 0. W0 first, while no PR is open. Every workstream after it then branches from
