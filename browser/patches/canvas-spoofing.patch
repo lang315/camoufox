@@ -1,0 +1,391 @@
+diff --git a/dom/base/CanvasSeedManager.cpp b/dom/base/CanvasSeedManager.cpp
+new file mode 100644
+index 0000000000..0007463b91
+--- /dev/null
++++ b/dom/base/CanvasSeedManager.cpp
+@@ -0,0 +1,118 @@
++#include "CanvasSeedManager.h"
++#include "MaskConfig.hpp"
++#include "mozilla/HashFunctions.h"
++#include "mozilla/Logging.h"
++#include "mozilla/dom/Document.h"
++
++namespace mozilla {
++namespace dom {
++
++// Camoufox: guards read these lines to tell a perturbed read from one that
++// was not, which the pixels alone cannot show.
++static LazyLogModule sCamouCanvasLog("CamouCanvas");
++
++/* static */ nsString
++CanvasSeedManager::KeyForUserContext(uint32_t userContextId) {
++  nsString key;
++  key.AppendLiteral(u"canvas_seed_");
++  key.AppendInt(userContextId);
++  return key;
++}
++
++/* static */ void
++CanvasSeedManager::SetSeed(uint32_t userContextId, uint32_t seed) {
++  nsString key = KeyForUserContext(userContextId);
++  RoverfoxStorageManager::PutUint(key, seed);
++  DisableFunction(userContextId);
++  MOZ_LOG(sCamouCanvasLog, LogLevel::Debug,
++          ("CAMOU-CANVAS set ctx=%u seed=%u", userContextId, seed));
++}
++
++/* static */ uint32_t
++CanvasSeedManager::GetSeed(uint32_t userContextId) {
++  nsString key = KeyForUserContext(userContextId);
++  uint32_t seed = 0;
++  if (RoverfoxStorageManager::GetUint(key, seed) && seed != 0) {
++    return seed;
++  }
++  // Fallback to CAMOU_CONFIG so worker processes pick up the seed.
++  if (auto val = MaskConfig::GetUint32("canvas:seed")) {
++    return val.value();
++  }
++  return 0;
++}
++
++/* static */ void
++CanvasSeedManager::DisableFunction(uint32_t userContextId) {
++  RoverfoxStorageManager::MarkSetterUsed("canvas", userContextId);
++}
++
++/* static */ bool
++CanvasSeedManager::IsFunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj) {
++  return RoverfoxStorageManager::IsSetterOffered(aObj, "canvas");
++}
++
++// Hash of the first kHashBytes of buf (or the whole buf if smaller).
++// Mixes content into the per-context seed so identical canvases on
++// different contexts diverge AND so resizing the same drawing keeps
++// the noise pattern coherent.
++static uint32_t HashContent(const uint8_t* buf, size_t len) {
++  constexpr size_t kHashBytes = 1024;
++  const size_t n = (len < kHashBytes) ? len : kHashBytes;
++  return mozilla::HashBytes(buf, n);
++}
++
++/* static */ void
++CanvasSeedManager::Perturb(uint8_t* data, size_t length,
++                           uint32_t seed, double density, uint32_t strength) {
++  if (seed == 0 || data == nullptr || length < 4 || density <= 0.0) {
++    return;
++  }
++  MOZ_LOG(sCamouCanvasLog, LogLevel::Debug,
++          ("CAMOU-CANVAS perturb seed=%u bytes=%zu", seed, length));
++  // Mix seed with content. Keeps noise deterministic per (seed, content).
++  uint32_t s = seed ^ HashContent(data, length);
++  if (s == 0) {
++    s = seed | 1u;
++  }
++  // LCG (the same LCG the audio/harfbuzz seed paths use).
++  const uint32_t kThreshold = static_cast<uint32_t>(density * 4294967296.0);
++  for (size_t i = 0; i < length; ++i) {
++    if ((i & 3u) == 3u) {
++      continue;  // skip alpha channel
++    }
++    s = s * 1103515245u + 12345u;
++    if (s < kThreshold) {
++      int32_t delta = ((s >> 16) & 1u) ? +static_cast<int32_t>(strength)
++                                       : -static_cast<int32_t>(strength);
++      int32_t v = static_cast<int32_t>(data[i]) + delta;
++      if (v < 0) v = 0;
++      else if (v > 255) v = 255;
++      data[i] = static_cast<uint8_t>(v);
++    }
++  }
++}
++
++/* static */ double
++CanvasSeedManager::GetNoiseDensity() {
++  if (auto v = MaskConfig::GetDouble("canvas:noiseDensity")) {
++    return v.value();
++  }
++  return 0.0005;  // 1 in 2000 channels
++}
++
++/* static */ uint32_t
++CanvasSeedManager::GetNoiseStrength() {
++  if (auto v = MaskConfig::GetUint32("canvas:noiseStrength")) {
++    return v.value();
++  }
++  return 1;  // ±1 LSB
++}
++
++/* static */ uint32_t
++CanvasSeedManager::SeedFromDocument(Document* aDoc) {
++  return aDoc ? GetSeed(RoverfoxStorageManager::UserContextId(aDoc)) : 0;
++}
++
++} // namespace dom
++} // namespace mozilla
+diff --git a/dom/base/CanvasSeedManager.h b/dom/base/CanvasSeedManager.h
+new file mode 100644
+index 0000000000..5e59fc391d
+--- /dev/null
++++ b/dom/base/CanvasSeedManager.h
+@@ -0,0 +1,63 @@
++#ifndef mozilla_dom_CanvasSeedManager_h
++#define mozilla_dom_CanvasSeedManager_h
++
++#include "nsString.h"
++#include "RoverfoxStorageManager.h"
++
++struct JSContext;
++
++namespace mozilla {
++namespace dom {
++
++class Document;
++
++/**
++ * CanvasSeedManager — per-userContextId canvas perturbation seed plus the
++ * Perturb() helper that applies deterministic ±1 LSB noise to RGBA buffers
++ * at the readback boundary. Used by:
++ *   - CanvasRenderingContext2D::GetImageData
++ *   - HTMLCanvasElement::ToDataURL / ToBlob
++ *   - OffscreenCanvas::ConvertToBlob / TransferToImageBitmap
++ *   - ClientWebGLContext::ReadPixels (default-FBO only)
++ *
++ * Same seed + same source bytes → same output (deterministic), so a site
++ * reading the canvas twice cannot detect the noise by re-rendering. Two
++ * BrowsingContexts with different userContextId diverge.
++ */
++class CanvasSeedManager {
++ public:
++  static void SetSeed(uint32_t userContextId, uint32_t seed);
++  static uint32_t GetSeed(uint32_t userContextId);
++
++  static void DisableFunction(uint32_t userContextId);
++  static bool IsFunctionEnabledForWebIDL(JSContext* aCx, JSObject* aObj);
++
++  /**
++   * Deterministic LSB perturbation. Same (data, length, seed) → same output.
++   *   - Modifies RGB channels only; alpha untouched.
++   *   - density: 0..1 fraction of channels to perturb (Brave low-impact ≈ 0.0005).
++   *   - strength: signed delta in [1, 4]; values >1 produce visible banding.
++   *
++   * Caller is responsible for resolving `seed` from the right userContextId
++   * before invoking; passing seed == 0 makes this a no-op.
++   */
++  static void Perturb(uint8_t* data, size_t length,
++                      uint32_t seed, double density, uint32_t strength);
++
++  // Config-backed convenience accessors.
++  static double GetNoiseDensity();
++  static uint32_t GetNoiseStrength();
++
++  // The active seed for a document's context, read from its principal, so a
++  // document without a browsing context (DOMParser, createHTMLDocument) finds
++  // its creator's seed.
++  static uint32_t SeedFromDocument(Document* aDoc);
++
++ private:
++  static nsString KeyForUserContext(uint32_t userContextId);
++};
++
++}  // namespace dom
++}  // namespace mozilla
++
++#endif  // mozilla_dom_CanvasSeedManager_h
+diff --git a/dom/base/moz.build b/dom/base/moz.build
+index ad24dc91a2..af5abf9a37 100644
+--- a/dom/base/moz.build
++++ b/dom/base/moz.build
+@@ -152,6 +152,7 @@ EXPORTS.mozilla.dom += [
+     "BodyUtil.h",
+     "BorrowedAttrInfo.h",
+     "CacheExpirationTime.h",
++    "CanvasSeedManager.h",
+     "CCGCScheduler.h",
+     "CharacterData.h",
+     "CharacterDataBuffer.h",
+@@ -356,6 +357,7 @@ UNIFIED_SOURCES += [
+     "BodyConsumer.cpp",
+     "BodyUtil.cpp",
+     "BorrowedAttrInfo.cpp",
++    "CanvasSeedManager.cpp",
+     "CCGCScheduler.cpp",
+     "CharacterData.cpp",
+     "CharacterDataBuffer.cpp",
+diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
+index 8fd79e9868..ba36325c1c 100644
+--- a/dom/base/nsGlobalWindowInner.cpp
++++ b/dom/base/nsGlobalWindowInner.cpp
+@@ -89,6 +89,7 @@
+ #include "mozilla/dom/AudioContext.h"
+ #include "AudioFingerprintManager.h"
+ #include "RoverfoxStorageManager.h"
++#include "CanvasSeedManager.h"
+ #include "mozilla/dom/AutoEntryScript.h"
+ #include "mozilla/dom/BarProps.h"
+ #include "mozilla/dom/BindingDeclarations.h"
+@@ -7786,6 +7787,11 @@ void nsGlobalWindowInner::SetAudioFingerprintSeed(uint32_t seed,
+   RoverfoxStorageManager::RemoveSetter("setAudioFingerprintSeed");
+ }
+ 
++void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
++  CanvasSeedManager::SetSeed(RoverfoxStorageManager::UserContextId(this), seed);
++  RoverfoxStorageManager::RemoveSetter("setCanvasSeed");
++}
++
+ RefPtr<GenericPromise> nsGlobalWindowInner::StorageAccessPermissionChanged(
+     bool aGranted) {
+   // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
+diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
+index eec89694f8..e9bc8f7026 100644
+--- a/dom/base/nsGlobalWindowInner.h
++++ b/dom/base/nsGlobalWindowInner.h
+@@ -681,6 +681,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+   // Audio fingerprint seed for per-context audio fingerprinting
+   void SetAudioFingerprintSeed(uint32_t seed, mozilla::ErrorResult& aRv);
+ 
++  // Canvas pixel perturbation seed for privacy-preserving canvas readback
++  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
++
+   void GetWebExposedLocales(nsTArray<nsString>& aLocales);
+ 
+   mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
+diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
+index 0553126dbf..09587eddc3 100644
+--- a/dom/canvas/CanvasRenderingContext2D.cpp
++++ b/dom/canvas/CanvasRenderingContext2D.cpp
+@@ -59,6 +59,8 @@
+ #include "mozilla/dom/CanvasRenderingContext2DBinding.h"
+ #include "mozilla/dom/DOMMatrix.h"
+ #include "mozilla/dom/Document.h"
++#include "mozilla/dom/CanvasSeedManager.h"
++#include "AccessObserverDom.hpp"
+ #include "mozilla/dom/FontFaceSet.h"
+ #include "mozilla/dom/FontFaceSetImpl.h"
+ #include "mozilla/dom/GeneratePlaceholderCanvasData.h"
+@@ -2260,6 +2262,22 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
+   return NS_OK;
+ }
+ 
++// Resolve the owning Document for canvas seed lookup: html canvas via its
++// element, offscreen (main-thread) via its owner window. Worker offscreen has
++// no Document, so this returns null and perturbation becomes a no-op.
++static Document* CanvasSeedDocumentFor(HTMLCanvasElement* aCanvasElement,
++                                       OffscreenCanvas* aOffscreenCanvas) {
++  if (aCanvasElement) {
++    return aCanvasElement->OwnerDoc();
++  }
++  if (aOffscreenCanvas) {
++    if (auto* win = aOffscreenCanvas->GetOwnerWindow()) {
++      return win->GetExtantDoc();
++    }
++  }
++  return nullptr;
++}
++
+ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+     mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
+     int32_t* out_format, gfx::IntSize* out_imageSize) {
+@@ -2279,6 +2297,28 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+       *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
+       *out_imageSize = data->GetSize();
+       ret = SurfaceToPackedBGRA(data);
++      // Camoufox canvas perturbation. No-op when seed == 0 (spoofing off).
++      // Covers toDataURL / toBlob / OffscreenCanvas.convertToBlob (BGRA packed).
++      // toBlob still asks for the buffer under the placeholder and then
++      // discards it, so that read is not noised. It is still recorded: the
++      // observer records the read the page made, whatever answered it.
++      Document* seedDoc =
++          CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++      if (camoufox::AccessObserver::IsArmed()) {
++        camoufox::RecordSurfaceFromDocument(seedDoc,
++                                            camoufox::SurfaceId::Canvas);
++      }
++      if (aExtractionBehavior != CanvasUtils::ImageExtraction::Placeholder) {
++        uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++        if (seed != 0 && ret) {
++          CanvasSeedManager::Perturb(
++              ret.get(),
++              static_cast<size_t>(out_imageSize->width) *
++                  out_imageSize->height * 4,
++              seed, CanvasSeedManager::GetNoiseDensity(),
++              CanvasSeedManager::GetNoiseStrength());
++        }
++      }
+     }
+   }
+ 
+@@ -6803,6 +6843,20 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+                         aWidth * 4, SurfaceFormat::R8G8B8A8,
+                         dstWriteRect.Size());
+     }
++
++    // Camoufox canvas perturbation on the JS-visible RGBA buffer. No-op when
++    // seed == 0. Placeholder path already broke out above, so it is untouched.
++    Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++    // Camoufox tracking-observer: record the read (no-op when disarmed).
++    if (camoufox::AccessObserver::IsArmed()) {
++      camoufox::RecordSurfaceFromDocument(seedDoc, camoufox::SurfaceId::Canvas);
++    }
++    uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
++    if (seed != 0) {
++      CanvasSeedManager::Perturb(data, len.value(), seed,
++          CanvasSeedManager::GetNoiseDensity(),
++          CanvasSeedManager::GetNoiseStrength());
++    }
+   } while (false);
+ 
+   readback->Unmap();
+diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
+index 5aaa4279fd..8cd6dbad57 100644
+--- a/dom/canvas/ClientWebGLContext.cpp
++++ b/dom/canvas/ClientWebGLContext.cpp
+@@ -16,6 +16,8 @@
+ #include "WebGLMethodDispatcher.h"
+ #include "WebGLTextureUpload.h"
+ #include "WebGLValidateStrings.h"
++#include "mozilla/dom/CanvasSeedManager.h"
++#include "AccessObserverDom.hpp"
+ #include "gfxCrashReporterUtils.h"
+ #include "js/PropertyAndElement.h"  // JS_DefineElement
+ #include "js/ScalarType.h"          // js::Scalar::Type
+@@ -5477,6 +5479,26 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+               range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
+               alphaChannelOffset, hasAlphaChannel);
+         }
++        // camoufox: deterministic per-seed WebGL readback perturbation.
++        // A launch the RFP canvas targets cover reads the placeholder above
++        // instead, and its launcher sets no seed, so only an uncovered launch
++        // is perturbed.
++        // Offscreen/worker contexts have no owner document and stay unperturbed.
++        if (dom::Document* seedDoc = GetOwnerDoc()) {
++          // Camoufox tracking-observer: record the read (no-op when disarmed).
++          if (camoufox::AccessObserver::IsArmed()) {
++            camoufox::RecordSurfaceFromDocument(seedDoc,
++                                                camoufox::SurfaceId::WebGL);
++          }
++          const uint32_t seed =
++              dom::CanvasSeedManager::SeedFromDocument(seedDoc);
++          if (seed != 0) {
++            dom::CanvasSeedManager::Perturb(
++                range->data(), range->size_bytes(), seed,
++                dom::CanvasSeedManager::GetNoiseDensity(),
++                dom::CanvasSeedManager::GetNoiseStrength());
++          }
++        }
+       }
+     }
+   });
+diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
+index ab1c306617..3bc45920a2 100644
+--- a/dom/webidl/Window.webidl
++++ b/dom/webidl/Window.webidl
+@@ -972,3 +972,9 @@ partial interface Window {
+   [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
+   readonly attribute DocumentPictureInPicture documentPictureInPicture;
+ };
++
++// Canvas pixel perturbation seed for privacy-preserving canvas readback
++partial interface Window {
++  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
++  undefined setCanvasSeed(unsigned long seed);
++};

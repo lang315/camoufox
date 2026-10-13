@@ -1,7 +1,7 @@
 // Package config models the CAMOU_CONFIG payload consumed by the
-// patched Firefox via additions/camoucfg/MaskConfig.hpp.
+// patched Firefox via browser/additions/camoucfg/MaskConfig.hpp.
 //
-// The full key set is defined in settings/properties.json. Both
+// The full key set is defined in browser/settings/properties.json. Both
 // dot-separated (navigator.*) and colon-separated (canvas:seed,
 // webGl:vendor) names are kept verbatim so we can serialize them
 // back exactly the way the C++ parser expects.
@@ -171,7 +171,7 @@ type Config struct {
 	Certificates     []string `json:"certificates,omitempty"`
 	Debug            *bool    `json:"debug,omitempty"`
 
-	// Registered in settings/properties.json but had no producer field, so
+	// Registered in browser/settings/properties.json but had no producer field, so
 	// TestProducerSchemaDrift failed on main and goapi.yml was red for every
 	// PR -- which would make the guard added alongside it unreadable.
 	// Kept in its own block so gofmt does not realign the one above.

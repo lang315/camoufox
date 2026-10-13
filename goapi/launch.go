@@ -220,7 +220,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		// real WebRTC calls that need mDNS connectivity.
 		prefs["media.peerconnection.ice.obfuscate_host_addresses"] = false
 	}
-	// The bundled settings/camoufox.cfg ships these at 0, which disables
+	// The bundled browser/settings/camoufox.cfg ships these at 0, which disables
 	// session history and leaves Page.GoBack/GoForward inert. Restore the
 	// Firefox defaults so navigation works (matches donutbrowser). A
 	// userPref overrides the cfg defaultPref.

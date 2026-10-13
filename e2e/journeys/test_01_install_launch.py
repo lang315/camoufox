@@ -39,7 +39,7 @@ def test_launch_modes(drv, site, binary, mode, check):
 def test_fresh_venv_install(tmp_path, site, binary):
     venv.create(tmp_path / "venv", with_pip=True)
     py = tmp_path / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    subprocess.run([str(py), "-m", "pip", "install", "-q", str(REPO / "pythonlib")], check=True, timeout=600)
+    subprocess.run([str(py), "-m", "pip", "install", "-q", str(REPO / "python")], check=True, timeout=600)
     script = textwrap.dedent(f"""
         from camoufox.sync_api import Camoufox
         with Camoufox(executable_path={str(binary)!r}, headless=True) as browser:

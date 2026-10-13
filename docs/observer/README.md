@@ -109,8 +109,8 @@ All seven per-access surfaces are wired end-to-end: canvas and webgl
 (`canvas-spoofing.patch`), audio (`audio-fingerprint-manager.patch`), fonts
 (`font-list-spoofing.patch`), navigator (`navigator-spoofing.patch`), screen
 (`screen-spoofing.patch`), webrtc (`webrtc-ip-spoofing.patch`). Verified at
-runtime — see `build-tester/observer/REPORT.md:16-29` and the re-runnable assert
-in `build-tester/observer/test_observer_records.py:17-18`.
+runtime — see `browser/tests/build-tester/observer/REPORT.md:16-29` and the re-runnable assert
+in `browser/tests/build-tester/observer/test_observer_records.py:17-18`.
 
 The engine-cached and un-spoofed surfaces remain outside the observer by
 construction, not as follow-on work: they consult no spoof config, so there is

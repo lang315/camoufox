@@ -11,7 +11,7 @@ import (
 )
 
 // knownConfigOnlyKeys are CAMOU keys the patched binary reads and config.go
-// emits, but which are not yet registered in settings/properties.json (the
+// emits, but which are not yet registered in browser/settings/properties.json (the
 // canonical schema). They are live — shipped in media-codec-spoofing — so
 // properties.json simply lags. Freezing them here means a NEW divergence fails
 // the test while this documented lag passes. When properties.json is updated to
@@ -22,8 +22,8 @@ import (
 // declared in properties.json during the beta.31 sync, so they are gone.
 //
 // The two below are read by a raw data.find("mediaCapabilities:...") in
-// additions/camoucfg/MaskConfig.hpp. Upstream's schema guard
-// (pythonlib/tests/test_config_schema.py) only matches MaskConfig::Get*/Has*
+// browser/additions/camoucfg/MaskConfig.hpp. Upstream's schema guard
+// (python/tests/test_config_schema.py) only matches MaskConfig::Get*/Has*
 // string literals, so it cannot see them: this set is their only watchdog.
 var knownConfigOnlyKeys = map[string]bool{
 	"mediaCapabilities:canPlayType":  true,
@@ -45,30 +45,36 @@ func configJSONKeys() map[string]bool {
 }
 
 // TestProducerSchemaDrift asserts the goapi producer (config.go) and the
-// canonical schema (settings/properties.json) stay in sync: no spoofable
+// canonical schema (browser/settings/properties.json) stay in sync: no spoofable
 // property is silently undroppable by the producer, and no producer key
 // escapes the schema without being a documented lag. A new patch key added to
 // only one side fails here — that is exactly the "dead key / partial spoof"
 // class that optimize-for-donut.md found by hand.
 func TestProducerSchemaDrift(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("..", "..", "..", "settings", "properties.json"))
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "browser", "settings", "properties.json"))
 	if err != nil {
 		t.Fatalf("read properties.json: %v", err)
 	}
 	var props []struct {
 		Property string `json:"property"`
+		Removed  string `json:"removed"`
 	}
 	if err := json.Unmarshal(data, &props); err != nil {
 		t.Fatalf("parse properties.json: %v", err)
 	}
 	schema := map[string]bool{}
+	live := map[string]bool{}
 	for _, p := range props {
 		schema[p.Property] = true
+		// A removed key is kept so launchers can say "removed in X"; it has no effect, so no producer field.
+		if p.Removed == "" {
+			live[p.Property] = true
+		}
 	}
 	cfg := configJSONKeys()
 
-	// Every schema property must have a config.go field.
-	for k := range schema {
+	// Every live schema property must have a config.go field.
+	for k := range live {
 		if !cfg[k] {
 			t.Errorf("properties.json key %q has no config.go field (producer cannot emit it)", k)
 		}
@@ -88,7 +94,7 @@ func TestProducerSchemaDrift(t *testing.T) {
 // TestProducerSchemaDrift above only compares TOP-LEVEL Config keys against
 // properties.json, so nested object fields were checked against nothing. That
 // gap shipped a real bug: config.go emitted "voiceURI" (mirroring
-// settings/camoucfg.jvv, which was itself wrong) while MVoices reads
+// the since-deleted settings/camoucfg.jvv, which was itself wrong) while MVoices reads
 // "voiceUri". JSON keys are case-sensitive, MVoices skips any entry missing a
 // required field, so every goapi-configured voice was dropped and the host's
 // own voices stayed exposed. CI passed throughout: the runtime subtest only
@@ -97,7 +103,7 @@ func TestProducerSchemaDrift(t *testing.T) {
 // The oracle here is the reader itself, not a second schema -- agreeing with
 // the wrong spec is how the bug got in.
 func TestVoiceKeysMatchReader(t *testing.T) {
-	src, err := os.ReadFile(filepath.Join("..", "..", "..", "additions", "camoucfg", "MaskConfig.hpp"))
+	src, err := os.ReadFile(filepath.Join("..", "..", "..", "browser", "additions", "camoucfg", "MaskConfig.hpp"))
 	if err != nil {
 		t.Fatalf("read MaskConfig.hpp: %v", err)
 	}

@@ -13,7 +13,7 @@ import (
 
 // fontconfigEnv returns the FONTCONFIG_FILE=<path> entry that confines the
 // browser to the bundled fonts of the identity's OS, or "" off Linux (the other
-// hosts render with their own font stack). It ports pythonlib/camoufox/utils.py
+// hosts render with their own font stack). It ports python/src/camoufox/utils.py
 // get_env_vars + _generate_fontconfig: without it a Linux launch resolves
 // against the host's fontconfig and renders host fonts under a foreign-OS
 // identity.
@@ -174,7 +174,7 @@ func isDir(p string) bool {
 // which the launch font mask refuses, so monospace fell to the first allowed
 // family: Arial or Arimo (#162). Every family must be in every drawn font subset
 // (TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims). Kept identical to
-// pythonlib's GENERIC_FONT_FAMILIES.
+// GENERIC_FONT_FAMILIES in python/src/camoufox/utils.py.
 // ponytail: x-western and x-unicode only; other lang groups keep the host
 // default until the browser-side fix (#162, W1) lands.
 var genericFamilies = map[string][3]string{

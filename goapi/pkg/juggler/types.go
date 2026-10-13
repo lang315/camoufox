@@ -3,7 +3,7 @@ package juggler
 import "encoding/json"
 
 // TargetInfo is emitted by Browser.attachedToTarget and friends.
-// See additions/juggler/protocol/Protocol.js (browserTypes.TargetInfo).
+// See browser/additions/juggler/protocol/Protocol.js (browserTypes.TargetInfo).
 type TargetInfo struct {
 	Type             string `json:"type"`
 	TargetID         string `json:"targetId"`

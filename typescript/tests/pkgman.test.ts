@@ -1,18 +1,21 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileNotFoundError } from "../src/exceptions.js";
+import {
+	LOCAL_DATA,
+	loadDataFile,
+	OS_ARCH_MATRIX,
+	OS_NAME,
+} from "../src/paths.js";
 import {
 	AvailableVersion,
 	formatAssetDate,
-	LOCAL_DATA,
-	loadYaml,
-	OS_ARCH_MATRIX,
-	OS_NAME,
 	pkgmanDeps,
 	RepoConfig,
 	Version,
+	webdl,
 } from "../src/pkgman.js";
 
 describe("Version ordering", () => {
@@ -152,15 +155,41 @@ describe("formatAssetDate", () => {
 	});
 });
 
+describe("the fpgen model directory", () => {
+	/** fpgen's model directory once paths.ts is imported with this env. */
+	async function modelDirWith(env: string): Promise<[string, string]> {
+		vi.stubEnv("CAMOUFOX_FPGEN_DATA", env);
+		vi.resetModules();
+		const { INSTALL_DIR } = await import("../src/paths.js");
+		const { modelDir } = await import("fpgen-js");
+		return [modelDir(), INSTALL_DIR];
+	}
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.resetModules();
+	});
+
+	it("is fpgen/ in the Camoufox cache", async () => {
+		const [dir, installDir] = await modelDirWith("");
+		expect(dir).toBe(path.join(installDir, "fpgen"));
+	});
+
+	it("is $CAMOUFOX_FPGEN_DATA when set", async () => {
+		const env = path.join(os.tmpdir(), "camoufox-fpgen-data");
+		expect((await modelDirWith(env))[0]).toBe(env);
+	});
+});
+
 describe("repos.yml", () => {
 	it("is the file the Python package ships", () => {
 		const shipped = fs.readFileSync(
-			path.join(import.meta.dirname, "../../pythonlib/camoufox/repos.yml"),
+			path.join(import.meta.dirname, "../../python/src/camoufox/repos.yml"),
 			"utf-8",
 		);
 		const ours = fs.readFileSync(path.join(LOCAL_DATA, "repos.yml"), "utf-8");
 		expect(ours).toBe(shipped);
-		expect(loadYaml("repos.yml").default.browser).toBe("Official");
+		expect(loadDataFile("repos.yml").default.browser).toBe("Official");
 	});
 });
 
@@ -172,7 +201,7 @@ describe("AvailableVersion.toMetadata", () => {
 			isPrerelease: false,
 		});
 		expect(JSON.stringify(v.toMetadata())).toBe(
-			'{"version":"152.0.4","build":"beta.30","prerelease":false,"asset_id":null,"asset_size":null,"asset_updated_at":null,"sha256":null,"created_at":null}',
+			'{"version":"152.0.4","build":"beta.30","prerelease":false,"asset_id":null,"asset_size":null,"asset_updated_at":null,"sha256":null,"created_at":null,"interface":1}',
 		);
 	});
 });
@@ -190,5 +219,48 @@ describe("parseSemver", () => {
 	])("%s parses as its release", async (raw, expected) => {
 		const { parseSemver } = await import("../src/pkgman.js");
 		expect(parseSemver(raw)).toEqual(expected);
+	});
+});
+
+describe("webdl network failures", () => {
+	afterEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("retries a request that failed before any response", async () => {
+		const closed = Object.assign(new TypeError("fetch failed"), {
+			cause: { code: "UND_ERR_SOCKET", message: "other side closed" },
+		});
+		const fetchMock = vi
+			.fn()
+			.mockRejectedValueOnce(closed)
+			.mockResolvedValueOnce(new Response("mmdb"));
+		vi.stubGlobal("fetch", fetchMock);
+		const body = await webdl(
+			"https://example.test/a.zip",
+			undefined,
+			false,
+			null,
+			{
+				progressCallback: () => {},
+			},
+		);
+		expect(body.toString()).toBe("mmdb");
+		expect(fetchMock).toHaveBeenCalledTimes(2);
+	});
+
+	it("does not retry an HTTP error", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockResolvedValue(
+				new Response("", { status: 404, statusText: "Not Found" }),
+			);
+		vi.stubGlobal("fetch", fetchMock);
+		await expect(
+			webdl("https://example.test/missing.zip", undefined, false, null, {
+				progressCallback: () => {},
+			}),
+		).rejects.toThrow("404 Client Error");
+		expect(fetchMock).toHaveBeenCalledTimes(1);
 	});
 });

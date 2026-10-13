@@ -158,7 +158,7 @@ func WithAddons(paths ...string) Option {
 }
 
 // WithCanvasNoise tunes the canvas pixel-perturbation pipeline added
-// by patches/canvas-spoofing.patch. density is the fraction of RGB
+// by browser/patches/canvas-spoofing.patch. density is the fraction of RGB
 // channels touched per readback (default 0.0005 = 1 in 2000); strength
 // is the absolute LSB delta (default 1). Larger values produce visible
 // banding in headful mode — Brave's low-impact default is the safe
@@ -187,7 +187,7 @@ func WithMDNSObfuscation(enable bool) Option {
 }
 
 // WithWebRTCLocalIP wires the dead config keys webrtc:localipv4 /
-// webrtc:localipv6 from patches/webrtc-ip-spoofing2.patch. When set,
+// webrtc:localipv6 from browser/patches/webrtc-ip-spoofing2.patch. When set,
 // RFC1918 / ULA candidates in SDP are replaced with the supplied local
 // addresses instead of falling back to the public spoof. Pass empty
 // strings to leave a slot unset.
