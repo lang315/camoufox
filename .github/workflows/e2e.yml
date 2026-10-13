@@ -19,6 +19,10 @@ on:
       soak_seconds:
         description: "Soak length per driver"
         default: "200"
+      generic_prefs:
+        description: "Set the launchers' #162 generic font prefs (off = measure the browser fix alone)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -91,6 +95,7 @@ jobs:
         working-directory: e2e
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          CAMOUFOX_NO_GENERIC_PREFS: ${{ inputs.generic_prefs && '0' || '1' }}
         run: |
           # Per-test timeout, as ci/run_e2e.py sets on the gate: one hung test must not hold the job.
           args=($E2E_BROWSER --soak-seconds "${{ inputs.soak_seconds }}" -v -rA --timeout 900)
