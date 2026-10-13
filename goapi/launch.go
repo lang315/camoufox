@@ -254,6 +254,9 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 			prefs[k] = v
 		}
 	}
+	if syncFontFallback(uaOSDir(cfg.NavigatorUserAgent, config.HostOS()), config.HostOS()) {
+		prefs["gfx.font_rendering.fallback.async"] = false
+	}
 	for k, v := range lc.firefoxUserPrefs {
 		prefs[k] = v
 	}

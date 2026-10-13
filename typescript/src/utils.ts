@@ -1646,10 +1646,12 @@ export async function launchOptions({
 		setInto(firefox_user_prefs, "ui.useOverlayScrollbars", 1);
 	}
 
-	// Per-character font fallback, LINUX ONLY: with async fallback on, the
-	// first measurement of a character only one bundled family provides returns
-	// the primary family's .notdef. macOS must NOT get this.
-	if (targetOs === "lin") {
+	// Per-character font fallback, synchronous for a linux identity and for any
+	// identity of another OS than the host's: with async fallback on, the first
+	// measurement of a character only one bundled family provides returns the
+	// primary family's .notdef (#165). A mac identity on a mac host must NOT get
+	// this; see the same block in python/src/camoufox/utils.py.
+	if (targetOs === "lin" || targetOs !== utilsDeps.hostOsKey()) {
 		setInto(firefox_user_prefs, "gfx.font_rendering.fallback.async", false);
 	}
 

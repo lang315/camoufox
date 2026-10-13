@@ -167,6 +167,18 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   lookup is still exempt, as it is from the mask itself. The table
   answers before the launchers' own #162 prefs, so a launch-only identity now
   gets the same generic a per-context list gives it.
+- **No cached miss while cmaps load (#165).** With async fallback on,
+  `GlobalFontFallback` skips every family whose cmap is not loaded yet, and
+  upstream cached the resulting miss in `mCodepointsWithNoFonts`. In the
+  first content process of a launch, that answered every later lookup of the
+  character with a hexbox until the parent had loaded every cmap, 1 to 10 s
+  after launch.
+  - `SystemFindFontForChar` no longer caches a miss when the scan skipped a
+    family (`mCamouFallbackCmapsPending`). The next lookup scans again.
+  - The first lookup still misses. The launchers close that by turning async
+    fallback off for any identity except a native mac or win one.
+  - Guarded by `fallback-miss-while-cmaps-load.py`, which reads the
+    `global-fallback` lines.
 - **`gfxFontGroup::GetDefaultFont`'s scope and shared-list walk, plus
   `GetDefaultFontLocked`'s two last resorts (#88).** What is **measured** is
   that a refusing context never reaches `GetDefaultFont` at all (arm (h3), shape

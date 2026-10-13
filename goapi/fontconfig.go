@@ -183,6 +183,16 @@ var genericFamilies = map[string][3]string{
 	"linux":   {"Cousine", "Tinos", "Arimo"},
 }
 
+// syncFontFallback reports whether a launch turns off async per-character font
+// fallback: for a linux identity, and for any identity of another OS than the
+// host's, whose own fallback the mask refuses, so the first context drew
+// U+1F603, U+2603 and U+4E2D as hexboxes for 1-10 s (#165). A mac identity on a
+// mac host keeps it: forcing the scan there changed the face CoreText picks.
+// Kept identical to the rule in python/src/camoufox/utils.py.
+func syncFontFallback(targetOS, hostOS string) bool {
+	return targetOS == "linux" || targetOS != hostOS
+}
+
 func genericFontPrefs(targetOS string) map[string]string {
 	f, ok := genericFamilies[targetOS]
 	if !ok {
