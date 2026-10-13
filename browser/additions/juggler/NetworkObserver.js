@@ -626,16 +626,33 @@ export class NetworkObserver {
         }
         if (this._targetRegistry.shouldBustHTTPAuthCacheForProxy(proxy))
           Services.obs.notifyObservers(null, "net:clear-active-logins");
-        proxyFilter.onProxyFilterResult(protocolProxyService.newProxyInfo(
-            proxy.type,
-            proxy.host,
-            proxy.port,
-            '', /* aProxyAuthorizationHeader */
-            '', /* aConnectionIsolationKey */
-            Ci.nsIProxyInfo.TRANSPARENT_PROXY_RESOLVES_HOST, /* aFlags */
-            UINT32_MAX, /* aFailoverTimeout */
-            null, /* failover proxy */
-        ));
+        // SOCKS credentials travel in the proxy info itself; promptAuth only ever
+        // answers HTTP AUTH_PROXY, so dropping them made an authenticated SOCKS5
+        // proxy refuse the connection (#166).
+        const socksAuth = proxy.type.startsWith('socks') && proxy.username;
+        proxyFilter.onProxyFilterResult(socksAuth ?
+          protocolProxyService.newProxyInfoWithAuth(
+              proxy.type,
+              proxy.host,
+              proxy.port,
+              proxy.username,
+              proxy.password || '',
+              '', /* aProxyAuthorizationHeader */
+              '', /* aConnectionIsolationKey */
+              Ci.nsIProxyInfo.TRANSPARENT_PROXY_RESOLVES_HOST, /* aFlags */
+              UINT32_MAX, /* aFailoverTimeout */
+              null, /* failover proxy */
+          ) :
+          protocolProxyService.newProxyInfo(
+              proxy.type,
+              proxy.host,
+              proxy.port,
+              '', /* aProxyAuthorizationHeader */
+              '', /* aConnectionIsolationKey */
+              Ci.nsIProxyInfo.TRANSPARENT_PROXY_RESOLVES_HOST, /* aFlags */
+              UINT32_MAX, /* aFailoverTimeout */
+              null, /* failover proxy */
+          ));
       },
     };
     protocolProxyService.registerChannelFilter(this._channelProxyFilter, 0 /* position */);
