@@ -2,6 +2,7 @@ package fingerprint
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -18,5 +19,30 @@ func TestEmbeddedFontsMatchPythonlib(t *testing.T) {
 	}
 	if !bytes.Equal(rawFonts, want) {
 		t.Fatalf("data/fonts.json differs from python/src/camoufox/fonts.json; refresh it: cp %s goapi/pkg/fingerprint/data/fonts.json", src)
+	}
+}
+
+// The baseline taskbar heights and touch points are pythonlib's
+// launcher-constants.json values; a drifted copy claims an avail screen the
+// browser does not report.
+func TestBaselineConstantsMatchPythonlib(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "python", "src", "camoufox", "launcher-constants.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c struct {
+		Taskbar map[string]uint32 `json:"baselineTaskbarHeight"`
+		Touch   uint32            `json:"baselineMultiTouchPoints"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil {
+		t.Fatal(err)
+	}
+	for key, osName := range map[string]string{"win": "windows", "mac": "macos", "lin": "linux"} {
+		if got, ok := baselineTaskbarHeight[osName]; !ok || got != c.Taskbar[key] {
+			t.Errorf("baselineTaskbarHeight[%q] = %d, launcher-constants.json says %d", osName, got, c.Taskbar[key])
+		}
+	}
+	if baselineMultiTouchPoints != c.Touch {
+		t.Errorf("baselineMultiTouchPoints = %d, launcher-constants.json says %d", baselineMultiTouchPoints, c.Touch)
 	}
 }
