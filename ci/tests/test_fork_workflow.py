@@ -6,10 +6,12 @@ touches it.
 """
 
 import pytest
+import yaml
 
 from ci._util import REPO_ROOT
 
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "tests.yml"
+BUILD = WORKFLOW.with_name("build.yml")
 GUARD = '"${{ github.repository }}" != "daijro/camoufox"'
 
 
@@ -130,7 +132,7 @@ def test_the_gate_lets_install_skip_on_a_fork_only():
     assert "REPOSITORY: ${{ github.repository }}" in gate
 
 
-# --- build.yml on a tag ------------------------------------------------------
+# --- build.yml ---------------------------------------------------------------
 
 
 def test_build_runs_only_when_dispatched():
@@ -138,11 +140,7 @@ def test_build_runs_only_when_dispatched():
     creates its tag. A tag trigger then rebuilt all seven targets and, on
     success, attached them to the already-published release: runs 36006238588
     and 38362834381 (#203)."""
-    import yaml
-
-    workflow = yaml.safe_load(
-        (REPO_ROOT / ".github" / "workflows" / "build.yml").read_text(encoding="utf-8")
-    )
+    workflow = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
     # PyYAML reads the bare key `on` as the boolean True.
     assert set(workflow[True]) == {"workflow_dispatch"}
     assert "release" not in workflow["jobs"]
