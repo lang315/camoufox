@@ -1,6 +1,5 @@
 """Journey 8: long sessions, many contexts, and a browser that dies under you."""
 
-import os
 import threading
 import time
 import urllib.request
@@ -8,21 +7,14 @@ import urllib.request
 import psutil
 import pytest
 
-from util import browser_procs, rss_mb
+from util import browser_procs, moz_log_env, rss_mb
 
 pytestmark = pytest.mark.slow
 PAGES = ["/login", "/shop", "/upload", "/download", "/fp"]
 
 
 def fifty_contexts(driver, site):
-    env = None
-    logdir = os.environ.get("E2E_MOZ_LOG")
-    if logdir:
-        # #171: where does a stalled navigation stop? Per-process logs, timestamped,
-        # so the stall's wall-clock time (printed below) finds it in the file.
-        os.makedirs(logdir, exist_ok=True)
-        env = {**os.environ, "MOZ_LOG": "timestamp,nsHttp:3,nsSocketTransport:3",
-               "MOZ_LOG_FILE": os.path.join(logdir, f"{driver.name}-moz")}
+    env = moz_log_env(driver.name)  # the stall's wall-clock time, printed below, finds it in the file
     b = driver.launch(env=env) if env else driver.launch()
     for i in range(50):
         c = b.new_context()

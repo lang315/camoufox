@@ -67,13 +67,29 @@ def wait_for(page, js: str, timeout: float = 15) -> Any:
         time.sleep(0.2)
 
 
+def moz_log_env(name: str) -> Optional[dict]:
+    """A launch env that captures MOZ_LOG to $E2E_MOZ_LOG/<name>-moz, or None when it is unset.
+    #171: where does a stalled request stop? Per-process logs, timestamped, so a
+    stall's wall-clock time finds it in the file."""
+    logdir = os.environ.get("E2E_MOZ_LOG")
+    if not logdir:
+        return None
+    os.makedirs(logdir, exist_ok=True)
+    return {**os.environ, "MOZ_LOG": "timestamp,nsHttp:3,nsSocketTransport:3",
+            "MOZ_LOG_FILE": os.path.join(logdir, f"{name}-moz")}
+
+
 def wait_out(page, timeout: float = 60) -> Any:
     try:
         return json.loads(wait_for(page, OUT_JS, timeout))
     except TimeoutError as e:
         try:
+            # A resource gets its timing entry only once its response ends, so a request
+            # still pending is missing from the list (#171).
             where = page.eval("(() => { const o = document.getElementById('out'); "
-                              "return [location.href, document.readyState, o ? o.dataset.progress || 'no progress' : 'no #out']; })()")
+                              "return [location.href, document.readyState, o ? o.dataset.progress || 'no progress' : 'no #out', "
+                              "'resources ' + performance.getEntriesByType('resource').map(r => "
+                              "`${new URL(r.name).pathname}@${Math.round(r.startTime)}-${Math.round(r.responseEnd)}ms`).join(' ')]; })()")
         except Exception as err:
             where = f"page did not answer: {str(err)[:120]}"
         raise TimeoutError(f"page never published #out in {timeout:.0f}s; page state {where}; {e}") from None

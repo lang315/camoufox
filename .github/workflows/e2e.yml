@@ -27,7 +27,7 @@ on:
         description: "Only the tests matching this pytest -k expression"
         required: false
       mozlog:
-        description: "Capture MOZ_LOG (nsHttp, nsSocketTransport) for the fifty-contexts journey (#171)"
+        description: "Capture MOZ_LOG (nsHttp, nsSocketTransport) for the fingerprint and fifty-contexts journeys (#171)"
         type: boolean
         default: false
 

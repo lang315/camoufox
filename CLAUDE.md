@@ -103,8 +103,9 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f k=fifty_contexts -f mozlog=true
   ```
   `mozlog=true` uploads a `MOZ_LOG` capture (`mozlog-<target>`) of the
-  fifty-contexts journey (#171). `e2e/probes/` holds one-off measurements run by
-  hand against a binary, not collected by pytest: `emoji_timing.py` is #165's.
+  fingerprint and fifty-contexts journeys (#171). `e2e/probes/` holds one-off
+  measurements run by hand against a binary, not collected by pytest:
+  `emoji_timing.py` is #165's.
 
 ## Verifying spoofing claims (learned the hard way)
 
