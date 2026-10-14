@@ -107,7 +107,9 @@ class GoBrowser:
     def __init__(self, d: GoDriver, h: str) -> None:
         self.d, self.h = d, h
 
-    def new_context(self) -> "GoCtx":
+    def new_context(self, **kw) -> "GoCtx":
+        if kw:
+            pytest.skip(f"go: no per-context {', '.join(kw)}")
         return GoCtx(self.d, self.d.rpc("browser.new_context", self.h))
 
     def new_identity_context(self, **kw):
