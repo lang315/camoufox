@@ -1,8 +1,8 @@
 diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
-index d02c530cd5..bd48a0f323 100644
+index 767adbd9dd..5745b0bdb5 100644
 --- a/dom/base/Navigator.cpp
 +++ b/dom/base/Navigator.cpp
-@@ -974,6 +974,21 @@ bool Navigator::Vibrate(const nsTArray<uint32_t>& aPattern) {
+@@ -980,6 +980,21 @@ bool Navigator::Vibrate(const nsTArray<uint32_t>& aPattern) {
  //*****************************************************************************
  
  uint32_t Navigator::MaxTouchPoints(CallerType aCallerType) {

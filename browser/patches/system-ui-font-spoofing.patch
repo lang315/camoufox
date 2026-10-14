@@ -1,5 +1,5 @@
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index c3bbff7628..c87de00e3d 100644
+index 978cc54c13..40212b6835 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -31,6 +31,7 @@
@@ -10,7 +10,7 @@ index c3bbff7628..c87de00e3d 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/gfx/Logging.h"
  #include "mozilla/glean/GfxMetrics.h"
-@@ -2665,9 +2666,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
+@@ -2670,9 +2671,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
    }
  }
  
@@ -67,7 +67,7 @@ index c3bbff7628..c87de00e3d 100644
    // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
    // code below ends up using [NSFont systemFontOfSize: 0.0].
    nsFont systemFont;
-@@ -2809,17 +2857,53 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2814,17 +2862,53 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    }
  
    auto index = static_cast<size_t>(aGenericType);
@@ -123,7 +123,7 @@ index c3bbff7628..c87de00e3d 100644
  void gfxPlatformFontList::AddGenericFonts(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGenericType, nsAtom* aLanguage,
-@@ -2852,9 +2936,24 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2857,9 +2941,24 @@ void gfxPlatformFontList::AddGenericFonts(
    // Placed AFTER the math remap above so the row asked for is the row the
    // caller ends up wanting. Falls through to the pref memo when the helper
    // declines or its key resolves empty.
@@ -149,7 +149,7 @@ index c3bbff7628..c87de00e3d 100644
        nsAutoCString camouKey, camouStep;
        bool camouAnswered = false;
        if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
-@@ -2884,6 +2983,7 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2889,6 +2988,7 @@ void gfxPlatformFontList::AddGenericFonts(
    PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
                                                          aGenericType, prefLang);
  
@@ -157,7 +157,7 @@ index c3bbff7628..c87de00e3d 100644
    if (!prefFonts->IsEmpty()) {
      aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
      for (auto& f : *prefFonts) {
-@@ -2906,9 +3006,20 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2911,9 +3011,20 @@ void gfxPlatformFontList::AddGenericFonts(
        if (!camouAllowed) {
          continue;
        }
@@ -178,7 +178,7 @@ index c3bbff7628..c87de00e3d 100644
  }
  
  static nsAtom* PrefLangToLangGroups(uint32_t aIndex) {
-@@ -3533,6 +3644,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
+@@ -3538,6 +3649,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
        pref = nullptr;
      }
    }
@@ -191,7 +191,7 @@ index c3bbff7628..c87de00e3d 100644
  
    // Create a new FontPrefs and replace the existing one.
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index a26464adde..8ffc07e8de 100644
+index 701750be08..5ffe5a30b3 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
 @@ -1198,6 +1198,12 @@ class gfxPlatformFontList : public gfxFontInfoLoader {

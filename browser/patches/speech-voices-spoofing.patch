@@ -123,10 +123,10 @@ index 0000000000..90e1ca117c
 +
 +#endif  // mozilla_dom_SpeechVoicesManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index 926cadf3dc..c1b1fbf7e6 100644
+index c9a14f1e11..88f6b8f9d2 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -577,6 +577,14 @@ EXPORTS.mozilla.dom += [
+@@ -579,6 +579,14 @@ EXPORTS.mozilla.dom += [
      "FontListManager.h",
  ]
  
@@ -142,7 +142,7 @@ index 926cadf3dc..c1b1fbf7e6 100644
  # CharacterDataBuffer.cpp
  if CONFIG["INTEL_ARCHITECTURE"]:
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 25f413db16..56d4c9500f 100644
+index ee60eb3a6a..126a75c4b9 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
 @@ -19,6 +19,7 @@
@@ -153,7 +153,7 @@ index 25f413db16..56d4c9500f 100644
  #include "MainThreadUtils.h"
  #include "Navigator.h"
  #include "PaintWorkletImpl.h"
-@@ -7864,6 +7865,14 @@ void nsGlobalWindowInner::SetScreenColorDepth(uint32_t depth,
+@@ -7870,6 +7871,14 @@ void nsGlobalWindowInner::SetScreenColorDepth(uint32_t depth,
    RoverfoxStorageManager::RemoveSetter("setScreenColorDepth");
  }
  
@@ -169,10 +169,10 @@ index 25f413db16..56d4c9500f 100644
      bool aGranted) {
    // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index ff8c14d011..d6826ed802 100644
+index 10700bcbe2..4def5672b9 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -709,6 +709,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -712,6 +712,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
                             mozilla::ErrorResult& aRv);
    void SetScreenColorDepth(uint32_t depth, mozilla::ErrorResult& aRv);
  
@@ -233,7 +233,7 @@ index e1bf345159..ca6ffacb21 100644
      "ipc",
  ]
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index c4cb127e83..e4db344794 100644
+index 11c1c4a607..006ae5fabf 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
 @@ -949,6 +949,12 @@ partial interface Window {
