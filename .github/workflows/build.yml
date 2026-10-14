@@ -20,6 +20,7 @@ on:
 jobs:
   matrix:
     runs-on: ubuntu-24.04
+    permissions: {}
     outputs:
       json: ${{ steps.gen.outputs.json }}
     steps:
@@ -43,6 +44,8 @@ jobs:
 
   build:
     needs: matrix
+    permissions:
+      contents: read
     # macOS legs run on macos-26 (Xcode 26 / SDK 26.x). FF150 hard-requires the
     # macOS 26 SDK: mac_sdk_min_version() is "26.5", and the source actually uses
     # macOS-26-only APIs (e.g. widget/cocoa/nsCocoaWindow.mm references

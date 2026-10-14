@@ -161,3 +161,16 @@ def test_every_build_target_is_one_multibuild_builds():
     pairs = {(leg["target"], leg["arch"]) for leg in full}
     pairs |= {tuple(o.split("-", 1)) for o in options if o != "full"}
     assert not pairs & set(multibuild.UNSUPPORTED), sorted(pairs & set(multibuild.UNSUPPORTED))
+
+
+def test_every_job_declares_its_token_permissions():
+    # AGENTS.md: least privilege, per job. A job with no `permissions:` at either
+    # level runs with the repository's default token scope (#187).
+    bare = []
+    for path in sorted(WORKFLOW.parent.glob("*.yml")):
+        workflow = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if "permissions" in workflow:
+            continue
+        bare += [f"{path.name}:{name}" for name, job in workflow["jobs"].items()
+                 if "permissions" not in job and "uses" not in job]
+    assert not bare, bare
