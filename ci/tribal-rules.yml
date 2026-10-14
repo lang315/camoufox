@@ -207,6 +207,29 @@ rules:
       only effect is to become detectable is not a feature, so the manager,
       the window setter, the shaper hook and the config key are gone.
 
+  - id: ubo-lists-pinned-to-bundled
+    title: uBlock Origin's filter lists are pinned to the ones it bundles; no regional list
+    check: manual
+    evidence:
+      - "issue #211; e2e runs 38456928453, 38481074309 and 38483854834 (macOS, locale de-DE)"
+      - "uBO platform/common/vapi-background.js: onBeforeRequest holds tabId >= 0 while suspendDepth != 0"
+      - "uBO src/js/storage.js: loadFilterLists() calls vAPI.net.suspend() whenever vAPI.Net.canSuspend(), true on Firefox"
+      - "uBO src/js/background.js: assetFetchTimeout 30"
+    rationale: >-
+      On Firefox uBO holds every page request while it loads its filter lists.
+      Every Camoufox launch is a first run, and on a first run uBO auto-selects
+      a regional list from the UI language, which it does not bundle and must
+      download. When that download hangs, every page waits for uBO's 30 s
+      timeout once per mirror. With locale de-DE behind a proxy that held
+      outside hosts, Page.goto timed out at 30 s. The setting
+      suspendUntilListsAreLoaded=false does not help: it lifts only the
+      start-up hold, and loadFilterLists() suspends again regardless of it.
+      Pinning the selection through managed storage (toOverwrite.filterLists)
+      leaves only bundled lists, so the first load needs no network. The cost
+      is that a non-English locale loses its regional list. When uBO changes
+      its default lists, update the keys in policies.json from its
+      assets.json.
+
   - id: canvas-noise-entropy-is-lower-than-audio
     title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)
     check: manual   # an open finding, not a settled decision

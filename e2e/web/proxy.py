@@ -58,9 +58,11 @@ def _pipe(a, b) -> None:
 
 
 class Proxy:
-    def __init__(self, kind: str, auth=None) -> None:
+    def __init__(self, kind: str, auth=None, hang_outside=False) -> None:
+        """hang_outside: accept a request for any host but `.test` and never answer it,
+        as a stalled CDN does."""
         assert kind in ("http", "socks5")
-        self.kind, self.auth = kind, auth
+        self.kind, self.auth, self.hang_outside = kind, auth, hang_outside
         self.hosts: list = []
         proxy = self
 
@@ -86,8 +88,12 @@ class Proxy:
             d["username"], d["password"] = self.auth
         return d
 
-    def _resolve(self, host: str) -> str:
+    def _resolve(self, host: str, c) -> str:
         self.hosts.append(host)
+        if self.hang_outside and not host.endswith(".test"):
+            while c.recv(65536):  # hold the client until it gives up
+                pass
+            raise ConnectionError(f"held {host}")
         return "127.0.0.1" if host.endswith(".test") else host
 
     def _http(self, c) -> None:
@@ -104,13 +110,13 @@ class Proxy:
             break
         if method == "CONNECT":
             host, port = target.rsplit(":", 1)
-            up = socket.create_connection((self._resolve(host), int(port)))
+            up = socket.create_connection((self._resolve(host, c), int(port)))
             c.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
         else:
             # ponytail: later requests on this keep-alive connection go to the same
             # upstream; fine while every proxied page lives on one .test origin.
             u = urlsplit(target)
-            up = socket.create_connection((self._resolve(u.hostname), u.port or 80))
+            up = socket.create_connection((self._resolve(u.hostname, c), u.port or 80))
             up.sendall(head)
         _pipe(c, up)
 
@@ -138,6 +144,6 @@ class Proxy:
         else:
             host = socket.inet_ntop(socket.AF_INET6, _recvn(c, 16))
         port = struct.unpack(">H", _recvn(c, 2))[0]
-        up = socket.create_connection((self._resolve(host), port))
+        up = socket.create_connection((self._resolve(host, c), port))
         c.sendall(b"\x05\x00\x00\x01" + socket.inet_aton("127.0.0.1") + struct.pack(">H", port))
         _pipe(c, up)

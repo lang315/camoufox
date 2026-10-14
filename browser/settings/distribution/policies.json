@@ -42,6 +42,26 @@
         "updates_disabled": true
       }
     },
+    "3rdparty": {
+      "Extensions": {
+        "uBlock0@raymondhill.net": {
+          "toOverwrite": {
+            "filterLists": [
+              "user-filters",
+              "ublock-filters",
+              "ublock-badware",
+              "ublock-privacy",
+              "ublock-unbreak",
+              "ublock-quick-fixes",
+              "easylist",
+              "easyprivacy",
+              "urlhaus-1",
+              "plowe-0"
+            ]
+          }
+        }
+      }
+    },
     "SearchEngines": {
       "PreventInstalls": true,
       "Remove": [

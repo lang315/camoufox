@@ -1,5 +1,7 @@
 """Journey 3: proxies, geoip and WebRTC, as a user configures them."""
 
+import time
+
 import pytest
 
 from oracle.docs import cite
@@ -8,6 +10,9 @@ from util import header, lan_ips, wait_out
 GEOIP_IP = "8.8.8.8"
 SPOOFED_WEBRTC_IP = "203.0.113.7"  # TEST-NET-3: cannot be anyone's real address
 CONTEXT_WEBRTC_IP = "198.51.100.9"  # TEST-NET-2
+# Firefox's own media-plugin update check and downloads, the other outside requests a launch makes.
+GMP_HOSTS = {"aus5.mozilla.org", "update.googleapis.com", "edgedl.me.gvt1.com", "dl.google.com",
+             "ciscobinary.openh264.org"}
 
 
 def via_proxy(drv, site, proxy):
@@ -31,6 +36,38 @@ def test_proxy(drv, site, http_proxy, socks_proxy, socks_proxy_noauth, kind, che
     req = site.seen("/fp")[-1]
     check("e2e.test" in proxy.hosts, f"the {kind} proxy carried the page (hosts seen: {sorted(set(proxy.hosts))})")
     check(fp["main"]["ua"] == header(req, "User-Agent"), "UA through the proxy matches the header that arrived")
+    check.done()
+
+
+def test_a_hanging_filter_list_download_does_not_hold_pages(drv, site, check):
+    """#211: uBO holds every page while it loads its filter lists. A de-DE first run
+    used to select a regional list that must be downloaded, so a hanging download
+    held pages for uBO's 30 s timeout per mirror. While any list download hangs, a
+    page must still load."""
+    from web.proxy import Proxy
+
+    proxy = Proxy("http", hang_outside=True)
+    lists = lambda: [h for h in proxy.hosts if not h.endswith(".test") and h not in GMP_HOSTS]
+    try:
+        b = drv.launch(os="windows", locale="de-DE", proxy=proxy.playwright())
+        page = b.new_context().new_page()
+        # Navigate once a list download is in flight; how soon one starts depends on the host.
+        deadline = time.monotonic() + 90
+        while not lists() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        in_flight = lists()
+        t0 = time.monotonic()
+        error = None
+        try:
+            page.goto(f"http://e2e.test:{site.port1}/login")  # Playwright's own 30 s timeout bounds it
+        except Exception as e:
+            error = str(e)[:80]
+        took = time.monotonic() - t0
+        b.close()
+    finally:
+        proxy.stop()
+    check(in_flight, "a filter-list download was held when the page navigated (else VACUOUS)", ledger=False)
+    check(error is None and took < 10, f"the page took {took:.1f} s ({error or 'loaded'}) while {in_flight} hung")
     check.done()
 
 
