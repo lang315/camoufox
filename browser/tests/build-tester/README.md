@@ -32,7 +32,7 @@ python scripts/run_tests.py /path/to/camoufox-bin/camoufox
 npm dependencies and creates `.venv/` with this tree's `python/` package on first
 run, then calls `run_tests.py`. It forwards every option below except `--json`.
 
-`run_tests.sh` launches the browser **headful**, borrowing a display from `xvfb` when there is none. That matters: headless Firefox has no GL context, and the suite's WebGL checks report `passed: true` on "WebGL not available" — a headless run scores 5 of them for free and drops 12 more from the denominator entirely (issue #75). Running `python scripts/run_tests.py` directly still works, but needs a `DISPLAY` (or `xvfb-run`, or `BUILDTESTER_HEADLESS=1` to opt out and forfeit those checks).
+The suite launches the browser **headful**, so the WebGL checks run against a real GL context; a check that finds no WebGL fails (issues #75, #195). On Linux, `run_tests.sh` borrows a display from `xvfb` when there is none, and exits with an error when there is neither. Running `python scripts/run_tests.py` directly on Linux needs a `DISPLAY` (e.g. under `xvfb-run -a`) and refuses to start without one.
 
 In CI the suite runs through `python3 -m ci.run_build_tester --binary <path>`
 from the repository root (see [`ci/README.md`](../../../ci/README.md)).

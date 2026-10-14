@@ -474,13 +474,13 @@ export async function runExtendedChecks(): Promise<
       };
     } else {
       result.webglRenderHash.noWebGL = {
-        passed: true,
+        passed: false,
         detail: "WebGL not available",
       };
     }
   } catch (e: any) {
     result.webglRenderHash.error = {
-      passed: true,
+      passed: false,
       detail: "WebGL render error: " + e.message,
     };
   }
@@ -610,7 +610,7 @@ export async function runExtendedChecks(): Promise<
     try {
       const wCanvas = document.createElement("canvas");
       const wGl = wCanvas.getContext("webgl");
-      if (!wGl) return { passed: true, detail: "WebGL not available" };
+      if (!wGl) return { passed: false, detail: "WebGL not available" };
       const dbg = wGl.getExtension("WEBGL_debug_renderer_info");
       if (!dbg) return { passed: true, detail: "Debug renderer info not available" };
       const renderer =
@@ -997,7 +997,7 @@ export async function runExtendedChecks(): Promise<
       try {
         const sc = document.createElement("canvas");
         const sgl = sc.getContext("webgl");
-        if (!sgl) return { passed: true, detail: "WebGL not available" };
+        if (!sgl) return { passed: false, detail: "WebGL not available" };
         const ext = sgl.getExtension("WEBGL_debug_renderer_info");
         if (!ext) return { passed: true, detail: "Debug renderer info not available" };
         const renderer = (
@@ -1146,7 +1146,7 @@ export async function runExtendedChecks(): Promise<
       try {
         const c = document.createElement("canvas");
         const gl = c.getContext("webgl");
-        if (!gl) return { passed: true, detail: "WebGL not available" };
+        if (!gl) return { passed: false, detail: "WebGL not available" };
         const ext = gl.getExtension("WEBGL_debug_renderer_info");
         if (!ext)
           return { passed: true, detail: "Debug renderer info not available" };

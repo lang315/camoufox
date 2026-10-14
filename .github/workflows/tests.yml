@@ -944,7 +944,9 @@ jobs:
           # fpgen's model itself: TLS verification off, no checksum, and only
           # ever the April-2025 release (observed in run 36050915401).
           python3 "$GITHUB_WORKSPACE/python/scripts/pin-fpgen-model.py"
-      - run: xvfb-run -a python3 -m ci.run_build_tester --binary "$CAMOUFOX_BINARY"
+      # The suite is headful, so the Xvfb screen is observable: give it the
+      # one run_tests.sh gives it, so the two entrypoints measure the same thing.
+      - run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python3 -m ci.run_build_tester --binary "$CAMOUFOX_BINARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

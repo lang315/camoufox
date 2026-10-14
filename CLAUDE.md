@@ -78,14 +78,11 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   # or, what CI runs:
   python3 -m ci.run_build_tester --binary /path/to/camoufox-bin
   ```
-  `run_tests.sh` installs deps and wraps the run in `xvfb` when there is no
-  display, falling back to a warning when `xvfb-run` is missing. That does not
-  make the run headful: `scripts/runner.py` launches every browser with
-  `headless=True`, and `scripts/run_tests.py` never checks for a display. So
-  build-tester currently runs **headless**. Headless Firefox has no GL context
-  and the WebGL checks fail *open* — `passed: true` on "WebGL not available" —
-  so every run scores 5 checks for free and drops 12 more from the denominator
-  (issue #75). #195 tracks it.
+  build-tester runs **headful** (#195): `scripts/runner.py` refuses to start on
+  Linux without a `DISPLAY`, `run_tests.sh` borrows one from `xvfb` and exits
+  with an error when `xvfb-run` is missing, and CI runs it under `xvfb-run`.
+  A WebGL check that finds no WebGL fails; it used to pass on "WebGL not
+  available", which scored a run without a GL context as green (issue #75).
 - **`browser/tests/playwright/patches/`** — one standalone guard per shipped spoofing behaviour
   (isolated evaluate, trusted events, fonts, mouse trajectories, touchscreen).
   The most direct evidence a Firefox bump did not neuter a patch that still

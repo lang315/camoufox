@@ -393,6 +393,19 @@ rules:
       it passed on PNG headers and could not have noticed non-deterministic
       output. getImageData is the surface a fingerprinter reads; hash that.
 
+  - id: build-tester-is-headful-and-webgl-absence-fails
+    title: build-tester launches headful, refuses to run without a display, and fails a WebGL check that finds no WebGL
+    check: automated
+    evidence:
+      - "issue #75: one binary, headless 124/125 with 5 WebGL checks passing on 'WebGL not available', headful under xvfb 136/137 with none"
+      - "issue #195: browser/tests/build-tester/scripts/runner.py launched with headless=True at both sites, so run_tests.sh's xvfb fallback and BUILDTESTER_HEADLESS changed nothing"
+    rationale: >-
+      The WebGL checks returned passed:true when there was no GL context, so a
+      run without WebGL scored them as green and left the webglExtended block
+      out of the denominator. The suite now launches headful, a Linux host with
+      no display fails before launching, and every "not available" branch fails
+      the check, so missing WebGL reads as a failure rather than as coverage.
+
   # -------------------------------------------------------------------------
   # Fonts
   # -------------------------------------------------------------------------

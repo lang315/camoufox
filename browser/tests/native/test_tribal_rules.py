@@ -20,6 +20,7 @@ import ast
 import importlib
 import inspect
 import json
+import os
 import re
 import subprocess
 import sys
@@ -725,6 +726,47 @@ def test_the_canvas_check_hashes_pixels_rather_than_a_data_url_prefix():
         "the canvas and emoji-canvas fingerprints should both hash their pixels"
         + explain("canvas-fingerprint-is-hashed-not-truncated")
     )
+
+
+def test_build_tester_is_headful_and_webgl_absence_fails():
+    why = explain("build-tester-is-headful-and-webgl-absence-fails")
+    tester = BROWSER / "tests" / "build-tester"
+
+    launches = [
+        kw.value
+        for node in ast.walk(ast.parse((tester / "scripts" / "runner.py").read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        for kw in node.keywords
+        if kw.arg == "headless"
+    ]
+    assert len(launches) >= 2 and all(
+        isinstance(v, ast.Constant) and v.value is False for v in launches
+    ), "runner.py must launch every browser headful" + why
+
+    # A Linux host with no display must stop before building anything.
+    probe = (
+        "import asyncio, sys; sys.platform = 'linux'; import runner\n"
+        "def boom(*a, **k): raise SystemExit('ran without a display')\n"
+        "runner.ensure_bundle = boom\n"
+        "sys.exit(10 + asyncio.run(runner.run_tests('camoufox-bin', 1, '', None, True)))\n"
+    )
+    env = {k: v for k, v in os.environ.items() if k != "DISPLAY"}
+    proc = subprocess.run(
+        [sys.executable, "-c", probe], cwd=tester / "scripts", env=env, capture_output=True, text=True
+    )
+    assert proc.returncode == 11 and "no DISPLAY" in proc.stderr, (
+        f"runner.run_tests without DISPLAY on Linux: exit {proc.returncode}, {proc.stderr[-300:]!r}" + why
+    )
+
+    sh = (tester / "run_tests.sh").read_text(encoding="utf-8")
+    assert "BUILDTESTER_HEADLESS" not in sh and "falling back to headless" not in sh, (
+        "run_tests.sh must fail, not fall back to headless, without a display" + why
+    )
+
+    checks = tester / "src" / "lib" / "checks"
+    ts = (checks / "extended.ts").read_text(encoding="utf-8") + (checks / "workers.ts").read_text(encoding="utf-8")
+    fail_open = re.findall(r'passed:\s*true,\s*detail:\s*"[^"]*WebGL (?:renderer )?(?:not available|render error)', ts)
+    assert not fail_open, f"a WebGL check passes when WebGL is missing: {fail_open}" + why
 
 
 # ---------------------------------------------------------------------------
