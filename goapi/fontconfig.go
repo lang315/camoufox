@@ -86,9 +86,9 @@ func uaOSDir(ua, hostOS string) string {
 // directory named for the OSes that use it, and groups.json's readBy lists the
 // groups each OS reads. Older bundles hold a full copy per OS in fonts/<os>/.
 //
-// Unlike pythonlib, which swallows any groups.json error, an unreadable or
-// corrupt file is an error here: an absent one is an old bundle and falls back
-// to the legacy layout, but a damaged one must not silently widen the scan.
+// As in pythonlib and the TypeScript launcher, an unreadable or corrupt file
+// is an error: an absent one is an old bundle and falls back to the legacy
+// layout, but a damaged one must not silently widen the scan.
 func fontScanDirs(fontsDir, osDir string) ([]string, error) {
 	var dirs []string
 	osKey := map[string]string{"linux": "lin", "macos": "mac", "windows": "win"}[osDir]

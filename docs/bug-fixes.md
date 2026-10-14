@@ -12,6 +12,27 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #186: a corrupt groups.json widened the font scan to every OS
+
+**Fixed by:** the PR that closes #186. **Found by:** review of the goapi twin in #179.
+
+**Symptom.** None observed in a run. It was found by reading: the Python and TypeScript launchers caught any error reading `fonts/groups.json`.
+
+**Root cause.**
+- `_generate_fontconfig` (`python/src/camoufox/utils.py`) and `generateFontconfig` (`typescript/src/utils.ts`) caught any error reading `fonts/groups.json` and left the scan list empty.
+- An empty list fell through to `fonts/<os>/`, which a grouped bundle does not have, and then to `fonts/` itself.
+- fontconfig scans recursively, so every other OS's faces became glyph-fallback candidates. That is the leak the per-OS grouping exists to prevent.
+
+**Fix.**
+- A `groups.json` that exists but cannot be read or parsed now raises, as goapi's `fontScanDirs` already did.
+- An absent one still means a legacy bundle and keeps the `fonts/<os>/` fallback.
+
+**Evidence.** `python/tests/test_fontconfig_groups.py` and the matching `typescript/tests/utils.test.ts` block:
+- the corrupt-file case fails on the old code (1 failed, 2 passed in each) and passes after the fix;
+- the valid-file and missing-file cases pass on both versions, as controls.
+
+**What misled.** Nothing at runtime: a shipped bundle always has a valid `groups.json`, so no run could show the fallback.
+
 ## #211: a first run's hanging filter-list download held every page for 30 s
 
 **Fixed by:** PR #212. **Found by:** the e2e suite on macOS (#171, #210).
