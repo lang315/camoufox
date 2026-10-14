@@ -115,6 +115,9 @@ def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     from util import Checks
 
     monkeypatch.setattr(known, "HOST", "Windows")
+    # The ledger can be empty of strict entries, so the test files its own (#193's, now fixed).
+    monkeypatch.setattr(known, "CHECKS", [
+        (r"test_fingerprint_is_coherent\[go-linux\]", "fonts_no_foreign_os: ", 193, True, {"Windows"})])
     node = "journeys/test_02_fingerprint.py::test_fingerprint_is_coherent[go-linux]"
     red = Checks(node)
     red(False, "fonts_no_foreign_os: other-OS marker families rendered: {'windows': ['Roman']}")

@@ -14,10 +14,6 @@ HOST = platform.system()
 
 # (test node id regex, check text prefix, issue, strict, hosts measured on)
 CHECKS = [
-    # Windows host on Firefox 156 (e2e run 38274480396): a macos or linux identity renders
-    # Windows-only marker families, in every driver.
-    (r"test_02_fingerprint\.py::test_(new_context_)?fingerprint_is_coherent\[(pkg|pw|go)-(macos|linux)\]",
-     "fonts_no_foreign_os: ", 193, True, {"Windows"}),
     # Depends on which presets the launch and the context draw: intermittent, so not strict.
     (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
      "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux", "Windows"}),
