@@ -248,8 +248,20 @@ names one SETUP-INVALID. Two processes leave an arm unmeasured. Arms (i), (i2),
 (n5) check it after, so a leak seen across processes still counts as a verdict. The disc and pid
 probes also use `file:` pages but score nothing; the step prints a non-scoring
 `shared-process` line for every pair. Arm (b) closes its donor context before the
-recipient exists, so it shares a process only if the `file` process outlives that
-close, which pid's donor-closed line shows. Variants 1 and 2 of the arm (b)
+recipient exists, and the `file` process did not outlive that in smoke run
+38539979038: the pid probe's donor-closed pair saw file process 14601 still listed
+right after the close, gone once the recipient's page was ready, and the recipient
+in a new one, 14655. So arm (b) is in `KNOWN_UNMEASURABLE` for its cross-context
+claim, which (b2) measures with the donor alive. Its per-context narrowing checks
+still score.
+
+An arm that installs a one-shot setter (`setFontList`, `setSpeechVoices`) from an
+init script and checks it ran on the page under test ((b2r), (n5)) must navigate
+`file:` to `file:`. Going from about:blank to a `file:` page switches process, and
+across that switch the setter was spent in the file process before the page under
+test read it (run 38539979038: `saw=false` on both arms' pages, with the list
+installed). Those arms load a first `file:` page, add the init script, then load
+the page under test. Variants 1 and 2 of the arm (b)
 discriminator still load `data:` pages and print without a shared-process reading.
 
 ## macOS host (#148)

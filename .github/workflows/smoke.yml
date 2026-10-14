@@ -2415,10 +2415,17 @@ jobs:
           #    exact reading error CLAUDE.md lesson 4 records twice: a global
           #    read back through page.evaluate (isolated world), and a one-shot
           #    setter already consumed by the about:blank invocation.
-          #  * data-fl at about:blank must be ABSENT. With the reorder the init
-          #    script is added after new_page(), so about:blank cannot carry it.
-          #    A value there means the reorder did not take effect and this is
-          #    arm (b2) under a different name -- scored as setup invalid.
+          #  * data-fl on the first page must be ABSENT. With the reorder the
+          #    init script is added after that page loaded, so it cannot carry
+          #    it. A value there means the reorder did not take effect and this
+          #    is arm (b2) under a different name -- scored as setup invalid.
+          #    The first page is a file: page, not about:blank (#180): going
+          #    from about:blank to a file: page switches process, and across
+          #    that switch the one-shot setter was spent in the file process
+          #    before the page under test read it (run 38539979038: `CAMOU-FL
+          #    set` from the file process ~100 ms before the page's first
+          #    group line, then saw=false on the page). file: to file: stays
+          #    in the one file process, with no switch.
           #  * The measurement itself is arm (b)'s own JS/PROBES, so a genuinely
           #    absent signal (nothing resolves, impossible family resolves) is
           #    still caught by check_signal below, exactly as in arm (b).
@@ -2459,6 +2466,7 @@ jobs:
                   ctx = b2r_browser.new_context()
                   b2r_ctxs.append(ctx)
                   page = ctx.new_page()
+                  page.goto(page_uri(f"b2r-{label}-first"))
                   b2r_pids[f"{label}_after_new_page"] = tab_pids()
                   fl_blank = page.evaluate(
                       '() => document.documentElement.getAttribute("data-fl")')
@@ -2492,7 +2500,7 @@ jobs:
                   #    launch, not win alone. The `group` lines are exact
                   #    either way -- they attribute by uri=, not by offset.
                   for _ln in camou_fl(b2r_marks[label], "CAMOU-FL group",
-                                      f"b2r-{label}", limit=6):
+                                      f"/b2r-{label}.html", limit=6):
                       print(f"  [b2r / #83 log / b2r-{label}] {_ln}")
                   print(f"  [b2r / #83 log / {label}] gate ctx histogram, "
                         f"{label} half only: "
@@ -2522,7 +2530,7 @@ jobs:
               b2r_browser.close()
 
           for label in ("mac", "win"):
-              print(f"  [b2r / {label}] data-fl at about:blank (expect None): "
+              print(f"  [b2r / {label}] data-fl on the first page (expect None): "
                     f"{b2r[label]['fl_blank']!r}")
               print(f"  [b2r / {label}] data-fl on the document under test "
                     f"(expect saw=true applied=true): {b2r[label]['fl_doc']!r}")
@@ -2545,7 +2553,7 @@ jobs:
                   b2r_failures.append(f"arm (b2r) no signal: {exc}")
               if b2r[label]["fl_blank"] is not None:
                   b2r_failures.append(
-                      f"arm (b2r) setup invalid: {label}'s about:blank already carried "
+                      f"arm (b2r) setup invalid: {label}'s first page already carried "
                       f"data-fl={b2r[label]['fl_blank']!r}, so the init script applied before "
                       f"the page existed -- the reorder this arm tests did not take effect, "
                       f"and this is arm (b2) under another name.")
@@ -6709,6 +6717,11 @@ jobs:
                       for label in ("a", "b"):
                           ctx = b.new_context()
                           page = ctx.new_page()
+                          # Into the file process BEFORE the init script exists,
+                          # as in arm (b2r): from about:blank, the process switch
+                          # spends the one-shot setter before the page under test
+                          # reads it (#180, run 38539979038: data-sv saw=false).
+                          page.goto(page_uri("n5-%s-first" % label))
                           pids_before = tab_pids()
                           ctx.add_init_script(
                               N5_INIT % json.dumps(",".join(halves[label])))
@@ -7281,6 +7294,15 @@ jobs:
                       "only codepoint both faces cover at different advances that no "
                       "bundled Latin face covers. Falls through to a step failure the "
                       "moment this arm reaches a real verdict again."),
+              "(b)": ("38539979038", "arm (b) unmeasured: the mac and win docu",
+                      "#180: arm (b) closes its donor context before the recipient "
+                      "exists, and the file content process does not outlive it: in run "
+                      "38539979038 (b)'s pages were laid out by pids 6777 and 6866, and the "
+                      "pid probe's donor-closed pair shows why -- file process 14601 was "
+                      "still listed right after ctx_mac.close(), gone once win's page was "
+                      "ready, and win's page ran in a new one, 14655. Its cross-context "
+                      "claim is measured by (b2) with the donor alive; its per-context "
+                      "narrowing checks still score."),
           }
           for _k, _v in KNOWN_UNMEASURABLE.items():
               assert isinstance(_v, tuple) and len(_v) == 3 and _v[0].isdigit(), (
@@ -7318,10 +7340,11 @@ jobs:
               (unmeasured if tag else unexpected).append(t)
           # Non-scoring. One line per two-context page pair, in one place.
           # (b), (b2), (b2r) and (n5) also score this reading in their own
-          # arms; the disc and pid probes only print it here, and pid's
-          # donor-closed pair answers whether the file process outlives a
-          # closed context (docs/fonts-gating.md, "Two contexts in one content
-          # process").
+          # arms; the disc and pid probes only print it here. `NO` on (b) and
+          # (pid) is the expected reading: both close the donor first, and the
+          # file process did not outlive that in run 38539979038 (see (b) in
+          # KNOWN_UNMEASURABLE and docs/fonts-gating.md, "Two contexts in one
+          # content process").
           print("=== shared-process audit (file: page pairs; non-scoring) ===")
           for _arm, _a, _b in (("(b)", "b-mac", "b-win"),
                                ("(b2)", "b2-mac", "b2-win"),
