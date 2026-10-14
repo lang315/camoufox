@@ -994,17 +994,18 @@ jobs:
                     absentWidth: absentW};
           }"""
 
-          def probe(page, marker="f"):
-              # `marker` goes into the document URI, which is the only field
-              # the CAMOU-FL `group ... uri=` line carries that can name a
-              # context (the `gate` line has no uri at all). Without it every
-              # context in this step navigates to the same
-              # `data:text/html,<h1>f</h1>` and no font group in the log can be
-              # attributed to the context that produced it (#83). Arm (b2r)
-              # has always used a distinct URI per context and reproduces the
-              # same verdict as arm (b2), so the URI is not a variable either
-              # arm is sensitive to.
-              page.goto(f"data:text/html,<h1>{marker}</h1>")
+          def probe(page, url="data:text/html,<h1>f</h1>"):
+              # `url` carries a per-context marker, which the CAMOU-FL
+              # `group ... uri=` line is the only field able to name a context
+              # by (the `gate` line has no uri at all). Without it every
+              # context in this step navigates to the same document and no
+              # font group in the log can be attributed to the context that
+              # produced it (#83). Arm (b2r) has always used a distinct URI per
+              # context and reproduces the same verdict as arm (b2), so the URI
+              # is not a variable either arm is sensitive to. Cross-context
+              # arms pass a page_uri() file: page so both contexts share a
+              # content process (#180).
+              page.goto(url)
               return page.evaluate(JS, PROBES)
 
           def check_signal(label, r):
@@ -1128,7 +1129,7 @@ jobs:
               # per-context list, which is what arms (a)/(c)/(d) are about.
               _ctx_default = b.new_context()
               _pg_default = _ctx_default.new_page()
-              default = probe(_pg_default, "a-default")
+              default = probe(_pg_default, "data:text/html,<h1>a-default</h1>")
               # Same BrowserContext as `default`, so the same context id and
               # the same font list. A second b.new_context() would be a FRESH
               # context and so a reference nothing establishes as comparable.
@@ -1340,7 +1341,8 @@ jobs:
               except Exception as exc:
                   FILE_PAGES["ok"] = False
                   _why = (f"file: pages could not be loaded ({type(exc).__name__}: {exc}); "
-                          f"arms (i), (i2), (j), (j2) and (n4) need them to put two contexts "
+                          f"arms (b), (b2), (b2r), (i), (i2), (j), (j2), (n4) and (n5) need "
+                          f"them to put two contexts "
                           f"in one content process, so they cannot be measured")
                   tripwires.append(f"(file) {_why}")
                   unmeasured_arms["(file)"] = _why[:220]
@@ -1351,8 +1353,8 @@ jobs:
           def docs_share_process(mark, needle_a, needle_b):
               """(shared, pids of A's document, pids of B's document).
 
-              `needle_*` is a substring of the document's uri: `/<name>.html` for the
-              file: pages, `<h1>name</h1>` for the data: pages.
+              `needle_*` is a substring of the document's uri: `/<name>.html` for a
+              page_uri(name) page.
 
               Whether two documents ran in ONE content process, read from the
               browser. Every document's font group logs a `CAMOU-FL group ... uri=`
@@ -1382,6 +1384,7 @@ jobs:
           # bundled family and nothing is deleted from font.system.whitelist.
           # setFontList() per context is the only narrowing in play. Covers
           # arm (b).
+          b_mark = log_mark()
           with sync_playwright() as pw:
               b = pw.firefox.launch(
                   executable_path=os.environ["CAMOUFOX_BIN"], headless=False,
@@ -1437,7 +1440,7 @@ jobs:
                   ctx = b.new_context()
                   ctx.add_init_script(B_INIT % json.dumps(",".join(FONTS[name])))
                   pg = ctx.new_page()
-                  ctxs[name] = probe(pg, f"b-{name}")
+                  ctxs[name] = probe(pg, page_uri(f"b-{name}"))
                   fl_b[name] = pg.evaluate('() => document.documentElement.getAttribute("data-fl")')
                   # Same collision arm (a) hits, same context, fresh document:
                   # MS Gothic renders the probe string at the fallback face's
@@ -1446,12 +1449,13 @@ jobs:
                   # fonts.json lists -- arm (b) needs the verdict, and arm (a)
                   # already carries the full sweep that names the face.
                   pg2 = ctx.new_page()
-                  pg2.goto(f"data:text/html,<h1>b-{name}-fallback</h1>")
+                  pg2.goto(page_uri(f"b-{name}-fallback"))
                   b_naming[name] = pg2.evaluate(NAMING_JS, [PROBES, PROBES])
                   ctx.close()
               print(f"  [arm b / #83 instrumentation] setFontList per context {fl_b}")
               b.close()
           mac, win = ctxs["mac"], ctxs["win"]
+          b_same, b_pa, b_pb = docs_share_process(b_mark, "/b-mac.html", "/b-win.html")
 
           for label, r in (("bare launch / mac context", mac), ("bare launch / win context", win)):
               print(f"  [{label}] measure        {r['measure']}")
@@ -1918,6 +1922,16 @@ jobs:
           if any(win_res[f] for f in MAC_ONLY):
               b_failures.append(
                   f"the win context resolves macOS-only families: {win_res}")
+          # A clean win is evidence against a per-process leak only if win's
+          # document was laid out where mac's was. A leak seen across processes
+          # stays a verdict, so this is the arm's only red when nothing else is.
+          if not b_same:
+              _why = (f"arm (b) unmeasured: the mac and win documents were laid out by "
+                      f"different content processes (A: {b_pa or 'no group line'}, "
+                      f"B: {b_pb or 'no group line'}), so a per-process leak could not reach win")
+              if not b_failures:
+                  unmeasured_arms["(b)"] = _why[:220]
+              b_failures.append(_why)
           print(f"  (b) per-context narrowing:  {'RED' if b_failures else 'GREEN'} -- {b_failures}")
           if b_failures:
               tripwires.append(f"(b) per-context narrowing: {b_failures}")
@@ -1995,7 +2009,7 @@ jobs:
               ctx2_mac = b2.new_context()
               ctx2_mac.add_init_script(INIT % json.dumps(",".join(FONTS["mac"])))
               pg_mac = ctx2_mac.new_page()
-              mac2 = probe(pg_mac, "b2-mac")
+              mac2 = probe(pg_mac, page_uri("b2-mac"))
               fl_mac = pg_mac.evaluate('() => document.documentElement.getAttribute("data-fl")')
               # Deliberately NOT closed here -- the one variable this
               # arm tests. Arm (b) above calls ctx.close() at this exact
@@ -2010,7 +2024,7 @@ jobs:
               ctx2_win = b2.new_context()
               ctx2_win.add_init_script(INIT % json.dumps(",".join(FONTS["win"])))
               pg_win = ctx2_win.new_page()
-              win2 = probe(pg_win, "b2-win")
+              win2 = probe(pg_win, page_uri("b2-win"))
               fl_win = pg_win.evaluate('() => document.documentElement.getAttribute("data-fl")')
               print(f"  [donor-alive / #83 instrumentation] mac setFontList {fl_mac}")
               print(f"  [donor-alive / #83 instrumentation] win setFontList {fl_win}")
@@ -2049,8 +2063,9 @@ jobs:
               #  * A DIFFERENT PROCESS. mFcSubstituteCache is a per-process
               #    singleton, so a re-probe page in another content process
               #    could not see win's entries and would print "unchanged"
-              #    vacuously. The tab pids are recorded and asserted below,
-              #    the way arms (j)/(j2) do, not assumed.
+              #    vacuously. Which process laid out each document is read
+              #    from its group lines and asserted below, the way arms
+              #    (j)/(j2) do, not assumed.
               #  * A DEAD RENDER. Scored through check_signal with the rest of
               #    the arm, so nothing-resolved is setup invalid, not a pass.
               # The init script is on the CONTEXT, so it runs again here;
@@ -2061,11 +2076,13 @@ jobs:
               b2_reprobe_mark = log_mark()
               b2_pids_before = tab_pids()
               pg_mac2 = ctx2_mac.new_page()
-              mac_after = probe(pg_mac2, "b2-reprobe")
+              mac_after = probe(pg_mac2, page_uri("b2-reprobe"))
               b2_pids_after = tab_pids()
               ctx2_mac.close()
               ctx2_win.close()
               b2.close()
+          b2_same, b2_pa, b2_pb = docs_share_process(b2_mark, "/b2-mac.html", "/b2-win.html")
+          b2rp_same, _, b2rp_pr = docs_share_process(b2_mark, "/b2-win.html", "/b2-reprobe.html")
 
           print(f"  [donor-alive / mac context] measure {mac2['measure']}")
           print(f"  [donor-alive / win context, donor still open] measure {win2['measure']}")
@@ -2228,26 +2245,13 @@ jobs:
           # The re-probe is only a measurement if it shared the donor's content
           # process: mFcSubstituteCache is a per-process singleton, so a page in
           # a different process cannot see win's entries and would report the
-          # donor "unchanged" no matter what the memo holds.
-          if isinstance(b2_pids_before, str) or isinstance(b2_pids_after, str):
+          # donor "unchanged" no matter what the memo holds. The pid table is
+          # only printed: it also counts processes that lay out no document.
+          if not b2rp_same:
               b2_reprobe_bad.append(
-                  f"arm (b2) setup invalid (re-probe half only): could not read the "
-                  f"content-process table "
-                  f"({b2_pids_before} / {b2_pids_after}), so the re-probe cannot be shown "
-                  f"to have run where win's memo entries live.")
-          elif (b2_pids_after - b2_pids_before) or not b2_pids_before:
-              # R1 (re-review of f5eabd5): `or not b2_pids_before` is the clause
-              # arms (i2)/(j)/(j2) all carry and this one had dropped.
-              # tab_pids() returns an empty SET -- not the "ERR:" string --
-              # whenever pgrep succeeds but no line's last field is "tab", and
-              # set() - set() is falsy, so without this the arm would assert
-              # co-residency on zero evidence.
-              b2_reprobe_bad.append(
-                  f"arm (b2) setup invalid (re-probe half only): the donor re-probe cannot "
-                  f"be shown to have "
-                  f"shared the donor's content process. Tab pids were "
-                  f"{sorted(b2_pids_before)} before and {sorted(b2_pids_after)} after -- "
-                  f"either a new process appeared, or no tab process was visible at all. "
+                  f"arm (b2) setup invalid (re-probe half only): the re-probe and win's "
+                  f"documents were laid out by different content processes (win: "
+                  f"{b2_pb or 'no group line'}, re-probe: {b2rp_pr or 'no group line'}). "
                   f"mFcSubstituteCache is a per-process singleton, so an 'unchanged' "
                   f"result from another process is vacuous.")
           # R2 (re-review): the whole re-probe rests on NOTHING having flushed
@@ -2262,11 +2266,6 @@ jobs:
           # mac would re-resolve through its own gate, the pattern would be
           # unchanged and this arm would print GREEN having measured nothing.
           # Not qualified by context id for that reason.
-          #
-          # R5, residual: "no new pid appeared" does not rule out two
-          # pre-existing tab processes with mac and win split between them and
-          # the re-probe landing in mac's. Under dom.ipc.processCount=1 there
-          # should be exactly one; the pids are printed, so a reader can see it.
           if b2_mac_ctx is None:
               b2_reprobe_bad.append(
                   f"arm (b2) setup invalid (re-probe half only): no `CAMOU-FL set` line "
@@ -2315,6 +2314,15 @@ jobs:
           # off a dead donor is not a verdict. Note the two guards: the width
           # verdict needs only the width preconditions (R6).
           b2_failures = list(b2_width_bad) + list(b2_reprobe_bad)
+          # Read from `group` lines, which every document writes whether or not
+          # the memo answered first, so unlike the `gate` lines R6 rules out this
+          # cannot hide a leak. A leak seen across processes is still a verdict,
+          # and note_unmeasured labels the arm by that.
+          if not b2_same:
+              b2_failures.append(
+                  f"arm (b2) unmeasured: the mac and win documents were laid out by different "
+                  f"content processes (A: {b2_pa or 'no group line'}, B: {b2_pb or 'no group line'}), "
+                  f"so a per-process leak could not reach win.")
           b2_leaked, b2_reverse, b2_lost, b2_gained = [], [], [], []
           if not b2_width_bad:
               b2_leaked = [f for f in MAC_ONLY if win2["measure"][f]]
@@ -2353,8 +2361,8 @@ jobs:
                   f"arm (b2)/#83: the donor's SECOND render, in a new page of the still-open "
                   f"mac context after win had rendered, changed answers: {b2_reverse}. It "
                   f"read {mac_after['measure']} where its first render read "
-                  f"{mac2['measure']}. Both renders ran in tab process(es) "
-                  f"{sorted(b2_pids_after)}. Shape: {_shape}. TWO readings fit: a MEMO LEAK "
+                  f"{mac2['measure']}. The re-probe was laid out by process(es) "
+                  f"{b2rp_pr}, as win was. Shape: {_shape}. TWO readings fit: a MEMO LEAK "
                   f"(mac served the recipient's entries -- the reverse leak the per-context "
                   f"mFcSubstituteCache key, not the SetFontList flush, is what closes), "
                   f"which produces BOTH directions; or a CONTEXT-0 FAIL-OPEN on the "
@@ -2455,7 +2463,7 @@ jobs:
                   fl_blank = page.evaluate(
                       '() => document.documentElement.getAttribute("data-fl")')
                   ctx.add_init_script(B2R_INIT % json.dumps(",".join(FONTS[label])))
-                  page.goto(f"data:text/html,<h1>b2r-{label}</h1>")
+                  page.goto(page_uri(f"b2r-{label}"))
                   b2r_pids[f"{label}_after_goto"] = tab_pids()
                   fl_doc = page.evaluate(
                       '() => document.documentElement.getAttribute("data-fl")')
@@ -2578,6 +2586,15 @@ jobs:
                       f"macOS-only families {b2r_leaked} with the donor alive -- H1 is "
                       f"REFUTED; the leak survives the reorder and the cause is not process "
                       f"placement.")
+          # After the leak verdict, as in (b2): a leak seen across processes is
+          # still a verdict, a clean win from another process is not.
+          b2r_same, b2r_pa, b2r_pb = docs_share_process(
+              b2r_marks["mac"], "/b2r-mac.html", "/b2r-win.html")
+          if not b2r_same:
+              b2r_failures.append(
+                  f"arm (b2r) setup invalid: the mac and win documents were laid out by "
+                  f"different content processes (A: {b2r_pa or 'no group line'}, "
+                  f"B: {b2r_pb or 'no group line'}), so a per-process leak could not reach win.")
           # C3 (from this task's review): a (b2r) RED has three distinct causes
           # and only one of them is a verdict. `no signal` (the check_signal
           # try/except above) and `setup invalid` (three variants, C2's donor
@@ -5773,7 +5790,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
                   page_mac = ctx_mac.new_page()
-                  page_mac.goto("data:text/html,<h1>disc-mac</h1>")
+                  page_mac.goto(page_uri("disc-mac"))
                   mac_result = page_mac.evaluate(JS_DISC_MAC)
 
                   ctx_win = b.new_context()
@@ -5781,7 +5798,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
                   page_win = ctx_win.new_page()
-                  page_win.goto("data:text/html,<h1>disc-win</h1>")
+                  page_win.goto(page_uri("disc-win"))
                   win_result = page_win.evaluate(JS_DISC_WIN)
 
                   b.close()
@@ -5986,7 +6003,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
                   page_mac = ctx_mac.new_page()
-                  page_mac.goto("data:text/html,<h1>pid-mac</h1>")
+                  page_mac.goto(page_uri("pid-mac"))
                   after_mac = content_pids()
                   ctx_mac.close()
                   after_close = content_pids()
@@ -5995,7 +6012,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
                   page_win = ctx_win.new_page()
-                  page_win.goto("data:text/html,<h1>pid-win</h1>")
+                  page_win.goto(page_uri("pid-win"))
                   after_win = content_pids()
                   ctx_win.close()
                   b.close()
@@ -6012,7 +6029,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(FONTS["mac"])))
                   page_mac = ctx_mac.new_page()
-                  page_mac.goto("data:text/html,<h1>pid-mac2</h1>")
+                  page_mac.goto(page_uri("pid-mac2"))
                   after_mac = content_pids()
                   # donor stays alive -- no ctx_mac.close() here
                   ctx_win = b.new_context()
@@ -6020,7 +6037,7 @@ jobs:
                       'if (typeof window.setFontList === "function") '
                       'window.setFontList(%s);' % json.dumps(",".join(FONTS["win"])))
                   page_win = ctx_win.new_page()
-                  page_win.goto("data:text/html,<h1>pid-win2</h1>")
+                  page_win.goto(page_uri("pid-win2"))
                   after_win = content_pids()
                   ctx_mac.close()
                   ctx_win.close()
@@ -6674,7 +6691,7 @@ jobs:
                   # the two under test, not from a launch-level default.
                   ctx0 = b.new_context()
                   page0 = ctx0.new_page()
-                  page0.goto("data:text/html,<h1>n5-base</h1>")
+                  page0.goto(page_uri("n5-base"))
                   out["base"] = page0.evaluate(JS_N5)
                   # N2: DEDUPE BEFORE SPLITTING. The halves are `r[:n]` and
                   # `r[n:]`, so a name appearing twice with its copies
@@ -6695,7 +6712,7 @@ jobs:
                           pids_before = tab_pids()
                           ctx.add_init_script(
                               N5_INIT % json.dumps(",".join(halves[label])))
-                          page.goto("data:text/html,<h1>n5-%s</h1>" % label)
+                          page.goto(page_uri("n5-%s" % label))
                           out[label] = {"res": page.evaluate(JS_N5),
                                         "pids_before": pids_before,
                                         "pids_after": tab_pids(),
@@ -6705,7 +6722,9 @@ jobs:
               out["halves"] = halves
               return out
 
+          n5_mark = log_mark()
           n5 = n5_probe()
+          n5_same, n5_pa, n5_pb = docs_share_process(n5_mark, "/n5-a.html", "/n5-b.html")
           # N4: this printed ~1.2 MB across three lines -- 13362 voice names,
           # twice more as the two halves. `gh run view --log` truncates this
           # workflow's output without a marker, and an arm that prints a
@@ -6782,6 +6801,13 @@ jobs:
                               f"VOICES LEAK: ctx {_lbl} read "
                               f"{len(_got - _want)} name(s) in neither context's "
                               f"configured list, e.g. {sorted(_got - _want)[:10]}")
+              # After the verdict: a leak seen across processes is still a leak.
+              if not n5_same:
+                  n5_failures.append(
+                      f"setup invalid: ctx a's and ctx b's documents were laid out by "
+                      f"different content processes (a: {n5_pa or 'no group line'}, "
+                      f"b: {n5_pb or 'no group line'}), so a per-process leak could not "
+                      f"reach the other context")
           if n5_failures:
               tripwires.append(f"(n5) per-context speech voices (#90): {n5_failures}")
               note_unmeasured("(n5)", n5_failures, "VOICES LEAK")
@@ -7126,12 +7152,9 @@ jobs:
               "(b2)": "#83, cross-context leak with the donor alive -- closed by the flush "
                       "in SetFontList and the per-context mFcSubstituteCache key together; "
                       "the flush alone explains (b2)/(b2r), the key is what (b2)'s post-B "
-                      "re-probe tests. On FF156 the donor and recipient run in different "
-                      "content processes (see the shared-process audit above), so this GREEN "
-                      "measures that setup, not an in-process leak",
+                      "re-probe tests",
               "(b2r)": "#83, same, with the init script on the document under test; "
-                       "measures the flush, not the key -- see (b2)'s re-probe; same FF156 "
-                       "process caveat as (b2)",
+                       "measures the flush, not the key -- see (b2)'s re-probe",
               # Back here, as Phase 0 said they would be. These two emit TWO
               # kinds of red and this table takes no prefix, so BOTH now fail
               # the step: the "#94/#88 refused-list render:" red that Phase 0
@@ -7162,9 +7185,7 @@ jobs:
                       "split into two disjoint halves of 6681, and each context read "
                       "~6480 names all from its OWN half and none from the other's. A "
                       "RED here is either a real cross-context leak or a runner whose "
-                      "speech registry went away; both must fail the step. That run is "
-                      "FF152; on FF156 the two contexts run in different content processes "
-                      "(see the shared-process audit above)",
+                      "speech registry went away; both must fail the step",
               # Round 3's own arms. Each was EXPECTED_RED through Phase 0 and
               # each guards a defect this branch's C++ closes, so each must be
               # GREEN on a binary built from this head -- and an arm that comes
@@ -7295,12 +7316,13 @@ jobs:
                   continue
               tag = next((k for k in unmeasured_arms if t.startswith(k)), None)
               (unmeasured if tag else unexpected).append(t)
-          # Non-scoring. Arms that still load their two contexts' pages from data:
-          # URLs ran in different content processes on FF156 (docs/fonts-gating.md,
-          # "Two contexts in one content process"), so their GREEN is not a
-          # measurement of a per-process leak. Printed so a log reader does not
-          # have to take that on trust; nothing here fails the step.
-          print("=== shared-process audit (data: page pairs; non-scoring) ===")
+          # Non-scoring. One line per two-context page pair, in one place.
+          # (b), (b2), (b2r) and (n5) also score this reading in their own
+          # arms; the disc and pid probes only print it here, and pid's
+          # donor-closed pair answers whether the file process outlives a
+          # closed context (docs/fonts-gating.md, "Two contexts in one content
+          # process").
+          print("=== shared-process audit (file: page pairs; non-scoring) ===")
           for _arm, _a, _b in (("(b)", "b-mac", "b-win"),
                                ("(b2)", "b2-mac", "b2-win"),
                                ("(b2r)", "b2r-mac", "b2r-win"),
@@ -7309,7 +7331,7 @@ jobs:
                                ("(pid)", "pid-mac", "pid-win"),
                                ("(pid2)", "pid-mac2", "pid-win2")):
               _same, _pa, _pb = docs_share_process(
-                  LOG_START, "<h1>%s</h1>" % _a, "<h1>%s</h1>" % _b)
+                  LOG_START, "/%s.html" % _a, "/%s.html" % _b)
               print(f"  shared-process: {'yes' if _same else 'NO '} {_arm:6} "
                     f"A {_pa or 'none'} / B {_pb or 'none'}")
           print("=== tripwire triage ===")
@@ -7760,13 +7782,13 @@ jobs:
           # that has to survive, and this step is `if: always()`.
           #
           # This attributes by uri= alone, so it needs no byte mark and does
-          # not care which launch or process emitted the line. The
-          # `<h1>...</h1>` wrapper is part of the needle: it makes the marker
-          # unambiguous against a bare substring.
+          # not care which launch or process emitted the line. The `/` and
+          # `.html` of the file: page path are part of the needle: they make
+          # the marker unambiguous against a bare substring.
           print("=== (b2)/(b2r) group lines by context (uri= attribution) ===")
           for m in ("b2-mac", "b2-win", "b2-reprobe", "b2r-mac", "b2r-win"):
               sel = [ln for _ts, _b, _i, ln in rows
-                     if "CAMOU-FL group " in ln and f"<h1>{m}</h1>" in ln]
+                     if "CAMOU-FL group " in ln and f"/{m}.html" in ln]
               print(f"  [{m}] {len(sel)} group line(s)")
               for ln in sel[-6:]:
                   print(f"    {ln}")

@@ -240,13 +240,16 @@ one process pool per container, whatever those prefs say: in smoke run
 processes (read from the pid MOZ_LOG prefixes to each `CAMOU-FL group` line; the
 `cfx-child.<n>` file name is shared by several processes and says nothing). The
 `file` remote type carries no container and `dom.ipc.processCount.file` is 1, so
-arms (i), (i2), (j), (j2) and (n4) now load their two pages from `file:` URLs and
-assert that both documents' group lines carry one pid; a throwaway launch before
-them proves a `file:` page loads and otherwise names one SETUP-INVALID. Arms that
-still use `data:` pages for two contexts ((b), (b2), (b2r), (n5), the pid and disc
-probes) are green without having shared a process; their green says nothing about
-a per-process leak, and the step prints a non-scoring `shared-process` line for each
-pair.
+arms (b), (b2), (b2r), (i), (i2), (j), (j2), (n4) and (n5) load their two pages
+from `file:` URLs and assert that both documents' group lines carry one pid (#179,
+#180); a throwaway launch before them proves a `file:` page loads and otherwise
+names one SETUP-INVALID. An arm whose two documents ran in different processes is
+unmeasured, unless it saw a leak anyway, which stays a verdict. The disc and pid
+probes also use `file:` pages but score nothing; the step prints a non-scoring
+`shared-process` line for every pair. Arm (b) closes its donor context before the
+recipient exists, so it shares a process only if the `file` process outlives that
+close, which pid's donor-closed line shows. Variants 1 and 2 of the arm (b)
+discriminator still load `data:` pages and print without a shared-process reading.
 
 ## macOS host (#148)
 

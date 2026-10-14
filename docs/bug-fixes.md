@@ -12,6 +12,25 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #180: smoke's cross-context leak arms were green without sharing a process
+
+**Fixed by:** the PR that moves arms (b), (b2), (b2r) and (n5) to `file:` pages. **Found by:** #179's shared-process audit.
+
+**Symptom.** Smoke run 36884274972 (build 36837150848, Firefox 156) scored (b2), (b2r) and (n5) GREEN, while its own non-scoring audit printed `shared-process: NO` for all seven two-context pairs, e.g. `shared-process: NO  (b2)   A ['7884'] / B ['7915']`.
+
+**Root cause.** Firefox 156 gives every `web` document the remote type `web=^userContextId=<N>` (`SharedWebRemoteType` in `dom/ipc/ProcessIsolation.cpp`), one process pool per container. These arms still loaded their pages from `data:` URLs, so `dom.ipc.processCount=1` no longer put the donor and the recipient in one process. A leak through a per-process cache (`mFcSubstituteCache`, the speech registry mirror) could not reach the recipient, so a clean recipient was guaranteed. (b2)'s re-probe gate compared `tab_pids()` before and after, which also counts processes that lay out no document.
+
+**Fix.**
+- The arms load `page_uri()` `file:` pages (the `file` remote type carries no container, `dom.ipc.processCount.file=1`) and read `docs_share_process` on both documents, as #179 did for (i), (i2), (j) and (n4).
+- A pair laid out by two processes is registered as unmeasured through the arm's tripwire, after the leak verdict, so a leak seen across processes is still reported as a leak. (b2)'s re-probe half is gated on win's and the re-probe's documents sharing a process.
+- The disc and pid probes use `file:` pages too and stay print-only. The audit and the dump step's `(b2)/(b2r)` slice match `/<name>.html`.
+
+**Evidence.**
+- Red: run 36884274972, job 110443482493, `shared-process: NO` on (b), (b2), (b2r), (n5), disc, pid and pid2.
+- Green: smoke on the fix branch against build 38495081436, run id in the PR (pending at the time of writing).
+
+**What misled.** Each arm's own verdict read GREEN, and the EXPECTED_GREEN table explained it as #83 and #90 being fixed. Only a reading of which process wrote each document's group line showed the two contexts never met.
+
 ## #236: TestScrollToBottom required a scroll position the drawn window could not reach
 
 **Fixed by:** the PR that changes `goapi/scroll_test.go`. **Found by:** smoke run 38568534252.
@@ -66,6 +85,7 @@ later change should read first.
 - Not measured: that this run's launch would have finished under 30 s. The mechanism, a bound below a healthy cold start, is #157's finding.
 
 **What misled.** The tribal rule `displayfd-read-timeout` is automated and was green, so the bound read as enforced. Its `expect` names only `camoufox.virtdisplay`, so it never saw the TypeScript twin.
+
 
 ## #224: smoke's goapi step went red on two stale TestRuntimeSpoofs expectations
 
