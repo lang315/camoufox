@@ -5,7 +5,7 @@
  *
  * VIRTDISPLAY_TEST_N controls the concurrent-launch count (default 50).
  */
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -21,6 +21,7 @@ import {
 	SCREEN_ENV_VAR,
 	VirtualDisplay,
 } from "../src/virtdisplay.js";
+import { PYTHON } from "./golden-setup.js";
 import { prerequisite } from "./prereq.js";
 
 afterEach(() => {
@@ -70,20 +71,47 @@ describe("xvfbArgs", () => {
 		expect(args[idx + 2]).toBe("1280x720x24");
 	});
 
-	it("disables COMPOSITE by default", () => {
+	it("enables COMPOSITE by default", () => {
+		const args = new VirtualDisplay().xvfbArgs;
+		expect(args[args.indexOf("COMPOSITE") - 1]).toBe("+extension");
+	});
+
+	it("disables COMPOSITE via the env escape hatch", () => {
+		process.env[COMPOSITE_ENV_VAR] = "0";
 		const args = new VirtualDisplay().xvfbArgs;
 		expect(args[args.indexOf("COMPOSITE") - 1]).toBe("-extension");
 	});
 
-	it("enables COMPOSITE via the env escape hatch", () => {
-		process.env[COMPOSITE_ENV_VAR] = "1";
-		const args = new VirtualDisplay().xvfbArgs;
-		expect(args[args.indexOf("COMPOSITE") - 1]).toBe("+extension");
+	it("disables COMPOSITE via the constructor", () => {
+		const args = new VirtualDisplay(false, undefined, false).xvfbArgs;
+		expect(args[args.indexOf("COMPOSITE") - 1]).toBe("-extension");
 	});
 
-	it("enables COMPOSITE via the constructor", () => {
-		const args = new VirtualDisplay(false, undefined, true).xvfbArgs;
-		expect(args[args.indexOf("COMPOSITE") - 1]).toBe("+extension");
+	it("reads the COMPOSITE env var as pythonlib does", () => {
+		const values = [null, "", "0", " 0 ", "false", "False", "1", "true", "no"];
+		const python = spawnSync(
+			PYTHON,
+			[
+				"-c",
+				"import json, os, sys\n" +
+					"from camoufox.virtdisplay import COMPOSITE_ENV_VAR, VirtualDisplay\n" +
+					"out = []\n" +
+					"for v in json.loads(sys.argv[1]):\n" +
+					"    os.environ.pop(COMPOSITE_ENV_VAR, None)\n" +
+					"    if v is not None: os.environ[COMPOSITE_ENV_VAR] = v\n" +
+					"    out.append(VirtualDisplay().composite)\n" +
+					"print(json.dumps(out))",
+				JSON.stringify(values),
+			],
+			{ encoding: "utf-8" },
+		);
+		expect(python.status, python.stderr).toBe(0);
+		const ours = values.map((v) => {
+			if (v === null) delete process.env[COMPOSITE_ENV_VAR];
+			else process.env[COMPOSITE_ENV_VAR] = v;
+			return new VirtualDisplay().composite;
+		});
+		expect(ours).toEqual(JSON.parse(python.stdout));
 	});
 
 	it("keeps GLX on and the cursor off", () => {
