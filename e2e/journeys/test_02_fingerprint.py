@@ -5,14 +5,22 @@ import pytest
 
 from oracle import coherence
 from oracle.docs import cite
-from util import packaged_locales, prerequisite, wait_out
+from util import moz_log_env, packaged_locales, prerequisite, wait_out
 
 
 def measure(drv, site, identity=False, **launch):
-    b = drv.launch(**launch)
+    log = "-".join([drv.name, *map(str, launch.values()), *(["identity"] if identity else [])])
+    env = moz_log_env(log)
+    b = drv.launch(**launch, env=env) if env else drv.launch(**launch)
     page = (b.new_identity_context() if identity else b.new_context()).new_page()
+    asked = len(site.seen("/fp-markers.json"))
     page.goto(site.url("/fp"))
-    fp = wait_out(page)
+    try:
+        fp = wait_out(page)
+    except TimeoutError as e:
+        # The other half of #171's question: did the page's request reach the server?
+        got = len(site.seen("/fp-markers.json")) - asked
+        raise TimeoutError(f"{e}; the server received {got} /fp-markers.json; MOZ_LOG {log if env else 'off'}") from None
     req = site.seen("/fp")[-1]
     b.close()
     return fp, req
