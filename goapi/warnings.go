@@ -17,7 +17,7 @@ import (
 // without fabricating a value that may contradict the proxy — the correct fix
 // is to warn, not to guess. Callers close the leak with WithGeoIP(true) or by
 // setting Config.Timezone / Config.Locale* explicitly.
-func leakWarnings(cfg *config.Config, hasProxy, geoIPEnabled bool) []string {
+func leakWarnings(cfg *config.Config, hasProxy, geoIPEnabled, canvasCovered bool) []string {
 	var w []string
 	if cfg == nil {
 		return w
@@ -28,6 +28,13 @@ func leakWarnings(cfg *config.Config, hasProxy, geoIPEnabled bool) []string {
 		w = append(w, "proxy set without geolocation spoofing: the host timezone and locale "+
 			"leak and can be cross-checked against the proxy's egress region. Enable "+
 			"WithGeoIP(true) or set Config.Timezone / Config.Locale* explicitly.")
+	}
+	if canvasCovered {
+		w = append(w, "canvas and WebGL readback return random data, as privacy.resistFingerprinting "+
+			"does in LibreWolf, Tor Browser and Mullvad Browser. Stock Firefox does not do this, so "+
+			"the browser reads as a privacy-hardened Firefox. It is on because the identity names a "+
+			"GPU the host's real pixels would contradict. Pass WithCanvasPlaceholder(false) to keep "+
+			"stock canvas behaviour.")
 	}
 	return w
 }

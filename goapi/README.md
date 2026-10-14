@@ -40,6 +40,13 @@ identity's OS rather than the host's. The file is written to `$XDG_CACHE_HOME/ca
 without `fonts.conf` fails the launch. `pkg/fingerprint/data/fonts.json` must match
 `python/src/camoufox/fonts.json`; a test enforces it.
 
+A page reads the canvas and WebGL pixels the host renders, whatever the identity claims. Every
+goapi identity names a preset's GPU, so by default `Launch` makes canvas readback return
+`privacy.resistFingerprinting`'s random placeholder and sends no canvas noise seed, as the Python
+and TypeScript launchers do for an identity that is not the host's own OS and GPU (#196).
+`WithCanvasPlaceholder(false)` keeps stock canvas behaviour with the fork's seeded noise. WebGPU is
+enabled where Firefox ships it for the claimed device, with no adapter.
+
 ## Features
 
 - **Phase 1** — dialog, navigation (Goto/NavigateGuarded), console/pageerror/crash events, keyboard, mouse (move/click/wheel), permissions, hover, scroll-into-view, bounding-box, element screenshot, wait state machine
