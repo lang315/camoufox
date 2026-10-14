@@ -12,6 +12,29 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #195: build-tester launched headless whatever display it was given
+
+**Fixed by:** the PR that makes `browser/tests/build-tester/scripts/runner.py` launch headful. **Found by:** the upstream sync review (#188).
+
+**Symptom.** #75 added an `xvfb` fallback to `run_tests.sh` so the WebGL checks would run against a real GL context. The browser stayed headless anyway, and with neither a display nor `xvfb-run` the script printed a warning and ran.
+
+**Root cause.**
+- `runner.py` passed `headless=True` to both `firefox.launch()` calls and never read `DISPLAY`. The `BUILDTESTER_HEADLESS` switch that `run_tests.sh` set was read by nothing.
+- The WebGL checks in `src/lib/checks/extended.ts` and `workers.ts` returned `{ passed: true, detail: "WebGL not available" }`. A run with no GL context therefore scored them as green.
+
+**Fix.**
+- Both launches are `headless=False`. On Linux, `run_tests()` returns 1 before building anything when `DISPLAY` is unset.
+- `run_tests.sh` drops `BUILDTESTER_HEADLESS`, runs directly off Linux, and exits 1 when Linux has neither a display nor `xvfb-run`.
+- Every "WebGL not available" branch, and the render-hash `catch`, now fails its check.
+- CI's `xvfb-run` gets the `1920x1080x24` screen `run_tests.sh` uses, because a headful window can see the screen.
+
+**Evidence.**
+- `test_build_tester_is_headful_and_webgl_absence_fails` in `browser/tests/native/test_tribal_rules.py`, rule `build-tester-is-headful-and-webgl-absence-fails`.
+- Against main's sources it failed on `runner.py must launch every browser headful`. With only the launches fixed, it failed on `exit 1, 'ran without a display'`. With the fix it passes.
+- Score before: main's Tests run 38524819436 (job 115725063597, 47ba70a), `OVERALL: [A] 1056/1064 checks passed (8 profiles)`. The after score is on the PR's Tests run.
+
+**What misled.** The issue expected the denominator to grow, from #75's measurement: headless 124/125 against headful 136/137. Main no longer behaves like #75's headless arm. Its run above was headless under `xvfb-run`, and all 8 profiles report a WebGL render hash and a full `webglExtended` block, with no "not available" detail anywhere. Per-context profiles already score 137/138 (macOS) and 136/137 (Linux). The likely difference is that #75's headless arm had no display at all, while CI's step was already wrapped in `xvfb-run`; this was not isolated. So the fail-open was latent on CI, not live, and the after score may equal the before.
+
 ## #196: a goapi launch read the host's real canvas under a foreign identity
 
 **Fixed by:** the PR that adds `goapi/rendering.go`. **Found by:** the upstream sync (#188), which ledgered it in `e2e/known.py`.

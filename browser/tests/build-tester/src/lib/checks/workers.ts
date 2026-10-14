@@ -212,13 +212,13 @@ export async function runWorkerChecks(): Promise<
 
     if (data.error) {
       workerConsistency.offscreenCanvasWebGL = {
-        passed: true,
+        passed: false,
         detail:
           "OffscreenCanvas WebGL not available in worker: " + data.error,
       };
     } else if (!mainWebGLRenderer) {
       workerConsistency.offscreenCanvasWebGL = {
-        passed: true,
+        passed: false,
         detail:
           "Main thread WebGL renderer not available for comparison",
       };

@@ -7,10 +7,9 @@ cd "$SCRIPT_DIR"
 BUILD_TESTER_DIR="$SCRIPT_DIR/../build-tester"
 
 VERSION="official/stable"
-# Headful by default: the WebGL checks in the shared build-tester bundle
-# answer "WebGL not available" with passed:true, so a headless run scores
-# them for free and drops 12 more from the denominator entirely (issue #75).
-# --headless opts out and forfeits those checks.
+# Headful by default: the WebGL checks in the shared build-tester bundle fail
+# with "WebGL not available" when the browser has no GL context (issues #75,
+# #195). --headless opts out, and fails those checks if WebGL is missing.
 HEADFUL="--headful"
 PROFILE_COUNT=6
 PROXIES="$SCRIPT_DIR/proxies.txt"

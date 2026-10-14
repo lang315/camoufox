@@ -75,10 +75,10 @@ $PIP uninstall -y cloverlabs-camoufox >/dev/null 2>&1 || true
 $PIP install -q -e ../../../python 'playwright<1.63'
 
 echo "==> Running build tester..."
-# The suite launches headful so the WebGL checks have a real GL context --
-# headless they answer "WebGL not available" and score passed:true without
-# testing anything (issue #75). With no display, borrow one from xvfb.
-if [ -n "$DISPLAY" ] || [ "$BUILDTESTER_HEADLESS" = "1" ]; then
+# scripts/runner.py launches headful, so the WebGL checks run against a real GL
+# context (issues #75, #195). A Linux host with no display borrows one from xvfb;
+# with neither, the run fails rather than testing less.
+if [ -n "$DISPLAY" ] || [ "$(uname -s)" != "Linux" ]; then
     $PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
 elif command -v xvfb-run >/dev/null 2>&1; then
     echo "    (no DISPLAY -- running under xvfb)"
@@ -86,8 +86,7 @@ elif command -v xvfb-run >/dev/null 2>&1; then
         xvfb-run -a --server-args="-screen 0 1920x1080x24" \
         $PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
 else
-    echo "    WARNING: no DISPLAY and no xvfb-run; falling back to headless." >&2
-    echo "    The WebGL checks will pass without a GL context (issue #75)." >&2
-    echo "    Install xvfb (apt install xvfb) to actually verify them." >&2
-    BUILDTESTER_HEADLESS=1 $PYTHON scripts/run_tests.py "$BINARY" "${EXTRA_ARGS[@]}"
+    echo "ERROR: no DISPLAY and no xvfb-run. build-tester launches headful." >&2
+    echo "    Install xvfb (apt install xvfb) or run with a display." >&2
+    exit 1
 fi

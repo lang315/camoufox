@@ -223,6 +223,16 @@ async def run_tests(
 ) -> int:
     project_dir = Path(__file__).parent.parent
 
+    # Headful, so the WebGL checks run against a real GL context (#75, #195).
+    # A Linux host with no display fails here rather than quietly testing less.
+    if sys.platform.startswith("linux") and not os.environ.get("DISPLAY"):
+        print(
+            f"{RED}ERROR: no DISPLAY. build-tester launches headful; "
+            f"run it under xvfb-run (or ./run_tests.sh, which does).{RESET}",
+            file=sys.stderr,
+        )
+        return 1
+
     # 1. Ensure bundle exists (the test page loads it with a <script src>)
     ensure_bundle(project_dir)
 
@@ -304,7 +314,7 @@ async def run_tests(
             try:
                 browser = await firefox.launch(
                     executable_path=binary_path,
-                    headless=True,
+                    headless=False,
                     firefox_user_prefs=FIREFOX_WEBGL_PREFS,
                 )
             except Exception as e:
@@ -332,7 +342,7 @@ async def run_tests(
                 env = {**dict(os.environ), "CAMOU_CONFIG": json.dumps(preset["camouConfig"])}
                 browser = await firefox.launch(
                     executable_path=binary_path,
-                    headless=True,
+                    headless=False,
                     env=env,
                     firefox_user_prefs=FIREFOX_WEBGL_PREFS,
                 )
