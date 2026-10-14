@@ -250,7 +250,7 @@ index eec89694f8..e9bc8f7026 100644
  
    mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
-index 0553126dbf..09587eddc3 100644
+index 0553126dbf..7773bd46b7 100644
 --- a/dom/canvas/CanvasRenderingContext2D.cpp
 +++ b/dom/canvas/CanvasRenderingContext2D.cpp
 @@ -59,6 +59,8 @@
@@ -314,18 +314,27 @@ index 0553126dbf..09587eddc3 100644
      }
    }
  
-@@ -6803,6 +6843,20 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+@@ -6757,6 +6797,13 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
++  // Camoufox tracking-observer: record the read the page made, placeholder
++  // included (no-op when disarmed).
++  Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
++  if (camoufox::AccessObserver::IsArmed()) {
++    camoufox::RecordSurfaceFromDocument(seedDoc, camoufox::SurfaceId::Canvas);
++  }
++
+   do {
+     uint8_t* randomData;
+     const IntSize size = readback->GetSize();
+@@ -6803,6 +6850,15 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
      }
 +
 +    // Camoufox canvas perturbation on the JS-visible RGBA buffer. No-op when
 +    // seed == 0. Placeholder path already broke out above, so it is untouched.
-+    Document* seedDoc = CanvasSeedDocumentFor(mCanvasElement, mOffscreenCanvas);
-+    // Camoufox tracking-observer: record the read (no-op when disarmed).
-+    if (camoufox::AccessObserver::IsArmed()) {
-+      camoufox::RecordSurfaceFromDocument(seedDoc, camoufox::SurfaceId::Canvas);
-+    }
 +    uint32_t seed = CanvasSeedManager::SeedFromDocument(seedDoc);
 +    if (seed != 0) {
 +      CanvasSeedManager::Perturb(data, len.value(), seed,
@@ -336,7 +345,7 @@ index 0553126dbf..09587eddc3 100644
  
    readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index 5aaa4279fd..8cd6dbad57 100644
+index 5aaa4279fd..6ff109edf8 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
 @@ -16,6 +16,8 @@
@@ -348,7 +357,20 @@ index 5aaa4279fd..8cd6dbad57 100644
  #include "gfxCrashReporterUtils.h"
  #include "js/PropertyAndElement.h"  // JS_DefineElement
  #include "js/ScalarType.h"          // js::Scalar::Type
-@@ -5477,6 +5479,26 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+@@ -5448,6 +5450,12 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+                                             state.mPixelPackState};
+     bool succeeded = DoReadPixels(desc, *range);
+     if (succeeded) {
++      // Camoufox tracking-observer: record the read the page made, placeholder
++      // included (no-op when disarmed).
++      if (camoufox::AccessObserver::IsArmed()) {
++        camoufox::RecordSurfaceFromDocument(GetOwnerDoc(),
++                                            camoufox::SurfaceId::WebGL);
++      }
+       CanvasUtils::ImageExtraction extraction =
+           ImageExtractionResult(mCanvasElement, mOffscreenCanvas);
+ 
+@@ -5477,6 +5485,21 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
                range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
                alphaChannelOffset, hasAlphaChannel);
          }
@@ -358,11 +380,6 @@ index 5aaa4279fd..8cd6dbad57 100644
 +        // is perturbed.
 +        // Offscreen/worker contexts have no owner document and stay unperturbed.
 +        if (dom::Document* seedDoc = GetOwnerDoc()) {
-+          // Camoufox tracking-observer: record the read (no-op when disarmed).
-+          if (camoufox::AccessObserver::IsArmed()) {
-+            camoufox::RecordSurfaceFromDocument(seedDoc,
-+                                                camoufox::SurfaceId::WebGL);
-+          }
 +          const uint32_t seed =
 +              dom::CanvasSeedManager::SeedFromDocument(seedDoc);
 +          if (seed != 0) {

@@ -1,0 +1,11 @@
+<!doctype html><meta charset=utf-8><title>observer readback probe</title><body><script>
+// Only the two pixel reads a covered launch answers from the placeholder branch:
+// no toDataURL, whose GetImageBuffer record would mask a missing canvas record.
+const log = {};
+try { const c=document.createElement('canvas'); c.width=200;c.height=50;
+  const x=c.getContext('2d'); x.fillRect(0,0,10,10); x.getImageData(0,0,200,50); log.canvas=1; } catch(e){ log.canvas='ERR:'+e; }
+try { const g=document.createElement('canvas').getContext('webgl');
+  g.clearColor(0.2,0.4,0.6,1.0); g.clear(g.COLOR_BUFFER_BIT);
+  g.readPixels(0,0,1,1,g.RGBA,g.UNSIGNED_BYTE,new Uint8Array(4)); log.webgl=1; } catch(e){ log.webgl='ERR:'+e; }
+window.__probeLog__ = log; window.__done__ = true;
+</script></body>
