@@ -12,8 +12,11 @@ import {
 } from "./exceptions.js";
 import { OS_NAME } from "./paths.js";
 
-/** Safe timeout for Xvfb writing the display num; prevents an infinite hang. */
-const DISPLAYFD_READ_TIMEOUT_MS = 10_000;
+/**
+ * Safe timeout for Xvfb writing the display num; prevents an infinite hang.
+ * 30 s for a cold first launch (#157); the measurements are on the Python twin.
+ */
+export const DISPLAYFD_READ_TIMEOUT_MS = 30_000;
 
 /**
  * Xvfb root geometry for headless="virtual". It is not observable (screen.* is

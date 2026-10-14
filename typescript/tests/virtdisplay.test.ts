@@ -17,6 +17,7 @@ import {
 import {
 	COMPOSITE_ENV_VAR,
 	DEFAULT_SCREEN,
+	DISPLAYFD_READ_TIMEOUT_MS,
 	SCREEN_ENV_VAR,
 	VirtualDisplay,
 } from "../src/virtdisplay.js";
@@ -93,6 +94,21 @@ describe("xvfbArgs", () => {
 	});
 });
 
+describe("displayfd read timeout", () => {
+	it("is the Python twin's bound", () => {
+		const twin = fs.readFileSync(
+			path.join(
+				import.meta.dirname,
+				"../../python/src/camoufox/virtdisplay.py",
+			),
+			"utf-8",
+		);
+		const seconds = twin.match(/^DISPLAYFD_READ_TIMEOUT_S = ([\d.]+)$/m)?.[1];
+		expect(seconds).toBeDefined();
+		expect(DISPLAYFD_READ_TIMEOUT_MS).toBe(Number(seconds) * 1000);
+	});
+});
+
 describe("kill", () => {
 	it("is safe to call on a display that was never started", () => {
 		expect(() => new VirtualDisplay().kill()).not.toThrow();
@@ -112,10 +128,12 @@ function hasXvfb(): boolean {
 const DISPLAY_RE = /^:\d+$/;
 const N = Number.parseInt(process.env.VIRTDISPLAY_TEST_N ?? "50", 10);
 
+// The timeout is above DISPLAYFD_READ_TIMEOUT_MS, so a stalled launch fails with
+// its own error.
 describe.skipIf(
 	process.platform !== "linux" ||
 		!prerequisite("xvfb", hasXvfb(), "apt-get install xvfb"),
-)("Xvfb lifecycle", () => {
+)("Xvfb lifecycle", { timeout: 60_000 }, () => {
 	const tracked: VirtualDisplay[] = [];
 	const track = (vd: VirtualDisplay) => {
 		tracked.push(vd);

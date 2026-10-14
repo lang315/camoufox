@@ -100,6 +100,7 @@ rules:
     evidence:
       - "commit 8f9ff07: 'so a hung Xvfb fails fast instead of blocking forever'"
       - "#157: first launch on six fresh ubuntu-24.04 runners took 603-8434 ms, later launches 25-39 ms; one CI run exceeded 10 s"
+      - "#232: the TypeScript twin kept 10 s after #157 and failed a CI run the same way; typescript/tests/virtdisplay.test.ts now pins it to this module's bound"
     rationale: >-
       A hung Xvfb with no timeout blocks the launch forever, at 0% CPU, with no
       diagnostic. The bound is 30 seconds. It was 10 until #157 measured a
