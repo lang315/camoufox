@@ -12,6 +12,25 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #232: the TypeScript launcher gave a cold Xvfb 10 s, where pythonlib gives 30
+
+**Fixed by:** the PR that sets `DISPLAYFD_READ_TIMEOUT_MS` to 30 s. **Found by:** the `typescript` job of Tests run 38553266734 (job 115816505596).
+
+**Symptom.** `virtdisplay.test.ts > Xvfb lifecycle > single launch returns a valid display and kill terminates Xvfb` failed with `CannotExecuteXvfb: Xvfb did not report a display within 10000ms`. It was the job's first Xvfb launch, on a PR that changed no TypeScript.
+
+**Root cause.** #157 (d83360a) measured a cold first Xvfb launch on fresh ubuntu-24.04 runners at 603-8434 ms, and raised pythonlib's `DISPLAYFD_READ_TIMEOUT_S` from 10 to 30. It left the twin in `typescript/src/virtdisplay.ts` at `DISPLAYFD_READ_TIMEOUT_MS = 10_000`. In the failing job the next test, two `get()` calls on one display where #157 measured a warm launch at 25-39 ms, took 3039 ms, so the runner was loaded (`webgl.test.ts` ran beside it).
+
+**Fix.**
+- `DISPLAYFD_READ_TIMEOUT_MS` is 30 s and exported.
+- A unit test reads `python/src/camoufox/virtdisplay.py` and requires the two bounds to match.
+- The `Xvfb lifecycle` block gets a 60 s test budget. The suite's 30 s `testTimeout` equalled the new bound, so a stalled launch would have reported vitest's timeout instead of `CannotExecuteXvfb`.
+
+**Evidence.**
+- Against main's value the new test failed with `expected 10000 to be 30000`. With the fix it passes.
+- Not measured: that this run's launch would have finished under 30 s. The mechanism, a bound below a healthy cold start, is #157's finding.
+
+**What misled.** The tribal rule `displayfd-read-timeout` is automated and was green, so the bound read as enforced. Its `expect` names only `camoufox.virtdisplay`, so it never saw the TypeScript twin.
+
 ## #224: smoke's goapi step went red on two stale TestRuntimeSpoofs expectations
 
 **Fixed by:** the PR that updates `goapi/runtime_spoof_test.go`. **Found by:** smoke run 38541963024, the first smoke on a branch carrying #215 and #219.
@@ -49,6 +68,7 @@ later change should read first.
 - Green: pending. It needs a Windows build and an e2e run on it. The strict `e2e/known.py` entry is removed, so that run fails if any of the four families still renders.
 
 **What misled.** The issue offered two hypotheses. The first, substitution, was correct, and it explains all four names, not only `MS Sans Serif`. The second was wrong: host bitmap `.fon` fonts reached outside the whitelist. DirectWrite cannot load `.fon` fonts at all, and that is why Firefox substitutes them (bug 642093). The Firefox 152 pass was no evidence either way, because none of the four names was a marker then. Also, `font-list-spoofing.patch` already describes `gfxDWriteFontList`'s substitution tables as filled at init, never from a gate answer. That is true, but it answers only the cross-context cache question. It does not cover a name rewritten above the gate. This is CLAUDE.md lesson 7 again.
+
 
 ## #195: build-tester launched headless whatever display it was given
 
