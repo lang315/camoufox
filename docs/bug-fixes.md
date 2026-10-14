@@ -12,6 +12,28 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #234: the TypeScript launcher started Xvfb without Composite
+
+**Fixed by:** the PR that turns Composite on in `typescript/src/virtdisplay.ts`. **Found by:** the #232 fix, which compared the two `virtdisplay` twins.
+
+**Symptom.** Under `headless: "virtual"`, the TypeScript launcher started Xvfb with `-extension COMPOSITE` unless `CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE` was `1` or `true`. pythonlib has started it with `+extension COMPOSITE` since #140.
+
+**Root cause.**
+- #136 measured that Playwright 1.55 under Xvfb records a 110-byte video with no frames when Composite is off. With Composite on, it records 54370 bytes. #140 turned Composite on in pythonlib and changed nothing in TypeScript.
+- The TypeScript default stayed `["1", "true"].includes((process.env[COMPOSITE_ENV_VAR] ?? "0").trim())`. Its comment said Composite on crashed the browser, which #136 found does not reproduce.
+- The TypeScript package also allows Playwright below 1.63. So a TypeScript user on Playwright 1.57 or older recorded empty videos under a virtual display.
+
+**Fix.**
+- The default is now `!["0", "false"].includes((process.env[COMPOSITE_ENV_VAR] ?? "1").trim())`, which is pythonlib's expression.
+- The comment points to the Python twin's measurement.
+- A unit test runs pythonlib's `VirtualDisplay().composite` over nine env values (unset, `""`, `0`, ` 0 `, `false`, `False`, `1`, `true`, `no`) and requires the TypeScript launcher to give the same answers.
+
+**Evidence.**
+- Against main, two tests failed. `enables COMPOSITE by default` got `-extension`. The parity test differed on unset, `""`, `False` and `no`, where pythonlib reads on and TypeScript read off. With the fix, both pass.
+- Not measured: an empty video from the TypeScript launcher itself. The mechanism is #136's measurement, made on the same binary with the same Xvfb arguments.
+
+**What misled.** The tribal rule `composite-extension-on` is automated and was green. Its tests import only the Python module, so the rule read as covering a behaviour that half the launchers did not have.
+
 ## #232: the TypeScript launcher gave a cold Xvfb 10 s, where pythonlib gives 30
 
 **Fixed by:** the PR that sets `DISPLAYFD_READ_TIMEOUT_MS` to 30 s. **Found by:** the `typescript` job of Tests run 38553266734 (job 115816505596).

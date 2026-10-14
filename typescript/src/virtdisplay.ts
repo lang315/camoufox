@@ -27,9 +27,9 @@ export const DEFAULT_SCREEN = "1x1x24";
 export const SCREEN_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_SIZE";
 
 /**
- * Composite stays off: it never caused #93 (a Juggler bug), and with it on the
- * old X11 capture path crashed the browser. CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=1
- * enables it.
+ * Composite is on by default: Playwright <=1.57 records video through the X11
+ * capturer, which gets no frames without it (#136, #140; the measurement is on
+ * the Python twin). CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE=0 disables it.
  */
 export const COMPOSITE_ENV_VAR = "CAMOUFOX_VIRTUAL_DISPLAY_COMPOSITE";
 
@@ -62,7 +62,7 @@ export class VirtualDisplay {
 		this.screen = screen || resolveScreen();
 		this.composite =
 			composite ??
-			["1", "true"].includes((process.env[COMPOSITE_ENV_VAR] ?? "0").trim());
+			!["0", "false"].includes((process.env[COMPOSITE_ENV_VAR] ?? "1").trim());
 	}
 
 	get xvfbArgs(): string[] {

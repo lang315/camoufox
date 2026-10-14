@@ -63,6 +63,7 @@ rules:
       - "lang315/camoufox#136: probe run 35622975837, one binary (build 35586323562)"
       - "python/src/camoufox/virtdisplay.py: the measurement table"
       - "issue #93: no video under headless='virtual'"
+      - "#234: the TypeScript twin kept Composite off; typescript/tests/virtdisplay.test.ts now requires it to read the env var as this module does"
     rationale: >-
       (Fork: reverses upstream's composite-extension-off.) The compositor fix for
       #93 covers only Page.startScreencast, which Playwright >=1.58 uses.
