@@ -1,0 +1,28 @@
+diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
+index 5b659113f3..969f377e49 100644
+--- a/gfx/thebes/gfxDWriteFontList.cpp
++++ b/gfx/thebes/gfxDWriteFontList.cpp
+@@ -2159,6 +2159,12 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
+     nsACString* subst = useHardcodedList ? mHardcodedSubstitutions.Get(keyName)
+                                          : mSubstitutions.Get(keyName);
+     if (subst) {
++      // Camoufox (#193): the base-class gate only ever sees the substitute, so
++      // ask it about the name the page asked for before swapping it out.
++      if (!CamouIsFamilyAllowed(aFontVisibilityProvider, keyName)) {
++        LOG_FONTLIST(("CAMOU-FL dwrite-subst key=%s allowed=0", keyName.get()));
++        return false;
++      }
+       keyName = *subst;
+     }
+   } else {
+@@ -2169,6 +2175,10 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
+                                ? aFontVisibilityProvider->GetFontVisibility()
+                                : FontVisibility::User;
+     if (ff && IsVisibleToCSS(*ff, level)) {
++      // Camoufox (#193): as above; this branch never reaches the base gate.
++      if (!CamouIsFamilyAllowed(aFontVisibilityProvider, keyName)) {
++        return false;
++      }
+       aOutput->AppendElement(FamilyAndGeneric(ff, aGeneric));
+       return true;
+     }

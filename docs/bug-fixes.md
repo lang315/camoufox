@@ -12,6 +12,23 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #193: on a Windows host, a macOS or Linux identity rendered Windows-only families
+
+**Fixed by:** the PR that adds `browser/patches/font-substitutes-gate.patch`. **Found by:** e2e on `windows-2025`.
+
+**Symptom.** `fonts_no_foreign_os` failed on the Windows leg of e2e run 38274480396, in every driver. A macOS identity rendered `MS Sans Serif`, `MS Serif`, `Roman` and `Small Fonts`; a Linux identity rendered the last three.
+
+**Root cause.** `gfxDWriteFontList::FindAndAddFamiliesLocked` (Firefox 156 `gfx/thebes/gfxDWriteFontList.cpp:2140`) swaps the requested name for its substitute before it calls the base `gfxPlatformFontList::FindAndAddFamiliesLocked` (`:2178`), where both font gates sit. The shared-list branch rewrites `keyName` (`:2159`). The non-shared branch returns the substitute family directly (`:2168`), without reaching the base gates at all. The substitutes come from `sDirectWriteSubs` (`:2086`: `MS Sans Serif` to `Microsoft Sans Serif`; `MS Serif` and `Roman` to `Times New Roman`; `Small Fonts` to `Arial`), plus `kFontSubstitutes` and the registry `FontSubstitutes` key (`GetFontSubstitutes`, `:1989`). So the gates were asked about `times new roman`, `arial` and `microsoft sans serif`, which the mac and lin lists allow, and never about the name the page asked for. `Microsoft Sans Serif` is on the mac list but not the lin list, which is why `MS Sans Serif` rendered only under the macOS identity.
+
+**Fix.** When a substitution applies, both branches ask `CamouIsFamilyAllowed` about the requested name first, and refuse the lookup if it is not allowed. A real machine of the spoofed OS does the same, because it has no font of that name. The shared branch logs `CAMOU-FL dwrite-subst key=<name> allowed=0` on a refusal. The launch mask alone can refuse, and it short-circuits the `CAMOU-FL gate` line, so this line is the only record of the refusal. A native Windows identity keeps stock behaviour for every name on the `win` list. The aliases missing from it (`Script`, `MS Shell Dlg`, `MS Shell Dlg 2`, `Helv`, `Tms Rmn`) are now refused there, where stock Firefox renders their substitute.
+
+**Evidence.**
+- Red: e2e run 38274480396, Windows leg (strict entry in `e2e/known.py`).
+- The patch applies to the tree with every earlier patch applied using GNU `patch -p1 --forward -l --binary`, with no fuzz or offset.
+- Green: pending. It needs a Windows build and an e2e run on it. The strict `e2e/known.py` entry is removed, so that run fails if any of the four families still renders.
+
+**What misled.** The issue offered two hypotheses. The first, substitution, was correct, and it explains all four names, not only `MS Sans Serif`. The second was wrong: host bitmap `.fon` fonts reached outside the whitelist. DirectWrite cannot load `.fon` fonts at all, and that is why Firefox substitutes them (bug 642093). The Firefox 152 pass was no evidence either way, because none of the four names was a marker then. Also, `font-list-spoofing.patch` already describes `gfxDWriteFontList`'s substitution tables as filled at init, never from a gate answer. That is true, but it answers only the cross-context cache question. It does not cover a name rewritten above the gate. This is CLAUDE.md lesson 7 again.
+
 ## #195: build-tester launched headless whatever display it was given
 
 **Fixed by:** the PR that makes `browser/tests/build-tester/scripts/runner.py` launch headful. **Found by:** the upstream sync review (#188).

@@ -197,10 +197,20 @@ deliberate: a gate that finds nothing must not turn `family.IsNull()` into a
 release-build null dereference at `gfxTextRun.cpp:2207-2221`.
 `GetFontFamilyList`'s existing unfiltered refill is the precedent.
 
+**DirectWrite family substitution (#193).** `gfxDWriteFontList::FindAndAddFamiliesLocked`
+swaps a requested name for its substitute (`sDirectWriteSubs`, `kFontSubstitutes`,
+the registry `FontSubstitutes` key) before the base-class gates run. Its
+non-shared branch returns the substitute without reaching them at all. So both
+gates were asked about `Times New Roman` when a page asked for `MS Serif`. Both
+branches now ask `CamouIsFamilyAllowed` about the requested name first. The
+shared branch logs `CAMOU-FL dwrite-subst key=<name> allowed=0` on a refusal.
+This is **gated by reading**. The measurement will be e2e `fonts_no_foreign_os`
+on a Windows host.
+
 Still ungated after round 3: `CoreTextFontList::FindSystemFontFamily`'s return
-on the macOS system-font path; the DWrite non-shared substitution branch and the
-non-shared `LookupInFaceNameLists` / `CommonFontFallback` `else` branches, all
-dormant while `gfx.e10s.font-list.shared` is true; and the
+on the macOS system-font path; and the non-shared `LookupInFaceNameLists` /
+`CommonFontFallback` `else` branches, both dormant while
+`gfx.e10s.font-list.shared` is true; and the
 **context-0 fail-open** for the per-context half only — the launch mask reaches
 context 0 on the codepoint-fallback path, measured by `(ctx105)` on U+1F600 under
 the Linux bundle conf, and at the remaining live sites by reading the callers
