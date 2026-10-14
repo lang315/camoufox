@@ -383,7 +383,9 @@ func TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims(t *testing.T) {
 			t.Fatalf("%s: no generic prefs", osName)
 		}
 		for seed := range uint64(200) {
-			fonts, err := fingerprint.RandomFontSubset(osName, rand.New(rand.NewPCG(seed, 0)))
+			// Even seeds draw a native identity (the host's own macOS or Windows).
+			native := seed%2 == 0 && osName != "linux"
+			fonts, err := fingerprint.RandomFontSubset(osName, native, rand.New(rand.NewPCG(seed, 0)))
 			if err != nil {
 				t.Fatal(err)
 			}

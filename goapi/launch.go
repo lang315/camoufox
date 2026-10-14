@@ -111,6 +111,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 			OS:             lc.os,
 			FirefoxVersion: lc.firefoxVersion,
 			Rand:           lc.rand,
+			HostOS:         config.HostOS(),
 		}
 		if err := fingerprint.Generate(cfg, fpOpts); err != nil {
 			return nil, fmt.Errorf("camoufox: generate fingerprint: %w", err)

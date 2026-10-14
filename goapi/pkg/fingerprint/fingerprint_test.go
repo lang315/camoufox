@@ -29,7 +29,7 @@ func TestGenerateWindowsPreset(t *testing.T) {
 		t.Fatalf("expected at least 12 fonts (essentials), got %d", len(cfg.Fonts))
 	}
 	// Marker fonts must always be present.
-	for _, m := range windowsMarkerFonts {
+	for _, m := range launcher.MarkerFonts["win"] {
 		var found bool
 		for _, f := range cfg.Fonts {
 			if f == m {
@@ -45,11 +45,11 @@ func TestGenerateWindowsPreset(t *testing.T) {
 
 func TestFontSubsetMacOS(t *testing.T) {
 	rng := rand.New(rand.NewPCG(42, 0))
-	fonts, err := RandomFontSubset("macos", rng)
+	fonts, err := RandomFontSubset("macos", false, rng)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range macosMarkerFonts {
+	for _, m := range launcher.MarkerFonts["mac"] {
 		var found bool
 		for _, f := range fonts {
 			if f == m {
