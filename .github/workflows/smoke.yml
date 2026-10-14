@@ -16,6 +16,10 @@ on:
 jobs:
   smoke:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      # gh run download of the build under test
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
