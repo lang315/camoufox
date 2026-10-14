@@ -2,7 +2,6 @@ package fingerprint
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,27 +35,22 @@ func TestEmbeddedPresetsMatchPythonlib(t *testing.T) {
 	}
 }
 
-// The baseline taskbar heights and touch points are pythonlib's
-// launcher-constants.json values; a drifted copy claims an avail screen the
-// browser does not report.
-func TestBaselineConstantsMatchPythonlib(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "python", "src", "camoufox", "launcher-constants.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var c struct {
-		Taskbar map[string]uint32 `json:"baselineTaskbarHeight"`
-		Touch   uint32            `json:"baselineMultiTouchPoints"`
-	}
-	if err := json.Unmarshal(raw, &c); err != nil {
-		t.Fatal(err)
-	}
-	for key, osName := range map[string]string{"win": "windows", "mac": "macos", "lin": "linux"} {
-		if got, ok := baselineTaskbarHeight[osName]; !ok || got != c.Taskbar[key] {
-			t.Errorf("baselineTaskbarHeight[%q] = %d, launcher-constants.json says %d", osName, got, c.Taskbar[key])
+// The font-draw tables and launcher constants are pythonlib's own files; a
+// drifted copy draws a machine pythonlib would not (#185).
+func TestEmbeddedLauncherDataMatchesPythonlib(t *testing.T) {
+	for name, got := range map[string][]byte{
+		"font-bases.json":         rawFontBases,
+		"font-groups.json":        rawFontGroups,
+		"essential-fonts.json":    rawEssentialFonts,
+		"launcher-constants.json": rawLauncherConstants,
+	} {
+		src := filepath.Join("..", "..", "..", "python", "src", "camoufox", name)
+		want, err := os.ReadFile(src)
+		if err != nil {
+			t.Fatal(err)
 		}
-	}
-	if baselineMultiTouchPoints != c.Touch {
-		t.Errorf("baselineMultiTouchPoints = %d, launcher-constants.json says %d", baselineMultiTouchPoints, c.Touch)
+		if !bytes.Equal(got, want) {
+			t.Errorf("data/%s differs from %s; refresh it: cp %s goapi/pkg/fingerprint/data/%s", name, src, src, name)
+		}
 	}
 }

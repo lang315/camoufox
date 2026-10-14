@@ -22,18 +22,15 @@ type Options struct {
 	// Rand controls all sampling. Pass nil for a fresh PRNG seeded
 	// from the global source.
 	Rand *rand.Rand
+	// HostOS is the machine the browser runs on ("windows" | "macos" |
+	// "linux"; config.HostOS). An identity of the host's own macOS or Windows
+	// is native: the browser renders the real system fonts, so only that OS's
+	// essential fonts are claimed.
+	HostOS string
 }
 
 var ffVersionRE = regexp.MustCompile(`Firefox/\d+\.0`)
 var rvVersionRE = regexp.MustCompile(`rv:\d+\.0`)
-
-// The browser's baseline protection (nsRFPService) reports the available
-// screen as the whole screen less a fixed taskbar for the claimed OS, and more
-// than one touch point as 5. Twins of python/src/camoufox/launcher-constants.json
-// (TestBaselineConstantsMatchPythonlib).
-var baselineTaskbarHeight = map[string]uint32{"windows": 48, "macos": 76, "linux": 0}
-
-const baselineMultiTouchPoints uint32 = 5
 
 // applyWindow mirrors follow_baseline_protection and clamp_window_dimensions
 // (python/src/camoufox/fingerprints.py): claim the available screen and touch
@@ -43,7 +40,9 @@ const baselineMultiTouchPoints uint32 = 5
 // browser, which lays it out inside the real window.
 func applyWindow(cfg *config.Config, targetOS string) {
 	if cfg.ScreenWidth != nil && cfg.ScreenHeight != nil {
-		aw, ah := *cfg.ScreenWidth, *cfg.ScreenHeight-baselineTaskbarHeight[targetOS]
+		// The browser's baseline protection (nsRFPService) reports the whole
+		// screen less a fixed taskbar for the claimed OS.
+		aw, ah := *cfg.ScreenWidth, *cfg.ScreenHeight-launcher.BaselineTaskbarHeight[osKey(targetOS)]
 		cfg.ScreenAvailWidth, cfg.ScreenAvailHeight = config.Uint32(aw), config.Uint32(ah)
 		if cfg.WindowOuterWidth == nil || *cfg.WindowOuterWidth > aw {
 			cfg.WindowOuterWidth = config.Uint32(aw)
@@ -53,7 +52,7 @@ func applyWindow(cfg *config.Config, targetOS string) {
 		}
 	}
 	if p := cfg.NavigatorMaxTouchPoints; p != nil && *p > 1 {
-		cfg.NavigatorMaxTouchPoints = config.Uint32(baselineMultiTouchPoints)
+		cfg.NavigatorMaxTouchPoints = config.Uint32(launcher.BaselineMultiTouchPoints)
 	}
 }
 
@@ -81,7 +80,8 @@ func Generate(cfg *config.Config, opts Options) error {
 		cfg.VoicesBlockIfNotDefined = config.Bool(true)
 	}
 	if len(cfg.Fonts) == 0 {
-		fonts, err := RandomFontSubset(targetOS, rng)
+		native := targetOS == opts.HostOS && targetOS != "linux"
+		fonts, err := RandomFontSubset(targetOS, native, rng)
 		if err != nil {
 			return err
 		}

@@ -1,9 +1,9 @@
 // Package fingerprint generates Firefox fingerprints for Camoufox.
 // It is a focused port of python/src/camoufox/fingerprints.py covering
 // the subset Camoufox actually uses: preset selection, font/voice
-// subset sampling, and seed generation. The four data files (presets,
-// fonts, voices, browserforge mapping) are embedded so the binary is
-// self-contained.
+// subset sampling, and seed generation. Its data files are embedded so the
+// binary is self-contained; the ones pythonlib also ships are byte-identical
+// copies (data_drift_test.go).
 package fingerprint
 
 import (

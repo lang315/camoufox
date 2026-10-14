@@ -12,6 +12,32 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #185: goapi's font lists were never one real machine's
+
+**Fixed by:** the PR that adds `goapi/pkg/fingerprint/font_draw_test.go`. **Found by:** the #185 drift review.
+
+**Symptom.** No run showed it. Measured on main's code: in 300 draws per OS, no goapi font list contained a whole OS base. Every identity claimed a partial install of its OS, which no real machine has.
+
+**Root cause.** `RandomFontSubset` (`goapi/pkg/fingerprint/fonts.go`) was a twin of an older pythonlib draw: 30-78% of `fonts.json` over a 9-17 family essential list. pythonlib's `_generate_random_font_subset` had since become:
+- one OS-version base by weight (`font-bases.json`), kept whole;
+- the essential floor (`essential-fonts.json`);
+- addition units at measured probabilities (`font-groups.json`);
+- the marker fonts.
+
+goapi also ignored `native` (the host's own macOS or Windows claims only its essential fonts), and its marker lists had drifted from `launcher-constants.json`.
+
+**Fix.**
+- goapi embeds pythonlib's `font-bases.json`, `font-groups.json`, `essential-fonts.json` and `launcher-constants.json`, with byte-equality drift tests, and draws as pythonlib does.
+- `Options.HostOS`, set from `config.HostOS()` at launch, decides `native`.
+- The taskbar and touch-point constants added in #208 now come from the same embedded file.
+
+**Evidence.** On the old code a throwaway test read 0/300 whole-base draws on each OS. After the fix:
+- `TestFontDrawIsOneMachineOfPythonlibsModel` passes for 300 draws per OS: a whole base, the essentials and markers present, and nothing outside base, unit, marker or essential lists;
+- the native and Windows-10-host tests pass;
+- `TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims` still holds for 200 draws per OS, native and not.
+
+**What misled.** Ubuntu 24.04's base is a subset of 26.04's, so a check that took the first base present in full blamed 26.04-only families as strays.
+
 ## #190: a TypeScript NewContext could report innerWidth > outerWidth
 
 **Fixed by:** the PR that adds `typescript/tests/context-geometry.test.ts`. **Found by:** porting #164's pythonlib fix (#191).

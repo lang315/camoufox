@@ -14,21 +14,21 @@ import (
 // it. The old 40/25/27 taskbars put a go-macos window 51 px below the reported
 // avail (e2e run 38413736022).
 func TestGeneratedWindowFitsScreen(t *testing.T) {
-	for _, osKey := range []string{"windows", "macos", "linux"} {
+	for _, osName := range []string{"windows", "macos", "linux"} {
 		rng := rand.New(rand.NewPCG(1, 2))
 		for i := 0; i < 300; i++ {
 			cfg := &config.Config{}
-			if err := Generate(cfg, Options{OS: osKey, Rand: rng}); err != nil {
+			if err := Generate(cfg, Options{OS: osName, Rand: rng}); err != nil {
 				t.Fatal(err)
 			}
 			sw, sh := *cfg.ScreenWidth, *cfg.ScreenHeight
 			aw, ah := *cfg.ScreenAvailWidth, *cfg.ScreenAvailHeight
 			if cfg.WindowOuterWidth == nil || cfg.WindowOuterHeight == nil {
-				t.Fatalf("%s draw %d: window.outer* unset", osKey, i)
+				t.Fatalf("%s draw %d: window.outer* unset", osName, i)
 			}
 			ow, oh := *cfg.WindowOuterWidth, *cfg.WindowOuterHeight
-			if !(ow <= aw && aw == sw && oh <= ah && ah == sh-baselineTaskbarHeight[osKey]) {
-				t.Fatalf("%s draw %d: screen %dx%d avail %dx%d outer %dx%d", osKey, i, sw, sh, aw, ah, ow, oh)
+			if !(ow <= aw && aw == sw && oh <= ah && ah == sh-launcher.BaselineTaskbarHeight[osKey(osName)]) {
+				t.Fatalf("%s draw %d: screen %dx%d avail %dx%d outer %dx%d", osName, i, sw, sh, aw, ah, ow, oh)
 			}
 		}
 	}
@@ -37,13 +37,13 @@ func TestGeneratedWindowFitsScreen(t *testing.T) {
 // #166: with no voices for linux and no block flag, the browser registered
 // the host's own voices (Microsoft voices on a Windows host).
 func TestGenerateAlwaysBlocksHostVoices(t *testing.T) {
-	for _, osKey := range []string{"windows", "macos", "linux"} {
+	for _, osName := range []string{"windows", "macos", "linux"} {
 		cfg := &config.Config{}
-		if err := Generate(cfg, Options{OS: osKey, Rand: rand.New(rand.NewPCG(3, 4))}); err != nil {
+		if err := Generate(cfg, Options{OS: osName, Rand: rand.New(rand.NewPCG(3, 4))}); err != nil {
 			t.Fatal(err)
 		}
 		if cfg.VoicesBlockIfNotDefined == nil || !*cfg.VoicesBlockIfNotDefined {
-			t.Fatalf("%s: voices:blockIfNotDefined not set", osKey)
+			t.Fatalf("%s: voices:blockIfNotDefined not set", osName)
 		}
 	}
 }
@@ -51,15 +51,15 @@ func TestGenerateAlwaysBlocksHostVoices(t *testing.T) {
 // pythonlib's follow_baseline_protection: more than one touch point reads as 5
 // in the browser, so the identity must claim 5.
 func TestGeneratedTouchPointsFollowBaseline(t *testing.T) {
-	for _, osKey := range []string{"windows", "macos", "linux"} {
+	for _, osName := range []string{"windows", "macos", "linux"} {
 		rng := rand.New(rand.NewPCG(5, 6))
 		for i := 0; i < 300; i++ {
 			cfg := &config.Config{}
-			if err := Generate(cfg, Options{OS: osKey, Rand: rng}); err != nil {
+			if err := Generate(cfg, Options{OS: osName, Rand: rng}); err != nil {
 				t.Fatal(err)
 			}
-			if p := cfg.NavigatorMaxTouchPoints; p != nil && *p > 1 && *p != baselineMultiTouchPoints {
-				t.Fatalf("%s draw %d: maxTouchPoints %d, the browser reports %d", osKey, i, *p, baselineMultiTouchPoints)
+			if p := cfg.NavigatorMaxTouchPoints; p != nil && *p > 1 && *p != launcher.BaselineMultiTouchPoints {
+				t.Fatalf("%s draw %d: maxTouchPoints %d, the browser reports %d", osName, i, *p, launcher.BaselineMultiTouchPoints)
 			}
 		}
 	}
