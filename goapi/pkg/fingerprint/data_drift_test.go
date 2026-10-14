@@ -22,6 +22,20 @@ func TestEmbeddedFontsMatchPythonlib(t *testing.T) {
 	}
 }
 
+// fingerprint-presets.json is the preset pool; pythonlib holds the one copy
+// python/scripts/clean_presets.py maintains. goapi kept ten presets that script
+// had removed (#185), so it could draw an identity pythonlib refuses.
+func TestEmbeddedPresetsMatchPythonlib(t *testing.T) {
+	src := filepath.Join("..", "..", "..", "python", "src", "camoufox", "fingerprint-presets.json")
+	want, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rawPresets, want) {
+		t.Fatalf("data/fingerprint-presets.json differs from %s; refresh it: cp %s goapi/pkg/fingerprint/data/fingerprint-presets.json", src, src)
+	}
+}
+
 // The baseline taskbar heights and touch points are pythonlib's
 // launcher-constants.json values; a drifted copy claims an avail screen the
 // browser does not report.
