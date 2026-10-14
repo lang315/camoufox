@@ -1595,6 +1595,23 @@ export function targetOsFromPlatform(plat: string): SupportedOS {
  * @param canvas_seed Draw a canvas noise seed for setCanvasSeed(). NewContext
  *   passes false on a browser whose canvas the RFP placeholder covers.
  */
+/** The launch window and screen NewBrowser records on a browser (#164). */
+export interface LaunchWindow {
+	outer: [number, number];
+	inner: [number | null, number | null];
+	screen: [number | null, number | null];
+}
+
+function isLaunchWindow(v: unknown): v is LaunchWindow {
+	return (
+		typeof v === "object" &&
+		v !== null &&
+		(["outer", "inner", "screen"] as const).every(
+			(k) => Array.isArray((v as any)[k]) && (v as any)[k].length === 2,
+		)
+	);
+}
+
 export function generateContextFingerprint({
 	preset,
 	os,
@@ -1605,6 +1622,7 @@ export function generateContextFingerprint({
 	config_overrides,
 	webgl_config,
 	canvas_seed = true,
+	launch_window,
 }: {
 	preset?: Preset | null;
 	os?: string | null;
@@ -1615,7 +1633,14 @@ export function generateContextFingerprint({
 	config_overrides?: Config | null;
 	webgl_config?: [string, string] | null;
 	canvas_seed?: boolean;
+	/** The browser's launch window, as attachLaunchWindow records it. The window
+	 * is process-wide, so the context's viewport becomes the launch inner size
+	 * (or, when the launch set none, the preset viewport clamped inside the
+	 * launch outer window) and its screen is made to hold the window (#164). */
+	launch_window?: LaunchWindow | null;
 } = {}): ContextFingerprint {
+	// Only a well-formed record counts; anything else is no record.
+	const lw = isLaunchWindow(launch_window) ? launch_window : null;
 	let config: Config;
 	let nav: Record<string, any>;
 	let screen: Record<string, any>;
@@ -1746,6 +1771,23 @@ export function generateContextFingerprint({
 	if (canvas_seed && !("canvas:seed" in config))
 		config["canvas:seed"] = random.randint(1, 4_294_967_295);
 
+	// #164: the launch window is process-wide, so a context's screen must hold
+	// it. When the drawn screen cannot, claim the launch's own screen, which
+	// launchOptions already made hold the window.
+	if (lw) {
+		const [ow, oh] = lw.outer;
+		const [lsw, lsh] = lw.screen;
+		const sw0 = screen.width;
+		const sh0 = screen.height;
+		const holds =
+			pyTruthy(sw0) && pyTruthy(sh0) && num(sw0) >= ow && num(sh0) >= oh;
+		if (!holds && pyTruthy(lsw) && pyTruthy(lsh)) {
+			screen = { ...screen, width: lsw, height: lsh };
+			config["screen.width"] = lsw;
+			config["screen.height"] = lsh;
+		}
+	}
+
 	if (timezone) config.timezone = timezone;
 	if (locale) {
 		const parsed = normalizeLocale(locale);
@@ -1786,8 +1828,32 @@ export function generateContextFingerprint({
 	if (pyTruthy(ua)) contextOptions.userAgent = ua;
 	const sw = screen.width;
 	const sh = screen.height;
-	if (pyTruthy(sw) && pyTruthy(sh))
-		contextOptions.viewport = { width: sw, height: Math.max(sh - 28, 600) };
+	if (pyTruthy(sw) && pyTruthy(sh)) {
+		const [iw, ih] = lw ? lw.inner : [null, null];
+		if (pyTruthy(iw) && pyTruthy(ih)) {
+			// The launch window's own inner size: inner <= outer by construction.
+			contextOptions.viewport = { width: iw, height: ih };
+		} else if (lw) {
+			// No launch inner (fpgen leaves window.inner* unmapped): the preset
+			// viewport, held inside the launch outer window by
+			// clampWindowDimensions' inner <= outer rule.
+			const win: Config = {
+				"window.outerWidth": lw.outer[0],
+				"window.outerHeight": lw.outer[1],
+				"window.innerWidth": sw,
+				"window.innerHeight": Math.max(num(sh) - 28, 600),
+			};
+			clampWindowDimensions(win);
+			contextOptions.viewport = {
+				width: win["window.innerWidth"],
+				height: win["window.innerHeight"],
+			};
+		} else {
+			// A browser NewBrowser did not launch carries no record, so the
+			// preset-sized viewport stays and #164 can still happen there.
+			contextOptions.viewport = { width: sw, height: Math.max(sh - 28, 600) };
+		}
+	}
 	const dpr = screen.devicePixelRatio;
 	if (pyTruthy(dpr)) contextOptions.deviceScaleFactor = dpr;
 	let tz = config.timezone;

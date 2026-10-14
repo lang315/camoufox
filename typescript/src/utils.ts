@@ -1122,6 +1122,30 @@ export function attachCanvasCover(
 }
 
 /**
+ * Record the launch window and screen on the browser for NewContext (#164).
+ * The launch window is process-wide (browser-init.patch resizes the real
+ * window once), so every context shares it. 1280x1040 is browser-init.patch's
+ * default when the config sets no outer size.
+ */
+export function attachLaunchWindow(
+	browser: any,
+	fromOptions: Record<string, any>,
+): void {
+	const cfg = JSON.parse(camouConfigBlob(fromOptions) || "{}");
+	browser._camoufoxLaunchWindow = {
+		outer: [
+			cfg["window.outerWidth"] || 1280,
+			cfg["window.outerHeight"] || 1040,
+		],
+		inner: [
+			cfg["window.innerWidth"] ?? null,
+			cfg["window.innerHeight"] ?? null,
+		],
+		screen: [cfg["screen.width"] ?? null, cfg["screen.height"] ?? null],
+	};
+}
+
+/**
  * Whether a new context on `browser` seeds the fork's canvas noise: only where
  * the launch left the canvas uncovered. Playwright keeps no launch options, so
  * a browser NewBrowser did not launch (firefox.launch(), connect()) has no
