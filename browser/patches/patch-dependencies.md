@@ -74,7 +74,7 @@ already set up, and do not add the include or `LOCAL_INCLUDES` themselves:
 | `font-list-spoofing.patch` | `anti-font-fingerprinting.patch` for `gfxFontGroup::mUserContextId` |
 | `canvas-spoofing.patch`, `timezone-spoofing.patch`, `webrtc-ip-spoofing.patch` | `audio-fingerprint-manager.patch` for `RoverfoxStorageManager.h` in `dom/base/nsGlobalWindowInner.cpp` |
 | `cross-process-storage.patch` | `font-list-spoofing.patch` for `FontListManager::OnFontListStored()`, which its storage-pref callback calls |
-| `font-substitutes-gate.patch` | `font-list-spoofing.patch` for `gfxPlatformFontList::CamouIsFamilyAllowed()` |
+| `font-substitutes-gate.patch` | `font-hijacker.patch` for `MaskConfig.hpp` in `gfx/thebes/gfxDWriteFontList.cpp`; `font-list-spoofing.patch` for `gfxPlatformFontList::CamouIsFamilyAllowed()` and `FontListManager::ContextIdFor()`; `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
 | `font-system-fonts-css2.patch`, `system-ui-font-spoofing.patch`, `webrtc-ip-spoofing.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
 
 ## RoverfoxStorageManager
