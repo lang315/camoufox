@@ -12,6 +12,26 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #190: a TypeScript NewContext could report innerWidth > outerWidth
+
+**Fixed by:** the PR that adds `typescript/tests/context-geometry.test.ts`. **Found by:** porting #164's pythonlib fix (#191).
+
+**Symptom.** The same as #164a, through the TypeScript launcher. A `NewContext` sized its viewport from the drawn screen alone, while the window it lives in is the launch's own: one real window per process, which browser-init.patch sizes once.
+
+**Root cause.** `generateContextFingerprint` (`typescript/src/fingerprints.ts`) had no record of the launch window. `NewBrowser` kept none, unlike pythonlib's `attach_launch_window`.
+
+**Fix.**
+- `NewBrowser` records the launch window from its own CAMOU_CONFIG (`attachLaunchWindow`).
+- `NewContext` passes the record to `generateContextFingerprint`, which, as pythonlib does:
+  - takes the launch inner size as the viewport;
+  - when the launch has no inner size, clamps the preset viewport inside the launch outer window, keeping its scale factor;
+  - claims the launch screen when the drawn screen cannot hold the window.
+- An explicit `noViewport` or `viewport: null` drops the generated viewport and `deviceScaleFactor`, which Playwright rejects with a null viewport.
+
+**Evidence.** `context-geometry.test.ts` mirrors `python/tests/test_context_geometry.py`: 7 of its 8 cases fail on the old code and all pass after the fix. The malformed-record case passes on both, as a control.
+
+**What misled.** The identity golden still passed, because a launch with no record (the golden's path) is unchanged.
+
 ## #185: goapi drew presets pythonlib had removed
 
 **Fixed by:** the PR that adds `TestEmbeddedPresetsMatchPythonlib`. **Found by:** a byte comparison while working on #185.
