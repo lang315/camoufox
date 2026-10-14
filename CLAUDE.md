@@ -33,6 +33,21 @@ Dispatch `build.yml` from `main` for each target, download the artifacts, then
 packages attached. `build.yml` runs only when dispatched, so creating that tag
 starts no build (#203).
 
+### Record every bug fix in `docs/bug-fixes.md`
+
+A PR that fixes a bug adds an entry to [`docs/bug-fixes.md`](docs/bug-fixes.md) in
+the same PR, newest first. The entry gives:
+
+- the symptom as first seen;
+- the root cause, with the code that causes it;
+- the fix, and any alternative that was tried and failed;
+- the red-to-green evidence;
+- what misled the investigation.
+
+Read the file before investigating a bug: a symptom seen before has its cause
+and its traps written down there. A settled decision still goes in
+`ci/tribal-rules.yml`, and the entry links to it.
+
 ### Patches: hand-written hunks
 
 **Balance the context lines in every hunk you hand-write.** GNU `patch` (what
