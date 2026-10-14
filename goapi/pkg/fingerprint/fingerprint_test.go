@@ -63,26 +63,6 @@ func TestFontSubsetMacOS(t *testing.T) {
 	}
 }
 
-func TestVoiceSubset(t *testing.T) {
-	rng := rand.New(rand.NewPCG(7, 0))
-	// Linux returns empty.
-	v, err := RandomVoiceSubset("linux", rng)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(v) != 0 {
-		t.Fatalf("linux voices should be empty, got %d", len(v))
-	}
-	// Windows returns everything (no subsetting).
-	wv, err := RandomVoiceSubset("windows", rng)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(wv) == 0 {
-		t.Fatal("expected windows voices")
-	}
-}
-
 // TestMediaCodecProfile guards #6: HEVC must be supported+coherent on
 // Windows/macOS and unsupported on Linux across canPlayType + decodingInfo.
 func TestMediaCodecProfile(t *testing.T) {

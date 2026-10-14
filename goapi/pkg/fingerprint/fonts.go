@@ -140,43 +140,6 @@ var hostHasWindows11Fonts = func() bool {
 	return err == nil
 }
 
-// RandomVoiceSubset mirrors _generate_random_voice_subset.
-// macOS: 40-80% random subset, essentials always present.
-// Windows: every voice.
-// Linux: empty.
-func RandomVoiceSubset(targetOS string, rng *rand.Rand) ([]string, error) {
-	voices, err := loadVoices()
-	if err != nil {
-		return nil, err
-	}
-	full := voices[osKey(targetOS)]
-	if len(full) == 0 {
-		return []string{}, nil
-	}
-	switch presetKey(targetOS) {
-	case "windows":
-		out := make([]string, len(full))
-		copy(out, full)
-		return out, nil
-	case "linux":
-		return []string{}, nil
-	}
-	essential := setOf([]string{"Samantha", "Alex", "Fred", "Victoria", "Karen", "Daniel"})
-	result := make([]string, 0, len(full))
-	nonEssential := make([]string, 0, len(full))
-	for _, v := range full {
-		if essential[v] {
-			result = append(result, v)
-		} else {
-			nonEssential = append(nonEssential, v)
-		}
-	}
-	pct := 40 + rngInt(rng, 41) // [40, 80]
-	count := min(int(float64(pct)/100.0*float64(len(nonEssential))+0.5), len(nonEssential))
-	result = append(result, sampleN(nonEssential, count, rng)...)
-	return result, nil
-}
-
 // setOf returns a string→true map for membership tests.
 func setOf(xs []string) map[string]bool {
 	m := make(map[string]bool, len(xs))

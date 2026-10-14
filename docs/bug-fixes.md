@@ -12,6 +12,34 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #185: goapi's voice lists were never one real machine's
+
+**Fixed by:** the PR that adds `goapi/pkg/fingerprint/voices.go`. **Found by:** the #185 drift review.
+
+**Symptom.** None in a run. Measured with a test on the old code (seed 1, 2):
+- a Windows `fr-FR` identity claimed 53 voices from every language pack at once;
+- a Linux identity claimed none;
+- every identity marked its first voice as the default.
+
+**Root cause.** goapi read its own flat `voices.json`, which pythonlib does not have. It kept every Windows voice whatever the locale, drew a random 40-80% of macOS voices, and gave Linux nothing. pythonlib's `_generate_random_voice_subset` draws from `voice-manifests.json` instead:
+- the OS base;
+- the display locale's Windows pack, its legacy Desktop voices and extra packs at their measured probabilities;
+- macOS downloads.
+
+It builds each `voiceUri` the way the OS backend does and marks no voice default, as stock Firefox does.
+
+**Fix.**
+- goapi embeds pythonlib's `voice-manifests.json` and `voice-uris.json`, with drift tests, and ports the draw and `_voice_uri`.
+- The locale comes from `locale:language`/`locale:region`, or else `navigator.language`.
+- `voices.json` and its loader are removed.
+
+**Evidence.**
+- The same test on the new code: Windows `fr-FR` 3 voices, all French; Linux 131; no default.
+- `TestVoiceURIMatchesPythonlib` checks nine URIs `_voice_uri` returned.
+- `TestVoicesFollowTheManifest` checks 100 draws per case for the base, the locale's pack and no default.
+
+**What misled.** Python NFKD-folds a macOS name outside the URI catalogue, which Go would need `golang.org/x/text` for. Every such name in the data is ASCII, so a test pins that instead of adding a dependency.
+
 ## #185: goapi's font lists were never one real machine's
 
 **Fixed by:** the PR that adds `goapi/pkg/fingerprint/font_draw_test.go`. **Found by:** the #185 drift review.
