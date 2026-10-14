@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #236: TestScrollToBottom required a scroll position the drawn window could not reach
+
+**Fixed by:** the PR that changes `goapi/scroll_test.go`. **Found by:** smoke run 38568534252.
+
+**Symptom.** `scroll_test.go:66: expected scrollY >= 4000, got 3722` in smoke's goapi step.
+
+**Root cause.** The test loads a 5000 px page and required `window.scrollY >= 4000`. The furthest a page scrolls is `scrollHeight - innerHeight`, and the launch draws a random identity, so `innerHeight` varies. That run drew a window 1278 px tall: the page was at its bottom, 3722, and the bound was out of reach. The test passed only for windows at most 1000 px tall.
+
+**Fix.** The test reads `scrollHeight - innerHeight` from the page and requires `scrollY` to reach it. It fails first if the page is not scrollable at all.
+
+**Evidence.** Red: the run above. Green: 5 of 5 local runs on the fork.3 macOS arm64 build. A `ScrollToBottom` that did not scroll leaves `scrollY` at 0, below any bottom, so the check still fails for the bug it is about.
+
+**What misled.** Nothing; the number alone gave it away.
+
 ## #234: the TypeScript launcher started Xvfb without Composite
 
 **Fixed by:** the PR that turns Composite on in `typescript/src/virtdisplay.ts`. **Found by:** the #232 fix, which compared the two `virtdisplay` twins.
