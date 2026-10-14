@@ -88,24 +88,18 @@ func Generate(cfg *config.Config, opts Options) error {
 		cfg.Fonts = fonts
 	}
 	if len(cfg.Voices) == 0 {
-		names, err := RandomVoiceSubset(targetOS, rng)
+		// Drawn after the locale is known: the Windows list is the display
+		// language's pack, so an fr-FR identity has French voices.
+		locale := cfg.NavigatorLanguage
+		if cfg.LocaleLanguage != "" {
+			locale = cfg.LocaleLanguage
+			if cfg.LocaleRegion != "" {
+				locale += "-" + cfg.LocaleRegion
+			}
+		}
+		voices, err := RandomVoices(targetOS, locale, rng)
 		if err != nil {
 			return err
-		}
-		meta := voiceMetaFor(targetOS)
-		voices := make([]config.Voice, len(names))
-		for i, n := range names {
-			lang, local := "en-US", true
-			if m, ok := meta[n]; ok {
-				lang, local = m.lang, m.local
-			}
-			voices[i] = config.Voice{
-				VoiceURI:       n,
-				Name:           n,
-				Lang:           lang,
-				IsLocalService: local,
-				IsDefault:      i == 0,
-			}
 		}
 		cfg.Voices = voices
 	}

@@ -43,6 +43,8 @@ func TestEmbeddedLauncherDataMatchesPythonlib(t *testing.T) {
 		"font-groups.json":        rawFontGroups,
 		"essential-fonts.json":    rawEssentialFonts,
 		"launcher-constants.json": rawLauncherConstants,
+		"voice-manifests.json":    rawVoiceManifests,
+		"voice-uris.json":         rawVoiceURIs,
 	} {
 		src := filepath.Join("..", "..", "..", "python", "src", "camoufox", name)
 		want, err := os.ReadFile(src)

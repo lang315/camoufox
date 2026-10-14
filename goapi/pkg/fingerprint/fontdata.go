@@ -48,6 +48,8 @@ var (
 		Windows11MarkerFonts     []string            `json:"windows11MarkerFonts"`
 		BaselineTaskbarHeight    map[string]uint32   `json:"baselineTaskbarHeight"`
 		BaselineMultiTouchPoints uint32              `json:"baselineMultiTouchPoints"`
+		MacNoveltyVoices         []string            `json:"macNoveltyVoices"`
+		MacEloquenceVoices       []string            `json:"macEloquenceVoices"`
 	}](rawLauncherConstants)
 )
 
