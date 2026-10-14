@@ -24,13 +24,6 @@ CHECKS = [
     # Timing: depends on how soon the first read lands.
     (r"test_05_contexts\.py::test_new_context_gives_each_context_its_own_identity\[pkg\]",
      "two pages of one context agree", 165, False, {"Darwin", "Linux"}),
-    # goapi has no rendering plan (#196): a launch on another OS still sends canvas:seed and
-    # gets no RFP placeholder, so its canvas reads the same twice. The same missing plan means
-    # goapi, unlike the Python and TypeScript launchers, still allows a cross-OS context on a
-    # native-OS launch. Read from the code, not yet measured on a browser: strict, so a host
-    # where it passes says so.
-    (r"test_05_contexts\.py::test_a_covered_launch_reads_the_canvas_placeholder\[go\]",
-     "canvas readback is the placeholder: ", 196, True, {"Darwin", "Linux", "Windows"}),
 ]
 
 # Findings that surface as an exception: (node id regex, issue, hosts, exception, strict).

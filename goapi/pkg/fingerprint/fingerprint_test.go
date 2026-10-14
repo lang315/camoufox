@@ -22,8 +22,9 @@ func TestGenerateWindowsPreset(t *testing.T) {
 	if cfg.ScreenWidth == nil || *cfg.ScreenWidth == 0 {
 		t.Fatal("no screen width")
 	}
-	if cfg.CanvasSeed == nil || *cfg.CanvasSeed == 0 {
-		t.Fatal("canvas seed unset or zero")
+	// The launch's rendering plan decides the canvas seed (goapi/rendering.go).
+	if cfg.CanvasSeed != nil {
+		t.Fatal("Generate drew a canvas seed; only an uncovered launch may")
 	}
 	if len(cfg.Fonts) < 12 {
 		t.Fatalf("expected at least 12 fonts (essentials), got %d", len(cfg.Fonts))

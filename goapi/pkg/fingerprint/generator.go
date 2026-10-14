@@ -109,9 +109,6 @@ func Generate(cfg *config.Config, opts Options) error {
 	if cfg.AudioSeed == nil {
 		cfg.AudioSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
 	}
-	if cfg.CanvasSeed == nil {
-		cfg.CanvasSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
-	}
 
 	// Rendering-consistency default (matches donutbrowser): suppress
 	// OS/theme-dependent chrome styling so canvas/screenshot surfaces do

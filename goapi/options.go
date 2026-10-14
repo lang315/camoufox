@@ -31,6 +31,7 @@ type launchConfig struct {
 	cfg               *config.Config
 
 	keepMDNSObfuscation bool // opt out of Phase-5 mDNS disable
+	canvasPlaceholder   *bool // nil: the rendering plan's default (rendering.go)
 
 	proxy        *proxy.Proxy
 	geoIPEnabled bool
@@ -171,6 +172,16 @@ func WithCanvasNoise(density float64, strengthLSB uint32) Option {
 		c.cfg.CanvasNoiseDensity = config.Float64(density)
 		c.cfg.CanvasNoiseStrength = config.Uint32(strengthLSB)
 	}
+}
+
+// WithCanvasPlaceholder chooses whether canvas readback returns
+// privacy.resistFingerprinting's random placeholder (#196). The default is on:
+// every goapi identity names a preset's GPU, and the host's real pixels would
+// contradict it. false keeps stock canvas behaviour with the fork's seeded
+// noise, which only agrees with an identity on the host's own OS and GPU
+// (pythonlib's canvas_noise=False).
+func WithCanvasPlaceholder(on bool) Option {
+	return func(c *launchConfig) { c.canvasPlaceholder = &on }
 }
 
 // WithMDNSObfuscation re-enables Firefox's mDNS host-address

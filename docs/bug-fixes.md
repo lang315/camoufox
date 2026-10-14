@@ -12,6 +12,25 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #196: a goapi launch read the host's real canvas under a foreign identity
+
+**Fixed by:** the PR that adds `goapi/rendering.go`. **Found by:** the upstream sync (#188), which ledgered it in `e2e/known.py`.
+
+**Symptom.** `test_a_covered_launch_reads_the_canvas_placeholder[go]` failed on every host. A goapi launch on another OS read the same `toDataURL` twice, where the Python and TypeScript launchers return RFP's random placeholder.
+
+**Root cause.** goapi had no rendering plan. `Generate` always drew `canvas:seed`, and the launch never set `privacy.baselineFingerprintingProtection.overrides`. So the page read the host's real pixels, with keyed noise, under an identity naming another OS and GPU.
+
+**Fix.**
+- pythonlib's `plan_rendering` covers the canvas of any identity that names a GPU, and every goapi identity names its preset's. So `Launch` turns on the placeholder by default, sends no canvas seed under it, and warns, as `LeakWarning('canvas_noise')` does.
+- `WithCanvasPlaceholder(false)` keeps the host canvas with a seeded noise (`canvas_noise=False`).
+- WebGPU follows `set_webgpu` with no host GPU known: enabled where Firefox ships it, with the adapter blocked.
+
+**Evidence.**
+- The ledger entry (strict) and its two oracle tests are removed, and the e2e journey must pass for go on every host.
+- Unit tests cover the plan, the override merge, the WebGPU prefs and the warning.
+
+**What misled.** goapi already has `WithCanvasNoise`, which tunes the fork's noise density and is unrelated to pythonlib's `canvas_noise`. Hence the new option's different name.
+
 ## #185: goapi's voice lists were never one real machine's
 
 **Fixed by:** the PR that adds `goapi/pkg/fingerprint/voices.go`. **Found by:** the #185 drift review.

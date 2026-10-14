@@ -114,20 +114,20 @@ def test_known_finding_reports_known_and_strict_entry_flags_a_fix(monkeypatch):
     import known
     from util import Checks
 
-    monkeypatch.setattr(known, "HOST", "Darwin")
-    node = "journeys/test_05_contexts.py::test_a_covered_launch_reads_the_canvas_placeholder[go]"
+    monkeypatch.setattr(known, "HOST", "Windows")
+    node = "journeys/test_02_fingerprint.py::test_fingerprint_is_coherent[go-linux]"
     red = Checks(node)
-    red(False, "canvas readback is the placeholder: False")
+    red(False, "fonts_no_foreign_os: other-OS marker families rendered: {'windows': ['Roman']}")
     assert red.failed == []
-    fixed = Checks(node)  # #196 is strict
-    fixed(True, "canvas readback is the placeholder: True")
-    assert fixed.failed and "#196" in fixed.failed[0]
+    fixed = Checks(node)  # #193 is strict
+    fixed(True, "fonts_no_foreign_os: other-OS marker families rendered: {}")
+    assert fixed.failed and "#193" in fixed.failed[0]
     other = Checks(node)
     other(False, "the page loaded")
     assert other.failed == ["the page loaded"]
     monkeypatch.setattr(known, "HOST", "Plan9")  # a host nobody has measured
     unmeasured = Checks(node)
-    unmeasured(False, "canvas readback is the placeholder: False")
+    unmeasured(False, "fonts_no_foreign_os: other-OS marker families rendered: {'windows': ['Roman']}")
     assert unmeasured.failed, "a host nobody measured must fail loudly"
 
 
@@ -144,20 +144,3 @@ def test_a_negative_control_is_never_matched_against_the_ledger(monkeypatch):
     assert c.failed == []
     c(False, "voices_no_foreign_os: its negative control went red (else VACUOUS)", ledger=False)
     assert c.failed, "a control that did not go red fails even under a ledgered check"
-
-
-def test_goapi_canvas_gap_is_ledgered_only_for_its_own_checks(monkeypatch):
-    import known
-    from util import Checks
-
-    monkeypatch.setattr(known, "HOST", "Linux")
-    node = "journeys/test_05_contexts.py::test_a_covered_launch_reads_the_canvas_placeholder[go]"
-    gap = Checks(node)
-    gap(False, "canvas readback is the placeholder: toDataURL differs between two reads")
-    assert gap.failed == []
-    control = Checks(node)
-    control(False, "toDataURL of the reference Firefox is equal between two reads (else VACUOUS)", ledger=False)
-    assert control.failed, "the probe's control is never excused by the goapi gap"
-    python = Checks(node.replace("[go]", "[pkg]"))
-    python(False, "canvas readback is the placeholder: toDataURL differs between two reads")
-    assert python.failed, "only goapi lacks the rendering plan"

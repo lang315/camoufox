@@ -126,7 +126,8 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 
 	// Detection-risk warnings (mirrors pythonlib LeakWarning). Evaluated
 	// after geo resolution + fingerprint so cfg reflects the final config.
-	emitLeakWarnings(os.Stderr, leakWarnings(cfg, lc.proxy != nil, lc.geoIPEnabled))
+	seedUncoveredCanvas(cfg, lc.canvasPlaceholder, lc.rand)
+	emitLeakWarnings(os.Stderr, leakWarnings(cfg, lc.proxy != nil, lc.geoIPEnabled, coversCanvas(lc.canvasPlaceholder)))
 
 	envVars, err := cfg.EnvVars(config.HostOS())
 	if err != nil {
@@ -261,6 +262,10 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	for k, v := range lc.firefoxUserPrefs {
 		prefs[k] = v
 	}
+	if coversCanvas(lc.canvasPlaceholder) {
+		addCanvasPlaceholder(prefs)
+	}
+	setWebGPU(prefs, uaOSDir(cfg.NavigatorUserAgent, config.HostOS()), cfg.WebGLVendor)
 	if err := b.enable(ctx, prefs); err != nil {
 		_ = b.Close()
 		return nil, err
