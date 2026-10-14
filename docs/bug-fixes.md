@@ -12,6 +12,35 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #183: a worker's canvas and a transferred canvas read back unnoised
+
+**Fixed by:** the PR that gives worker and transferred canvases their context's seed in `canvas-spoofing.patch`. **Found by:** the FF156 sync review (#179), which pointed at `ImageEncoder`'s offscreen branch.
+
+**Symptom.** On a launch the canvas placeholder does not cover (the launchers seed it), four readbacks carried no noise. A page could draw the same thing in a worker and on the page, then compare, which showed both the noise and the canvas under it. Measured on fork.3 against a launch with no seed:
+- `getImageData` of a worker's `OffscreenCanvas` came back unperturbed;
+- so did `readPixels` of a worker's WebGL context;
+- so did `toDataURL` and `toBlob` of a canvas whose control went to a worker.
+
+**Root cause.**
+- `CanvasSeedManager::SeedFromDocument` returned 0 for a null document. A worker canvas has no document (`CanvasSeedDocumentFor` finds no owner window), and `ReadPixels` skipped the lookup without an owner document.
+- A transferred canvas is read back through `OffscreenCanvasDisplayHelper`: `GetImageBuffer` for `toBlob`, and `ImageEncoder`'s offscreen branch for `toDataURL`. Both ran only Firefox's own randomisation.
+
+**Fix.**
+- `SeedFromDocument(nullptr)` on a worker thread uses the worker's user context, which is its page's (`ClientWebGLContext::GetUserContextId` already does the same). `RoverfoxStorageManager` reads are already safe off the main thread.
+- `ReadPixels` asks even without an owner document.
+- `MaybeRandomizePixels` adds the element's noise, except under the placeholder. `ImageEncoder`'s offscreen branch always copies, so `toDataURL` passes through it.
+
+**Evidence.**
+- `canvas-spoofing.py` arm 3: a worker's canvas must hash like the page's, and a transferred canvas's two reads must log `perturb seed=S1`.
+  - On fork.3 it failed on both.
+  - On this branch it passes, on Linux CI (Tests 38554469075) and on the macOS build (run 38554185647).
+- A probe on the macOS build: with seed `111`, `worker_getImageData` and `main_getImageData` are both `87a6eaf0204c`, and `worker_readPixels` and `main_readPixels` are both `0131af06eef0`. Both transferred reads differ from the unseeded launch and are stable across launches with one seed.
+
+**What misled.**
+- The issue placed the gap in a worker, but `ImageEncoder`'s offscreen branch runs on the main thread, for a canvas handed to a worker. The worker's own reads were a second, separate gap.
+- `toDataURL` and `toBlob` differ between launches even with no seed (Firefox's session randomisation key), so their hashes cannot show the fork's noise. The guard reads the patch's log lines for them instead.
+- The arm 3 guard cannot see WebGL: headless Firefox on Linux has no GL context. `readPixels` in a worker is measured on macOS only.
+
 ## #226: the Tracking Observer recorded nothing from web pages on Firefox 156
 
 **Fixed by:** the PR that marks the observer's window actor `safeForUntrustedWebProcess`. **Found by:** #199's covered-launch test, whose uncovered arm also failed.
