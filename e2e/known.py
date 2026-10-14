@@ -13,20 +13,10 @@ import re
 HOST = platform.system()
 
 # (test node id regex, check text prefix, issue, strict, hosts measured on)
-CHECKS = [
-    # Depends on which presets the launch and the context draw: intermittent, so not strict.
-    (r"test_02_fingerprint\.py::test_new_context_fingerprint_is_coherent\[pkg-",
-     "screen_contains_viewport: screen", 164, False, {"Darwin", "Linux", "Windows"}),
-    # Timing: depends on how soon the first read lands.
-    (r"test_05_contexts\.py::test_new_context_gives_each_context_its_own_identity\[pkg\]",
-     "two pages of one context agree", 165, False, {"Darwin", "Linux"}),
-]
+CHECKS = []
 
 # Findings that surface as an exception: (node id regex, issue, hosts, exception, strict).
-RAISES = [
-    # Intermittent: stalled at context 4 or 9 in two Linux runs, never on macOS.
-    (r"test_08_lifecycle\.py::test_fifty_contexts_in_a_row\[(pkg|pw)\]", 171, {"Linux"}, AssertionError, False),
-]
+RAISES = []
 
 
 def for_check(nodeid: str, what: str):
