@@ -12,6 +12,43 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #226: the Tracking Observer recorded nothing from web pages on Firefox 156
+
+**Fixed by:** the PR that marks the observer's window actor `safeForUntrustedWebProcess`. **Found by:** #199's covered-launch test, whose uncovered arm also failed.
+
+**Symptom.** `browser/tests/build-tester/observer/test_observer_records.py` on `v156.0.1-beta.32-fork.3`: `observer recorded: []`, with all seven surfaces missing. The snapshot still listed the page's requests, so the parent side worked.
+
+**Root cause.**
+- The surfaces were recorded. A process script draining every content process found the page's canvas and WebGL records still in the web process's buffer.
+- The page's window had no `TrackingObserverChild`, so nothing drained it. Forcing one threw `Window protocol 'TrackingObserver' doesn't match remote type 'web'`.
+- Firefox 156 sets `dom.jsipc.check_safeForUntrustedWebProcess`. `JSActorProtocol::RemoteTypePrefixMatches` then refuses, in `web` and `file` processes, any actor not registered with `safeForUntrustedWebProcess: true`. `browser/additions/observer/TrackingObserver.sys.mjs` registered without it.
+
+**Fix.** The registration sets `safeForUntrustedWebProcess: true`, as Juggler's actors already do (`browser/additions/juggler/components/Juggler.js`).
+
+**Evidence.**
+- Red on fork.3: `observer recorded: []`.
+- Re-registering the actor at runtime with the flag, on the same binary, recorded `['canvas', 'webgl']` for a page that reads both.
+- Green on this branch's macOS build (run 38554181799): `PASS: all 7 surfaces recorded`.
+
+**What misled.** `REPORT.md` measured 7/7 before the Firefox 156 sync, and nothing in CI runs the observer harness, so the regression went unseen. Switching the actor's creation event from `DOMWindowCreated` to `DOMDocElementInserted` changed nothing: the actor was refused before any event could create it.
+
+## #199: a covered launch's getImageData and readPixels went unrecorded
+
+**Fixed by:** the PR that moves the observer record above the placeholder branch in `canvas-spoofing.patch`. **Found by:** the upstream sync review (#188).
+
+**Symptom.** On a launch whose canvas the RFP placeholder covers, the Tracking Observer recorded no canvas read for `getImageData` and no WebGL read for `readPixels`. `toDataURL` and `toBlob` were recorded.
+
+**Root cause.** `CanvasRenderingContext2D::GetImageDataArray` and `ClientWebGLContext::ReadPixels` take Firefox's placeholder branch before the fork's block. That block held both the perturb and `RecordSurfaceFromDocument`, so a covered read skipped the record along with the noise. #188 had already split `GetImageBuffer` this way.
+
+**Fix.** Both functions record the read before the placeholder branch. The perturb stays off the placeholder path.
+
+**Evidence.**
+- The new covered-launch arm of `test_observer_records.py` uses `probe_readback.html`, which makes only those two reads, so a `toDataURL` record cannot stand in for them.
+- On fork.3, with the #226 actor fixed at runtime: covered launch `[]`, uncovered `['canvas', 'webgl']`.
+- On this branch's macOS build (run 38554181799): `observer recorded (covered launch): ['canvas', 'webgl']`.
+
+**What misled.** The issue could not be reproduced until #226 was found: on Firefox 156 the observer recorded nothing at all, covered or not.
+
 ## #180: smoke's cross-context leak arms were green without sharing a process
 
 **Fixed by:** the PR that moves arms (b), (b2), (b2r) and (n5) to `file:` pages. **Found by:** #179's shared-process audit.
