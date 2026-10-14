@@ -12,16 +12,18 @@ READBACK = ("canvas", "webgl")
 
 
 def run_apps(driver, site):
-    """The page's results, two reads of one canvas and one GL buffer, and whether the launch was covered."""
+    """The page's results, two reads of one canvas and one GL buffer, whether the launch was covered,
+    and each failed probe's message and the step it had reached."""
     b = driver.launch(headless=False)
     page = b.new_context().new_page()
     page.goto(site.url("/apps"))
     page.click("#clip")
     got = wait_out(page, 90)
     reads = {**page.eval(TWO_READS), **page.eval(TWO_READS_GL)}
+    errors = page.eval("document.getElementById('out').dataset.errors")
     covered = b.canvas_covered
     b.close()
-    return got, reads, covered
+    return got, reads, covered, errors
 
 
 @pytest.fixture(scope="module")
@@ -30,8 +32,9 @@ def reference(ref, site):
 
 
 def test_web_apis_behave_like_the_reference(drv, site, reference, check):
-    got, reads, covered = run_apps(drv, site)
-    want, plain, _ = reference
+    got, reads, covered, errors = run_apps(drv, site)
+    want, plain, _, ref_errors = reference
+    print(f"probe errors: camoufox={errors} reference={ref_errors}")
     for api in sorted(want):
         if not (covered and api in READBACK):
             check(got.get(api) == want[api], f"{api}: camoufox={got.get(api)!r} reference={want[api]!r}")

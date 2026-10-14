@@ -5,15 +5,23 @@
 <button id="clip">Copy</button><div id="out"></div>
 <script>
 const $ = id => document.getElementById(id);
-const r = {};
+const r = {}, errors = {};
 const within = (ms, p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
+// The compared result keeps only the error's name; the message, and the step a probe had
+// reached, go out of band so a failure names its cause without changing what is compared.
 async function t(name, fn) {
-  try { r[name] = await within(8000, fn()); } catch (e) { r[name] = "error: " + ((e && e.name) || e); }
+  const at = {};
+  try { r[name] = await within(8000, fn(at)); } catch (e) {
+    r[name] = "error: " + ((e && e.name) || e);
+    errors[name] = `${e && e.message}${at.step ? " at " + at.step : ""}`;
+  }
 }
 const sum = cv => cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data.reduce((a, b) => a + b, 0);
 let autoDone = false, clipDone = false;
 function finish() {
-  if (autoDone && clipDone) { $("out").textContent = JSON.stringify(r); $("out").dataset.done = "1"; }
+  if (autoDone && clipDone) {
+    $("out").dataset.errors = JSON.stringify(errors); $("out").textContent = JSON.stringify(r); $("out").dataset.done = "1";
+  }
 }
 async function run() {
   await t("websocket", () => new Promise((ok, no) => {
@@ -32,11 +40,15 @@ async function run() {
       tx.oncomplete = () => { const g = q.result.transaction("s").objectStore("s").get("k"); g.onsuccess = () => ok(g.result === "v"); };
     };
   }));
-  await t("serviceworker", async () => {
+  await t("serviceworker", async at => {
+    at.step = "register";
     await navigator.serviceWorker.register("/sw.js", {scope: "/"});
+    at.step = "ready";
     await navigator.serviceWorker.ready;
+    at.step = "controllerchange";
     if (!navigator.serviceWorker.controller)
       await new Promise(ok => navigator.serviceWorker.addEventListener("controllerchange", ok, {once: true}));
+    at.step = "fetch";
     return (await (await fetch("/sw-probe")).text()) === "from-sw";
   });
   await t("canvas", async () => {
