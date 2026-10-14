@@ -57,13 +57,22 @@ func TestScrollToBottom(t *testing.T) {
 		t.Fatalf("ScrollToBottom: %v", err)
 	}
 
-	raw, err := p.Evaluate(ctx, `window.scrollY`)
+	// The bottom depends on the drawn window's innerHeight, so read it from the page.
+	raw, err := p.Evaluate(ctx, `[window.scrollY, document.documentElement.scrollHeight - window.innerHeight]`)
 	if err != nil {
 		t.Fatalf("evaluate scrollY: %v", err)
 	}
-	scrollY, _ := raw.(float64)
-	if scrollY < 4000 {
-		t.Errorf("expected scrollY >= 4000, got %v", scrollY)
+	got, _ := raw.([]any)
+	if len(got) != 2 {
+		t.Fatalf("evaluate scrollY: got %v", raw)
+	}
+	scrollY, _ := got[0].(float64)
+	bottom, _ := got[1].(float64)
+	if bottom <= 0 {
+		t.Fatalf("the 5000px page is not scrollable: scrollHeight - innerHeight = %v", bottom)
+	}
+	if scrollY < bottom {
+		t.Errorf("expected scrollY at the bottom (%v), got %v", bottom, scrollY)
 	}
 }
 
