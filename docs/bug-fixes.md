@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #224: smoke's goapi step went red on two stale TestRuntimeSpoofs expectations
+
+**Fixed by:** the PR that updates `goapi/runtime_spoof_test.go`. **Found by:** smoke run 38541963024, the first smoke on a branch carrying #215 and #219.
+
+**Symptom.** `touch_trio` failed with `window.TouchEvent should be undefined (desktop)`, and `readpixels_deterministic` with `readPixels hash not deterministic in-context`. Smoke on main fa0cafc, the same browser, had passed.
+
+**Root cause.** The test draws its identity with a pinned RNG. After #215 changed the preset pool, that draw is a touch device (`navigator.maxTouchPoints` 5) naming a Windows Intel GPU.
+- `touchscreen-fingerprint-spoofing.patch` defines `window.TouchEvent` exactly when `navigator.maxTouchPoints` is above zero, so "always undefined" was only true of the old draw.
+- #219 covers the canvas of every goapi identity naming a GPU, so both reads were RFP's random placeholder. The subtest is about the per-seed noise of an uncovered launch.
+
+**Fix.** `touch_trio` asserts `TouchEvent` is defined exactly when `maxTouchPoints` is above zero. The test's launch passes `WithCanvasPlaceholder(false)`, so `readpixels_deterministic` measures the seeded noise again.
+
+**Evidence.** On the fork.3 macOS arm64 build (`7b50dec4…`): the old test fails the same two subtests (`950045696 vs 1657080320`), the new one passes all ten.
+
+**What misled.** Two unrelated subtests failing together read like one browser regression. Both came from the pinned draw moving under the test.
+
 ## #193: on a Windows host, a macOS or Linux identity rendered Windows-only families
 
 **Fixed by:** the PR that adds `browser/patches/font-substitutes-gate.patch`. **Found by:** e2e on `windows-2025`.
@@ -56,6 +72,7 @@ later change should read first.
 - Score before: main's Tests run 38524819436 (job 115725063597, 47ba70a), `OVERALL: [A] 1056/1064 checks passed (8 profiles)`. The after score is on the PR's Tests run.
 
 **What misled.** The issue expected the denominator to grow, from #75's measurement: headless 124/125 against headful 136/137. Main no longer behaves like #75's headless arm. Its run above was headless under `xvfb-run`, and all 8 profiles report a WebGL render hash and a full `webglExtended` block, with no "not available" detail anywhere. Per-context profiles already score 137/138 (macOS) and 136/137 (Linux). The likely difference is that #75's headless arm had no display at all, while CI's step was already wrapped in `xvfb-run`; this was not isolated. So the fail-open was latent on CI, not live, and the after score may equal the before.
+
 
 ## #196: a goapi launch read the host's real canvas under a foreign identity
 

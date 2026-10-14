@@ -54,6 +54,10 @@ func launchForSpoofTest(t *testing.T) (context.Context, *camoufox.Page, *config.
 		camoufox.WithHeadless(os.Getenv("CAMOUFOX_HEADLESS") == "1"),
 		camoufox.WithFirefoxUserPref("webgl.force-enabled", true),
 		camoufox.WithFirefoxUserPref("webgl.disabled", false),
+		// The pinned draw names a Windows GPU, which covers the canvas on any
+		// other host (#196) and makes every readback random; readpixels_deterministic
+		// measures the per-seed noise of an uncovered launch.
+		camoufox.WithCanvasPlaceholder(false),
 	)
 	if err != nil {
 		cancel()
@@ -262,17 +266,18 @@ func TestRuntimeSpoofs(t *testing.T) {
 		}
 	})
 
-	// #23 touch trio: ontouchstart absent, TouchEvent undefined, maxTouchPoints matches.
+	// #23 touch trio: ontouchstart absent, maxTouchPoints matches, and TouchEvent
+	// defined exactly when maxTouchPoints is above zero (touchscreen-fingerprint-spoofing.patch).
 	t.Run("touch_trio", func(t *testing.T) {
 		if evalBool(t, ctx, p, `'ontouchstart' in window`) {
 			t.Error("'ontouchstart' should be absent (desktop)")
 		}
-		if !evalBool(t, ctx, p, `typeof window.TouchEvent === 'undefined'`) {
-			t.Error("window.TouchEvent should be undefined (desktop)")
-		}
 		want := float64(0)
 		if cfg.NavigatorMaxTouchPoints != nil {
 			want = float64(*cfg.NavigatorMaxTouchPoints)
+		}
+		if defined := evalBool(t, ctx, p, `typeof window.TouchEvent !== 'undefined'`); defined != (want > 0) {
+			t.Errorf("window.TouchEvent defined = %v with maxTouchPoints %v", defined, want)
 		}
 		if mtp := evalFloat(t, ctx, p, "navigator.maxTouchPoints"); mtp != want {
 			t.Errorf("navigator.maxTouchPoints = %v, want %v", mtp, want)
