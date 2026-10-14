@@ -240,13 +240,29 @@ one process pool per container, whatever those prefs say: in smoke run
 processes (read from the pid MOZ_LOG prefixes to each `CAMOU-FL group` line; the
 `cfx-child.<n>` file name is shared by several processes and says nothing). The
 `file` remote type carries no container and `dom.ipc.processCount.file` is 1, so
-arms (i), (i2), (j), (j2) and (n4) now load their two pages from `file:` URLs and
-assert that both documents' group lines carry one pid; a throwaway launch before
-them proves a `file:` page loads and otherwise names one SETUP-INVALID. Arms that
-still use `data:` pages for two contexts ((b), (b2), (b2r), (n5), the pid and disc
-probes) are green without having shared a process; their green says nothing about
-a per-process leak, and the step prints a non-scoring `shared-process` line for each
-pair.
+arms (b), (b2), (b2r), (i), (i2), (j), (j2), (n4) and (n5) load their two pages
+from `file:` URLs and assert that both documents' group lines carry one pid (#179,
+#180); a throwaway launch before them proves a `file:` page loads and otherwise
+names one SETUP-INVALID. Two processes leave an arm unmeasured. Arms (i), (i2),
+(j), (j2) and (n4) check this before their leak verdict. Arms (b), (b2), (b2r) and
+(n5) check it after, so a leak seen across processes still counts as a verdict. The disc and pid
+probes also use `file:` pages but score nothing; the step prints a non-scoring
+`shared-process` line for every pair. Arm (b) closes its donor context before the
+recipient exists, and the `file` process did not outlive that in smoke run
+38539979038: the pid probe's donor-closed pair saw file process 14601 still listed
+right after the close, gone once the recipient's page was ready, and the recipient
+in a new one, 14655. So arm (b) is in `KNOWN_UNMEASURABLE` for its cross-context
+claim, which (b2) measures with the donor alive. Its per-context narrowing checks
+still score.
+
+An arm that installs a one-shot setter (`setFontList`, `setSpeechVoices`) from an
+init script and checks it ran on the page under test ((b2r), (n5)) must navigate
+`file:` to `file:`. Going from about:blank to a `file:` page switches process, and
+across that switch the setter was spent in the file process before the page under
+test read it (run 38539979038: `saw=false` on both arms' pages, with the list
+installed). Those arms load a first `file:` page, add the init script, then load
+the page under test. Variants 1 and 2 of the arm (b)
+discriminator still load `data:` pages and print without a shared-process reading.
 
 ## macOS host (#148)
 

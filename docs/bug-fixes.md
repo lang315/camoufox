@@ -12,6 +12,32 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #180: smoke's cross-context leak arms were green without sharing a process
+
+**Fixed by:** the PR that moves arms (b), (b2), (b2r) and (n5) to `file:` pages. **Found by:** #179's shared-process audit.
+
+**Symptom.** Smoke run 36884274972 (build 36837150848, Firefox 156) scored (b2), (b2r) and (n5) GREEN, while its own non-scoring audit printed `shared-process: NO` for all seven two-context pairs, e.g. `shared-process: NO  (b2)   A ['7884'] / B ['7915']`.
+
+**Root cause.** Firefox 156 gives every `web` document the remote type `web=^userContextId=<N>` (`SharedWebRemoteType` in `dom/ipc/ProcessIsolation.cpp`), one process pool per container. These arms still loaded their pages from `data:` URLs, so `dom.ipc.processCount=1` no longer put the donor and the recipient in one process. A leak through a per-process cache (`mFcSubstituteCache`, the speech registry mirror) could not reach the recipient, so a clean recipient was guaranteed. (b2)'s re-probe gate compared `tab_pids()` before and after, which also counts processes that lay out no document.
+
+**Fix.**
+- The arms load `page_uri()` `file:` pages (the `file` remote type carries no container, `dom.ipc.processCount.file=1`) and read `docs_share_process` on both documents, as #179 did for (i), (i2), (j) and (n4).
+- A pair laid out by two processes is registered as unmeasured through the arm's tripwire, after the leak verdict, so a leak seen across processes is still reported as a leak. (b2)'s re-probe half is gated on win's and the re-probe's documents sharing a process.
+- The disc and pid probes use `file:` pages too and stay print-only. The audit and the dump step's `(b2)/(b2r)` slice match `/<name>.html`.
+- (b2r) and (n5) check that their one-shot setter ran on the page under test. They now load a first `file:` page before adding the init script. From about:blank, the process switch spent the setter in the file process before the page under test read it.
+- Arm (b) closes its donor first, and in run 38539979038 the `file` process did not outlive that, so its cross-context half is in `KNOWN_UNMEASURABLE` with run 38539979038's signature. (b2) measures the same claim with the donor alive.
+
+**Evidence.**
+- Red: run 36884274972, job 110443482493, `shared-process: NO` on (b), (b2), (b2r), (n5), disc, pid and pid2.
+- First fix attempt, run 38539979038 (job 115772049528): `shared-process: yes` on (b2), (b2r), (n5), disc and pid2, and (b2) GREEN. Three arms came back unmeasured and failed the step:
+  - (b): pids 6777 / 6866. The pid probe's donor-closed pair saw file process 14601 gone by the time the recipient's page loaded in 14655.
+  - (b2r): `data-fl='{"saw":false,"applied":false}'` on both pages.
+  - (n5): `data-sv='{"saw":false,"applied":false,"err":null}'` on both pages.
+  In (b2r) and (n5) the list was installed anyway: (b2r)'s `CAMOU-FL set ctx=6 n=567` and `gate ctx=6 hasList=1 key=segoe ui allowed=0` both came from the file process (pid 8438) that laid out the page, and each n5 context read only its own half. The setter was spent on another document, not in another process or context.
+- Green: a second dispatch on the fix branch against build 38495081436, run id in the PR (pending at the time of writing).
+
+**What misled.** Each arm's own verdict read GREEN, and the EXPECTED_GREEN table explained it as #83 and #90 being fixed. Only a reading of which process wrote each document's group line showed the two contexts never met. The first fix run's final assert opens with `0 arm(s) red for a reason this guard does not already know about:`, which reads as a contradiction. That count is the `unexpected` bucket. The step failed on the second list in the same message, the arms whose own preconditions failed.
+
 ## #236: TestScrollToBottom required a scroll position the drawn window could not reach
 
 **Fixed by:** the PR that changes `goapi/scroll_test.go`. **Found by:** smoke run 38568534252.
@@ -66,6 +92,7 @@ later change should read first.
 - Not measured: that this run's launch would have finished under 30 s. The mechanism, a bound below a healthy cold start, is #157's finding.
 
 **What misled.** The tribal rule `displayfd-read-timeout` is automated and was green, so the bound read as enforced. Its `expect` names only `camoufox.virtdisplay`, so it never saw the TypeScript twin.
+
 
 ## #224: smoke's goapi step went red on two stale TestRuntimeSpoofs expectations
 
