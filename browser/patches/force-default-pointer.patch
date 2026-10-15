@@ -1,12 +1,8 @@
 diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
+index 797b5851ae..1d9149d2fa 100644
 --- a/layout/style/nsMediaFeatures.cpp
 +++ b/layout/style/nsMediaFeatures.cpp
-@@ -408,34 +433,41 @@ static PointerCapabilities GetPointerCapabilities(const Document* aDocument,
-     // that we don't need to care about ResistFingerprinting.
-     if (bc->TouchEventsOverride() == dom::TouchEventsOverride::Enabled) {
-       return PointerCapabilities::Coarse;
-     }
-   }
+@@ -428,24 +428,31 @@ static PointerCapabilities GetPointerCapabilities(const Document* aDocument,
  
    // The default value for Desktop is mouse-type pointer, and for Android
    // a coarse pointer.
@@ -50,8 +46,3 @@ diff --git a/layout/style/nsMediaFeatures.cpp b/layout/style/nsMediaFeatures.cpp
  }
  
  PointerCapabilities Gecko_MediaFeatures_PrimaryPointerCapabilities(
-     const Document* aDocument) {
-   return GetPointerCapabilities(aDocument,
-                                 LookAndFeel::IntID::PrimaryPointerCapabilities);
- }
- 

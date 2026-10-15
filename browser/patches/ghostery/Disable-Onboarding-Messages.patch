@@ -7,10 +7,10 @@ Subject: Disable Onboarding Messages
  1 file changed, 1 insertion(+), 2 deletions(-)
 
 diff --git a/browser/components/asrouter/modules/OnboardingMessageProvider.sys.mjs b/browser/components/asrouter/modules/OnboardingMessageProvider.sys.mjs
-index ceded6b755..90aa3abe36 100644
+index 085c798b24..354bbd5b1d 100644
 --- a/browser/components/asrouter/modules/OnboardingMessageProvider.sys.mjs
 +++ b/browser/components/asrouter/modules/OnboardingMessageProvider.sys.mjs
-@@ -1213,8 +1213,7 @@ const BASE_MESSAGES = () => [
+@@ -3325,8 +3325,7 @@ const PREONBOARDING_MESSAGES = () => [
  ];
  
  // Eventually, move Feature Callout messages to their own provider

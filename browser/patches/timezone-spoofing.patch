@@ -102,10 +102,10 @@ index 0000000000..34c35cfd76
 +
 +#endif  // mozilla_dom_TimezoneManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index c1b1fbf7e6..ee5d0b9149 100644
+index 88f6b8f9d2..3854865d77 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -290,6 +290,7 @@ EXPORTS.mozilla.dom += [
+@@ -291,6 +291,7 @@ EXPORTS.mozilla.dom += [
      "TimeoutBudgetManager.h",
      "TimeoutHandler.h",
      "TimeoutManager.h",
@@ -113,7 +113,7 @@ index c1b1fbf7e6..ee5d0b9149 100644
      "TreeIterator.h",
      "TreeOrderedArray.h",
      "TreeOrderedArrayInlines.h",
-@@ -518,6 +519,7 @@ UNIFIED_SOURCES += [
+@@ -520,6 +521,7 @@ UNIFIED_SOURCES += [
      "TimeoutExecutor.cpp",
      "TimeoutHandler.cpp",
      "TimeoutManager.cpp",
@@ -122,10 +122,10 @@ index c1b1fbf7e6..ee5d0b9149 100644
      "UIDirectionManager.cpp",
      "UserActivation.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 56d4c9500f..3590b9f2b0 100644
+index 126a75c4b9..7c3bd63e6d 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -247,6 +247,8 @@
+@@ -248,6 +248,8 @@
  #include "nsICookieService.h"
  #include "nsID.h"
  #include "nsIDOMStorageManager.h"
@@ -134,7 +134,7 @@ index 56d4c9500f..3590b9f2b0 100644
  #include "nsIDOMXULControlElement.h"
  #include "nsIDeviceSensors.h"
  #include "nsIDocShell.h"
-@@ -7763,6 +7765,29 @@ IntlUtils* nsGlobalWindowInner::GetIntlUtils(ErrorResult& aError) {
+@@ -7764,6 +7766,29 @@ IntlUtils* nsGlobalWindowInner::GetIntlUtils(ErrorResult& aError) {
    return mIntlUtils;
  }
  
@@ -165,10 +165,10 @@ index 56d4c9500f..3590b9f2b0 100644
    MOZ_ASSERT(aSharedWorker);
    MOZ_ASSERT(!mSharedWorkers.Contains(aSharedWorker));
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index d6826ed802..a9d8fb50ba 100644
+index 4def5672b9..22e3ee0e96 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -685,6 +685,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -688,6 +688,8 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
  
    mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
  
@@ -253,7 +253,7 @@ index 2da511a657..3b4f16cd41 100644
    MOZ_ASSERT(NS_IsMainThread());
  
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index e4db344794..c2c6eb41b8 100644
+index 006ae5fabf..b989267c65 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
 @@ -955,6 +955,12 @@ partial interface Window {

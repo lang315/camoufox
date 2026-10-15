@@ -10,7 +10,7 @@ index ca6ffacb21..fb661fd69e 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ['/camoucfg']
 diff --git a/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp b/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
-index 3648239545..759e61837b 100644
+index e046255242..afcccea51b 100644
 --- a/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
 +++ b/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
 @@ -23,7 +23,9 @@
@@ -23,7 +23,7 @@ index 3648239545..759e61837b 100644
  using mozilla::intl::LocaleService;
  
  #undef LOG
-@@ -165,6 +167,20 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
+@@ -166,6 +168,20 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
        // Start up all speech synth services.
        NS_CreateServicesFromCategory(NS_SPEECH_SYNTH_STARTED, nullptr,
                                      NS_SPEECH_SYNTH_STARTED);
@@ -44,7 +44,7 @@ index 3648239545..759e61837b 100644
      }
    }
  
-@@ -301,6 +317,21 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
+@@ -302,6 +318,21 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
      return NS_ERROR_NOT_AVAILABLE;
    }
  
@@ -66,7 +66,7 @@ index 3648239545..759e61837b 100644
    return AddVoiceImpl(aService, aUri, aName, aLang, aLocalService,
                        aQueuesUtterances);
  }
-@@ -373,6 +404,16 @@ nsSynthVoiceRegistry::NotifyVoicesChanged() {
+@@ -374,6 +405,16 @@ nsSynthVoiceRegistry::NotifyVoicesChanged() {
  
  NS_IMETHODIMP
  nsSynthVoiceRegistry::NotifyVoicesError(const nsAString& aError) {
@@ -83,7 +83,7 @@ index 3648239545..759e61837b 100644
    if (XRE_IsParentProcess()) {
      nsTArray<SpeechSynthesisParent*> ssplist;
      GetAllSpeechSynthActors(ssplist);
-@@ -775,6 +816,30 @@ void nsSynthVoiceRegistry::SpeakImpl(VoiceData* aVoice, nsSpeechTask* aTask,
+@@ -776,6 +817,30 @@ void nsSynthVoiceRegistry::SpeakImpl(VoiceData* aVoice, nsSpeechTask* aTask,
         NS_ConvertUTF16toUTF8(aText).get(),
         NS_ConvertUTF16toUTF8(aVoice->mUri).get(), aRate, aPitch));
  

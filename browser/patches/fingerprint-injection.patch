@@ -1,8 +1,8 @@
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index e8f35ff5c4..88cea77d60 100644
+index f104f5e03f..c32833dabc 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -664,3 +664,6 @@ GeneratedFile(
+@@ -666,3 +666,6 @@ GeneratedFile(
          "/servo/components/style/properties/counted_unknown_properties.py",
      ],
  )
@@ -11,7 +11,7 @@ index e8f35ff5c4..88cea77d60 100644
 +LOCAL_INCLUDES += ["/camoucfg"]
 \ No newline at end of file
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 4bc8548e31..2bea4b618a 100644
+index ba36325c1c..f20bbb4893 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
 @@ -3,6 +3,7 @@
@@ -22,7 +22,7 @@ index 4bc8548e31..2bea4b618a 100644
  
  #include <inttypes.h>
  #include <stdio.h>
-@@ -3715,6 +3716,8 @@ void nsGlobalWindowInner::SetName(const nsAString& aName,
+@@ -3717,6 +3718,8 @@ void nsGlobalWindowInner::SetName(const nsAString& aName,
  
  double nsGlobalWindowInner::GetInnerWidth(CallerType aCallerType,
                                            ErrorResult& aError) {
@@ -31,7 +31,7 @@ index 4bc8548e31..2bea4b618a 100644
    FORWARD_TO_OUTER_OR_THROW(GetInnerWidthOuter, (aCallerType, aError), aError,
                              0);
  }
-@@ -3728,6 +3731,8 @@ nsresult nsGlobalWindowInner::GetInnerWidth(CallerType aCallerType,
+@@ -3730,6 +3733,8 @@ nsresult nsGlobalWindowInner::GetInnerWidth(CallerType aCallerType,
  
  double nsGlobalWindowInner::GetInnerHeight(CallerType aCallerType,
                                             ErrorResult& aError) {
@@ -40,7 +40,7 @@ index 4bc8548e31..2bea4b618a 100644
    FORWARD_TO_OUTER_OR_THROW(GetInnerHeightOuter, (aCallerType, aError), aError,
                              0);
  }
-@@ -3741,6 +3746,12 @@ nsresult nsGlobalWindowInner::GetInnerHeight(CallerType aCallerType,
+@@ -3743,6 +3748,12 @@ nsresult nsGlobalWindowInner::GetInnerHeight(CallerType aCallerType,
  
  int32_t nsGlobalWindowInner::GetOuterWidth(CallerType aCallerType,
                                             ErrorResult& aError) {
@@ -53,7 +53,7 @@ index 4bc8548e31..2bea4b618a 100644
    FORWARD_TO_OUTER_OR_THROW(GetOuterWidthOuter, (aCallerType, aError), aError,
                              0);
  }
-@@ -3761,11 +3772,13 @@ double nsGlobalWindowInner::ScreenEdgeSlopY() const {
+@@ -3763,11 +3774,13 @@ double nsGlobalWindowInner::ScreenEdgeSlopY() const {
  
  int32_t nsGlobalWindowInner::GetScreenX(CallerType aCallerType,
                                          ErrorResult& aError) {
@@ -67,7 +67,7 @@ index 4bc8548e31..2bea4b618a 100644
    FORWARD_TO_OUTER_OR_THROW(GetScreenYOuter, (aCallerType, aError), aError, 0);
  }
  
-@@ -3799,6 +3812,8 @@ static nsPresContext* GetPresContextForRatio(Document* aDoc) {
+@@ -3801,6 +3814,8 @@ static nsPresContext* GetPresContextForRatio(Document* aDoc) {
  double nsGlobalWindowInner::GetDevicePixelRatio(CallerType aCallerType,
                                                  ErrorResult& aError) {
    ENSURE_ACTIVE_DOCUMENT(aError, 0.0);

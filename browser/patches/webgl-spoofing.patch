@@ -88,10 +88,10 @@ index 0000000000..06de6922f3
 +
 +#endif  // mozilla_dom_WebGLParamsManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index ee5d0b9149..cb146517aa 100644
+index 3854865d77..9656bb9b8a 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -587,6 +587,14 @@ EXPORTS.mozilla.dom += [
+@@ -589,6 +589,14 @@ EXPORTS.mozilla.dom += [
      "SpeechVoicesManager.h",
  ]
  
@@ -107,7 +107,7 @@ index ee5d0b9149..cb146517aa 100644
  # CharacterDataBuffer.cpp
  if CONFIG["INTEL_ARCHITECTURE"]:
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 3590b9f2b0..e1281931d5 100644
+index 7c3bd63e6d..3da5385859 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
 @@ -27,6 +27,7 @@
@@ -118,7 +118,7 @@ index 3590b9f2b0..e1281931d5 100644
  #include "WindowDestroyedEvent.h"
  #include "WindowNamedPropertiesHandler.h"
  #include "js/ComparisonOperators.h"
-@@ -7898,6 +7899,23 @@ void nsGlobalWindowInner::SetSpeechVoices(const nsAString& aVoices,
+@@ -7904,6 +7905,23 @@ void nsGlobalWindowInner::SetSpeechVoices(const nsAString& aVoices,
    RoverfoxStorageManager::RemoveSetter("setSpeechVoices");
  }
  
@@ -143,10 +143,10 @@ index 3590b9f2b0..e1281931d5 100644
      bool aGranted) {
    // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index a9d8fb50ba..f3fbefbbfd 100644
+index 22e3ee0e96..44d414d231 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -714,6 +714,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -717,6 +717,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
    // Per-context speech voices
    void SetSpeechVoices(const nsAString& aVoices, mozilla::ErrorResult& aRv);
  
@@ -158,7 +158,7 @@ index a9d8fb50ba..f3fbefbbfd 100644
    void Alert(nsIPrincipal& aSubjectPrincipal, mozilla::ErrorResult& aError);
    void Alert(const nsAString& aMessage, nsIPrincipal& aSubjectPrincipal,
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index 5aaa4279fd..03163036ee 100644
+index 8cd6dbad57..0e480847cd 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
 @@ -3,6 +3,12 @@
@@ -174,7 +174,7 @@ index 5aaa4279fd..03163036ee 100644
  
  #include <fmt/format.h>
  
-@@ -781,6 +787,23 @@ void ClientWebGLContext::SetUnpackColorSpace(
+@@ -783,6 +789,23 @@ void ClientWebGLContext::SetUnpackColorSpace(
    Run<RPROC(SetUnpackColorSpace)>(*mUnpackColorSpace);
  }
  
@@ -198,7 +198,7 @@ index 5aaa4279fd..03163036ee 100644
  void ClientWebGLContext::GetContextAttributes(
      dom::Nullable<dom::WebGLContextAttributes>& retval) {
    retval.SetNull();
-@@ -794,6 +817,9 @@ void ClientWebGLContext::GetContextAttributes(
+@@ -796,6 +819,9 @@ void ClientWebGLContext::GetContextAttributes(
  
    const auto& options = notLost->info.options;
  
@@ -208,7 +208,7 @@ index 5aaa4279fd..03163036ee 100644
    result.mAlpha.Construct(options.alpha);
    result.mDepth = options.depth;
    result.mStencil = options.stencil;
-@@ -2179,6 +2205,107 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2181,6 +2207,107 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
    const auto& state = State();
  
    // -
@@ -316,7 +316,7 @@ index 5aaa4279fd..03163036ee 100644
  
    const auto fnSetRetval_Buffer = [&](const GLenum target) {
      const auto buffer = *MaybeFind(state.mBoundBufferByTarget, target);
-@@ -2288,13 +2415,19 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2290,13 +2417,19 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
        return;
  
      case LOCAL_GL_ALIASED_POINT_SIZE_RANGE:
@@ -340,7 +340,7 @@ index 5aaa4279fd..03163036ee 100644
        return;
  
      // 4 floats
-@@ -2310,7 +2443,11 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2312,7 +2445,11 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
      case LOCAL_GL_MAX_VIEWPORT_DIMS: {
        auto maxViewportDim = BitwiseCast<int32_t>(limits.maxViewportDim);
        const auto dims = std::array<int32_t, 2>{maxViewportDim, maxViewportDim};
@@ -353,7 +353,7 @@ index 5aaa4279fd..03163036ee 100644
        return;
      }
  
-@@ -2438,6 +2575,31 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2440,6 +2577,31 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
    // -
  
    if (!debug) {
@@ -385,7 +385,7 @@ index 5aaa4279fd..03163036ee 100644
      const auto GetUnmaskedRenderer = [&]() {
        const auto prefLock = StaticPrefs::webgl_override_unmasked_renderer();
        if (!prefLock->IsEmpty()) {
-@@ -2470,9 +2632,12 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2472,9 +2634,12 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
            allowRenderer = false;
          }
          if (allowRenderer) {
@@ -401,7 +401,7 @@ index 5aaa4279fd..03163036ee 100644
            }
          }
          if (!ret) {
-@@ -2510,9 +2675,12 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2512,9 +2677,12 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
                  ShouldResistFingerprinting(RFPTarget::WebGLRendererConstant)) {
                ret = Some("Mozilla"_ns);
              } else {
@@ -417,7 +417,7 @@ index 5aaa4279fd..03163036ee 100644
                }
              }
              break;
-@@ -2542,10 +2710,13 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
+@@ -2544,10 +2712,13 @@ void ClientWebGLContext::GetParameter(JSContext* cx, GLenum pname,
                             RFPTarget::WebGLVendorConstant)) {
                ret = Some("Mozilla"_ns);
              } else {
@@ -435,7 +435,7 @@ index 5aaa4279fd..03163036ee 100644
                }
              }
              break;
-@@ -3020,6 +3191,24 @@ ClientWebGLContext::GetShaderPrecisionFormat(const GLenum shadertype,
+@@ -3022,6 +3193,24 @@ ClientWebGLContext::GetShaderPrecisionFormat(const GLenum shadertype,
      return nullptr;
    }
  
@@ -460,7 +460,7 @@ index 5aaa4279fd..03163036ee 100644
    const auto& shaderPrecisions = *notLost->info.shaderPrecisions;
    const auto args =
        webgl::GetShaderPrecisionFormatArgs{shadertype, precisiontype};
-@@ -6392,6 +6581,17 @@ bool ClientWebGLContext::IsSupported(const WebGLExtensionID ext,
+@@ -6414,6 +6603,17 @@ bool ClientWebGLContext::IsSupported(const WebGLExtensionID ext,
      return false;
    }
  
@@ -478,7 +478,7 @@ index 5aaa4279fd..03163036ee 100644
    const auto& limits = Limits();
    return limits.supportedExtensions[ext];
  }
-@@ -6406,6 +6606,18 @@ void ClientWebGLContext::GetSupportedExtensions(
+@@ -6428,6 +6628,18 @@ void ClientWebGLContext::GetSupportedExtensions(
    }
  
    auto& retarr = retval.SetValue();
@@ -527,7 +527,7 @@ index b5809a1fca..8d36d592b2 100644
      "/js/xpconnect/wrappers",
  ]
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index c2c6eb41b8..6cf202d17a 100644
+index b989267c65..79dd3701b8 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
 @@ -1006,6 +1006,18 @@ partial interface Window {

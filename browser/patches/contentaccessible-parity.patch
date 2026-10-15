@@ -55,10 +55,10 @@ index 783c67d397..2118fe4611 100644
          content/browser/browser-gestureSupport.js           (content/browser-gestureSupport.js)
          content/browser/browser-init.js                     (content/browser-init.js)
 diff --git a/browser/components/BrowserComponents.manifest b/browser/components/BrowserComponents.manifest
-index 7214821fc5..489c64ea19 100644
+index cf7e11dfc4..cddc09c2f0 100644
 --- a/browser/components/BrowserComponents.manifest
 +++ b/browser/components/BrowserComponents.manifest
-@@ -89,9 +89,6 @@ category browser-window-delayed-startup chrome://browser/content/browser-fullScr
+@@ -91,9 +91,6 @@ category browser-window-delayed-startup chrome://browser/content/browser-fullScr
  #ifdef MOZ_DATA_REPORTING
  category browser-window-delayed-startup chrome://browser/content/browser-data-submission-info-bar.js gDataNotificationInfoBar.init
  #endif
