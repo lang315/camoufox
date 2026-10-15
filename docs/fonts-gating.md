@@ -385,3 +385,30 @@ Georgia, Comic Sans MS) are the host's own fonts, so these rows go through
 Neither fix regressed the #87 Windows readings, and the DWrite face-name path
 that #150 opened is gated as the code reads.
 
+## A Windows identity's font set against a real Windows 10 machine
+
+Measured on the user's Windows build PC (Windows 10.0.19045, no Office), against
+`v156.0.1-beta.32-fork.4` on macOS arm64 with `os="windows"`. Sources: the host's
+`System.Drawing.Text.InstalledFontCollection` (GDI families, read-only) for the
+real machine; `launch_options(os="windows")`'s `fonts` key, 60 draws, for the
+identities; `python/src/camoufox/fonts.json` for the `win` list. This compares
+family names only. It does not compare rendering, metrics or codepoint fallback,
+and one machine is not a population: it has no Office and no LibreOffice.
+
+| Reading | Result |
+|---|---|
+| Families the real machine has (118; 3 OEM or developer-tool installs left out) | 115 |
+| Of those, not in the `win` list | 22: 11 `Bahnschrift` and 8 `Cascadia` weight and width names that GDI lists as families (DirectWrite groups them under one family), `SimSun-ExtG`, `Wingdings 2` and `Wingdings 3` |
+| Fonts per Windows identity | 125 to 282 |
+| Families in 40 identities' union that this machine lacks | 207 (Office families such as `Century Gothic`, `Book Antiqua`, `Garamond`; Windows 11 families such as `Segoe UI Variable`; and open-source families) |
+| Identities listing at least one open-source family (`DejaVu`, `Liberation`, `Noto`, `Roboto`, `Open Sans`, `Source`, `Meslo` and similar) | 13 of 60, up to 41 families in one identity |
+| `win` list entries matching that pattern | 55 of 335 |
+| Measured in the browser (macOS host, one identity, 240 families configured) | 214 render, none outside the configured set, 0 of 637 macOS- or Linux-only names present. The 26 not measured are weight names (`Calibri Light`, `Sitka *`, `Segoe UI Variable *`) and the four bitmap fonts (`MS Sans Serif`, `MS Serif`, `Roman`, `Small Fonts`); whether they are absent or only share a baseline's width is not established. |
+
+What this does not settle: whether an open-source family in a Windows identity is
+a tell. The `win` list comes from recorded Windows devices, and LibreOffice or a
+user's own installs put those families on real machines, but a stock Windows 10
+has none of them, and 55 of 335 is a large share. Answering it needs the share of
+recorded Windows devices that carry them. The `Bahnschrift` and `Cascadia` rows
+are an artefact of GDI enumeration, not gaps.
+
