@@ -40,6 +40,17 @@ overrides into it. A red on the DOMParser half is therefore a real finding,
 not a guard bug. Cross-OS canvas readback is covered by the RFP placeholder,
 and a page that draws in a DOMParser document would escape it.
 
+Arm 3, an uncovered launch, one context seeded S1 (#183). A canvas a worker
+draws has no document, and a canvas whose control went to a worker is read
+back through its OffscreenCanvasDisplayHelper; neither used to be perturbed:
+
+    worker getImageData == page getImageData   the worker's canvas has the page's noise
+    perturb lines carry S1 twice               toDataURL and toBlob of a transferred
+                                               canvas, the only reads of that launch
+
+What this guard cannot see: readPixels in a worker. Headless Firefox on Linux
+has no GL context, so WebGL is measured by hand on a host that has one.
+
 Perturbation is read from the patch's own CAMOU-CANVAS log lines, never from
 pixels: the placeholder is random, so its pixels cannot show whether noise was
 added to them.
@@ -71,7 +82,8 @@ ORIGIN = "https://camoufox.test/"
 # The probe runs as the page's own script: an isolated-world evaluate cannot
 # read getImageData's pixels through the Xray. No text: a document without a
 # window may resolve fonts differently, and the two canvases must render alike.
-# ?read=page or ?read=parsed reads only that document's canvas.
+# ?read=page or ?read=parsed reads only that document's canvas; ?read=worker
+# and ?read=transferred are arm 3's.
 PAGE = r"""<!doctype html><script>
 (async () => {
   const read = new URLSearchParams(location.search).get('read') || 'both';
@@ -93,10 +105,32 @@ PAGE = r"""<!doctype html><script>
   };
   const probe = {};
   try {
-    if (read !== 'parsed') {
+    if (read === 'worker') {
+      probe.page = [await hash(draw(document.createElement('canvas')))];
+      const src = `const draw = ${draw}; const hash = ${hash};
+        onmessage = async () => postMessage(await hash(draw(new OffscreenCanvas(1, 1))));`;
+      const worker = new Worker(URL.createObjectURL(new Blob([src])));
+      probe.worker = await new Promise(resolve => {
+        worker.onmessage = (e) => resolve(e.data);
+        worker.postMessage(0);
+      });
+    } else if (read === 'transferred') {
+      const canvas = document.createElement('canvas');
+      document.documentElement.append(canvas);
+      const offscreen = canvas.transferControlToOffscreen();
+      const src = `const draw = ${draw};
+        onmessage = (e) => { draw(e.data); requestAnimationFrame(() => postMessage(0)); };`;
+      const worker = new Worker(URL.createObjectURL(new Blob([src])));
+      await new Promise(resolve => {
+        worker.onmessage = resolve;
+        worker.postMessage(offscreen, [offscreen]);
+      });
+      probe.transferred = canvas.toDataURL().length;
+      await new Promise(resolve => canvas.toBlob(resolve));
+    } else if (read !== 'parsed') {
       probe.page = await readAll(draw(document.createElement('canvas')));
     }
-    if (read !== 'page') {
+    if (read === 'both' || read === 'parsed') {
       const parsed = new DOMParser().parseFromString('<canvas></canvas>', 'text/html');
       probe.parsed = await readAll(draw(parsed.querySelector('canvas')));
     }
@@ -173,6 +207,18 @@ async def main() -> int:
         check(failures, "DOMParser canvas carries its context's seed", a["parsed"][0] != c["parsed"][0], True)
         check(failures, "DOMParser canvas has the page's noise", a["parsed"][0], a["page"][0])
     check(failures, "perturb lines carry S1 and S2", {S1, S2} <= set(perturbed), True)
+
+    print("\n=== uncovered launch, context seeded S1, a worker's canvas ===")
+    (worker,), _, _ = await run(binary, {}, (S1,), "worker")
+    check(failures, "worker canvas reads", worker.get("error"), None)
+    if "worker" in worker:
+        check(failures, "a worker's canvas has the page's noise", worker["worker"], worker["page"][0])
+
+    print("\n=== uncovered launch, context seeded S1, a canvas whose control went to a worker ===")
+    (transferred,), _, perturbed = await run(binary, {}, (S1,), "transferred")
+    check(failures, "transferred canvas reads", transferred.get("error"), None)
+    check(failures, "the transferred canvas rendered", transferred.get("transferred", 0) > 100, True)
+    check(failures, "toDataURL and toBlob of it are perturbed with S1", perturbed.count(S1), 2)
 
     prefs: Dict[str, Any] = {}
     add_canvas_placeholder(prefs)
