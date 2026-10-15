@@ -123,3 +123,27 @@ def test_context_webrtc_ip_overrides_the_launch_one(drv, site, stun, check):
     check(CONTEXT_WEBRTC_IP in text, f"the context's WebRTC IP appears: {got['candidates']}")
     check(SPOOFED_WEBRTC_IP not in text, "the launch-level WebRTC IP does not")
     check.done()
+
+
+def ice_gathering_behind_a_context_proxy(drv, site, proxy):
+    b = drv.launch(os="windows")
+    page = b.new_context(proxy=proxy.playwright()).new_page()
+    page.goto(f"http://e2e.test:{site.port1}/webrtc")  # .test resolves only inside the proxy
+    got = wait_out(page, 20)
+    b.close()
+    return got
+
+
+def test_ice_gathering_completes_behind_a_context_proxy(drv, site, http_proxy, check):
+    """#181 (upstream #774): behind Playwright's per-context proxy, ICE gathering
+    must reach "complete" as it does in Firefox; the page bounds the wait at 8 s."""
+    got = ice_gathering_behind_a_context_proxy(drv, site, http_proxy)
+    check("e2e.test" in http_proxy.hosts, "the context's proxy carried the page (non-vacuous)", ledger=False)
+    check(got["gathering"][-1] == "complete", f"iceGatheringState went {got['gathering']}; candidates {got['candidates']}")
+    check.done()
+
+
+def test_ice_gathering_completes_behind_a_context_proxy_reference(ref, site, http_proxy):
+    """Oracle B for the test above: Playwright's own Firefox behind the same proxy."""
+    got = ice_gathering_behind_a_context_proxy(ref, site, http_proxy)
+    assert got["gathering"][-1] == "complete", f"iceGatheringState went {got['gathering']}"

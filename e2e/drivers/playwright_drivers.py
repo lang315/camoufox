@@ -80,8 +80,8 @@ class PwBrowser:
         self.canvas_covered = canvas_covered
         self._ctx_kwargs = context_kwargs or {}
 
-    def new_context(self) -> PwCtx:
-        return PwCtx(self.b.new_context(**self._ctx_kwargs))
+    def new_context(self, **kw) -> PwCtx:
+        return PwCtx(self.b.new_context(**self._ctx_kwargs, **kw))
 
     def new_identity_context(self, **kw) -> PwCtx:
         """camoufox.sync_api.NewContext: a context with its own fingerprint (pkg only)."""
