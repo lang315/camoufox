@@ -158,7 +158,7 @@ index 22e3ee0e96..44d414d231 100644
    void Alert(nsIPrincipal& aSubjectPrincipal, mozilla::ErrorResult& aError);
    void Alert(const nsAString& aMessage, nsIPrincipal& aSubjectPrincipal,
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index 8cd6dbad57..0e480847cd 100644
+index 313ce10e16..3e3e4c590c 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
 @@ -3,6 +3,12 @@
@@ -460,7 +460,7 @@ index 8cd6dbad57..0e480847cd 100644
    const auto& shaderPrecisions = *notLost->info.shaderPrecisions;
    const auto args =
        webgl::GetShaderPrecisionFormatArgs{shadertype, precisiontype};
-@@ -6414,6 +6603,17 @@ bool ClientWebGLContext::IsSupported(const WebGLExtensionID ext,
+@@ -6412,6 +6601,17 @@ bool ClientWebGLContext::IsSupported(const WebGLExtensionID ext,
      return false;
    }
  
@@ -478,7 +478,7 @@ index 8cd6dbad57..0e480847cd 100644
    const auto& limits = Limits();
    return limits.supportedExtensions[ext];
  }
-@@ -6428,6 +6628,18 @@ void ClientWebGLContext::GetSupportedExtensions(
+@@ -6426,6 +6626,18 @@ void ClientWebGLContext::GetSupportedExtensions(
    }
  
    auto& retarr = retval.SetValue();
