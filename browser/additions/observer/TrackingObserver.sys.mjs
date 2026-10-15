@@ -36,6 +36,9 @@ function register() {
   // (no drain, no capture) — verified at runtime.
   ActorManagerParent.addJSWindowActors({
     TrackingObserver: {
+      // Without it, dom.jsipc.check_safeForUntrustedWebProcess keeps the child
+      // out of web and file content processes, where every page runs.
+      safeForUntrustedWebProcess: true,
       parent: {
         esModuleURI: "resource://gre/modules/TrackingObserverParent.sys.mjs",
       },
