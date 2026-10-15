@@ -352,7 +352,10 @@ and each process parses them on first use. When a font list reaches a process
 that already exists, RoverfoxStorageManager's pref callback flushes that
 process's platform font-list memos (`CAMOU-FL flush`): the codepoint cache and
 the font-name caches, which may hold answers made before the list arrived.
-Font groups that had already resolved their fonts are not flushed. That the
+Font groups that had already resolved their fonts are not flushed. A list over
+4 KiB never reached the callback in another process until #231: Firefox syncs
+no longer string pref, so the store now writes such a value in chunks and fires
+the callback once all of them have arrived. That the
 callback fires before the lists are needed is established by reading the code;
 the measurement is pending CI.
 `browser/tests/playwright/patches/context-list-every-process.py` guards it: every page of one

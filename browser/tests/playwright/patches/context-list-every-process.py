@@ -11,8 +11,9 @@ store (RoverfoxStorageManager), and each process parses it on first use.
 
 How this guard measures it:
 
-  * Context A's list is the generated list minus Georgia. The launch list is the
-    same list plus Georgia, so only the per-context list can refuse it.
+  * Context A's list is every Windows family in fonts.json minus Georgia. The
+    launch list is the same list plus Georgia, so only the per-context list can
+    refuse it.
   * Context B's list includes Georgia: the positive control. Georgia must
     render there, or a refusal in A proves nothing.
   * A opens pages on two origins and a second same-origin page. Every one must
@@ -43,6 +44,11 @@ How this guard measures it:
     not here. "Without the list after its arrival" counts main-thread lookups
     only, because a worker's gate line can be written after a flush line it
     was computed before.
+
+Context A's list is the whole Windows list, not a preset's draw, so it is over
+4 KiB once joined (#231). Firefox sends no longer string pref to another
+process, so only the storage's chunked write carries it. A preset's list
+crosses that size only now and then, which made this arm look flaky.
 
 Rendered versus refused is read under two fallbacks whose widths differ: a
 family that renders measures the same under both.
@@ -165,7 +171,8 @@ def flush_arm(logdir, ctx):
 
 async def main() -> int:
     from camoufox.async_api import AsyncCamoufox
-    from camoufox.fingerprints import generate_context_fingerprint, get_random_preset
+    from camoufox.fingerprints import (_load_os_fonts, generate_context_fingerprint,
+                                       get_random_preset)
 
     site = tempfile.mkdtemp(prefix="guard149-")
     for name in ("a.html", "b.html"):
@@ -179,10 +186,9 @@ async def main() -> int:
     os.environ["MOZ_LOG"] = "fontlist:4,ProcessIsolation:4,sync,append"
     os.environ["MOZ_LOG_FILE"] = str(logdir / "cfx%PID")
 
+    fonts = sorted(set(_load_os_fonts()["win"]) - {PROBE})
     for _ in range(15):
         preset = get_random_preset(os="windows")
-        base = generate_context_fingerprint(preset=preset)
-        fonts = sorted(set(base["config"].get("fonts", [])) - {PROBE})
         fp_a = generate_context_fingerprint(preset=preset, config_overrides={"fonts": fonts})
         fp_b = generate_context_fingerprint(preset=preset, config_overrides={"fonts": fonts + [PROBE]})
         try:
@@ -210,6 +216,13 @@ async def main() -> int:
         raise RuntimeError("Could not find a valid preset after 15 attempts")
 
     ok = True
+    size = len(",".join(fonts).encode())
+    print(f"  context A's list: {len(fonts)} names, {size} bytes joined")
+    # Firefox's MAX_ADVISABLE_PREF_LENGTH: under it the storage writes one pref
+    # and this run cannot see #231.
+    if size <= 4096:
+        print("  FAIL: context A's list is not over 4 KiB, so this run cannot see #231")
+        ok = False
     print(f"  control (context B, {PROBE} on its list): {control}")
     if not control.get("valid") or not control.get("rendered"):
         print(f"  FAIL: {PROBE} does not render where it is allowed -- this guard measures nothing")
