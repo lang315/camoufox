@@ -405,10 +405,13 @@ and one machine is not a population: it has no Office and no LibreOffice.
 | `win` list entries matching that pattern | 55 of 335 |
 | Measured in the browser (macOS host, one identity, 240 families configured) | 214 render, none outside the configured set, 0 of 637 macOS- or Linux-only names present. The 26 not measured are weight names (`Calibri Light`, `Sitka *`, `Segoe UI Variable *`) and the four bitmap fonts (`MS Sans Serif`, `MS Serif`, `Roman`, `Small Fonts`); whether they are absent or only share a baseline's width is not established. |
 
-What this does not settle: whether an open-source family in a Windows identity is
-a tell. The `win` list comes from recorded Windows devices, and LibreOffice or a
-user's own installs put those families on real machines, but a stock Windows 10
-has none of them, and 55 of 335 is a large share. Answering it needs the share of
-recorded Windows devices that carry them. The `Bahnschrift` and `Cascadia` rows
-are an artefact of GDI enumeration, not gaps.
-
+Where the open-source families come from: four addition units of the per-launch
+draw in [`FONTS.md`](FONTS.md) (`libreoffice` 0.066, `web` 0.088, `dev` 0.038 and
+`meslo` 0.040 on Windows), each at a probability measured on the fpgen corpus. The
+chance of at least one of them is 1 - 0.934 x 0.912 x 0.962 x 0.960 = 0.21, and 13
+of 60 draws is 0.22. So the identities carry those families at the rate the corpus
+gives. What stays open is whether that rate is right for the traffic a detector
+sees, whether the units are really independent (an identity can draw `office` and
+`libreoffice` together), and whether the fonts render as the real files do.
+A stock Windows 10 has none of them, so this machine says nothing about the rate.
+The `Bahnschrift` and `Cascadia` rows are an artefact of GDI enumeration, not gaps.
