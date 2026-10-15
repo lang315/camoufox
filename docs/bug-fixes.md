@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #242: one GitHub 5xx failed a whole model or browser download
+
+**Fixed by:** the PR that retries a transient answer in `webdl`. **Found by:** Tests run 38610977407, attempt 1, failing in setup; the same job passed when re-run.
+
+**Symptom.** The pinned fpgen model download got an HTTP 500 from GitHub, and `python/scripts/pin-fpgen-model.py` failed the job before any test ran.
+
+**Root cause.**
+- Python `webdl` (`python/src/camoufox/pkgman.py`) made one `requests.get` and called `raise_for_status()`, so any 5xx or dropped connection ended the download.
+- TypeScript `request` (`typescript/src/pkgman.ts`) retried a request that failed without a response but returned every HTTP answer, a 5xx included, to `raiseForStatus`.
+
+**Fix.** Both retry twice, after 1 s and 2 s, on a connection error, a 429 or a 5xx, and then raise the last one. Any other 4xx is returned at once. The request is an idempotent GET of a sha256-pinned file, so a retry cannot change what is installed. `AGENTS.md` bars retrying a flaky test; a host outage is not the behaviour under test.
+
+**Evidence.** `python/tests/test_webdl_retry.py`: 7 of 10 fail on `origin/main` (the three 4xx controls pass there), 10 pass with the fix. `typescript/tests/pkgman.test.ts`: 4 new tests fail on `origin/main`, all 34 pass with the fix.
+
+**What misled the investigation.** Nothing. The TypeScript comment "HTTP errors are responses, never retried" stood in the way of the same fix there and was rewritten with it.
+
 ## #231: a per-context value over 4 KiB never reached other content processes
 
 **Fixed by:** the PR that chunks oversized values in `cross-process-storage.patch`. **Found by:** `context-list-every-process.py` failing on PR #225, whose change was test-only.
