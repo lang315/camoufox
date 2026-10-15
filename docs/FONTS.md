@@ -203,7 +203,9 @@ plus independent per-unit draws. Not a uniform percentage of a pool.
    The Windows rates of `office`, `hololens`, `libreoffice`, `pan-euro`, `dev` and `web` are
    measured from the pinned fpgen model by `browser/scripts/measure-font-units.py` (8000 seeded
    draws; a unit is counted by the fonts only it carries; a bundle counts when half of its probed
-   fonts show; an à-la-carte rate is corrected for the fonts the model never probes). Each carries
+   fonts show (a bundle installs whole, so a few of its fonts alone point at other software: one
+   font reads `office` 0.626, a quarter to a half of them 0.503, and a one-font threshold on
+   `libreoffice` reads 0.163 against 0.073 to 0.088 from a quarter up); an à-la-carte rate is corrected for the fonts the model never probes). Each carries
    the model's tag in the manifest, and `ci/tests/test_font_units.py` fails when the model is
    bumped and the rates are not re-measured. `meslo` and `cascadia` have no font the model probes,
    and `cjk-tc` is conditional on a locale the samples do not carry, so they keep their rates.

@@ -18,7 +18,10 @@ exclusive font (`meslo`, `cascadia`), and `cjk-tc`, whose rate is conditional on
 the samples do not carry, keep the rate they have. A bundle counts as present when at least half
 of its probed fonts show.
 
-The draw is seeded, so a rerun gives the same table.
+The draw is seeded, so a rerun gives the same table. fpgen is loaded through
+camoufox.fpgen_model.load_fpgen(), which installs the pinned model first (a bare
+`import fpgen` would fetch another one), so the package must be importable:
+`pip install -e python`.
 
 Usage:
     python3 browser/scripts/measure-font-units.py            # print old -> new
@@ -46,6 +49,8 @@ def reveal_probability(kind, probed, total, sizes):
     """The chance a sample shows at least one probed font of a unit that is installed."""
     if kind == 'bundle':
         return 1.0
+    if not sizes:
+        raise ValueError('an a-la-carte unit needs its sizes to correct its rate')
     return sum(s['w'] * (1 - math.comb(total - probed, s['n']) / math.comb(total, s['n'])) for s in sizes)
 
 
@@ -75,8 +80,9 @@ def unit_rate(samples, kind, probed, total, sizes):
 
 
 def draw(n, seed):
-    import fpgen
+    from camoufox.fpgen_model import load_fpgen
 
+    fpgen = load_fpgen()
     random.seed(seed)
     out = []
     for _ in range(n):

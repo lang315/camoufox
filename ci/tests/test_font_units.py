@@ -76,3 +76,14 @@ def test_a_locale_gated_unit_is_not_measured_from_samples_that_ignore_locale(mfu
 def test_a_unit_whose_fonts_the_model_never_probes_is_not_measured(mfu):
     assert "probes none" in mfu.skip_reason({"id": "meslo", "fonts": ["x"]}, probed=set())
     assert mfu.skip_reason({"id": "web", "fonts": ["x"]}, probed={"x"}) is None
+
+
+def test_an_alacarte_unit_without_sizes_fails_loudly_not_by_dividing_by_zero(mfu):
+    with pytest.raises(ValueError, match="sizes"):
+        mfu.reveal_probability("alacarte", 2, 4, [])
+
+
+def test_the_script_imports_fpgen_only_through_the_pinned_loader():
+    # A bare `import fpgen` downloads the first model GitHub lists (python/src/camoufox/fpgen_model.py),
+    # while the script records the pinned tag as its source.
+    assert "import fpgen\n" not in SCRIPT.read_text() and "load_fpgen" in SCRIPT.read_text()
