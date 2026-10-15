@@ -12,6 +12,34 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #231: a per-context value over 4 KiB never reached other content processes
+
+**Fixed by:** the PR that chunks oversized values in `cross-process-storage.patch`. **Found by:** `context-list-every-process.py` failing on PR #225, whose change was test-only.
+
+**Symptom.** `FAIL flush: no content process logged CAMOU-FL flush ctx=7 with its font list live`. 1 of 13 CI runs and 1 of 15 local runs (fork.3, macOS arm64). In the failing run no content process logged any `CAMOU-FL flush`; only the parent did.
+
+**Root cause.**
+- `RoverfoxStorageManager` kept each per-context value as one `roverfox.s.<key>` pref.
+- Firefox sends no string pref longer than `MAX_ADVISABLE_PREF_LENGTH` (4 KiB, `modules/libpref/Preferences.cpp:172`) to another process. `Pref::HasAdvisablySizedValues()` (`:843-860`) gates both `SerializePreferences` (`:4869`), the snapshot a new process starts with, and `Preferences::GetPreference` (`:5269`), which `ContentParent::Observe` uses for every update.
+- A font list of about 280 names is over 4 KiB. In every other process the `roverfox.s.` callback never ran, so nothing flushed the font caches (`FontListManager::OnFontListStored`), updated the worker mirror (`MirrorPref`) or cleared the miss cache. A process created later had no copy in its snapshot either.
+- Pages of the context still refused the probe, because `ReadValue` falls back to a sync IPC read on the main thread. A worker reads only the mirror, and a process that had missed the key before the put kept answering from its miss cache.
+
+**Fix.**
+- A value over 3 KiB is written as chunk prefs `roverfox.c.<key>.<i>`, cut on UTF-8 code point boundaries, and then `roverfox.s.<key>` as a header: `0x01`, the count, `:`, a generation. Shorter values keep the single pref.
+- Only the header matches the callback. `ContentParent::Observe` (`dom/ipc/ContentParent.cpp:3920`) sends each change as an async `PreferenceUpdate` on the one PContent channel (`:3961`), or queues it and flushes the queue in order (`:1648`). So the callback runs after every chunk has arrived.
+- libpref notifies only when a value changes (`Preferences.cpp:2505`). The generation makes every header new, so a second value with the same chunk count still reaches other processes.
+- No stored value starts with `0x01`: numbers, `0`/`1` and the launcher's strings never do, and `StorePref` chunks any value that does. So a header cannot be mistaken for a value.
+- `StorePref` and `LoadPref` are the one writer and reader: the parent's put, the IPC put, the main-thread read, the parent's IPC get, `MirrorPref` and `EnsureMirror`'s snapshot. Off the main thread reads stay mutex-only.
+- Chunks a later, shorter value leaves behind are not removed. The header's count bounds every read, so they are never read.
+- Rejected: a custom IPC broadcast of the value. It reaches only the processes alive at the put, so a process created later still starts without it.
+
+**Evidence.**
+- `context-list-every-process.py` now gives context A the whole Windows list from `fonts.json` (334 names, 4794 bytes) instead of a preset's draw.
+- Red: against fork.3 (macOS arm64) it failed 3 of 3 runs on the flush line above, exit 1.
+- Green: the PR's Tests run, which builds the Linux browser from the branch and runs the patch guards.
+
+**What misled.** It looked like a flaky guard: it failed 1 time in 13 on CI. The only variable that tracked the failure was the length of the preset's font list: lists of 124 to 242 names passed, and the one run that drew 284 names failed.
+
 ## #183: a worker's canvas and a transferred canvas read back unnoised
 
 **Fixed by:** the PR that gives worker and transferred canvases their context's seed in `canvas-spoofing.patch`. **Found by:** the FF156 sync review (#179), which pointed at `ImageEncoder`'s offscreen branch.
