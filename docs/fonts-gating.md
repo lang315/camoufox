@@ -385,3 +385,52 @@ Georgia, Comic Sans MS) are the host's own fonts, so these rows go through
 Neither fix regressed the #87 Windows readings, and the DWrite face-name path
 that #150 opened is gated as the code reads.
 
+## A Windows identity's font set against a real Windows 10 machine
+
+Measured on the user's Windows build PC (Windows 10.0.19045, no Office), against
+`v156.0.1-beta.32-fork.4` on macOS arm64 with `os="windows"`. Sources: the host's
+`System.Drawing.Text.InstalledFontCollection` (GDI families, read-only) for the
+real machine; `launch_options(os="windows")`'s `fonts` key, 60 draws, for the
+identities; `python/src/camoufox/fonts.json` for the `win` list. This compares
+family names only. It does not compare rendering, metrics or codepoint fallback,
+and one machine is not a population: it has no Office and no LibreOffice.
+
+| Reading | Result |
+|---|---|
+| Families the real machine has (118; 3 OEM or developer-tool installs left out) | 115 |
+| Of those, not in the `win` list | 22: 11 `Bahnschrift` and 8 `Cascadia` weight and width names that GDI lists as families (DirectWrite groups them under one family), `SimSun-ExtG`, `Wingdings 2` and `Wingdings 3` |
+| Fonts per Windows identity | 125 to 282 |
+| Families in 40 identities' union that this machine lacks | 207 (Office families such as `Century Gothic`, `Book Antiqua`, `Garamond`; Windows 11 families such as `Segoe UI Variable`; and open-source families) |
+| Identities listing at least one open-source family (`DejaVu`, `Liberation`, `Noto`, `Roboto`, `Open Sans`, `Source`, `Meslo` and similar) | 13 of 60, up to 41 families in one identity |
+| `win` list entries matching that pattern | 55 of 335 |
+| Measured in the browser (macOS host, one identity, 240 families configured) | 214 render, none outside the configured set, 0 of 637 macOS- or Linux-only names present. The 26 not measured are weight names (`Calibri Light`, `Sitka *`, `Segoe UI Variable *`) and the four bitmap fonts (`MS Sans Serif`, `MS Serif`, `Roman`, `Small Fonts`); whether they are absent or only share a baseline's width is not established. |
+
+Where the open-source families come from: four addition units of the per-launch
+draw in [`FONTS.md`](FONTS.md) (`libreoffice` 0.066, `web` 0.088, `dev` 0.038 and
+`meslo` 0.040 on Windows), each at a probability measured on the fpgen corpus. The
+chance of at least one of them is 1 - 0.934 x 0.912 x 0.962 x 0.960 = 0.21, and 13
+of 60 draws is 0.22. So the identities carry those families at the rate the corpus
+gives. What stays open is whether that rate is right for the traffic a detector
+sees, whether the units are really independent (an identity can draw `office` and
+`libreoffice` together), and whether the fonts render as the real files do.
+A stock Windows 10 has none of them, so this machine says nothing about the rate.
+The `Bahnschrift` and `Cascadia` rows are an artefact of GDI enumeration, not gaps.
+
+### Is it a tell? Two checks (#244)
+
+**Against the fpgen model's Windows samples** (4000 draws of `fpgen.generate(os="Windows")`, its `allFonts` node; 10000 draws of the fork's `_generate_random_font_subset("windows")`). Each unit is detected by the fonts only that unit carries, restricted to the fonts the model probes at all. Units share members (`Roboto` is in both `libreoffice` and `web`), so counting a unit by all its fonts overstates the joint rate by 7x.
+
+| Unit | Model | Fork draw |
+|---|---|---|
+| `libreoffice` | 0.069 | 0.066 |
+| `pan-euro` | 0.027 | 0.027 |
+| `office` | 0.527 | 0.607 |
+| `hololens` | 0.288 | 0.595 |
+| `web` | 0.123 | 0.075 |
+| `dev` | 0.014 | 0.029 |
+
+The open-source units that a Windows identity carries are `libreoffice` (agrees), `web` (the fork draws it less often) and `dev` (more often, on 8 probed fonts). `meslo` and `cascadia` have no font the model probes. `hololens` is the one clear gap: the manifest's measured 0.592 is twice the model's 0.288. Pairs: the fork draws every pair independently, as its ratios of joint to product (0.79 to 1.02) show; the model has `office` with `web` at 1.40 and `web` with `dev` at 4.2, so identities pair web and developer fonts four times less often than the model does.
+
+**Against the font files** (`Resources/fonts` in the fork.4 macOS build; 69 of 86 open-source families have a regular, upright, Latin-complete face; width of `HxmW0 .8Qgy` at 72 px with kerning off, from `hmtx` and from `measureText`): 63 agree within 0.6 px. Six differ. Four have two files for one family in the bundle (a variable face with an optical-size axis and a static one: `Source Serif 4`, `Inter`, `Noto Sans Armenian`) so the file read may not be the file the browser chose; `DejaVu Sans Condensed`, `Amiri` and `Noto Naskh Arabic` have one file each and are unexplained. This shows the browser draws what the bundle holds. It does not show that the bundle's file versions match the ones a real LibreOffice or Google Fonts install puts on a machine.
+
+What follows: no single family or unit is a signature. Each appears on real machines at a rate near the model's. The residue is calibration: `hololens` (59% against 29%), `web` and `dev` not co-drawn as often as in the model, and three families whose measured width is unexplained. A page can only use a rate difference statistically, across many visits.
