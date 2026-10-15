@@ -415,3 +415,22 @@ sees, whether the units are really independent (an identity can draw `office` an
 `libreoffice` together), and whether the fonts render as the real files do.
 A stock Windows 10 has none of them, so this machine says nothing about the rate.
 The `Bahnschrift` and `Cascadia` rows are an artefact of GDI enumeration, not gaps.
+
+### Is it a tell? Two checks (#244)
+
+**Against the fpgen model's Windows samples** (4000 draws of `fpgen.generate(os="Windows")`, its `allFonts` node; 10000 draws of the fork's `_generate_random_font_subset("windows")`). Each unit is detected by the fonts only that unit carries, restricted to the fonts the model probes at all. Units share members (`Roboto` is in both `libreoffice` and `web`), so counting a unit by all its fonts overstates the joint rate by 7x.
+
+| Unit | Model | Fork draw |
+|---|---|---|
+| `libreoffice` | 0.069 | 0.066 |
+| `pan-euro` | 0.027 | 0.027 |
+| `office` | 0.527 | 0.607 |
+| `hololens` | 0.288 | 0.595 |
+| `web` | 0.123 | 0.075 |
+| `dev` | 0.014 | 0.029 |
+
+The open-source units that a Windows identity carries are `libreoffice` (agrees), `web` (the fork draws it less often) and `dev` (more often, on 8 probed fonts). `meslo` and `cascadia` have no font the model probes. `hololens` is the one clear gap: the manifest's measured 0.592 is twice the model's 0.288. Pairs: the fork draws every pair independently, as its ratios of joint to product (0.79 to 1.02) show; the model has `office` with `web` at 1.40 and `web` with `dev` at 4.2, so identities pair web and developer fonts four times less often than the model does. `meslo` and `cascadia` were not measured.
+
+**Against the font files** (`Resources/fonts` in the fork.4 macOS build; 69 of 86 open-source families have a regular, upright, Latin-complete face; width of `HxmW0 .8Qgy` at 72 px with kerning off, from `hmtx` and from `measureText`): 63 agree within 0.6 px. Six differ. Four have two files for one family in the bundle (a variable face with an optical-size axis and a static one: `Source Serif 4`, `Inter`, `Noto Sans Armenian`) so the file read may not be the file the browser chose; `DejaVu Sans Condensed`, `Amiri` and `Noto Naskh Arabic` have one file each and are unexplained. This shows the browser draws what the bundle holds. It does not show that the bundle's file versions match the ones a real LibreOffice or Google Fonts install puts on a machine.
+
+What follows: no single family or unit is a signature. Each appears on real machines at a rate near the model's. The residue is calibration: `hololens` (59% against 29%), `web` and `dev` not co-drawn as often as in the model, and three families whose measured width is unexplained. A page can only use a rate difference statistically, across many visits.
