@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #246: the Windows font units' rates had no source
+
+**Fixed by:** the PR that adds `browser/scripts/measure-font-units.py`. **Found by:** comparing 10000 draws with 4000 fpgen Windows samples while answering #244.
+
+**Symptom.** A Windows identity carried `HoloLens MDL2 Assets` on 59% of draws; the pinned fpgen model puts it on 29%, and on 22% to 31% in every browser subgroup (Chrome 0.31, Firefox 0.22, Edge 0.22, Opera 0.31).
+
+**Root cause.** `font-manifests.json` gave each unit `prob` and `"measured": true` with no corpus, model or date behind it, and nothing in `browser/scripts/` computed them (`gen-font-groups.py` only copies them). The pinned model disagreed on four more: `office` 0.602 against 0.501, `web` 0.088 against 0.158, `dev` 0.038 against 0.017, `libreoffice` 0.066 against 0.075.
+
+**Fix.** `measure-font-units.py` draws seeded Windows samples from the pinned model and writes the six units it can see, with the model's tag, into the manifest; `gen-font-groups.py` and a copy to `goapi/pkg/fingerprint/data/` follow. `ci/tests/test_font_units.py` pins the maths and fails when the manifest was measured against another model than `fpgen-model.json`'s. The first run also rewrote `cjk-tc` from 0.9 to 0.023, because its rate is conditional on `zh-TW` and the samples ignore locale; it is now skipped by `skip_reason`, with a test.
+
+**Evidence.** The new tests failed before the script existed (5 failed or errored) and pass after (8 passed); `python/tests/test_font_distribution.py` 31 passed and `go test ./pkg/fingerprint/` ok on the new rates.
+
+**What misled the investigation.** Counting a unit by all its fonts: `Roboto` is in `libreoffice` and `web`, so the joint rate read seven times too high until each unit was counted by the fonts only it carries. And a bundle counted by one font: `office` reads 0.626 that way, close to the old 0.602, against 0.503 at half the fonts; that may be where the old number came from, but nothing records it. Not explained by this: `hololens` reads 0.30 under any threshold, so the old 0.592 stays unexplained.
+
 ## #242: one GitHub 5xx failed a whole model or browser download
 
 **Fixed by:** the PR that retries a transient answer in `webdl`. **Found by:** Tests run 38610977407, attempt 1, failing in setup; the same job passed when re-run.
