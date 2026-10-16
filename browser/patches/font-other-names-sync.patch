@@ -1,19 +1,15 @@
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 40212b6835..aa53636d9f 100644
+index 40212b6835..1f52f98726 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -2203,8 +2203,17 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -2203,8 +2203,13 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      // in practice, so avoid pulling in names at startup.
      if (!family && !mOtherFamilyNamesInitialized) {
        bool triggerLoading = true;
 +      // Camoufox (#247): a page under a launch-level or per-context font list
 +      // would otherwise draw the fallback for a legacy family name until the
 +      // loader has run, so its first lookup reads the names now.
-+      uint32_t camouCtx = mozilla::dom::FontListManager::GetCurrentContext();
-+      bool camouMasked =
-+          MaskedFontListAppliesTo(aFontVisibilityProvider) ||
-+          (camouCtx != 0 &&
-+           mozilla::dom::FontListManager::HasFontList(camouCtx));
++      bool camouMasked = CamouGenericTableApplies(aFontVisibilityProvider);
        bool mayDefer =
 -          !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading);
 +          !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading) &&
