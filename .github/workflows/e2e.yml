@@ -26,6 +26,9 @@ on:
       k:
         description: "Only the tests matching this pytest -k expression"
         required: false
+      probe:
+        description: "Run this e2e/probes script (with run_id) on each OS instead of the journeys, e.g. other_names_stall.py (#253)"
+        required: false
       mozlog:
         description: "Capture MOZ_LOG (nsHttp, nsSocketTransport) for the fingerprint and fifty-contexts journeys (#171)"
         type: boolean
@@ -98,7 +101,7 @@ jobs:
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
           if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
       - name: Run
-        if: env.E2E_SKIP != '1'
+        if: env.E2E_SKIP != '1' && inputs.probe == ''
         shell: bash
         working-directory: e2e
         env:
@@ -111,6 +114,14 @@ jobs:
           if [ -n "${E2E_LIVE:-}" ]; then args+=(-m "live or not live"); fi
           if [ -n "$E2E_K" ]; then args+=(-k "$E2E_K"); fi
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest "${args[@]}"; else python -m pytest "${args[@]}"; fi
+      - name: Probe
+        if: env.E2E_SKIP != '1' && inputs.probe != ''
+        shell: bash
+        env:
+          PROBE: ${{ inputs.probe }}
+        run: |
+          # A probe takes --zip, which a release input does not give it: that fails at argparse, loudly.
+          python "e2e/probes/$PROBE" $E2E_BROWSER --runs 8
       - if: always() && inputs.mozlog
         uses: actions/upload-artifact@v4
         with:
