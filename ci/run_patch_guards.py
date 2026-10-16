@@ -47,6 +47,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "fingerprint-setter-seal",
         "generic-monospace-launch-mask",
         "fallback-miss-while-cmaps-load",
+        "legacy-family-names-first-measure",
         "local-font-source",
         "locale-explicit-names",
         "media-devices-coherence",
