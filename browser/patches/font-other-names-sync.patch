@@ -1,0 +1,18 @@
+diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
+index 40212b6835..79df6bfbde 100644
+--- a/gfx/thebes/gfxPlatformFontList.cpp
++++ b/gfx/thebes/gfxPlatformFontList.cpp
+@@ -2203,8 +2203,12 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+     // in practice, so avoid pulling in names at startup.
+     if (!family && !mOtherFamilyNamesInitialized) {
+       bool triggerLoading = true;
++      // Camoufox (#247): a masked page cannot tell the loader is still idle, so
++      // its first lookup of a legacy family name reads the names now instead of
++      // answering "no such family" and finding the family seconds later.
+       bool mayDefer =
+-          !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading);
++          !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading) &&
++          !MaskedFontListAppliesTo(aFontVisibilityProvider);
+       if (IsAscii(key)) {
+         // If `key` is an ASCII name, only trigger loading if it includes a
+         // space, and the "base" name (up to the last space) exists as a known
