@@ -38,6 +38,7 @@ be listed there.
 | `css-media-spoofing.patch` | `cssMedia:colorGamut`, `cssMedia:prefersColorScheme`, `cssMedia:dynamicRange` |
 | `fingerprint-injection.patch` | `navigator.*`, `screen.*`, `window.*` |
 | `font-hijacker.patch` | `fonts`, `navigator.platform` |
+| `font-other-names-sync.patch` | `font-list-spoofing.patch` for `gfxPlatformFontList::CamouGenericTableApplies()` |
 | `font-system-fonts-css2.patch` | `navigator.platform`, `window.devicePixelRatio` |
 | `force-default-pointer.patch` | `navigator.maxTouchPoints` |
 | `geolocation-spoofing.patch` | `geolocation:*` |
