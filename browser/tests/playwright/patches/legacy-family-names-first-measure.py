@@ -17,8 +17,9 @@ once and lifts its time limit: launch took 1.7 s longer, measured.)
 A windows identity whose `fonts` are the three legacy names measures each of them in
 a fresh browser, then measures them again every 2 s until the loader has run (the
 widths stop changing, 10 s at least, 30 s at most). The tell is a name whose first
-width differs from its settled width. The reference is the same name in the same
-page, so both sides are guaranteed to be about the same face. A fallback name
+width differs from its settled width. A name that resolves keeps its width, so
+first == settled does not depend on which generic the fallback is. The reference
+is the same name in the same page, so both sides are about the same face. A fallback name
 (`Zzz Not A Font`) is measured too, but only to show the arm is not vacuous: at
 least one legacy name must settle on a width other than the fallback's. It is not
 the pass/fail control, because with these `fonts` the generics resolve to one of
