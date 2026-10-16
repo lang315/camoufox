@@ -418,19 +418,19 @@ The `Bahnschrift` and `Cascadia` rows are an artefact of GDI enumeration, not ga
 
 ### Is it a tell? Two checks (#244)
 
-**Against the fpgen model's Windows samples** (4000 draws of `fpgen.generate(os="Windows")`, its `allFonts` node; 10000 draws of the fork's `_generate_random_font_subset("windows")`). Each unit is detected by the fonts only that unit carries, restricted to the fonts the model probes at all. Units share members (`Roboto` is in both `libreoffice` and `web`), so counting a unit by all its fonts overstates the joint rate by 7x.
+**Against the fpgen model's Windows samples** (4000 draws of `fpgen.generate(os="Windows")`, its `allFonts` node; 10000 draws of the fork's `_generate_random_font_subset("windows")` after #249 re-measured the unit rates). Each unit is detected by the fonts only that unit carries, restricted to the fonts the model probes at all. Units share members (`Roboto` is in both `libreoffice` and `web`), so counting a unit by all its fonts overstates the joint rate by 7x.
 
 | Unit | Model | Fork draw |
 |---|---|---|
-| `libreoffice` | 0.069 | 0.066 |
-| `pan-euro` | 0.027 | 0.027 |
-| `office` | 0.527 | 0.607 |
-| `hololens` | 0.288 | 0.595 |
-| `web` | 0.123 | 0.075 |
-| `dev` | 0.014 | 0.029 |
+| `libreoffice` | 0.069 | 0.075 |
+| `pan-euro` | 0.027 | 0.023 |
+| `office` | 0.527 | 0.511 |
+| `hololens` | 0.288 | 0.289 |
+| `web` | 0.123 | 0.138 |
+| `dev` | 0.014 | 0.015 |
 
-The open-source units that a Windows identity carries are `libreoffice` (agrees), `web` (the fork draws it less often) and `dev` (more often, on 8 probed fonts). `meslo` and `cascadia` have no font the model probes. `hololens` is the one clear gap: the manifest's measured 0.592 is twice the model's 0.288. Pairs: the fork draws every pair independently, as its ratios of joint to product (0.79 to 1.02) show; the model has `office` with `web` at 1.40 and `web` with `dev` at 4.2, so identities pair web and developer fonts four times less often than the model does.
+The open-source units that a Windows identity carries are `libreoffice`, `web` and `dev` (on 8 probed fonts); every unit is within 0.016 of the model. `meslo` and `cascadia` have no font the model probes. Before #249 the fork drew `hololens` at 0.595, twice the model's 0.288 (and `office` 0.607, `web` 0.075, `dev` 0.029); #249 measured the rates from the model. Pairs: the fork draws every pair independently, as its ratios of joint to product (0.66 to 1.04) show; the model has `office` with `web` at 1.40 and `web` with `dev` at 4.2, so identities pair web and developer fonts about five times less often than the model does (0.0014 against 0.0073).
 
 **Against the font files** (`Resources/fonts` in the fork.4 macOS build; 69 of 86 open-source families have a regular, upright, Latin-complete face; width of `HxmW0 .8Qgy` at 72 px with kerning off, from `hmtx` and from `measureText`): 63 agree within 0.6 px. Six differ. Four have two files for one family in the bundle (a variable face with an optical-size axis and a static one: `Source Serif 4`, `Inter`, `Noto Sans Armenian`) so the file read may not be the file the browser chose; `Amiri` and `Noto Naskh Arabic` have one file each and the gap is the measurement, not the browser: a sum of `hmtx` advances ignores shaping, and the font's default features replace the glyph of `.` (`Noto Naskh Arabic` swaps `period` for `period.locl` through `locl`). HarfBuzz with only `kern` off gives 433.51 and 490.68 for the string, the browser 433.47 and 490.63; with `calt`, `ccmp`, `liga` and `locl` off as well, it gives back the file sums, 441.79 and 486.22. `DejaVu Sans Condensed` is the browser: its legacy family name (name ID 1) differs from its typographic family `DejaVu Sans` (name ID 16), so on macOS `"DejaVu Sans Condensed"` finds no family and draws the fallback (475.20 with `monospace`, 468.03 with `sans-serif`, the same as no family at all), while `font: condensed 72px "DejaVu Sans"` measures 468.20, the file's 468.18. Sweeping all 86 families, `DejaVu Sans Light` and `DejaVu Serif Condensed` fail the same way and nothing else does (#247). Measured on macOS only: Windows and Linux are open. This shows the browser draws what the bundle holds. It does not show that the bundle's file versions match the ones a real LibreOffice or Google Fonts install puts on a machine.
 
-What follows: no single family or unit is a signature. Each appears on real machines at a rate near the model's. The residue is calibration: `hololens` (59% against 29%), `web` and `dev` not co-drawn as often as in the model, and three DejaVu families that the list names but macOS draws as the fallback (#247). A page can only use a rate difference statistically, across many visits.
+What follows: no single family or unit is a signature. Each appears on real machines at a rate near the model's. The residue is pairing, not rates: `web` and `dev` are not co-drawn as often as in the model, and three DejaVu families that the list names but macOS draws as the fallback (#247). A page can only use a rate difference statistically, across many visits.
