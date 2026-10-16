@@ -629,3 +629,19 @@ rules:
       on the default-route address, because nICEr skips a loopback STUN server
       under the shipped prefs. The launch-level
       webrtc:ipv4 key is not asserted, because no browser code reads it (#163).
+
+  - id: legacy-family-names-read-on-masked-lookup
+    title: A legacy font family name is resolved by a patch on the lookup, not by gfx.font_loader.delay=0
+    check: manual
+    evidence:
+      - "#247: Windows identity on the fork.4 macOS arm64 build, 8 launches in 8 drew the fallback for DejaVu Sans Condensed, Sans Light and Serif Condensed"
+      - "same binary, 8 alternating launches: launch to about:blank 9.13 s without the pref, 10.85 s with gfx.font_loader.delay=0; first lookup 1662 ms against 2 ms"
+      - "Firefox 156.0.1 gfx/thebes/gfxPlatformFontList.cpp: gfx.font_loader.delay is read in InitOtherFamilyNames, in the font loader's time-slice check, and in GetPrefsAndStartLoader"
+      - "browser/patches/font-other-names-sync.patch; browser/tests/playwright/patches/legacy-family-names-first-measure.py"
+    rationale: >-
+      The pref resolves the names, but it is one setting for three behaviours: it
+      makes the other family names synchronous, starts the font loader after 1 ms
+      instead of 8 s, and removes the loader's per-pass time limit. Launch took
+      1.7 s longer, and by reading the code the loader would read every cmap at
+      startup, which fallback-miss-while-cmaps-load.py needs pending. The patch
+      changes one argument on the one lookup that needs it, for a masked page.

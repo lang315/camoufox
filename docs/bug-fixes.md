@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #247: a legacy font family name drew the fallback for the first seconds of a launch
+
+**Fixed by:** the PR that adds `browser/patches/font-other-names-sync.patch`. **Found by:** explaining a width mismatch listed in #246.
+
+**Symptom.** On the fork.4 macOS arm64 build, a Windows identity that listed `DejaVu Sans Condensed`, `DejaVu Sans Light` or `DejaVu Serif Condensed` (the `libreoffice` unit) measured them as the fallback font: 473.52 for all three, the width of a family that does not exist, under both `monospace` and `sans-serif`. A measurement a few seconds later gave the files' own advances, 468.17, 517.95 and 475.73.
+
+**Root cause.** macOS registers these faces under their typographic family (`DejaVu Sans`, `DejaVu Serif`, name ID 16). Firefox finds the legacy name (name ID 1) through "other family names", which `gfxPlatformFontList::FindAndAddFamiliesLocked` loads lazily: the first lookup of a name whose base name exists calls `InitOtherFamilyNames(mayDefer)` with `mayDefer` true, which queues the load and returns, and the lookup answers "no such family". The name resolves once the font loader has run, 8 s after launch by default (`gfx.font_loader.delay`).
+
+**Fix.** The lookup passes `mayDefer` false when `MaskedFontListAppliesTo` is true, so a masked page's first lookup reads the names at once. Chrome, and a launch with no font list, keep the stock deferral, and startup and the font loader are unchanged. The first lookup now takes 2.2 s on every launch (8 of 8) here, where fork.4's took 2 to 3 ms when it missed and 0.9 to 1.6 s when it blocked. Stock Firefox already blocks the same way when a page probes a name such as `Arial Black`.
+
+**Alternative tried and rejected.** `gfx.font_loader.delay=0` also resolves the names (0 launches in 8 miss), but it is read in three places in `gfxPlatformFontList.cpp`: it starts the loader at once, lifts the loader's time limit and makes the other names synchronous. Launch took 1.7 s longer (9.13 s to 10.85 s, same binary, 8 alternating launches). By reading the code, the loader would also read every cmap at startup, which `fallback-miss-while-cmaps-load.py` needs pending; that guard was not run with the pref. The decision is in `ci/tribal-rules.yml`.
+
+**Evidence.** `legacy-family-names-first-measure.py` launches a Windows identity twice and measures each name once against the fallback under both generics. On the fork.4 build (`2ab689f`) it fails, 2 launches in 2 with all three names at 473.52. On the build of this branch (macOS arm64, build run 38839435259, head `8f85e2a`) it passes, with 468.17, 517.95 and 475.73 on both launches. The two builds differ in more than this patch (`main` moved by the font-unit rates, their script and tests, none of which is compiled into the browser). Measured on macOS only: on Linux fontconfig publishes both names, so the guard is not expected to fail there, and Windows is not measured.
+
+**What misled the investigation.** The first table in #247 measured right after launch and read a late resolution as a naming problem (name ID 1 against name ID 16), and `docs/fonts-gating.md` repeated it. `font: condensed 72px "DejaVu Sans"` measured the right width at that moment because that name needs no lazy load, which looked like a confirmation. Measuring again four seconds later in the same browser was the check that broke it.
+
 ## #246: the Windows font units' rates had no source
 
 **Fixed by:** the PR that adds `browser/scripts/measure-font-units.py`. **Found by:** comparing 10000 draws with 4000 fpgen Windows samples while answering #244.
