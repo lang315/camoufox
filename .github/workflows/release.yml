@@ -538,7 +538,7 @@ jobs:
     # is the one event this workflow's token may start a run with.
     needs: [plan, tag-library]
     if: >-
-      !cancelled() && github.event_name == 'schedule'
+      !cancelled() && github.repository == 'daijro/camoufox' && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     permissions:
       actions: write
