@@ -17,6 +17,7 @@ GEO = {
 
 def _launch(monkeypatch, config):
     monkeypatch.setattr(utils, 'geoip_allowed', lambda: None)
+    monkeypatch.setattr(utils, 'public_ipv6', lambda: None)
     monkeypatch.setattr(
         utils, 'get_geolocation', lambda *a, **k: SimpleNamespace(as_config=lambda: dict(GEO))
     )
