@@ -85,6 +85,9 @@ type Config struct {
 	WebRTCLocalIPv4 string `json:"webrtc:localipv4,omitempty"`
 	WebRTCLocalIPv6 string `json:"webrtc:localipv6,omitempty"`
 
+	// network:*
+	NetworkIPv4Only *bool `json:"network:ipv4Only,omitempty"`
+
 	// battery:*
 
 	// fonts / voices
