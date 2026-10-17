@@ -429,9 +429,7 @@ jobs:
     # and fork tags end in `-fork.<n>`, so on a fork it would fail every run.
     # summary and gate treat the skip as expected.
     needs: [resolve, static, build, fetch-browser]
-    if: >-
-      github.repository == 'daijro/camoufox' && always() &&
-      (needs.build.result == 'success' || needs.fetch-browser.result == 'success')
+    if: github.repository == 'daijro/camoufox' && always() && (needs.build.result == 'success' || needs.fetch-browser.result == 'success')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
