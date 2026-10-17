@@ -636,6 +636,7 @@ rules:
       - "CI run 38299426185: upstream's webrtc-context-ip and webrtc-port-range read the srflx candidate upstream fabricates against a silent STUN server, and saw no candidates on the fork"
       - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
       - "CI run 38310314782 (head 7e03c7e): both adapted guards passed, patch guards spoofing 22/22"
+      - "CI run 38992109773 (head a4236f8): upstream's ipv4-only-network guard read no host candidate with network:ipv4Only off or on, because of no_host; it now sets no_host false for its own probe"
     rationale: >-
       The fork's WebRTC model diverges from upstream's. A context's IP masks the
       srflx candidate a real STUN answer produces, no srflx candidate is made up,
@@ -647,6 +648,8 @@ rules:
       on the default-route address, because nICEr skips a loopback STUN server
       under the shipped prefs. The launch-level
       webrtc:ipv4 key is not asserted, because no browser code reads it (#163).
+      ipv4-only-network turns no_host off for its probe, since the page cannot
+      see which addresses were gathered otherwise.
 
   - id: legacy-family-names-read-on-masked-lookup
     title: A legacy font family name is resolved by a patch on the lookup, not by gfx.font_loader.delay=0
