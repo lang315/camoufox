@@ -79,7 +79,7 @@ def check(failures: List[str], label: str, got: Any, want: Any) -> None:
 
 
 @contextlib.contextmanager
-def hidden_display() -> Iterator[str]:
+def hidden_display(screen: str = "1400x900") -> Iterator[str]:
     """A private Xvfb display for the duration of the block.
 
     The process environment points at it too. On a Wayland desktop an inherited
@@ -91,7 +91,7 @@ def hidden_display() -> Iterator[str]:
         if not os.path.exists(f"/tmp/.X11-unix/X{n}"):
             break
     display = f":{n}"
-    proc = subprocess.Popen(["Xvfb", display, "-screen", "0", "1400x900x24", "-nolisten", "tcp"],
+    proc = subprocess.Popen(["Xvfb", display, "-screen", "0", f"{screen}x24", "-nolisten", "tcp"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     time.sleep(1.5)
     saved = dict(os.environ)

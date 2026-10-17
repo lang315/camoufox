@@ -4,9 +4,9 @@
 
 "use strict";
 
-const {Helper} = ChromeUtils.importESModule('chrome://juggler/content/Helper.js');
+const {Helper} = ChromeUtils.importESModule('resource://gre/modules/juggler/Helper.js');
 const {NetUtil} = ChromeUtils.importESModule('resource://gre/modules/NetUtil.sys.mjs');
-const { ChannelEventSinkFactory } = ChromeUtils.importESModule("chrome://juggler/content/ChannelEventSink.sys.mjs");
+const { ChannelEventSinkFactory } = ChromeUtils.importESModule("resource://gre/modules/juggler/ChannelEventSink.sys.mjs");
 
 
 const Cc = Components.classes;
@@ -937,7 +937,12 @@ class ResponseStorage {
     // hasContentDecompressed is the only signal that we already have plain bytes.
     if ((request.httpChannel instanceof Ci.nsIEncodedChannel) && request.httpChannel.contentEncodings && !request.httpChannel.applyConversion && !request.httpChannel.hasContentDecompressed && !request._fulfilled) {
       const encodingHeader = request.httpChannel.getResponseHeader("Content-Encoding");
-      encodings = encodingHeader.split(/\s*\t*,\s*\t*/);
+      // Firefox itself skips "identity" and empty encodings when applying content
+      // conversions, and there is no stream converter registered for them.
+      encodings = encodingHeader.split(/\s*\t*,\s*\t*/).filter(encoding => {
+        const normalized = encoding.trim().toLowerCase();
+        return normalized && normalized !== 'identity' && normalized !== 'x-identity';
+      });
     }
     this._responses.set(request.requestId, {body, encodings});
     this._totalSize += body.length;

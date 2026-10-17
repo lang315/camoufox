@@ -35,6 +35,7 @@
   { "property": "webrtc:ipv6", "type": "str" },
   { "property": "webrtc:localipv4", "type": "str" },
   { "property": "webrtc:localipv6", "type": "str" },
+  { "property": "network:ipv4Only", "type": "bool" },
   { "property": "fonts", "type": "array" },
   { "property": "audio:seed", "type": "uint" },
   { "property": "geolocation:latitude", "type": "double" },

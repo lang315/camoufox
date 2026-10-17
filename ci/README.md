@@ -1,20 +1,20 @@
 # The test pipeline
 
 Everything that runs a suite against Camoufox. The same definition runs on a
-pull request, on a push to `main` (through `release.yml`), and for any caller of
-the `workflow_call` trigger that wants a specific browser version, so there is
-one meaning of "the tests pass". Every job can be run locally
+pull request, on a push to `main`, before every release (through
+`release.yml`), and for any caller of the `workflow_call` trigger that wants a
+specific browser version, so there is one meaning of "the tests pass". Every job can be run locally
 ([Running a piece by hand](#running-a-piece-by-hand)).
 
 ```
 resolve ── static ─────────────── lint, tribal rules, skiplist, self-tests  (seconds)
              ├─ typescript ────── type check, lint, vitest, golden parity
-             ├─ install ───────── packed packages + a real `camoufox fetch`
              └─ pythonlib ─────── the package's own tests                   (a minute)
                   └─ build or fetch ─┬─ patch guards × 3 + skiplist audit
                                      ├─ build-tester ─────── 8 fingerprint profiles
                                      ├─ e2e ──────────────── user journeys, 3 entry points (e2e/)
                                      ├─ typescript-browser ─ the npm launcher end to end
+                                     ├─ install ──────────── packed packages: fetch, launch, click, type
                                      └─ once guards and build-tester pass:
                                           ├─ playwright × 6 shards   (upstream suite + our own)
                                           ├─ native ───────── leaks, contexts, crash recovery
@@ -31,7 +31,7 @@ resolve ── static ─────────────── lint, tribal
 | `static` | `ci.run_native --subset rules`, `pytest ci/tests`, `browser/scripts/check-input-dispatch.py` | Settled decisions still hold, the skiplist is valid, input goes through one chokepoint, the pipeline reports honestly |
 | `pythonlib` | `ci.run_pythonlib` | `python/`'s own tests |
 | `typescript` | `ci.run_typescript` | Type check, lint, vitest, byte-for-byte parity with `python/` |
-| `install` | `ci.run_install` | The packed packages install into clean environments and fetch a real browser |
+| `install` | `ci.run_install` | The packed packages install into clean environments, fetch a real browser, and launch it and the browser under test through the installed package: the User-Agent claims the launched Firefox, the page and the request agree on it, the bundled fonts render, and a click and typed text reach the page as trusted events |
 | `build` / `fetch-browser` | `ci.run_prepare`, `ci.run_build` | The browser under test: compiled from this branch, or the published release built from the same sources |
 | `patch-guards` | `ci.run_patch_guards --group spoofing\|automation\|parity`, `ci.run_skiplist_audit` | One guard per shipped behaviour ([`browser/tests/playwright/`](../browser/tests/playwright/README.md)); every skiplist entry still fails |
 | `build-tester` | `ci.run_build_tester` | The raw binary against the anti-detect checks ([README](../browser/tests/build-tester/README.md)) |
@@ -211,16 +211,16 @@ Each tier gates the next, so a lint failure never reaches the build:
 | Tier | Jobs | Time |
 |---|---|---|
 | 0 static | lint, self-tests, settled decisions | seconds |
-| 1 unit | pythonlib, typescript, install | about a minute |
+| 1 unit | pythonlib, typescript | about a minute |
 | 2 browser | build (browser sources changed) or fetch (they did not) | minutes to hours |
-| 3a smoke | patch guards, skiplist audit, build-tester, typescript-browser | about 15 min |
+| 3a smoke | patch guards, skiplist audit, build-tester, typescript-browser, install | about 15 min |
 | 3b full | Playwright × 6, native, growth × 7, stealth | about 40 min |
 | 4 gate | the required check | seconds |
 
 | Mechanism | Effect |
 |---|---|
 | **Fetch instead of build** | A pull request that does not touch browser sources tests the published release built from exactly this tree's sources (`ci.release paired`). With no such release, it builds. |
-| **Compiled-input cache** | The build cache is keyed on a hash of the compiled inputs only (`ci/browser_inputs.py`). On a hit the browser is restored and this branch's Juggler JavaScript and other resources, the files `jar.mn` lists, are laid over it. Everything else, including any new file type, counts as native and forces a build. |
+| **Compiled-input cache** | The build cache is keyed on a hash of the compiled inputs only (`ci/browser_inputs.py`). On a hit the browser is restored and this branch's Juggler JavaScript and other resources, the files Juggler's `moz.build` lists in `FINAL_TARGET_FILES`, are laid over it. Everything else, including any new file type, counts as native and forces a build. |
 | **No partial restore** | That cache has no `restore-keys`: a partial match would hand the tests a browser built from different sources. A self-test checks the key covers every browser-affecting path. |
 | **Warm ccache** | Pushes to `main` and a twice-weekly schedule keep the ccache from being evicted; pull requests restore it. |
 | **Network retries only** | `ci.run_prepare` (`setup-minimal`, `dir`, `mozbootstrap`) retries only failures that read as transient network errors. A failed hunk or compile error fails at once. |
@@ -230,16 +230,23 @@ Pushing to a branch cancels its running build (`cancel-in-progress`).
 ## Releases
 
 One workflow, [`release.yml`](../.github/workflows/release.yml), makes every
-release. Every tested merge to `main` is released as a **prerelease**; a
-maintainer promotes one to **stable** by pushing a tag. Each library release is
-paired with exactly one browser build.
+release, on a **train**: on the 1st and 15th of each month the newest
+**prerelease** is promoted to **stable**, and a new prerelease is cut from
+`main`. Merges are tested by `tests.yml` but not released, so users see two
+releases a month rather than one per merge. Each library release is paired with
+exactly one browser build.
 
 ```
-merge to main ─► tests ─► plan ─┬─► build-browser ─► publish-browser ─┐
-               (tests.yml,      │   (only if its      v156.0.1-beta.N  │
-                this commit)    │    sources changed)                  ├─► publish-pypi ─► publish-npm ─► tag-library
-                                └─► build-library ─────────────────────┘   0.5.8bN          0.5.8-beta.N    v0.5.8bN
-                                    (only if what it ships changed)        (pip: --pre)     @next
+1st and 15th ─► plan ─► build-library ─► promote-browser ─► publish-pypi ─► publish-npm ─► tag-library ─► cut
+ (schedule)    (newest prerelease,        paired → stable     0.5.8            0.5.8 @latest   v0.5.8         │
+                no open regression)                                                                         │
+     ┌──────────────────────────────────────────────────────────────────────────────────────────────────────┘
+     ▼
+dispatch on main ─► tests ─► plan ─┬─► build-browser ─► publish-browser ─┐
+                  (tests.yml,      │   (only if its      v156.0.1-beta.N  │
+                   this commit)    │    sources changed)                  ├─► publish-pypi ─► publish-npm ─► tag-library
+                                   └─► build-library ─────────────────────┘   0.5.9bN          0.5.9-beta.N    v0.5.9bN
+                                       (only if what it ships changed)        (pip: --pre)     @next
 
 git tag v0.5.8 <tested main commit> && git push origin v0.5.8
                ─► plan ─► build-library ─► promote-browser ─► publish-pypi ─► publish-npm
@@ -248,12 +255,15 @@ git tag v0.5.8 <tested main commit> && git push origin v0.5.8
 
 | Rule | Detail |
 |---|---|
-| Only a tested commit is released | On a push to `main`, `release.yml` calls `tests.yml` on that commit and continues only if it passes. |
+| The train | The scheduled run promotes the newest library prerelease tag (`v0.5.8bN`) at the commit it was cut from, as `v0.5.8`, then its `cut` job dispatches `release.yml` on `main`. With no prerelease since the last promotion it promotes nothing; a cut with nothing changed publishes nothing. |
+| A regression holds the train | While an issue labelled `regression` is open, the promotion fails and says which issues hold it; the cut still runs. The label must exist, so an empty answer means "none open", not "nobody could mark one". |
+| Out of cycle | Run the Release workflow by hand on `main` (`gh workflow run release.yml --ref main`) to cut a prerelease now. Push a tag to promote by hand. |
+| Only a tested commit is released | A cut calls `tests.yml` on its commit and continues only if it passes. A promotion requires `All tests passed` on its commit. |
 | The browser is built only when its sources changed | `ci.browser_inputs.source_digest()` hashes the browser's sources. Each browser release carries a `manifest.json` with that digest, its commit, and the browser interface it speaks (`CONSTRAINTS.INTERFACE` in `python/src/camoufox/__version__.py`). A matching release is reused; otherwise `plan` takes the next unused `beta.N`. Nothing is committed: `ci.release set-build` writes the number into the build's tree. |
 | Builds are attested | `gh attestation verify <file> --repo daijro/camoufox` |
 | Packages are built once | `publish-pypi` and `publish-npm` upload the files `build-library` made: `0.5.8b2` on PyPI, `0.5.8-beta.2` on npm. `pip install camoufox` skips prereleases without `--pre`; npm installs `latest`, not `next`. |
 | The pairing | `ci.release stamp` writes the paired browser release into `python/src/camoufox/browser-pin.json`, which both launchers read. On `main` the file is `{}`, so a development checkout follows its channel. |
-| Promotion | A `vX.Y.Z` tag is refused unless the commit is on `main`, `All tests passed` succeeded on it, X.Y.Z is newer than every release, and a browser release was built from its sources. The paired browser becomes the stable release without a rebuild. |
+| Promotion | Refused unless the commit is on `main`, `All tests passed` succeeded on it, X.Y.Z is newer than every release, and a browser release was built from its sources. The paired browser becomes the stable release without a rebuild. |
 | Failed publish | Re-run the failed jobs; every version and tag comes from `plan`. |
 | Credentials | None stored. PyPI and npm use trusted publishing (OIDC) from `release.yml`. |
 
@@ -269,7 +279,7 @@ Releases cut before manifests existed (up to `v156.0.1-beta.32`) pair by the tag
 | `python3 -m ci.run_pythonlib` | | `python/`'s tests |
 | `python3 -m ci.run_typescript` | | `typescript/`'s tests |
 | `python3 -m ci.run_typescript --browser <bin>` | yes | The npm launcher end to end |
-| `python3 -m ci.run_install --tmpdir /mnt/tmpfs` | | Packed packages and a real fetch; the tmpdir must be its own filesystem |
+| `python3 -m ci.run_install --tmpdir /mnt/tmpfs --browser <bin>` | yes | Packed packages, a real fetch, and a launch, click and typing through each installed package; the tmpdir must be its own filesystem |
 | `python3 -m ci.run_patch_guards --binary <bin>` | yes | Patch guards; `--group spoofing\|automation\|parity`, `--only <name>` |
 | `python3 -m ci.run_patch_guards --binary <bin> --only stock-gpu-parity` | yes | WebGL and WebGPU against stock Firefox of the same version, downloaded into `.ci-work` ([upgrade step](../docs/patch-upgrading-guide.md#browser-owned-gpu-values)) |
 | `python3 -m ci.run_build_tester --binary <bin>` | yes | build-tester |
@@ -280,6 +290,7 @@ Releases cut before manifests existed (up to `v156.0.1-beta.32`) pair by the tag
 | `python3 -m ci.run_native --subset growth --binary <bin>` | yes | Memory growth; `--shard 3/7` for one test |
 | `python3 -m ci.run_sundial --binary <bin>` | yes | The stealth grade (needs the credential) |
 | `python3 -m ci.summarize --results-dir .ci-work/results` | | The summary table |
+| `GITHUB_EVENT_NAME=schedule python3 -m ci.release target` | | What the train would promote |
 | `python3 -m ci.release browser-plan` | | Whether a browser would be built or reused |
 | `python3 -m ci.release paired` | | The release built from this tree |
 | `python3 -m ci.release lib-plan --channel prerelease` | | The next library version |
