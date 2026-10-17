@@ -19,30 +19,35 @@ CAMOU_OBSERVE=1 /path/to/camoufox-bin
 ```
 
 With the variable unset (or `0`), nothing registers: no actor, no network
-observer, no panel, and the C++ ring buffer is never touched.
+observer, and the C++ ring buffer is never touched.
 
 ## Reading the results
 
-Open the panel in a tab:
+The records live in the parent process `Collector`. Read them from
+chrome-privileged script, for example Marionette's `using_context("chrome")`:
 
+```js
+const { getCollector } = ChromeUtils.importESModule(
+  "resource://gre/modules/TrackingObserver.sys.mjs"
+);
+getCollector().snapshot();
 ```
-chrome://camoufox/content/tracking.html
-```
 
-(There is deliberately no toolbar button or auto-open — navigate to the URL.)
+`browser/tests/build-tester/observer/harness.py` does this. There is no panel:
+a page for it needs a chrome package, and a registered chrome package is
+visible to every web page (`additions-register-no-new-chrome-package` in
+`ci/tribal-rules.yml`).
 
-Each row is one `(site, userContextId)` pair, showing:
+`snapshot()` returns one row per `(site, userContextId)` pair, each with:
 
-- **surface badges + counts** — which fingerprint APIs the page read and how
-  many times (e.g. `canvas:3`, `webgl:12`, `fonts:1`, `webrtc:2`).
-- **request count** — how many network requests that site issued.
-- **top third-party hosts** it talked to.
-
-`facebook.com`, `instagram.com`, `threads.net` are pinned and highlighted.
+- **`surfaces`** — which fingerprint APIs the page read and how many times,
+  keyed by surface id (`1` canvas, `2` webgl, `3` webrtc, `4` navigator,
+  `5` screen, `6` fonts, `7` audio).
+- **`requests`** — the network requests that site issued.
 
 ## What it CANNOT see (read this — silence is not safety)
 
-The panel lists a **"Not observable"** section for a reason. A surface being
+The list below matters. A surface being
 absent from a row does **not** mean the site didn't read it. The observer is
 blind to:
 
@@ -57,7 +62,7 @@ blind to:
 - **Worker / OffscreenCanvas** reads that happen off the main thread with no
   owning document.
 
-Treat the panel as "spoofed-surface consultations," not "everything they read."
+Treat the rows as "spoofed-surface consultations," not "everything they read."
 
 ## Attribution granularity
 
@@ -97,10 +102,9 @@ page reads a fingerprint surface (canvas readback, ...)
   → TrackingObserverChild drains via ChromeUtils.camouDrainAccessRecords() on a timer
   → sendAsyncMessage → TrackingObserverParent → Collector          [parent, memory-only]
 network: http-on-modify-request (read-only) → Collector.ingestNet(...)
-Collector change → Services.obs notify → chrome://camoufox panel re-renders
 ```
 
-The read path does only the ring-buffer push; all IPC, JSON, and rendering
+The read path does only the ring-buffer push; all IPC and JSON
 happen asynchronously off that path.
 
 ## Scope / status

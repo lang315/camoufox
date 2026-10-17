@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #258: the tracking panel registered a chrome package that pages can detect
+
+**Fixed by:** the PR that deletes `browser/additions/observer/jar.mn` and the panel. **Found by:** reading the sync with upstream #847 (#256) against the observer additions.
+
+**Symptom.** None observed in a browser. Upstream's `contentaccessible-parity.py` compares the registered chrome names of a build with a stock Firefox 156.0.1 and reports any extra one as `EXTRA vs stock -- <name> (pages can detect it)`. Camoufox registered `camoufox`.
+
+**Root cause.** `browser/additions/observer/jar.mn` began with `% content camoufox %content/` and `0-playwright.patch` packaged `chrome/camoufox.jar` and `chrome/camoufox.manifest` in every build, whether or not `CAMOU_OBSERVE=1` was set. Content processes receive every registered chrome package, and `new Worker('chrome://camoufox/...')` returns for a registered name and throws a SecurityError for an absent one (#847, `juggler-is-not-a-chrome-package`). The only user of the package was the tracking panel, which has no button and was opened by typing its URL. No test opened it: `build-tester/observer` reads `getCollector().snapshot()` through Marionette chrome context.
+
+**Fix.** The package, the four panel files and their unit test are deleted, along with the `camoufox` lines of `package-manifest.in` in `0-playwright.patch` and the `camoufox-observer:update` notification that only the panel listened to. The observer modules stay in `EXTRA_JS_MODULES`, so they are served from `resource://gre/modules/`, a host every Firefox registers. The rule is `additions-register-no-new-chrome-package` in `ci/tribal-rules.yml`. Alternatives, from reading the Firefox 156.0.1 sources and not run: serving the page from `resource://` does not work, because `nsChromeProtocolHandler.cpp` gives the system principal only to `chrome://` paths under `/content/` or `/skin/` and `nsResProtocolHandler.cpp` sets no owner, so the panel's `ChromeUtils` and `Services` would be undefined; a build flag keeps a second build flavor for a page nobody opens; a file in a stock package that is not contentaccessible (`mozapps`, `remote`) was not tried.
+
+**Evidence.** `test_additions_register_no_new_chrome_package` reads every `jar.mn` under `browser/additions` and checks each `% content|locale|skin|resource` name against `browser/scripts/data/contentaccessible-manifest.json`. Before the fix it fails with `['browser/additions/observer/jar.mn: content camoufox']`; after, it passes. It reads source, so it shows the package is no longer declared, not that a built browser registers no extra name. The browser-side check is `contentaccessible-parity.py` on a build, not run for this change.
+
+**What misled the investigation.** #847's fix and guard were written for Juggler, so the guard reads as if it closes the whole class; it only fails once a build carries the extra name. The observer's own docs say it is off by default, which is true of its data and false of its package.
+
 ## #247: a legacy font family name drew the fallback for the first seconds of a launch
 
 **Fixed by:** the PR that adds `browser/patches/font-other-names-sync.patch`. **Found by:** explaining a width mismatch listed in #246.

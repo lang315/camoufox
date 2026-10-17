@@ -867,3 +867,19 @@ def test_juggler_is_not_a_chrome_package():
         if f.is_file() and "chrome://juggler" in f.read_text(encoding="utf-8", errors="replace")
     ]
     assert not referencing, f"{referencing}\n" + explain("juggler-is-not-a-chrome-package")
+
+
+def test_additions_register_no_new_chrome_package():
+    """Rule: additions-register-no-new-chrome-package."""
+    registered = json.loads(
+        (BROWSER / "scripts" / "data" / "contentaccessible-manifest.json").read_text(encoding="utf-8")
+    )["registered"]
+    extra = []
+    for jar in sorted((BROWSER / "additions").rglob("jar.mn")):
+        for line in jar.read_text(encoding="utf-8").splitlines():
+            words = line.split()
+            if len(words) >= 3 and words[0] == "%":
+                kind, name = words[1], words[2]
+                if name not in registered.get(kind, []):
+                    extra.append(f"{jar.relative_to(REPO_ROOT)}: {kind} {name}")
+    assert not extra, f"{extra}\n" + explain("additions-register-no-new-chrome-package")

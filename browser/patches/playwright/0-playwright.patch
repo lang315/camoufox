@@ -75,20 +75,6 @@ index 8337336dc8..9eb83f33bb 100644
  
    DWORD creationFlags = CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT;
  
-diff --git a/browser/installer/package-manifest.in b/browser/installer/package-manifest.in
-index 46725ca049..87822cd648 100644
---- a/browser/installer/package-manifest.in
-+++ b/browser/installer/package-manifest.in
-@@ -197,6 +197,9 @@
- @RESPATH@/chrome/remote.manifest
- #endif
- 
-+@RESPATH@/chrome/camoufox@JAREXT@
-+@RESPATH@/chrome/camoufox.manifest
-+
- ; Modules
- @RESPATH@/browser/modules/*
- @RESPATH@/modules/*
 diff --git a/devtools/server/socket/websocket-server.js b/devtools/server/socket/websocket-server.js
 index 257e87fe0c..8c13f02010 100644
 --- a/devtools/server/socket/websocket-server.js

@@ -725,6 +725,19 @@ rules:
       which every Firefox registers. contentaccessible-parity.py compares the
       registered names with a stock release and runs the Worker probe.
 
+  - id: additions-register-no-new-chrome-package
+    title: No addition registers a chrome package or resource host a stock Firefox lacks
+    check: automated
+    evidence:
+      - "issue #847: a registered name is visible to any page through new Worker('chrome://<name>/...'), whatever the files under it do"
+      - "issue #258: the tracking panel's \"% content camoufox\" package, registered in every build though the observer is off unless CAMOU_OBSERVE=1, was the only such name left after #847; nothing opened the panel, and the tests read the Collector through Marionette chrome context"
+    rationale: >-
+      browser/additions/**/jar.mn may only register names that
+      scripts/data/contentaccessible-manifest.json records for a stock release.
+      Chrome code that needs files serves them from resource://gre/modules/,
+      which every Firefox registers. A page of its own, which needs a chrome
+      package to run privileged, is not worth a detectable build.
+
   # -------------------------------------------------------------------------
   # Releases
   # -------------------------------------------------------------------------

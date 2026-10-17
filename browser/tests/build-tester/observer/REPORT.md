@@ -28,10 +28,8 @@ claims)? Task 2 built a probe page that pokes all 7 and read the result back.
 other six are "follow-on work" — that claim is stale; runtime behavior shows all 7 already
 recording.
 
-**Readout method.** Content tabs cannot navigate to `chrome://` URLs at all — a categorical
-restriction, not a misconfiguration — and the `chrome://camoufox` panel itself is compiled
-privileged-only (no `contentaccessible=yes`), so scraping the panel from an automated
-content-tab session is impossible by construction. The observer's records live in the
+**Readout method.** Content tabs cannot navigate to `chrome://` URLs at all, a categorical
+restriction rather than a misconfiguration. The observer's records live in the
 parent-process `Collector`, which is only reachable from chrome-privileged script.
 Marionette's `using_context("chrome")` provides that directly: the harness switches into
 chrome context and runs
@@ -144,7 +142,7 @@ Verbatim, as required to appear in this report:
 > is structurally blind to: TLS ClientHello / JA3-JA4 / HTTP-2 SETTINGS / TCP, WASM
 > internals, Web/Service Workers, OffscreenCanvas, pure-CSS @media probes, timing
 > side-channels, and anything FB computes server-side (datr linkage, egress IP, header
-> order, encrypted beacon payloads). Silence in the panel ≠ the surface was not read, for
+> order, encrypted beacon payloads). Silence in the observer ≠ the surface was not read, for
 > anything unhooked.
 
 ## 5. Timing parity
