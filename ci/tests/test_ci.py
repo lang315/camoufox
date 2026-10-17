@@ -2443,19 +2443,19 @@ def test_excluded_scripts_exist():
         assert (REPO_ROOT / script).is_file(), f"{script} no longer exists"
 
 
-def test_jar_mn_is_read_not_guessed():
+def test_juggler_moz_build_is_read_not_guessed():
     """Two files in one source directory land at different depths.
 
     This is the trap the whole overlay turns on. A prefix rule would write
     JugglerFrameChild.sys.mjs one level too deep, leave the old copy in place,
     and run stale Juggler while every suite went green.
     """
-    from ci.browser_inputs import jar_entries
+    from ci.browser_inputs import resource_entries
 
-    entries = jar_entries()
-    assert entries["browser/additions/juggler/TargetRegistry.js"] == "chrome/juggler/content/TargetRegistry.js"
-    assert entries["browser/additions/juggler/content/FrameTree.js"] == "chrome/juggler/content/content/FrameTree.js"
-    assert entries["browser/additions/juggler/content/JugglerFrameChild.sys.mjs"] == "chrome/juggler/content/JugglerFrameChild.sys.mjs"
+    entries = resource_entries()
+    assert entries["browser/additions/juggler/TargetRegistry.js"] == "modules/juggler/TargetRegistry.js"
+    assert entries["browser/additions/juggler/content/FrameTree.js"] == "modules/juggler/content/FrameTree.js"
+    assert entries["browser/additions/juggler/content/JugglerFrameChild.sys.mjs"] == "modules/juggler/JugglerFrameChild.sys.mjs"
 
 
 def _fake_repo(tmp_path):
@@ -2466,10 +2466,9 @@ def _fake_repo(tmp_path):
     (jug / "Helper.js").write_text("resource\n")
     (jug / "content" / "FrameTree.js").write_text("resource\n")
     (jug / "screencast" / "Encoder.cpp").write_text("native\n")
-    (jug / "jar.mn").write_text(
-        "juggler.jar:\n% content juggler %content/\n"
-        "  content/Helper.js (Helper.js)\n"
-        "  content/content/FrameTree.js (content/FrameTree.js)\n"
+    (jug / "moz.build").write_text(
+        'FINAL_TARGET_FILES.modules.juggler += ["Helper.js"]\n'
+        'FINAL_TARGET_FILES.modules.juggler.content += ["content/FrameTree.js"]\n'
     )
     (tmp_path / "browser" / "upstream.sh").write_text("version=1\n")
     return tmp_path
@@ -2510,23 +2509,23 @@ def test_an_unrecognised_file_counts_as_native(tmp_path):
     assert native_digest(root) != before
 
 
-def test_jar_mn_itself_is_native(tmp_path):
+def test_juggler_moz_build_itself_is_native(tmp_path):
     """It decides the mapping and what is packaged at all.
 
-    If changing it only re-overlaid, a resource removed from jar.mn would keep
-    its stale copy in the dist forever.
+    If changing it only re-overlaid, a resource removed from moz.build would
+    keep its stale copy in the dist forever.
     """
     from ci.browser_inputs import native_digest
 
     root = _fake_repo(tmp_path)
     before = native_digest(root)
-    (root / "browser" / "additions" / "juggler" / "jar.mn").write_text(
-        "juggler.jar:\n% content juggler %content/\n  content/Helper.js (Helper.js)\n"
+    (root / "browser" / "additions" / "juggler" / "moz.build").write_text(
+        'FINAL_TARGET_FILES.modules.juggler += ["Helper.js"]\n'
     )
     assert native_digest(root) != before
 
 
-def test_the_overlay_writes_where_jar_mn_says(tmp_path):
+def test_the_overlay_writes_where_moz_build_says(tmp_path):
     from ci.browser_inputs import overlay
 
     root = _fake_repo(tmp_path)
@@ -2534,10 +2533,10 @@ def test_the_overlay_writes_where_jar_mn_says(tmp_path):
     (root / "browser" / "additions" / "juggler" / "content" / "FrameTree.js").write_text("new js\n")
     written = overlay(dist, root)
     assert sorted(written) == [
-        "chrome/juggler/content/Helper.js",
-        "chrome/juggler/content/content/FrameTree.js",
+        "modules/juggler/Helper.js",
+        "modules/juggler/content/FrameTree.js",
     ]
-    assert (dist / "chrome/juggler/content/content/FrameTree.js").read_text() == "new js\n"
+    assert (dist / "modules/juggler/content/FrameTree.js").read_text() == "new js\n"
 
 
 def test_the_overlay_runs_only_on_a_hit_and_before_the_upload():
@@ -2816,7 +2815,7 @@ def release_repo(tmp_path):
     (repo / "browser" / "upstream.sh").write_text("version=1.0\nrelease=beta.1\n")
     (repo / "browser" / "patches" / "a.patch").write_text("a\n")
     (repo / "browser" / "additions" / "juggler").mkdir(parents=True)
-    (repo / "browser" / "additions" / "juggler" / "jar.mn").write_text("% content juggler %content/\n")
+    (repo / "browser" / "additions" / "juggler" / "moz.build").write_text('FINAL_TARGET_FILES.modules.juggler += []\n')
     (repo / "typescript").mkdir()
     (repo / "typescript" / "x.ts").write_text("x\n")
     _git(repo, "add", "-A")
@@ -2973,3 +2972,118 @@ def test_every_workflow_step_running_verify_fonts_installs_the_package():
                     assert "pip install -e ../python" in run or "pip install -e python" in run, (
                         f"{workflow.name}:{name} runs verify-fonts.py without installing the camoufox package"
                     )
+
+
+# ---------------------------------------------------------------------------
+# the installed packages launch a browser
+# ---------------------------------------------------------------------------
+
+
+def _probe(ua="Mozilla/5.0 (X11; Linux x86_64; rv:156.0) Gecko/20100101 Firefox/156.0", fonts=None):
+    return {"navigator": {"userAgent": ua},
+            "fonts": fonts if fonts is not None else {"Arial": True, "DejaVu Sans": True, "Menlo": False}}
+
+
+def test_a_coherent_installed_launch_has_no_problems():
+    from ci.run_install import identity_problems
+
+    ua = _probe()["navigator"]["userAgent"]
+    assert identity_problems(_probe(), ua, "156.0.1-beta.32", ["Arial", "DejaVu Sans", "Cantarell"]) == []
+
+
+def test_an_installed_launch_must_claim_the_browser_it_runs():
+    from ci.run_install import identity_problems
+
+    ua = "Mozilla/5.0 (X11; Linux x86_64; rv:135.0) Gecko/20100101 Firefox/135.0"
+    problems = identity_problems(_probe(ua), ua, "156.0.1", ["Arial"])
+    assert len(problems) == 1 and "Firefox 156.0.1" in problems[0]
+
+
+def test_an_installed_launch_must_send_the_user_agent_the_page_sees():
+    from ci.run_install import identity_problems
+
+    other = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:156.0) Gecko/20100101 Firefox/156.0"
+    problems = identity_problems(_probe(), other, "156.0.1", ["Arial"])
+    assert len(problems) == 1 and "request's User-Agent" in problems[0]
+
+
+def test_an_installed_launch_must_render_the_fonts_it_claims():
+    """No fonts beside the binary, or a fontconfig that cannot find them, and
+    every family measures as the fallback."""
+    from ci.run_install import identity_problems
+
+    ua = _probe()["navigator"]["userAgent"]
+    missing = identity_problems(_probe(fonts={"Arial": False, "DejaVu Sans": True}), ua, "156.0", ["Arial"])
+    assert len(missing) == 1 and "'Arial'" in missing[0]
+    unmeasured = identity_problems(_probe(fonts={"Menlo": True}), ua, "156.0", ["Arial"])
+    assert len(unmeasured) == 1 and "none of the fonts" in unmeasured[0]
+
+
+_CLICK = {"type": "click", "trusted": True, "target": "button"}
+
+
+def _typed(text, trusted=True, target="input"):
+    return [{"type": t, "trusted": trusted, "target": target} for _ in text for t in ("keydown", "keyup")]
+
+
+def test_a_trusted_click_and_typing_have_no_problems():
+    from ci.run_install import interaction_problems
+
+    assert interaction_problems([_CLICK, *_typed("ab")], "ab", "ab") == []
+
+
+def test_the_click_must_reach_the_button_once_and_trusted():
+    from ci.run_install import interaction_problems
+
+    for clicks in ([], [_CLICK, _CLICK], [{**_CLICK, "trusted": False}], [{**_CLICK, "target": "input"}]):
+        problems = interaction_problems([*clicks, *_typed("ab")], "ab", "ab")
+        assert len(problems) == 1 and "one trusted click" in problems[0], clicks
+
+
+def test_the_typed_text_must_land_in_the_input():
+    from ci.run_install import interaction_problems
+
+    problems = interaction_problems([_CLICK, *_typed("ab")], "a", "ab")
+    assert len(problems) == 1 and "holds 'a'" in problems[0]
+
+
+def test_every_key_must_arrive_trusted_on_the_input():
+    """A dropped key, an untrusted key or one that lands elsewhere is not what
+    a user's typing produces, even when the input ends up holding the text."""
+    from ci.run_install import interaction_problems
+
+    dropped = interaction_problems([_CLICK, *_typed("a")], "ab", "ab")
+    assert len(dropped) == 1 and "typed 2 keys" in dropped[0]
+    untrusted = interaction_problems([_CLICK, *_typed("ab", trusted=False)], "ab", "ab")
+    assert len(untrusted) == 1 and "untrusted" in untrusted[0]
+    elsewhere = interaction_problems([_CLICK, *_typed("ab", target="button")], "ab", "ab")
+    assert len(elsewhere) == 1 and "missed the input" in elsewhere[0]
+
+
+def test_the_install_gate_launches_and_interacts_through_each_installed_package():
+    """`camoufox fetch` alone proved the packages install; nothing launched a
+    browser through them. Each launch goes through the user's import path, the
+    installed package rather than the source tree, also targets the browser
+    under test, and clicks and types the same way from Python and Node."""
+    from ci import run_install
+
+    source = (CI_ROOT / "run_install.py").read_text(encoding="utf-8")
+    assert '"--browser", type=Path, required=True' in source
+    assert '[str(python), "-I", str(PYTHON_PROBE)]' in source
+    assert "shutil.copy(NODE_PROBE, project / NODE_PROBE.name)" in source
+    assert '{"executable_path": str(browser)}' in source
+    python_probe = run_install.PYTHON_PROBE.read_text(encoding="utf-8")
+    node_probe = run_install.NODE_PROBE.read_text(encoding="utf-8")
+    assert "from camoufox.sync_api import Camoufox" in python_probe
+    assert 'import { Camoufox } from "camoufox";' in node_probe
+    for step in ("locator('#button').click()", "locator('#input').press_sequentially(text)"):
+        assert step in python_probe
+    for step in ('locator("#button").click()', 'locator("#input").pressSequentially(req.text)'):
+        assert step in node_probe
+    assert run_install.PROBE.is_file()
+
+    install = _jobs()["install"]
+    assert any(s.get("uses") == "./.github/actions/prepare-browser" for s in install["steps"])
+    assert {"build", "fetch-browser"} <= set(install["needs"])
+    runs = "\n".join(s.get("run") or "" for s in install["steps"])
+    assert '--browser "$CAMOUFOX_BINARY"' in runs
