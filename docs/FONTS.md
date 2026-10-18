@@ -64,8 +64,13 @@ faces), macOS `LM+LMW+M+MW` (779), Windows `LMW+LW+MW+W` (809). Storing a full
 copy per OS instead made 41% of the bundle byte-identical duplicates (2955 files
 / 3.96 GB became 1513 / 2.16 GB) while leaving every OS's set unchanged.
 
-Every package ships **all seven groups**, so the fingerprint is built from the
-fonts actually available. What differs is how they are gated:
+The Linux and Windows packages ship **all seven groups**, so the fingerprint is
+built from the fonts actually available. The macOS package ships every group
+except `M`. A macOS identity on a Mac uses the host's own fonts and never
+activates the bundle. When the bundle is activated, a second copy of the San
+Francisco faces under the system font's names makes CoreText draw the system
+UI font with the wrong glyphs (#259, `macos-package-ships-no-macos-only-fonts`).
+What differs is how the groups are gated:
 
 - **Linux packages** keep the group subdirectories and `groups.json`.
   `utils._generate_fontconfig` reads it at launch and hands fontconfig one

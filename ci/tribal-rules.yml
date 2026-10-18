@@ -457,6 +457,23 @@ rules:
       never received it, or answered without it after it arrived, and fails
       the run when no content process logged a flush with a live font list.
 
+  - id: macos-package-ships-no-macos-only-fonts
+    title: The macOS package bundles the Windows and Linux font groups, never the macOS-only one
+    check: automated
+    evidence:
+      - "issue #259: on a macOS host, fork.5 and fork.6 drew the wrong glyphs for every system-ui string (tab titles, the address bar, page text in system-ui or -apple-system), while 150.0.2-beta.25, packaged with --fonts windows linux, drew them correctly"
+      - "upstream #779 (6daae88) changed package-macos from --fonts windows linux to --fonts windows macos linux, which put ten San Francisco faces (42__SFNS.ttf and others) in Contents/Resources/fonts; the bundled SFNS.ttf is 7,909,644 bytes, and the host's /System/Library/Fonts/SFNS.ttf on macOS 15.7.4 is 8,330,740"
+      - "issue #259, one change each on the same Mac: the installed fork.6 with gfx.bundled-fonts.activate=0 drew correctly, and a fork.5 copy with only the ten *__SF* files removed and the bundle still on drew correctly"
+    rationale: >-
+      font-hijacker.patch activates the bundle on macOS for every launch except
+      a native identity: a launch with no config, and a Windows or Linux
+      identity on a Mac. CoreText then holds two different copies of the system
+      font under one name, and the system UI font draws its glyph ids from the
+      wrong one. The browser's own chrome uses that font whatever the identity
+      claims. A macOS identity on a Mac never activates the bundle, so the
+      macOS-only group is never read there. A Windows or Linux identity reads
+      only its own OS's groups, and the shared groups still ship.
+
   # -------------------------------------------------------------------------
   # Teardown
   # -------------------------------------------------------------------------

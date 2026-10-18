@@ -181,7 +181,7 @@ package-macos: fonts-extract
 		--version $(version) \
 		--release $(release) \
 		--arch $(arch) \
-		--fonts windows macos linux
+		--fonts windows linux
 
 package-windows: fonts-extract
 	python3 scripts/package.py windows \

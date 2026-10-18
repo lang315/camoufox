@@ -12,6 +12,34 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #259: on a Mac, the system UI font drew the wrong glyphs
+
+**Fixed by:** the PR that changes `package-macos` back to `--fonts windows linux`. **Found by:** the maintainer, launching the installed fork.6 app.
+
+**Symptom.** On a macOS host, every string in the system UI font drew wrong glyphs, mostly accented Latin letters in no meaningful order. That covered tab titles, the address bar, the urlbar popup, and page text in `system-ui` or `-apple-system`. `sans-serif`, `Helvetica` and `menu` drew correctly. It showed in two cases:
+- a bare launch with a fresh profile and no `CAMOU_CONFIG`;
+- a Windows identity through the Python launcher.
+
+Affected builds: fork.6 (BuildID `20261017141913`) and fork.5 (`20261016094712`). `150.0.2-beta.25` drew correctly.
+
+**Root cause.** Upstream #779 (6daae88) changed `package-macos` from `--fonts windows linux` to `--fonts windows macos linux`. The macOS package then carried the `M` group: 311 faces, ten of them San Francisco (`42__SFNS.ttf`, `34__SFNSItalic.ttf`, `41__SFNSMono.ttf`, ...). They are not the host's copies. The bundled `SFNS.ttf` is 7,909,644 bytes; the host's `/System/Library/Fonts/SFNS.ttf` on macOS 15.7.4 is 8,330,740.
+
+`font-hijacker.patch` skips `ActivateBundledFonts()` only when `MaskConfig::GetSpoofedOS()` is macOS. Every other launch registers the bundle with CoreText, so the process holds a second, different SF under the system font's names, and the system UI font draws glyph ids from the wrong one. The chrome uses that font whatever the identity claims.
+
+**Fix.** `package-macos` ships the Windows and Linux groups again: 1202 faces, `L+LM+LMW+LW+MW+W`. A macOS identity on a Mac never activates the bundle, so `M` was never read there. `browser/assets/macos.mozconfig` and `CLAUDE.md` already described the package this way. The rule is `macos-package-ships-no-macos-only-fonts` in `ci/tribal-rules.yml`, so an upstream sync cannot quietly bring the line back.
+
+Alternative, not taken: filter the target's own OS group in `package.py`. The tribal test guards the Makefile line just as well, with no code. Changing the C++ gate needs a rebuild and does not remove the duplicate faces.
+
+**Evidence.** All on the same Mac (arm64, macOS 15.7.4), each with a fresh profile:
+- `test_the_macos_package_ships_no_macos_only_fonts` fails on `main` (`['windows', 'macos', 'linux'] == ['windows', 'linux']`) and passes after the change.
+- The installed fork.6 with only `gfx.bundled-fonts.activate=0` drew correctly.
+- A fork.5 copy with only the ten `*__SF*` files removed, and the bundle still on, drew correctly.
+- A copy of fork.6 with the 311 `M` files removed is exactly this fix's file set (read from the pinned `fonts-bundle-v1.tar.xz`). It drew correctly both bare and under a Windows identity through the launcher. Unchanged fork.6 drew wrong glyphs in both.
+
+The macOS arm64 package built from this branch (build run 39097137899, BuildID `20261018051233`) holds the same 1202 files. It drew correctly both bare and under a Windows identity, and its e2e run (39103040059) passed: 108 passed on macOS.
+
+**What misled the investigation.** e2e (108 passed on macOS) and build-tester (grade A) read pages, never the chrome. Whether any of their checks draws `system-ui` text was not looked into. Two guards that read `system-ui` on a macOS host, `context-os-system-font` and `system-ui-font-spoofing`, fail on this Mac. It was tempting to blame this bug. They fail identically on the fixed file set: a macOS context on a Mac is native and gets no `system-ui` override (`('system-ui', 'none')`), while the guards expect Helvetica, as on Linux CI. That is a separate, host-dependent expectation.
+
 ## #258: the tracking panel registered a chrome package that pages can detect
 
 **Fixed by:** the PR that deletes `browser/additions/observer/jar.mn` and the panel. **Found by:** reading the sync with upstream #847 (#256) against the observer additions.

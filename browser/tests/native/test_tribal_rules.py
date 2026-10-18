@@ -334,6 +334,21 @@ def test_no_third_party_camoufox_distribution_is_installed():
 
 
 # ---------------------------------------------------------------------------
+# fonts
+# ---------------------------------------------------------------------------
+
+
+def test_the_macos_package_ships_no_macos_only_fonts():
+    """Rule: macos-package-ships-no-macos-only-fonts."""
+    makefile = (BROWSER / "Makefile").read_text(encoding="utf-8")
+    recipe = re.search(r"^package-macos:.*\n((?:\t.*\n)+)", makefile, re.M)
+    assert recipe, "no package-macos recipe in browser/Makefile"
+    fonts = re.search(r"--fonts ([^\\\n]+)", recipe.group(1))
+    assert fonts, "package-macos passes no --fonts"
+    assert fonts.group(1).split() == ["windows", "linux"], explain("macos-package-ships-no-macos-only-fonts")
+
+
+# ---------------------------------------------------------------------------
 # teardown
 # ---------------------------------------------------------------------------
 
