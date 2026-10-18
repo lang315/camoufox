@@ -36,7 +36,7 @@ Alternative, not taken: filter the target's own OS group in `package.py`. The tr
 - A fork.5 copy with only the ten `*__SF*` files removed, and the bundle still on, drew correctly.
 - A copy of fork.6 with the 311 `M` files removed is exactly this fix's file set (read from the pinned `fonts-bundle-v1.tar.xz`). It drew correctly both bare and under a Windows identity through the launcher. Unchanged fork.6 drew wrong glyphs in both.
 
-A macOS arm64 package built from this branch is linked from the pull request.
+The macOS arm64 package built from this branch (build run 39097137899, BuildID `20261018051233`) holds the same 1202 files. It drew correctly both bare and under a Windows identity, and its e2e run (39103040059) passed: 108 passed on macOS.
 
 **What misled the investigation.** e2e (108 passed on macOS) and build-tester (grade A) read pages, never the chrome. Whether any of their checks draws `system-ui` text was not looked into. Two guards that read `system-ui` on a macOS host, `context-os-system-font` and `system-ui-font-spoofing`, fail on this Mac. It was tempting to blame this bug. They fail identically on the fixed file set: a macOS context on a Mac is native and gets no `system-ui` override (`('system-ui', 'none')`), while the guards expect Helvetica, as on Linux CI. That is a separate, host-dependent expectation.
 
