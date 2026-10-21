@@ -1,5 +1,5 @@
 diff --git a/dom/base/ChromeUtils.cpp b/dom/base/ChromeUtils.cpp
-index dac837e733..ddc4628ef7 100644
+index fa5b75742a..009c1bc3c5 100644
 --- a/dom/base/ChromeUtils.cpp
 +++ b/dom/base/ChromeUtils.cpp
 @@ -3,6 +3,7 @@
@@ -15,10 +15,10 @@ index dac837e733..ddc4628ef7 100644
  #include "jsfriendapi.h"
  #include "mozJSModuleLoader.h"
 +#include "AccessObserver.hpp"
+ #include "mozilla/AwakeTimeStamp.h"
  #include "mozilla/Base64.h"
  #include "mozilla/ChromeProfilerCounter.h"
- #include "mozilla/Components.h"
-@@ -2717,6 +2719,27 @@ bool ChromeUtils::IsDarkBackground(GlobalObject&, Element& aElement) {
+@@ -2724,6 +2726,27 @@ bool ChromeUtils::IsDarkBackground(GlobalObject&, Element& aElement) {
    return nsNativeTheme::IsDarkBackground(f);
  }
  
@@ -46,7 +46,7 @@ index dac837e733..ddc4628ef7 100644
  double ChromeUtils::DateNow(GlobalObject&) { return JS_Now() / 1000.0; }
  
  /* static */
-@@ -2748,6 +2771,57 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
+@@ -2761,6 +2784,57 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
    }
  }
  
@@ -105,7 +105,7 @@ index dac837e733..ddc4628ef7 100644
  bool ChromeUtils::ShouldResistFingerprinting(
      GlobalObject& aGlobal, JSRFPTarget aTarget,
 diff --git a/dom/base/ChromeUtils.h b/dom/base/ChromeUtils.h
-index 8226005acc..b5ab85fb84 100644
+index d90be60e07..698ca2d90a 100644
 --- a/dom/base/ChromeUtils.h
 +++ b/dom/base/ChromeUtils.h
 @@ -340,6 +340,12 @@ class ChromeUtils {
@@ -121,7 +121,7 @@ index 8226005acc..b5ab85fb84 100644
    static double DateNow(GlobalObject&);
  
    static double Now(GlobalObject&);
-@@ -351,6 +357,20 @@ class ChromeUtils {
+@@ -353,6 +359,20 @@ class ChromeUtils {
    static void GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
                                                nsTArray<nsCString>& aNames);
  
@@ -143,10 +143,10 @@ index 8226005acc..b5ab85fb84 100644
        GlobalObject& aGlobal, JSRFPTarget aTarget,
        nsIRFPTargetSetIDL* aOverriddenFingerprintingSettings,
 diff --git a/dom/chrome-webidl/ChromeUtils.webidl b/dom/chrome-webidl/ChromeUtils.webidl
-index 7434ef25ae..60aef7d8f5 100644
+index cc2b266bdd..516d0809f9 100644
 --- a/dom/chrome-webidl/ChromeUtils.webidl
 +++ b/dom/chrome-webidl/ChromeUtils.webidl
-@@ -926,6 +926,18 @@ partial namespace ChromeUtils {
+@@ -934,6 +934,18 @@ partial namespace ChromeUtils {
     */
    boolean isDarkBackground(Element element);
  
@@ -165,7 +165,7 @@ index 7434ef25ae..60aef7d8f5 100644
    /**
     * Starts the JSOracle process for ORB JavaScript validation, if it hasn't started already.
     */
-@@ -937,6 +949,31 @@ partial namespace ChromeUtils {
+@@ -945,6 +957,31 @@ partial namespace ChromeUtils {
    [ChromeOnly]
    readonly attribute unsigned long aliveUtilityProcesses;
  
