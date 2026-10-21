@@ -25,7 +25,7 @@ import pytest
 # Make `import camoufox` resolve to the in-tree python/src without an install.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from camoufox import async_api, sync_api  # noqa: E402
+from camoufox import async_api, sync_api, utils  # noqa: E402
 
 
 class _FakeVirtualDisplay:
@@ -43,8 +43,8 @@ class _FakeVirtualDisplay:
 @pytest.fixture
 def fake_vd(monkeypatch):
     _FakeVirtualDisplay.instances = []
-    monkeypatch.setattr(async_api, "VirtualDisplay", _FakeVirtualDisplay)
-    monkeypatch.setattr(sync_api, "VirtualDisplay", _FakeVirtualDisplay)
+    # Both entry points start the display through utils.start_virtual_display.
+    monkeypatch.setattr(utils, "VirtualDisplay", _FakeVirtualDisplay)
     return _FakeVirtualDisplay
 
 
