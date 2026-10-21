@@ -241,6 +241,37 @@ def test_gate_result_keeps_the_best_outcome_across_retries():
     assert result.tests["t"] == "pass"
 
 
+def test_a_rerun_job_result_replaces_the_first_attempts(tmp_path, monkeypatch):
+    """"Rerun failed jobs" must be able to turn the summary green.
+
+    Every attempt's `results-*` artifacts stay in the run, and the summary
+    merges them all into one directory. When both attempts wrote
+    native_browser.json, one overwrote the other in no particular order: run
+    36266928260's rerun passed, and the summary still reported attempt 1's
+    failure. A rerun's result must land beside the first and win.
+    """
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    results.GateResult(gate="native_browser").finish(results.FAIL).save(tmp_path)
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "2")
+    results.GateResult(gate="native_browser").finish(results.PASS).save(tmp_path)
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "1")
+    results.GateResult(gate="patch_guards").finish(results.PASS).save(tmp_path)
+
+    assert len(list(tmp_path.glob("native_browser*.json"))) == 2
+    merged = results.load_all(tmp_path)
+    assert merged["native_browser"]["status"] == results.PASS
+    assert merged["patch_guards"]["status"] == results.PASS
+    assert results.load("native_browser", tmp_path)["status"] == results.PASS
+
+
+def test_a_later_attempt_wins_whatever_order_the_files_sort_in(tmp_path, monkeypatch):
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "10")
+    results.GateResult(gate="g").finish(results.PASS).save(tmp_path)
+    monkeypatch.setenv("GITHUB_RUN_ATTEMPT", "9")
+    results.GateResult(gate="g").finish(results.FAIL).save(tmp_path)
+    assert results.load_all(tmp_path)["g"]["status"] == results.PASS
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -484,6 +515,28 @@ def test_every_native_test_file_is_actually_run():
     missing = on_disk - wired
     assert not missing, f"browser/tests/native files that no subset runs: {sorted(missing)}"
     assert not wired - on_disk, f"runner lists files that do not exist: {sorted(wired - on_disk)}"
+
+
+def test_the_gpu_subset_is_never_part_of_all():
+    """No runner has a GPU, and the CI browser job runs `--subset browser`."""
+
+    from ci.run_native import FILES
+
+    assert "test_gpu_display.py" in FILES["gpu"]
+    assert not any("test_gpu_display.py" in group for name, group in FILES.items() if name != "gpu")
+
+
+def test_the_gpu_subset_without_a_card_is_an_error(monkeypatch, tmp_path):
+    """test_gpu_display.py skips itself without CAMOUFOX_GPU; asked for by name,
+    an all-skipped run would read as a pass."""
+
+    from ci import run_native
+
+    monkeypatch.delenv("CAMOUFOX_GPU", raising=False)
+    monkeypatch.setattr(run_native, "run_pytest", lambda **kw: pytest.fail("ran pytest"))
+    assert run_native.main(["--subset", "gpu", "--results-dir", str(tmp_path)]) == 1
+    (record,) = tmp_path.glob("*.json")
+    assert json.loads(record.read_text())["status"] == "error"
 
 
 # ---------------------------------------------------------------------------
