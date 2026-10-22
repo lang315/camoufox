@@ -134,6 +134,75 @@ def test_the_gate_lets_install_skip_on_a_fork_only():
     assert "REPOSITORY: ${{ github.repository }}" in gate
 
 
+# --- the gate's table ----------------------------------------------------------
+
+GATE_TIERS = (
+    "resolve static pythonlib typescript install build fetch-browser playwright "
+    "patch-guards build-tester native typescript-browser growth e2e sundial summary"
+).split()
+
+
+def _run_gate(results: dict, *, built="true", has_sundial="false", repository="lang315/camoufox"):
+    """Run the gate job's own script with a synthetic `needs` and return the
+    process and the mark printed for each tier."""
+    import json
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    gate = _job_block(WORKFLOW.read_text(encoding="utf-8"), "gate")
+    script = gate.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
+    needs = {name: {"result": results.get(name, "success")} for name in GATE_TIERS}
+    env = {
+        **os.environ,
+        "RESULTS": json.dumps(needs),
+        "BROWSER_CHANGED": built,
+        "HAS_SUNDIAL": has_sundial,
+        "REPOSITORY": repository,
+    }
+    proc = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)], env=env, capture_output=True, text=True
+    )
+    table = proc.stdout.split("tier results:", 1)[1].split("\n\n", 1)[0]
+    marks = {line.split()[1]: line.split()[0] for line in table.strip().splitlines()}
+    return proc, marks
+
+
+def test_the_gate_marks_an_excused_skip_as_a_skip_not_a_failure():
+    """On a fork the fetch, install and sundial tiers are skipped by design, and
+    the gate still printed FAIL beside them above "this pull request is
+    mergeable" (runs 39793265227 and 39801913772, #273)."""
+    proc, marks = _run_gate(
+        {"fetch-browser": "skipped", "install": "skipped", "sundial": "skipped"}
+    )
+    assert proc.returncode == 0, proc.stdout
+    assert {marks[t] for t in ("fetch-browser", "install", "sundial")} == {"skip"}
+    assert "FAIL" not in marks.values()
+    assert marks["pythonlib"] == "ok"
+
+
+def test_the_gate_fails_a_skip_that_nothing_excuses():
+    proc, marks = _run_gate({"playwright": "skipped"})
+    assert proc.returncode == 1
+    assert marks["playwright"] == "FAIL"
+    assert "not mergeable:\n  - playwright: skipped" in proc.stdout
+
+
+def test_the_gate_fails_a_tier_that_failed():
+    proc, marks = _run_gate({"pythonlib": "failure"})
+    assert proc.returncode == 1
+    assert marks["pythonlib"] == "FAIL"
+    assert "not mergeable:\n  - pythonlib: failure" in proc.stdout
+
+
+def test_the_gate_does_not_excuse_a_skip_the_run_did_not_earn():
+    """fetch-browser may skip only when the browser was built."""
+    proc, marks = _run_gate({"fetch-browser": "skipped"}, built="false")
+    assert proc.returncode == 1
+    assert marks["fetch-browser"] == "FAIL"
+
+
 # --- build.yml ---------------------------------------------------------------
 
 

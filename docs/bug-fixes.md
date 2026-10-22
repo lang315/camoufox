@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #273: the tests gate printed FAIL beside a tier it had allowed to be skipped
+
+**Fixed by:** the PR that derives each tier's mark in the `gate` job of `.github/workflows/tests.yml` from the same decision that fills `problems`. **Found by:** the gate logs of runs 39793265227 and 39801913772.
+
+**Symptom.** On every fork pull request the gate printed `FAIL  fetch-browser  skipped`, `FAIL  install  skipped` and `FAIL  sundial  skipped`, and then `every tier passed; this pull request is mergeable.`
+
+**Root cause.** The loop that fills `problems` excuses a skipped tier through `may_skip`. The table printed after it chose its own mark with `mark = "ok  " if result == "success" else "FAIL"`, which ignores `may_skip`, so the two disagreed about the same tier.
+
+**Fix.** The loop records one mark per tier (`ok`, `skip` or `FAIL`) and appends to `problems` only where it records `FAIL`. The table prints those marks. No second condition remains.
+
+**Evidence.**
+- Red: `ci/tests/test_fork_workflow.py::test_the_gate_marks_an_excused_skip_as_a_skip_not_a_failure` runs the gate's own script (extracted from the workflow with `_job_block`) with a synthetic `needs` and failed with `assert {'FAIL'} == {'skip'}`.
+- Green: the same file, 13 passed, and `python3 -m pytest ci/tests -q`, 261 passed. The other three new tests (a skip nothing excuses, a failed tier, a `fetch-browser` skip on a run that built the browser) pass before and after: they pin the behaviour that must not change.
+
+**What misled the investigation.** The exit code and the final line were right, so the gate looked correct. Only the table was wrong, and no test ran the script: the existing tests string-match the YAML.
+
 ## #265: the reference Firefox's service worker registration ran out of the page's 8 s budget on Windows
 
 **Fixed by:** the PR that adds `reference_verdict` to `e2e/util.py` and gives the service worker probe in `e2e/web/pages/apps.html` its own 20 s budget. **Found by:** e2e run 39734508472, Windows leg.
