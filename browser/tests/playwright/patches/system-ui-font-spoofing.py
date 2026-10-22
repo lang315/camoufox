@@ -4,6 +4,8 @@ Verify the system-ui font spoofing patch (system-ui-font-spoofing.patch).
 The patch reads navigator.platform from MaskConfig and returns the appropriate
 system font for GetSystemUIFontFamilies(): Helvetica for macOS, Segoe UI for
 Windows. Without it, Linux spoofing macOS resolves system-ui to "Sans" via GTK.
+A macOS identity on a macOS host is native and is not spoofed: system-ui is the
+host's own system font, which stock names -apple-system (#263).
 
 Usage:
     python browser/tests/playwright/patches/system-ui-font-spoofing.py
@@ -31,7 +33,7 @@ from helpers import launch_camoufox
 
 
 EXPECTED_FONT = {
-    "macos": "Helvetica",
+    "macos": "-apple-system" if sys.platform == "darwin" else "Helvetica",
     "windows": "Segoe UI",
 }
 
@@ -52,7 +54,7 @@ MEASURE_TEXT_JS = """(() => {
     }
 
     // Named fonts — direct lookup via FindAndAddFamiliesLocked
-    for (const name of ['Helvetica', 'Helvetica Neue', 'Segoe UI', 'Sans']) {
+    for (const name of ['Helvetica', 'Helvetica Neue', 'Segoe UI', 'Sans', '-apple-system']) {
         ctx.font = '72px "' + name + '", monospace';
         results[name] = ctx.measureText(testStr).width;
     }

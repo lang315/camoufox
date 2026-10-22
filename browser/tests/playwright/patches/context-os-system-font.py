@@ -25,10 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import resolve_binary  # noqa: E402
 
 # navigator.platform -> (the family `font: caption` computes to, the family
-# system-ui resolves to), as the patches spoof them.
+# system-ui resolves to), as the patches spoof them. A macOS context on a Mac is
+# native, so system-ui is the host's own system font, which stock names
+# -apple-system, not the Helvetica a spoofed macOS context gets (#263).
 EXPECTED = {
     "Win32": ("Segoe UI", "Segoe UI"),
-    "MacIntel": ("-apple-system", "Helvetica"),
+    "MacIntel": ("-apple-system", "-apple-system" if sys.platform == "darwin" else "Helvetica"),
 }
 
 PROBE = """(uiFamily) => {

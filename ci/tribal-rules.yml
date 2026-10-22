@@ -556,6 +556,24 @@ rules:
       macOS-only group is never read there. A Windows or Linux identity reads
       only its own OS's groups, and the shared groups still ship.
 
+  - id: native-system-ui-family-never-masked
+    title: A native identity's system UI family is never refused by the launch font mask
+    check: automated
+    evidence:
+      - "issue #263: under os=macos on a Mac, system-ui measured 391.367 with a serif fallback and 500.933 with a monospace one (resolved to nothing) while -apple-system measured 431, on 158.0-beta.33 fork.1, fork.7 and fork.6; stock Firefox 158.0 on the same Mac measured both at 431"
+      - "MOZ_LOG=fontlist:5 on that build: `CAMOU-FL pref-fallback ctx=6 key=.sf ns allowed=0`, then `step=system-ui key=none`; the same identity list plus .SF NS resolved system-ui to 431 with `allowed=1`"
+      - "commit 41b0944 (#188) sent a native identity's system-ui down the pref path and asserted its family would pass the read filter like every pref font; it was never measured on a Mac"
+    rationale: >-
+      A native identity resolves system-ui as the host does, so the family
+      GetSystemUIFontFamilies names is the OS's own. No font list names it: on
+      a Mac it is the hidden .SF NS behind the name -apple-system, which
+      CoreTextFontList answers before the mask, so the CSS name drew San
+      Francisco while system-ui drew the default serif and a page could tell
+      the two apart. The family is exempted by
+      CamouIsNativeSystemUIFamily and no other pref family is. The alternative
+      of adding the name to the font lists was rejected: the hidden name varies
+      with the macOS version, and every launcher would need it.
+
   # -------------------------------------------------------------------------
   # Teardown
   # -------------------------------------------------------------------------

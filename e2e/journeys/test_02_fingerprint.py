@@ -1,6 +1,8 @@
 """Journey 2: what an ordinary page reads agrees with itself and with what the
 server received (oracle C), for each OS a user can ask for (oracle A)."""
 
+import platform
+
 import pytest
 
 from oracle import coherence
@@ -68,4 +70,39 @@ def test_new_context_fingerprint_is_coherent(drv, site, os_name, check):
     print(cite("unique_context"))
     fp, req = measure(drv, site, identity=True, os=os_name)
     report(check, fp, req, os_name)
+    check.done()
+
+
+# One string measured with a serif and with a monospace fallback: a family that resolves
+# measures the same under both, a name that does not exist cannot.
+SYSTEM_UI_WIDTHS = """(() => {
+  const w = (stack) => {
+    const s = document.createElement("span");
+    s.style.cssText = "position:absolute;visibility:hidden;white-space:nowrap;font-size:32px;font-family:" + stack;
+    s.textContent = "Hamburgefonstiv 0123456789";
+    document.body.appendChild(s);
+    const r = s.getBoundingClientRect().width;
+    s.remove();
+    return r;
+  };
+  const both = (f) => ({serif: w(f + ",serif"), mono: w(f + ",monospace")});
+  return {systemUi: both("system-ui"), appleSystem: both("-apple-system"), absent: both('"No Such Family 263"')};
+})()"""
+
+
+def test_system_ui_resolves_to_the_system_font_of_a_mac(drv, site, check):
+    """A macOS identity on a Mac is native: system-ui is the face -apple-system is.
+    Stock Firefox 158.0 on a Mac measures both at 431 px (#263: the launch font mask
+    refused the hidden family system-ui names there, so it fell to the default serif)."""
+    if platform.system() != "Darwin":
+        pytest.skip("a native macOS identity needs a macOS host")
+    b = drv.launch(os="macos")
+    page = b.new_context().new_page()
+    page.goto(site.url("/"))
+    w = page.eval(SYSTEM_UI_WIDTHS)
+    print(f"widths (serif fallback, monospace fallback): {w}")
+    check(w["absent"]["serif"] != w["absent"]["mono"], "a family that does not exist measures differently under the two fallbacks (else VACUOUS)", ledger=False)
+    check(w["systemUi"]["serif"] == w["systemUi"]["mono"], f"system-ui resolves to a family: {w['systemUi']}")
+    check(w["systemUi"]["serif"] == w["appleSystem"]["serif"], f"system-ui is the face -apple-system is: {w['systemUi']['serif']} vs {w['appleSystem']['serif']}")
+    b.close()
     check.done()
