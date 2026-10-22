@@ -437,6 +437,7 @@ def test_a_native_identitys_system_ui_family_is_never_masked():
     patch = (BROWSER / "patches" / "system-ui-font-spoofing.patch").read_text(encoding="utf-8")
     why = explain("native-system-ui-family-never-masked")
     assert "+bool gfxPlatformFontList::CamouIsNativeSystemUIFamily(" in patch, why
+    assert "+bool gfxPlatformFontList::CamouIsNativeSystemUIName(" in patch, why
     assert re.search(r"\+\s+CamouIsNativeSystemUIFamily\(aFontVisibilityProvider, aGenericType,", patch), why
     assert "exempt=native-system-ui" in patch, why
 

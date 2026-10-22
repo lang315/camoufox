@@ -1,5 +1,5 @@
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index d642800..fff7c83 100644
+index d642800d45..6ae9a39f90 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -31,6 +31,7 @@
@@ -10,7 +10,30 @@ index d642800..fff7c83 100644
  #include "mozilla/gfx/2D.h"
  #include "mozilla/gfx/Logging.h"
  #include "mozilla/glean/GfxMetrics.h"
-@@ -2672,9 +2673,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
+@@ -2167,7 +2168,12 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+                               : FontVisibility::User;
+ 
+   // Camoufox: content only ever resolves families from the spoofed font list.
+-  if (MaskedFontListBlocks(aFontVisibilityProvider, key)) {
++  // The one exception is the OS's own system UI family under a native identity
++  // (#263), which no list names.
++  const bool camouNativeSystemUI = CamouIsNativeSystemUIName(
++      aFontVisibilityProvider, aGeneric, aLanguage, key);
++  if (!camouNativeSystemUI &&
++      MaskedFontListBlocks(aFontVisibilityProvider, key)) {
+     return false;
+   }
+ 
+@@ -2175,7 +2181,7 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+   // for a context that installed a list of its own. The launch-level "fonts"
+   // answer comes from MaskedFontListBlocks() above, which is the one place
+   // the chrome exemption lives.
+-  if (!CamouIsFontAllowed(key)) {
++  if (!camouNativeSystemUI && !CamouIsFontAllowed(key)) {
+     return false;
+   }
+ 
+@@ -2672,9 +2678,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
    }
  }
  
@@ -67,7 +90,7 @@ index d642800..fff7c83 100644
    // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
    // code below ends up using [NSFont systemFontOfSize: 0.0].
    nsFont systemFont;
-@@ -2816,17 +2864,82 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2816,17 +2869,112 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    }
  
    auto index = static_cast<size_t>(aGenericType);
@@ -124,17 +147,47 @@ index d642800..fff7c83 100644
 +// so the family GetSystemUIFontFamilies names is the OS's own. No font list
 +// names it (on macOS it is the hidden .SF NS), so the launch mask would refuse
 +// the one family stock draws system-ui with. Only that family is exempt.
-+bool gfxPlatformFontList::CamouIsNativeSystemUIFamily(
++static bool CamouNativeSystemUINames(
 +    FontVisibilityProvider* aFontVisibilityProvider,
 +    StyleGenericFontFamily aGenericType, nsAtom* aLangGroup,
-+    const FontFamily& aFamily) {
++    nsTArray<nsCString>& aNames) {
 +  if (aGenericType != StyleGenericFontFamily::SystemUi ||
 +      SystemUISpoofedOS(aFontVisibilityProvider) !=
 +          MaskConfig::SpoofedOS::None) {
 +    return false;
 +  }
++  GetSystemUIFontFamilies(aFontVisibilityProvider, aLangGroup, aNames);
++  return true;
++}
++
++bool gfxPlatformFontList::CamouIsNativeSystemUIName(
++    FontVisibilityProvider* aFontVisibilityProvider,
++    StyleGenericFontFamily aGenericType, nsAtom* aLangGroup,
++    const nsACString& aKey) {
 +  AutoTArray<nsCString, 1> names;
-+  GetSystemUIFontFamilies(aFontVisibilityProvider, aLangGroup, names);
++  if (!CamouNativeSystemUINames(aFontVisibilityProvider, aGenericType,
++                                aLangGroup, names)) {
++    return false;
++  }
++  for (const nsCString& name : names) {
++    nsAutoCString nameKey;
++    GenerateFontListKey(name, nameKey);
++    if (nameKey == aKey) {
++      return true;
++    }
++  }
++  return false;
++}
++
++bool gfxPlatformFontList::CamouIsNativeSystemUIFamily(
++    FontVisibilityProvider* aFontVisibilityProvider,
++    StyleGenericFontFamily aGenericType, nsAtom* aLangGroup,
++    const FontFamily& aFamily) {
++  AutoTArray<nsCString, 1> names;
++  if (!CamouNativeSystemUINames(aFontVisibilityProvider, aGenericType,
++                                aLangGroup, names)) {
++    return false;
++  }
 +  for (const nsCString& name : names) {
 +    AutoTArray<FamilyAndGeneric, 10> families;
 +    FindAndAddFamiliesLocked(aFontVisibilityProvider, aGenericType, name,
@@ -152,7 +205,7 @@ index d642800..fff7c83 100644
  void gfxPlatformFontList::AddGenericFonts(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGenericType, nsAtom* aLanguage,
-@@ -2859,9 +2972,24 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2859,9 +3007,24 @@ void gfxPlatformFontList::AddGenericFonts(
    // Placed AFTER the math remap above so the row asked for is the row the
    // caller ends up wanting. Falls through to the pref memo when the helper
    // declines or its key resolves empty.
@@ -178,7 +231,7 @@ index d642800..fff7c83 100644
        nsAutoCString camouKey, camouStep;
        bool camouAnswered = false;
        if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
-@@ -2891,6 +3019,7 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2891,6 +3054,7 @@ void gfxPlatformFontList::AddGenericFonts(
    PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
                                                          aGenericType, prefLang);
  
@@ -186,7 +239,7 @@ index d642800..fff7c83 100644
    if (!prefFonts->IsEmpty()) {
      aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
      for (auto& f : *prefFonts) {
-@@ -2905,17 +3034,34 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2905,17 +3069,34 @@ void gfxPlatformFontList::AddGenericFonts(
        } else if (f.mUnshared) {
          camouRaw = f.mUnshared->Name();
        }
@@ -224,7 +277,7 @@ index d642800..fff7c83 100644
  }
  
  static nsAtom* PrefLangToLangGroups(uint32_t aIndex) {
-@@ -3540,6 +3686,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
+@@ -3540,6 +3721,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
        pref = nullptr;
      }
    }
@@ -237,15 +290,21 @@ index d642800..fff7c83 100644
  
    // Create a new FontPrefs and replace the existing one.
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index 701750b..052f05c 100644
+index 701750be08..2ccf0068ba 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
-@@ -721,6 +721,13 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -721,6 +721,19 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                               nsACString& aKeyOut, nsACString& aStepOut)
        MOZ_REQUIRES(mLock);
  
-+  // Camoufox (#263): whether aFamily is the family system-ui resolves to when
-+  // the document's identity is the host's own OS.
++  // Camoufox (#263): the family system-ui resolves to when the document's
++  // identity is the host's own OS. The name is what GetSystemUIFontFamilies
++  // gives (and aKey is its lowercased key); the family is what that name
++  // resolves to.
++  static bool CamouIsNativeSystemUIName(
++      FontVisibilityProvider* aFontVisibilityProvider,
++      mozilla::StyleGenericFontFamily aGenericType, nsAtom* aLangGroup,
++      const nsACString& aKey);
 +  bool CamouIsNativeSystemUIFamily(
 +      FontVisibilityProvider* aFontVisibilityProvider,
 +      mozilla::StyleGenericFontFamily aGenericType, nsAtom* aLangGroup,
@@ -254,7 +313,7 @@ index 701750b..052f05c 100644
    static void FontWhitelistPrefChanged(const char* aPref, void* aClosure);
  
    bool AddWithLegacyFamilyName(const nsACString& aLegacyName,
-@@ -1198,6 +1205,12 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+@@ -1198,6 +1211,12 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
                         eFontPrefLang_Count>
        mLangGroupPrefFonts MOZ_GUARDED_BY(mLock);
    mozilla::UniquePtr<PrefFontList> mEmojiPrefFont MOZ_GUARDED_BY(mLock);
