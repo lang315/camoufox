@@ -80,12 +80,18 @@ class TestPinnedIdentityIsStable:
         assert first["fonts"] == second["fonts"]
 
     @pytest.mark.parametrize("os_name", ["windows", "macos", "linux"])
-    def test_every_bundled_preset_launches(self, os_name):
+    def test_every_bundled_preset_launches(self, os_name, monkeypatch):
         # The test above draws ONE preset at random, so a preset that cannot
         # launch would show up as a flake rather than a failure. Every preset
         # must launch with its own GPU and that GPU's recorded parameters.
+        # The host reports the preset's own core count: the launch replaces the
+        # preset's cores with the host's, and coherence drops an Intel Mac IGP
+        # beside a count outside intelMacIgpCores, so the result would follow
+        # the machine running the test (#271). The drop itself is covered by
+        # test_coherence.py.
         presets = fp.load_presets("150")["presets"][os_name]
         for i, preset in enumerate(presets):
+            monkeypatch.setattr(fp, "host_cpu_count", lambda n=preset["navigator"]["hardwareConcurrency"]: n)
             config = launch(os=os_name, fingerprint_preset=preset)
             assert config["webGl:renderer"] == preset["webgl"]["unmaskedRenderer"], (os_name, i)
             assert config.get("webGl:parameters"), (os_name, i)
