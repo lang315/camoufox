@@ -4,32 +4,22 @@
  * forever afterwards.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
+import { freshCachePerTest } from "./cache-home.js";
 
 type Addons = typeof import("../src/addons.js");
 
+const cacheRoot = freshCachePerTest("addons");
 let tmp: string;
-let savedXdg: string | undefined;
 let addons: Addons;
 let ubo: string;
 
 beforeEach(async () => {
-	tmp = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-addons-"));
-	savedXdg = process.env.XDG_CACHE_HOME;
-	// Point the addon store at a throwaway dir so no real cache is touched.
-	process.env.XDG_CACHE_HOME = tmp;
-	vi.resetModules();
+	tmp = cacheRoot();
 	addons = await import("../src/addons.js");
 	ubo = addons.getAddonPath("UBO");
 	expect(ubo.startsWith(tmp)).toBe(true);
-});
-
-afterEach(() => {
-	if (savedXdg === undefined) delete process.env.XDG_CACHE_HOME;
-	else process.env.XDG_CACHE_HOME = savedXdg;
-	fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 function writeManifest(extractPath: string) {

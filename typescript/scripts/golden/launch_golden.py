@@ -14,7 +14,7 @@ the goldens are a function of the code alone:
   * identity salt: scenarios pass a fixed fingerprint / preset dict (salt is a
     hash of it); the few that exercise the generate / random-preset paths patch
     the fresh salt, generate_fingerprint and get_random_preset.
-  * host: XDG_CACHE_HOME points the camoufox cache at a scratch dir; the stock
+  * host: the cache variables point the camoufox cache at a scratch dir; the stock
     profile disk capacity, the host OS key, the host CPU count, the monitor
     probe, the host GPU probe and the public-IP lookup are patched; the GeoIP
     reader is a fake maxminddb module over a fixed table; numpy's weighted
@@ -50,8 +50,10 @@ MODULE_SEED = 20261001
 
 # Must precede every camoufox import: INSTALL_DIR is computed at import time.
 SCRATCH = Path(tempfile.mkdtemp(prefix='camoufox-golden-'))
-os.environ['XDG_CACHE_HOME'] = str(SCRATCH / 'xdg-cache')
-CACHE = SCRATCH / 'xdg-cache' / 'camoufox'
+# Linux reads XDG_CACHE_HOME, Windows LOCALAPPDATA, macOS the home directory.
+os.environ['HOME'] = os.environ['USERPROFILE'] = str(SCRATCH / 'cache-home')
+os.environ['LOCALAPPDATA'] = str(SCRATCH / 'cache-home' / 'AppData' / 'Local')
+os.environ['XDG_CACHE_HOME'] = str(SCRATCH / 'cache-home' / '.cache')
 HOME = SCRATCH / 'home'
 HOME.mkdir(parents=True)
 
@@ -100,7 +102,8 @@ from camoufox.addons import DefaultAddons  # noqa: E402
 from camoufox.fingerprints import Screen  # noqa: E402
 from camoufox.utils import launch_options  # noqa: E402
 
-assert str(utils.INSTALL_DIR) == str(CACHE), (utils.INSTALL_DIR, CACHE)
+CACHE = Path(utils.INSTALL_DIR)
+assert SCRATCH in CACHE.parents, (utils.INSTALL_DIR, SCRATCH)
 
 # The mmdb files only have to exist and be fresh; the fake reader answers.
 for name in ('geoip aio by daijro-combined.mmdb', 'maxmind geolite2-ipv4.mmdb', 'maxmind geolite2-ipv6.mmdb'):

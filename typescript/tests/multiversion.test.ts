@@ -4,28 +4,17 @@
  * scan and specifier lookup, and removal bookkeeping.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
+import { freshCachePerTest } from "./cache-home.js";
 
 type MV = typeof import("../src/multiversion.js");
 
-let tmp: string;
-let savedXdg: string | undefined;
+freshCachePerTest("mv");
 let mv: MV;
 
 beforeEach(async () => {
-	tmp = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-mv-"));
-	savedXdg = process.env.XDG_CACHE_HOME;
-	process.env.XDG_CACHE_HOME = tmp;
-	vi.resetModules();
 	mv = await import("../src/multiversion.js");
-});
-
-afterEach(() => {
-	if (savedXdg === undefined) delete process.env.XDG_CACHE_HOME;
-	else process.env.XDG_CACHE_HOME = savedXdg;
-	fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 function addInstall(repo: string, folder: string, data: object) {
