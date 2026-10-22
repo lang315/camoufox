@@ -91,8 +91,8 @@ describe("RepoConfig", () => {
 	});
 
 	it("defaults to the repo named in the config", () => {
-		expect(RepoConfig.getDefaultName()).toBe("Official");
-		expect(RepoConfig.getDefault().name).toBe("Official");
+		expect(RepoConfig.getDefaultName()).toBe("lang315");
+		expect(RepoConfig.getDefault().name).toBe("lang315");
 	});
 
 	it("builds an asset regex that captures name/version/build", () => {
@@ -109,7 +109,7 @@ describe("RepoConfig", () => {
 	});
 
 	it("applies the stable channel's build floor", () => {
-		const official = RepoConfig.getDefault();
+		const official = RepoConfig.findByName("Official") as RepoConfig;
 		// Official pins stable to beta.19+; prerelease is unbounded.
 		expect(official.isVersionSupported(new Version("beta.28"), false)).toBe(
 			true,
@@ -189,7 +189,7 @@ describe("repos.yml", () => {
 		);
 		const ours = fs.readFileSync(path.join(LOCAL_DATA, "repos.yml"), "utf-8");
 		expect(ours).toBe(shipped);
-		expect(loadDataFile("repos.yml").default.browser).toBe("Official");
+		expect(loadDataFile("repos.yml").default.browser).toBe("lang315");
 	});
 });
 

@@ -575,6 +575,26 @@ rules:
       with the macOS version, and every launcher would need it.
 
   # -------------------------------------------------------------------------
+  # Browser source
+  # -------------------------------------------------------------------------
+
+  - id: launcher-default-browser-is-the-fork-alone
+    title: The launchers' default browser is lang315/camoufox alone, with no upstream fallback
+    check: automated
+    evidence:
+      - "issue #266: python/src/camoufox/repos.yml defaulted to daijro/camoufox, so `camoufox fetch` and every launcher installed a browser without this fork's patches"
+      - "pkgman.py get_asset (CamoufoxFetcher): it tries the next repository whenever one yields no matching asset, not only on an error; the fork's releases carry Windows and macOS packages only"
+      - "python/tests/test_fork_default_browser.py: with a comma list, Linux finds no fork package and installs upstream's"
+    rationale: >-
+      The default entry in repos.yml names lang315/camoufox and nothing else. A
+      second repository there is a silent fallback: on Linux the fork has no
+      package, so get_asset would move on and install upstream's unpatched
+      browser, and in an anti-detect browser a silent wrong answer is a
+      fingerprint. Linux has to raise MissingRelease instead. Upstream's
+      browser stays one `camoufox set official/stable` away, and the Official,
+      CoryKing and JWriter20 entries are kept for that.
+
+  # -------------------------------------------------------------------------
   # Teardown
   # -------------------------------------------------------------------------
 

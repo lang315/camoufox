@@ -340,6 +340,7 @@ passed to Playwright's `firefox.launch()` (or `launch_persistent_context()`).
 
 | Name | Repository |
 |---|---|
+| lang315 (default) | `lang315/camoufox`, this fork: Windows and macOS packages only |
 | Official | `daijro/camoufox` |
 | CoryKing | `coryking/camoufox` |
 | JWriter20 | `JWriter20/camoufox` |
@@ -365,7 +366,16 @@ fails, each saying which package upgrade is needed. Once a sync has seen such a
 build, every launch warns that the package needs upgrading.
 
 A development checkout (installed from the repository, not from PyPI) is
-paired with nothing and follows its channel, `official/stable` by default.
+paired with nothing and follows its channel, `lang315/stable` by default in this
+fork (`official/stable` upstream).
+
+The `lang315` repository is this fork's releases alone, with no upstream
+fallback: they carry Windows and macOS packages only, so on Linux `fetch` and a
+launch without `executable_path` raise `MissingRelease` instead of installing a
+browser without the fork's patches. `camoufox set official/stable` follows
+upstream's browser. `camoufox fetch` tells two releases apart by the sha256 of
+the asset, so a fork release that reuses the version and build of the installed
+one still replaces it.
 
 ## Development
 

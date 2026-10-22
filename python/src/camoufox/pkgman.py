@@ -635,8 +635,9 @@ class CamoufoxFetcher:
 
     def missing_asset_error(self) -> None:
         raise MissingRelease(
-            f"No matching release found for {OS_NAME} {self.arch} in the "
-            f"supported range. Please update the Python library."
+            f"No matching release found for {OS_NAME} {self.arch} in "
+            f"{', '.join(self.github_repos)} in the supported range. "
+            f"Please update the Python library."
         )
 
     def _get_releases(self, github_repo: str) -> List[Dict]:
@@ -828,6 +829,22 @@ def _not_installed_message() -> str:
     else:
         missing = f"{channel}/{pinned}" if pinned else channel
     return f"{missing} is not installed. Please run `camoufox fetch` to install."
+
+
+def update_needed(
+    current_verstr: Optional[str],
+    current_sha256: Optional[str],
+    verstr: str,
+    sha256: Optional[str],
+) -> bool:
+    """
+    Whether an install of `current_verstr` must be replaced by the release
+    `verstr`. Two releases can carry the same version and build, so the asset's
+    sha256 decides when both are known.
+    """
+    if current_verstr != verstr:
+        return True
+    return bool(current_sha256 and sha256 and current_sha256 != sha256)
 
 
 def installed_verstr() -> str:

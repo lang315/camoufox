@@ -159,16 +159,17 @@ jobs:
         # as that build matches this tree's browser sources (see below).
         run: |
           # Fork (lang315/camoufox#127): never fetch. `camoufox fetch` resolves
-          # releases from python/src/camoufox/repos.yml, whose first entry is
-          # daijro/camoufox, so on any other repository the fetch path grades a
-          # driver-only pull request against upstream's browser -- none of the
-          # fork's patches, and a green about the wrong binary. Building is
+          # releases from python/src/camoufox/repos.yml, whose default is the
+          # fork's own lang315/camoufox alone, and the fork publishes no Linux
+          # package, so the fetch path would find no browser to grade a
+          # driver-only pull request against; daijro/camoufox's browser would be
+          # the wrong binary. Building is
           # cheap when the compiled half is unchanged: the prebuilt cache in the
           # build job is keyed on native inputs, and a pull request restores
           # main's.
           if [ "${{ github.repository }}" != "daijro/camoufox" ]; then
             echo "browser_changed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Not daijro/camoufox -- building, because fetch would test upstream's release."
+            echo "::notice::Not daijro/camoufox -- building, because the fork publishes no Linux browser to fetch."
             exit 0
           fi
           if [ "${{ github.event_name }}" != "pull_request" ]; then

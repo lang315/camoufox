@@ -27,6 +27,11 @@ matches (`browser/patches/`, `browser/additions/`, `browser/settings/`,
 `browser/assets/`, `browser/scripts/`, `browser/bundle/fontconfig/`,
 `browser/upstream.sh`, `browser/Makefile`) is the same browser. A cold macOS leg is ~2h.
 
+**The launchers install this fork's browser by default.** `python/src/camoufox/repos.yml` defaults to
+`lang315/camoufox` alone, whose releases carry Windows and macOS packages only: on Linux the fetch
+raises `MissingRelease`, by design, because a second repo in that entry would install upstream's
+unpatched browser there.
+
 **Releasing a fork build is manual.** `release.yml` runs only on `daijro/camoufox`.
 Dispatch `build.yml` from `main` for each target, download the artifacts, then
 `gh release create v<version>-<release>-fork.<n> --target <main sha>` with the

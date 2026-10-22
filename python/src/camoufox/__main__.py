@@ -52,6 +52,7 @@ from .pkgman import (
     interface_supported,
     list_available_versions,
     rprint,
+    update_needed,
     upgrade_message,
 )
 
@@ -215,9 +216,12 @@ class CamoufoxUpdate(CamoufoxFetcher):
             self.current_verstr = installed_verstr()
         except FileNotFoundError:
             self.current_verstr = None
+        self.current_sha256 = next((iv.sha256 for iv in list_installed() if iv.is_active), None)
 
     def is_updated_needed(self) -> bool:
-        return self.current_verstr is None or self.current_verstr != self.verstr
+        return self.current_verstr is None or update_needed(
+            self.current_verstr, self.current_sha256, self.verstr, self.installed_sha256
+        )
 
     def update(self, replace: bool = False, i_know_what_im_doing: bool = False) -> None:
         if not self.is_updated_needed() and not replace:
