@@ -128,7 +128,18 @@ Round 3 (`fix/fonts-round3`) closed four more, and the distinction between
   (`GetSystemUIFontFamilies`: Helvetica, Segoe UI, Ubuntu), when the list
   allows that name and the face it resolves to; a refused family falls back
   to the table. A native identity (`SystemUISpoofedOS` is `None`) always takes
-  the stock path, with stock's own system-ui family gated by the read filter.
+  the stock path, and stock's own system-ui family is exempt from the read
+  filter (#263): it is the OS's own family, which no font list names, and on a
+  Mac it is the hidden `.SF NS` that the name `-apple-system` resolves to. Until
+  #263 it was filtered like every pref font, so a macOS identity on a Mac got no
+  family for `system-ui` and drew the default serif, while the CSS name
+  `-apple-system` (answered by `CoreTextFontList::FindAndAddFamiliesLocked`
+  before the mask) still drew San Francisco. The exemption is
+  `CamouIsNativeSystemUIFamily`: only a family that `GetSystemUIFontFamilies`
+  names and that the lookup resolves to is exempt, and its `pref-fallback` line
+  reads `allowed=1 exempt=native-system-ui`. Every other pref family still goes
+  through the mask. `WhichPrefFontSupportsChar` is left as it was: a family it
+  would offer for a system-ui run is the one the primary lookup already tried.
   Either way the `step=system-ui` line names the family system-ui got, or
   `none`. The OS is the context's own (`NavigatorManager::GetSpoofedOS`)
   first and the launch's second (#138). A worker asks through its own origin

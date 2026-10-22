@@ -432,6 +432,15 @@ def test_the_macos_package_ships_no_macos_only_fonts():
     assert fonts.group(1).split() == ["windows", "linux"], explain("macos-package-ships-no-macos-only-fonts")
 
 
+def test_a_native_identitys_system_ui_family_is_never_masked():
+    """Rule: native-system-ui-family-never-masked."""
+    patch = (BROWSER / "patches" / "system-ui-font-spoofing.patch").read_text(encoding="utf-8")
+    why = explain("native-system-ui-family-never-masked")
+    assert "+bool gfxPlatformFontList::CamouIsNativeSystemUIFamily(" in patch, why
+    assert re.search(r"\+\s+CamouIsNativeSystemUIFamily\(aFontVisibilityProvider, aGenericType,", patch), why
+    assert "exempt=native-system-ui" in patch, why
+
+
 # ---------------------------------------------------------------------------
 # teardown
 # ---------------------------------------------------------------------------
