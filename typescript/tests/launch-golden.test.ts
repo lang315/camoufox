@@ -19,12 +19,12 @@ import { fileURLToPath } from "node:url";
 import * as random from "python-random";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PyFloat, parsePyJson } from "../src/pycompat.js";
+import { isolateCacheAt } from "./cache-home.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "fixtures", "launch");
 const SCRATCH = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-golden-ts-"));
-const XDG = path.join(SCRATCH, "xdg-cache");
-const CACHE = path.join(XDG, "camoufox");
+const CACHE = await isolateCacheAt(SCRATCH);
 const HOME = path.join(SCRATCH, "home");
 
 // parsePyJson: the fresh salt is a 64-bit int, beyond a JS number.
@@ -123,8 +123,6 @@ let mods: {
 const ORIGINAL_ENV = { ...process.env };
 
 beforeAll(async () => {
-	// INSTALL_DIR is computed at import time, so point the cache first.
-	process.env.XDG_CACHE_HOME = XDG;
 	fs.mkdirSync(HOME, { recursive: true });
 	mods = {
 		utils: await import("../src/utils.js"),

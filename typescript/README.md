@@ -310,6 +310,14 @@ pnpm check       # biome lint and format
 pnpm typecheck   # tsc --noEmit
 ```
 
+Every test file runs against a cache directory of its own under the OS temp
+directory, on Linux, macOS and Windows alike (`tests/isolate-cache.ts`,
+`tests/cache-home.ts`); the real camoufox cache is never read or written, and
+a setup whose `INSTALL_DIR` falls outside that directory fails. The fpgen model
+lives in that cache, so the tests that draw identities need
+`CAMOUFOX_FPGEN_DATA` to point at an installed model, such as the one the pin
+script put in the venv (`.venv/lib/python3.14/site-packages/fpgen/data`).
+
 The data files (presets, fonts, voices, `territoryInfo.xml`, ...) have one copy,
 in `python/src/camoufox/`. `DATA_FILES` in `src/paths.ts` lists them, and the
 build copies them into the package.

@@ -2,14 +2,14 @@
  * Mirrors python/tests/test_fork_default_browser.py: the launchers install this
  * fork's browser, and only this fork's, by default (#266).
  *
- * INSTALL_DIR is computed at import from XDG_CACHE_HOME (Linux) or the home
- * directory (macOS, Windows), so every test points both at a fresh directory
- * and re-imports the modules: nothing here may touch the real cache.
+ * INSTALL_DIR is computed at import, so every test gets a fresh cache
+ * directory (cache-home.ts) and re-imports the modules: nothing here may touch
+ * the real cache.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { freshCachePerTest } from "./cache-home.js";
 
 const FORK = "lang315/camoufox";
 const UPSTREAM = "daijro/camoufox";
@@ -51,27 +51,14 @@ const UPSTREAM_RELEASES = [
 	},
 ] as any;
 
-let tmp: string;
-let savedXdg: string | undefined;
-let savedHome: string | undefined;
+freshCachePerTest("fork");
 let asked: string[];
 
 beforeEach(() => {
-	tmp = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-fork-"));
-	savedXdg = process.env.XDG_CACHE_HOME;
-	savedHome = process.env.HOME;
-	process.env.XDG_CACHE_HOME = tmp;
-	process.env.HOME = tmp;
-	vi.resetModules();
 	asked = [];
 });
 
 afterEach(() => {
-	if (savedXdg === undefined) delete process.env.XDG_CACHE_HOME;
-	else process.env.XDG_CACHE_HOME = savedXdg;
-	if (savedHome === undefined) delete process.env.HOME;
-	else process.env.HOME = savedHome;
-	fs.rmSync(tmp, { recursive: true, force: true });
 	vi.restoreAllMocks();
 });
 

@@ -2,27 +2,22 @@
  * Mirrors python/tests/test_browser_interface.py: a browser declares the
  * interface it speaks, and the library refuses one it cannot drive (#835).
  *
- * INSTALL_DIR is computed at import from XDG_CACHE_HOME, so every test points
- * that at a fresh directory and re-imports the modules.
+ * INSTALL_DIR is computed at import, so every test gets a fresh cache
+ * directory (cache-home.ts) and re-imports the modules.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CONSTRAINTS } from "../src/__version__.js";
+import { freshCachePerTest } from "./cache-home.js";
 
 const NEWER = CONSTRAINTS.INTERFACE + 1;
 
-let tmp: string;
-let savedXdg: string | undefined;
+freshCachePerTest("iface");
 let served: Map<string, unknown>;
 let fetched: string[];
 
 beforeEach(() => {
-	tmp = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-iface-"));
-	savedXdg = process.env.XDG_CACHE_HOME;
-	process.env.XDG_CACHE_HOME = tmp;
-	vi.resetModules();
 	served = new Map();
 	fetched = [];
 	vi.stubGlobal("fetch", async (url: string) => {
@@ -32,9 +27,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	if (savedXdg === undefined) delete process.env.XDG_CACHE_HOME;
-	else process.env.XDG_CACHE_HOME = savedXdg;
-	fs.rmSync(tmp, { recursive: true, force: true });
 	vi.unstubAllGlobals();
 	vi.restoreAllMocks();
 });

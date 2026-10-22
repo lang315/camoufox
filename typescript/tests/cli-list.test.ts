@@ -3,29 +3,21 @@
  * install paths in both listing modes.
  */
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { freshCachePerTest } from "./cache-home.js";
 
-let tmp: string;
-let savedXdg: string | undefined;
+freshCachePerTest("cli");
 let savedArgv: string[];
 
 beforeEach(() => {
-	tmp = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-cli-"));
-	savedXdg = process.env.XDG_CACHE_HOME;
 	savedArgv = process.argv;
-	process.env.XDG_CACHE_HOME = tmp;
-	vi.resetModules();
 });
 
 afterEach(() => {
-	if (savedXdg === undefined) delete process.env.XDG_CACHE_HOME;
-	else process.env.XDG_CACHE_HOME = savedXdg;
 	process.argv = savedArgv;
 	vi.doUnmock("../src/multiversion.js");
 	vi.restoreAllMocks();
-	fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 it("list all --path shows the path of an installed build", async () => {
