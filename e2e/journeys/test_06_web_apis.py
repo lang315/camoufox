@@ -1,10 +1,12 @@
 """Journey 6: ordinary web APIs still work: the same outcome as Playwright's own
 Firefox (oracle B). Both run headful: headless Firefox has no GL context."""
 
+import json
+
 import pytest
 
 from oracle.docs import cite
-from util import TWO_READS, TWO_READS_GL, wait_out
+from util import TWO_READS, TWO_READS_GL, reference_verdict, wait_out
 
 # Pixel readback of a launch whose canvas is covered is RFP's random placeholder, so these
 # two entries cannot match the reference; the placeholder is asserted instead.
@@ -37,7 +39,12 @@ def test_web_apis_behave_like_the_reference(drv, site, reference, check):
     print(f"probe errors: camoufox={errors} reference={ref_errors}")
     for api in sorted(want):
         if not (covered and api in READBACK):
-            check(got.get(api) == want[api], f"{api}: camoufox={got.get(api)!r} reference={want[api]!r}")
+            verdict = reference_verdict(api, got.get(api), want[api], errors, ref_errors)
+            if verdict == "reference-invalid":
+                check(False, f"REFERENCE INVALID {api}: the reference Firefox ran out of the page's time budget "
+                              f"({json.loads(ref_errors)[api]}) while camoufox={got.get(api)!r}; not a Camoufox difference", ledger=False)
+            else:
+                check(verdict == "same", f"{api}: camoufox={got.get(api)!r} reference={want[api]!r}")
     # The placeholder replaces pixels, not the context: WebGL exists either way.
     check(got["webgl"] != "no context", "a WebGL context exists")
     if covered:

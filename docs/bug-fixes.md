@@ -12,6 +12,26 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #265: the reference Firefox's service worker registration ran out of the page's 8 s budget on Windows
+
+**Fixed by:** the PR that adds `reference_verdict` to `e2e/util.py` and gives the service worker probe in `e2e/web/pages/apps.html` its own 20 s budget. **Found by:** e2e run 39734508472, Windows leg.
+
+**Symptom.** `test_web_apis_behave_like_the_reference` failed for `pkg`, `pw` and `go`: `serviceworker: camoufox=True reference='error: Error'`, with the page's out-of-band errors reading `reference={"serviceworker":"timeout at register",...}`. The same build passed in run 39741085315.
+
+**Root cause.** The probe's `within(8000, ...)` (`apps.html`, `t()`) was chosen when the suite was scaffolded (fd4e47f) and never measured. It bounds the whole registration, and on a GitHub Windows runner `navigator.serviceWorker.register()` is slow and spread widely: over 40 fresh headful launches of the same Windows build (20 of Playwright's Firefox 153.0, 20 of Camoufox, alternating which went first, probe run 39788884625), the time to `register()` resolving ranged from 0.19 s to 4.55 s for both browsers (reference median 2.07 s, Camoufox median 0.51 s with a tail to 4.36 s). None passed 8 s there, but run 39734508472 did, so the tail is longer than 40 samples show. The reference is measured once per module and compared by all three drivers, so one slow registration fails all three.
+
+**Not the cause.** A cold first launch: the first launch of each browser in the probe was not the slowest, and later launches in the same process were as slow. Camoufox: it registers faster than the reference (median 0.51 s against 2.07 s) and its slowest samples (about 4.4 s) match the reference's, so the spread belongs to the runner; the probe did not establish which part of registration is slow.
+
+**Fix.** Two changes, neither a retry or a skip.
+- The service worker step gets a 20 s budget (`t(name, fn, ms)`): the budget only tells a hang from an answer, and the observed maximum is 4.55 s.
+- A reference that ran out of the page's budget while Camoufox answered is scored by `reference_verdict` as "reference-invalid" and fails with `REFERENCE INVALID ...: not a Camoufox difference`, so it is neither blamed on Camoufox nor passed silently. Equal results and real differences score as before; Camoufox timing out where the reference answered is still Camoufox's difference.
+
+**Evidence.**
+- Red: `oracle/test_oracle.py::test_a_reference_that_timed_out_is_invalid_not_a_camoufox_difference` failed with `ImportError: cannot import name 'reference_verdict'`, fed with the exact errors strings of run 39734508472. The slow registration itself cannot be forced on demand, so the red is the scoring, not the browser.
+- Green: the same file, 23 passed.
+
+**What misled the investigation.** The first guess was a cold start: the reference is the first Playwright Firefox launch of the session and Defender scans fresh binaries. The alternating-order probe showed the reference and Camoufox are equally slow at any position.
+
 ## #267: the TypeScript tests used, and could wipe, the real camoufox cache on macOS
 
 **Fixed by:** the PR that adds `typescript/tests/cache-home.ts` and `typescript/tests/isolate-cache.ts`. **Found by:** running five TypeScript test files on a Mac whose `~/Library/Caches/camoufox` held `addons/` and `Profiles/`.

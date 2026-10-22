@@ -147,3 +147,23 @@ def test_a_negative_control_is_never_matched_against_the_ledger(monkeypatch):
     assert c.failed == []
     c(False, "voices_no_foreign_os: its negative control went red (else VACUOUS)", ledger=False)
     assert c.failed, "a control that did not go red fails even under a ledgered check"
+
+
+# Run 39734508472 (#265): the reference Firefox's service worker did not register within the page's budget.
+SELF_TIMEOUT = '{"serviceworker":"timeout at register","geolocation":"timeout"}'
+CAMOUFOX_ERRORS = '{"geolocation":"timeout"}'
+
+
+def test_a_reference_that_timed_out_is_invalid_not_a_camoufox_difference():
+    from util import reference_verdict
+    assert reference_verdict("serviceworker", True, "error: Error", CAMOUFOX_ERRORS, SELF_TIMEOUT) == "reference-invalid"
+
+
+def test_equal_results_and_real_differences_are_scored_as_before():
+    from util import reference_verdict
+    assert reference_verdict("geolocation", "error: Error", "error: Error", CAMOUFOX_ERRORS, SELF_TIMEOUT) == "same"
+    assert reference_verdict("canvas", False, True, "{}", "{}") == "differs"
+    # Camoufox timing out where the reference answered is Camoufox's difference.
+    assert reference_verdict("serviceworker", "error: Error", True, '{"serviceworker":"timeout at register"}', "{}") == "differs"
+    # A reference error that is not the page's own timeout is a behaviour of the reference.
+    assert reference_verdict("serviceworker", True, "error: SecurityError", "{}", '{"serviceworker":"denied"}') == "differs"
