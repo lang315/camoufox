@@ -12,6 +12,25 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #275: the runtime-library install hung for the job's whole hour and printed nothing
+
+**Fixed by:** the PR that adds `ci/apt_install.py` and uses it for every runtime-library install in the workflows. **Found by:** Tests run 39801913772, attempt 1, job "Patch guards: spoofing".
+
+**Symptom.** The step "Install browser runtime libraries" of `.github/actions/prepare-browser/action.yml` printed its header at 15:12:11 and nothing after it until the job was cancelled at its 1 h limit (3609 s). The re-run of the same commit passed.
+
+**Root cause.** Not established. The step ran `sudo apt-get update -qq` and then `sudo apt-get install -y ...` with no bound on either. In a healthy run `install` prints "Reading package lists..." immediately, so the stall was before `install` produced output, most likely in `update`, whose `-qq` hid its progress. The log cannot confirm that. It happened once in 900 runs of the step, so it is an environmental stall that cannot be reproduced on demand, and this fix makes it fail fast and say where; it does not remove it.
+
+**Fix.** `ci/apt_install.py PACKAGE...` runs `apt-get update` and then `apt-get install -y --no-install-recommends`, each bounded by 600 s, and exits 124 with `::error::apt-get <command> did not finish in 600s` when one runs out of time. `-qq` is gone, so a repeat shows its stage. There is no retry: a retry would turn the stall into a slow pass. The four runtime-library installs that run on a pull request use it (`prepare-browser`, the TypeScript job's Xvfb install, the zstd install of the overlay step, and `e2e.yml`).
+
+The limit comes from the step's own duration over 900 runs (60 Tests runs, every job using `prepare-browser`): median 9.6 s, p95 28.9 s, p99 103.5 s, slowest success 164.6 s. 600 s is 3.6 times the slowest success and 1/6 of the hour the job gave the stall. Composite action steps have no `timeout-minutes` (the metadata syntax reference lists `id`, `if`, `name`, `run`, `shell`, `uses`, `with`, `env`, `continue-on-error` and `working-directory`), so the bound is in the script.
+
+**Evidence.**
+- Red: the tests in `ci/tests/test_apt_install.py` failed before the script existed (5 failed), and `test_no_workflow_hides_the_progress_of_apt_get_update` named the `-qq` copies.
+- Green: 5 passed, and `python3 -m pytest ci/tests -q`, 262 passed. A stalled `apt-get update` (a stand-in that sleeps) with `APT_TIMEOUT=2` printed `::error::apt-get update did not finish in 2s` and exited 124 without running `install`.
+- The Tests run on the PR shows the new step output.
+
+**What misled the investigation.** The slowest `prepare-browser` action in those runs, 651 s (run 39610918463), looked like an apt time. Its apt step took 9.7 s; the rest was `actions/download-artifact`. The 1 h cancel showed no output at all, which read as a hang in the step's last command, and attempt 2 passed with no change, which read as a flaky test, though no test had started.
+
 ## #265: the reference Firefox's service worker registration ran out of the page's 8 s budget on Windows
 
 **Fixed by:** the PR that adds `reference_verdict` to `e2e/util.py` and gives the service worker probe in `e2e/web/pages/apps.html` its own 20 s budget. **Found by:** e2e run 39734508472, Windows leg.
