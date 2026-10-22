@@ -6,26 +6,15 @@
  */
 import * as fs from "node:fs";
 import * as net from "node:net";
-import * as os from "node:os";
 import * as path from "node:path";
 import { Writable } from "node:stream";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import { freshCachePerTest } from "./cache-home.js";
 
-let tmp: string;
-let savedXdg: string | undefined;
-
-beforeEach(() => {
-	tmp = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-dl-"));
-	savedXdg = process.env.XDG_CACHE_HOME;
-	process.env.XDG_CACHE_HOME = tmp;
-	vi.resetModules();
-});
+freshCachePerTest("dl");
 
 afterEach(() => {
-	if (savedXdg === undefined) delete process.env.XDG_CACHE_HOME;
-	else process.env.XDG_CACHE_HOME = savedXdg;
 	vi.unstubAllGlobals();
-	fs.rmSync(tmp, { recursive: true, force: true });
 });
 
 it("a failed write rejects, and the partial install is removed", async () => {

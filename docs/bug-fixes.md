@@ -32,6 +32,23 @@ later change should read first.
 
 **What misled the investigation.** The first guess was a cold start: the reference is the first Playwright Firefox launch of the session and Defender scans fresh binaries. The alternating-order probe showed the reference and Camoufox are equally slow at any position.
 
+## #267: the TypeScript tests used, and could wipe, the real camoufox cache on macOS
+
+**Fixed by:** the PR that adds `typescript/tests/cache-home.ts` and `typescript/tests/isolate-cache.ts`. **Found by:** running five TypeScript test files on a Mac whose `~/Library/Caches/camoufox` held `addons/` and `Profiles/`.
+
+**Symptom.** After the run, `addons/` and `Profiles/` were gone from the real cache, and `browsers/`, `config.json`, `repo_cache.json` and `.0.5_FLAG` had appeared in it. With only `HOME` redirected to protect the cache, the tests shared one directory and failed on each other's leftovers (`multiversion.test.ts` "removeVersion prunes empty parents and re-points the active version", and three tests in `browser-pin.test.ts`).
+
+**Root cause.** `userCacheDir` in `typescript/src/paths.ts` reads `XDG_CACHE_HOME` on Linux only; on macOS the directory is `os.homedir()/Library/Caches/camoufox` and on Windows it comes from `LOCALAPPDATA`. `INSTALL_DIR` is computed from it once, at import. Eight test files copied the same setup (set `XDG_CACHE_HOME`, `vi.resetModules()`, import), so on a Mac they imported the real directory, and `removeIncompatibleData()` (`pkgman.ts`) deletes the whole directory when `.0.5_FLAG` is missing. `launch-host.ts` and `launch-golden.test.ts` redirected the same single variable, and the Python golden script `launch_golden.py` asserted a Linux-only path, so the golden setup could not run on a Mac at all.
+
+**Fix.** The tests changed, not the product: `paths.ts` keeps following `platformdirs`, so the TypeScript and Python launchers still share one install directory. `cache-home.ts` has one function, `isolateCacheAt(root)`, which sets `HOME`, `USERPROFILE`, `LOCALAPPDATA` and `XDG_CACHE_HOME` under `root`, re-imports `paths.ts` and throws unless `INSTALL_DIR` is under `root`. `isolate-cache.ts` is a vitest setup file that calls it for every test file, so a file that forgets to isolate itself still cannot reach the real cache. `freshCachePerTest()` gives each test of a file an empty directory and replaces the eight copies. `launch_golden.py` redirects the same variables and reads `INSTALL_DIR` back instead of assuming a Linux path. An alternative that was rejected: making `paths.ts` honour `XDG_CACHE_HOME` on every OS, which would move real users' installs and drift from Python.
+
+**Evidence.**
+- Red, on the Mac, before the fix, with `~/Library/Caches/camoufox` empty before and after: `tests/cache-isolation.test.ts` computed the path and wrote nothing, and failed with `INSTALL_DIR is /Users/lang/Library/Caches/camoufox`.
+- Green: the same file, four tests, including one that leaves a file for the next test to look for, and a negative control that makes `INSTALL_DIR` fall outside the directory and expects `isolateCacheAt` to reject.
+- The whole suite on the Mac with the real `HOME`: the real cache listing was empty before and after. 589 passed, 138 skipped and 1 failed. The failure, `launch.test.ts` "every bundled macos preset launches with its own GPU" (`Apple M1` where the preset says `Intel(R) HD Graphics 400`), also fails on `main` with `HOME` redirected, so it is not caused by this change.
+
+**What misled the investigation.** Redirecting `HOME` looked like the whole fix, and it made the cache safe but not the suite: tests that share a directory fail on each other's leftovers, so each test needs a directory of its own, not only a different one from the real cache. The tests that already redirected `XDG_CACHE_HOME` passed on Linux CI, so nothing there suggested the variable was Linux-only.
+
 ## #266: the launchers installed upstream's browser, and a fork release that reused a version could not replace another
 
 **Fixed by:** the PR that adds the `lang315` entry to `repos.yml`, makes it the default, and makes `camoufox fetch` compare the asset's sha256. **Found by:** reading the repository list while planning how a fork install should pair with a browser.

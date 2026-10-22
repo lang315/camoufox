@@ -1,7 +1,7 @@
 /**
  * Shared scaffolding for the launch-layer tests: a scratch camoufox cache
- * (XDG_CACHE_HOME, set before any src module is imported -- INSTALL_DIR is
- * computed at import time), the fixture browser bundle, and the counterpart
+ * (set before any src module is imported -- INSTALL_DIR is computed at
+ * import time), the fixture browser bundle, and the counterpart
  * of the Python tests' `isolated_launch_dependencies` fixture.
  *
  * Import this module FIRST, then import src modules dynamically.
@@ -10,25 +10,17 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { isolateCacheAt } from "./cache-home.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const FIXTURES = path.join(HERE, "fixtures", "launch");
 export const BUNDLE = path.join(FIXTURES, "bundle");
 export const BUNDLE_EXE = path.join(BUNDLE, "camoufox-bin");
 
-// Keep reading the real fpgen model: it lives in the real cache, which the
-// scratch XDG_CACHE_HOME below would otherwise hide.
-if (!process.env.CAMOUFOX_FPGEN_DATA) {
-	const xdg = process.env.XDG_CACHE_HOME?.trim();
-	const base = xdg ? xdg : path.join(os.homedir(), ".cache");
-	process.env.CAMOUFOX_FPGEN_DATA = path.join(base, "camoufox", "fpgen");
-}
-
 export const SCRATCH = fs.mkdtempSync(
 	path.join(os.tmpdir(), "camoufox-launch-test-"),
 );
-process.env.XDG_CACHE_HOME = path.join(SCRATCH, "xdg-cache");
-export const CACHE = path.join(SCRATCH, "xdg-cache", "camoufox");
+export const CACHE = await isolateCacheAt(SCRATCH);
 export const HOME = path.join(SCRATCH, "home");
 fs.mkdirSync(HOME, { recursive: true });
 
