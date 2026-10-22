@@ -219,7 +219,7 @@ describe("the fetcher", () => {
 	])("with config %j accepts only the paired asset unless chosen otherwise", async (config, acceptsNewer) => {
 		const { pkgman } = await setup({ pin: PIN, installed: [], config });
 		const fetcher = Object.create(pkgman.CamoufoxFetcher.prototype);
-		fetcher.repoConfig = pkgman.RepoConfig.getDefault();
+		fetcher.repoConfig = pkgman.RepoConfig.findByName("Official");
 		fetcher.pattern = fetcher.repoConfig.buildPattern("lin", "x86_64");
 		const asset = (version: string, build: string) => ({
 			name: `camoufox-${version}-${build}-lin.x86_64.zip`,

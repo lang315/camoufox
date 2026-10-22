@@ -79,7 +79,7 @@ describe("choosing a browser", () => {
 		const pin = await import("../src/browser-pin.js");
 		vi.spyOn(pin, "effectivePin").mockReturnValue(null);
 		const fetcher = Object.create(pkgman.CamoufoxFetcher.prototype);
-		fetcher.repoConfig = pkgman.RepoConfig.getDefault();
+		fetcher.repoConfig = pkgman.RepoConfig.findByName("Official");
 		fetcher.pattern = fetcher.repoConfig.buildPattern("lin", "x86_64");
 		fetcher.githubRepos = ["daijro/camoufox"];
 		fetcher.getReleases = async () => [
@@ -103,7 +103,7 @@ describe("choosing a browser", () => {
 			release("v156.0.1-beta.31", "beta.31"),
 		]);
 		const versions = await pkgman.listAvailableVersions(
-			undefined,
+			pkgman.RepoConfig.findByName("Official"),
 			true,
 			"lin",
 			"x86_64",
