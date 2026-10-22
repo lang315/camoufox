@@ -42,6 +42,17 @@ class Checks:
         assert not self.failed, "failed: " + "; ".join(self.failed)
 
 
+def reference_verdict(api: str, got: Any, want: Any, errors: str, ref_errors: str) -> str:
+    """Score one probe of a page against the reference Firefox: "same", "differs", or
+    "reference-invalid" when the reference only differs because the page's own time budget ran out
+    on it (a message starting "timeout") while Camoufox answered. That says the reference could not
+    measure, not that Camoufox behaves differently (#265)."""
+    if got == want:
+        return "same"
+    timed_out = lambda raw: str(json.loads(raw).get(api, "")).startswith("timeout")  # noqa: E731
+    return "reference-invalid" if timed_out(ref_errors) and not timed_out(errors) else "differs"
+
+
 # Pages publish their result as JSON in #out and set data-done=1. Reading the DOM
 # works from any world, which matters: Playwright's evaluate runs in an isolated
 # world and cannot see page globals.

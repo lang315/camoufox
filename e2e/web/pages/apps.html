@@ -9,9 +9,11 @@ const r = {}, errors = {};
 const within = (ms, p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
 // The compared result keeps only the error's name; the message, and the step a probe had
 // reached, go out of band so a failure names its cause without changing what is compared.
-async function t(name, fn) {
+// The budget only tells a hang from an answer. A first service worker registration took 0.2 to 4.6 s over 40
+// fresh launches of both browsers on a Windows runner (#265), so it gets 20 s, not 8.
+async function t(name, fn, ms = 8000) {
   const at = {};
-  try { r[name] = await within(8000, fn(at)); } catch (e) {
+  try { r[name] = await within(ms, fn(at)); } catch (e) {
     r[name] = "error: " + ((e && e.name) || e);
     errors[name] = `${e && e.message}${at.step ? " at " + at.step : ""}`;
   }
@@ -50,7 +52,7 @@ async function run() {
       await new Promise(ok => navigator.serviceWorker.addEventListener("controllerchange", ok, {once: true}));
     at.step = "fetch";
     return (await (await fetch("/sw-probe")).text()) === "from-sw";
-  });
+  }, 20000);
   await t("canvas", async () => {
     const x = $("c").getContext("2d");
     x.fillStyle = "#c00"; x.fillRect(8, 8, 48, 48); x.font = "20px serif"; x.fillText("Hi", 10, 30);
