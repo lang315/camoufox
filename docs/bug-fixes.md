@@ -12,6 +12,29 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #266: the launchers installed upstream's browser, and a fork release that reused a version could not replace another
+
+**Fixed by:** the PR that adds the `lang315` entry to `repos.yml`, makes it the default, and makes `camoufox fetch` compare the asset's sha256. **Found by:** reading the repository list while planning how a fork install should pair with a browser.
+
+**Symptom.** `camoufox fetch` and every launch without `executable_path` installed `daijro/camoufox`'s browser, which has none of this fork's patches. And once the default named the fork, a machine holding `v158.0-beta.33-fork.1` printed "Camoufox binaries up to date!" and never reached `fork.2`, because both ship `camoufox-158.0-beta.33-<os>.<arch>.zip`.
+
+**Root cause.**
+- `python/src/camoufox/repos.yml` set `default.browser: Official`, and `Official` is `daijro/camoufox, camoufox/camoufox`. `browser-pin.json` is not the lever: `main` carries `{}` by design (`browser_pin.py`, `test_browser_pin.py`), and `ci.release stamp` writes the real pin only in `release.yml`, which runs only on `daijro/camoufox`.
+- `CamoufoxFetcher.get_asset` (`pkgman.py`) tries the next repository whenever one yields no matching asset, not only on an error. The fork publishes no Linux package, so a comma list in the fork's entry would install upstream's unpatched browser on Linux without a word.
+- `CamoufoxUpdate.is_updated_needed` (`__main__.py`, and `isUpdatedNeeded` in `__main__.ts`) compared only the `version-build` string. The install folder is keyed by the asset's sha256 (`browsers/<repo>/<version>-<build>-<sha8>`), so the two fork releases land in different folders, but the decision to install never got that far.
+
+**Fix.** The `lang315` entry names `lang315/camoufox` alone and is the default; Linux raises `MissingRelease`, which now names the repositories it looked in. `update_needed` (`pkgman.py`, `pkgman.ts`) replaces the comparison and takes the sha256 into account when both sides know it, for every repository: no fork-only branch. The entry has no browser bounds: fork releases are stable and their builds sit between the library's floor (`alpha.1`) and ceiling (`1`), which `Version.is_supported` still enforces at install. Tried and rejected: a comma list with upstream behind the fork (the Linux fallback above), and stamping `browser-pin.json` (not the lever, and `main` must keep `{}`). The rule is `launcher-default-browser-is-the-fork-alone` in `ci/tribal-rules.yml`.
+
+What the change does not do: an installed upstream browser is kept. Installs are scoped by repository name (`browsers/official/...` against `browsers/lang315/...`), and `remove_incompatible_data()` removes the cache only when the versioned-layout flag is missing, not when the default changes. A machine whose active browser is an upstream one keeps launching it until `camoufox fetch` installs the fork's and makes it active; a launch does not update an existing install.
+
+**Evidence.**
+- Red, Python, before the change: `test_the_default_browser_is_this_forks_releases_alone`, `test_the_other_browser_sources_are_still_chosen_by_name`, `test_the_fetcher_takes_the_newest_fork_release` (mac and win), `test_linux_has_no_fork_package_and_never_falls_back_to_upstream`, `test_a_fork_release_that_reuses_the_version_and_build_still_updates`: 6 failed. Red, TypeScript: 11 failed in `fork-default-browser.test.ts`, among them Linux, where the promise resolved instead of rejecting.
+- Green: the same tests, 13 Python and 12 TypeScript.
+- Live, on an Apple-silicon Mac with the cache redirected to a scratch directory (`camoufox path` printed it first): `camoufox sync` listed `lang315... 11 versions`; `camoufox fetch` installed `browsers/lang315/158.0-beta.33-07328be4`, whose `version.json` holds `sha256` `07328be434daaac2e0e8b605196de539b8d106e57307b217411df7664f5af468`, the digest `gh release view v158.0-beta.33-fork.2` shows; a launch through the package with no `executable_path` ran BuildID `20261022041804`; a second `fetch` said "Camoufox binaries up to date!".
+- Not run live: a machine moving from fork.1 to fork.2 (the unit tests cover the decision), and Linux and Windows.
+
+**What misled the investigation.** The asset names suggested the two releases were indistinguishable everywhere, when the install folder already told them apart and only the up-to-date decision did not. And running the TypeScript suite on a Mac used and wiped the real cache, because `userCacheDir` ignores `XDG_CACHE_HOME` there (#267); the cache is now cleaned, and the suite ran with `HOME` pointed at a scratch directory.
+
 ## #263: under a macOS identity on a Mac, system-ui drew the default serif
 
 **Fixed by:** the PR that adds `CamouIsNativeSystemUIName` and `CamouIsNativeSystemUIFamily` to `system-ui-font-spoofing.patch`. **Found by:** a width comparison of `system-ui` against `-apple-system` while re-checking fork.1 on a Mac. The two guards `context-os-system-font` and `system-ui-font-spoofing` had been reporting it since #188.

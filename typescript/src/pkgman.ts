@@ -857,8 +857,9 @@ export class CamoufoxFetcher {
 
 	missingAssetError(): never {
 		throw new MissingRelease(
-			`No matching release found for ${OS_NAME} ${this.arch} in the ` +
-				"supported range. Please update the camoufox package.",
+			`No matching release found for ${OS_NAME} ${this.arch} in ` +
+				`${this.githubRepos.join(", ")} in the supported range. ` +
+				"Please update the camoufox package.",
 		);
 	}
 
@@ -1045,6 +1046,21 @@ export async function listAvailableVersions(
 		return comparePyStr(b.assetCreatedAt ?? "", a.assetCreatedAt ?? "");
 	});
 	return versions;
+}
+
+/**
+ * Whether an install of `currentVerstr` must be replaced by the release
+ * `verstr`. Two releases can carry the same version and build, so the asset's
+ * sha256 decides when both are known.
+ */
+export function updateNeeded(
+	currentVerstr: string | null,
+	currentSha256: string | undefined,
+	verstr: string,
+	sha256: string | undefined,
+): boolean {
+	if (currentVerstr !== verstr) return true;
+	return Boolean(currentSha256 && sha256 && currentSha256 !== sha256);
 }
 
 /**

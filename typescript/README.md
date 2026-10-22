@@ -287,7 +287,9 @@ and `from_options` (an object from `launchOptions()` to use as is).
 
 Each release is paired with the one browser build it was built and tested with,
 the same build as the Python release of the same version, and every launch uses
-it until `camoufox set` chooses another. The Python README explains the rules:
+it until `camoufox set` chooses another. In this fork the default repository is
+`lang315/camoufox` alone (Windows and macOS packages, no upstream fallback). The
+Python README explains the rules:
 [Which browser build is used](https://github.com/daijro/camoufox/blob/main/python/README.md#which-browser-build-is-used).
 
 ## Development

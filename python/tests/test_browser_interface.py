@@ -71,7 +71,7 @@ def test_the_fetcher_skips_a_browser_this_library_cannot_drive(manifests, monkey
     served, _ = manifests
     monkeypatch.setattr("camoufox.browser_pin.effective_pin", lambda *a, **k: None)
     fetcher = pkgman.CamoufoxFetcher.__new__(pkgman.CamoufoxFetcher)
-    fetcher.repo_config = pkgman.RepoConfig.get_default()
+    fetcher.repo_config = pkgman.RepoConfig.find_by_name("Official")
     fetcher.pattern = fetcher.repo_config.build_pattern(spoof_os="lin", spoof_arch="x86_64")
     fetcher.installed_sha256 = None
     fetcher.installed_created_at = None
@@ -95,7 +95,9 @@ def test_sync_lists_only_browsers_this_library_can_drive(manifests, monkeypatch)
     api = "https://api.github.com/repos/daijro/camoufox/releases"
     served[api] = releases
 
-    versions = pkgman.list_available_versions(spoof_os="lin", spoof_arch="x86_64")
+    versions = pkgman.list_available_versions(
+        pkgman.RepoConfig.find_by_name("Official"), spoof_os="lin", spoof_arch="x86_64"
+    )
 
     assert [v.version.build for v in versions] == ["beta.39", "beta.31"]
     assert [v.interface for v in versions] == [CONSTRAINTS.INTERFACE, 1]
@@ -171,7 +173,7 @@ def test_sync_keeps_builds_needing_an_upgrade_out_of_the_installable_list(manife
         _release("v156.0.1-beta.39", "beta.39", {"interface": CONSTRAINTS.INTERFACE}, served),
     ]
     _synced(tmp_path, monkeypatch, [])
-    official = pkgman.RepoConfig.get_default()
+    official = pkgman.RepoConfig.find_by_name("Official")
     monkeypatch.setattr(pkgman.RepoConfig, "load_repos", staticmethod(lambda: [official]))
 
     cli._do_sync(spoof_os="lin", spoof_arch="x86_64")

@@ -1,6 +1,6 @@
 # Default configurations
 default:
-  browser: Official
+  browser: lang315
   geoip: GeoIP AIO by daijro
 
 # Browser repositories
@@ -31,6 +31,19 @@ browsers:
 
   - repo: JWriter20/camoufox
     name: JWriter20
+    pattern: "{name}-{version}-{build}-{os}.{arch}.zip"
+    versions:
+      - python_library:
+          min: "0.5.0"
+          max: "1"
+        # Assume all browsers
+
+  # This fork's releases, which carry Windows and macOS packages only. The entry
+  # names this repository alone: get_asset tries the next repository whenever
+  # one has no matching asset, so a second one here would install upstream's
+  # unpatched browser on Linux instead of failing.
+  - repo: lang315/camoufox
+    name: lang315
     pattern: "{name}-{version}-{build}-{os}.{arch}.zip"
     versions:
       - python_library:

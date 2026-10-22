@@ -113,7 +113,7 @@ def test_without_a_pin_the_channel_logic_is_unchanged(tmp_path, monkeypatch):
 def test_the_fetcher_accepts_only_the_paired_asset_by_default(tmp_path, monkeypatch, config, accepts_newer):
     _setup(tmp_path, monkeypatch, pin=PIN, installed=[], config=config)
     fetcher = pkgman.CamoufoxFetcher.__new__(pkgman.CamoufoxFetcher)
-    fetcher.repo_config = pkgman.RepoConfig.get_default()
+    fetcher.repo_config = pkgman.RepoConfig.find_by_name("Official")
     fetcher.pattern = fetcher.repo_config.build_pattern(spoof_os="lin", spoof_arch="x86_64")
     fetcher.installed_sha256 = None
     fetcher.installed_created_at = None

@@ -443,6 +443,20 @@ def test_a_native_identitys_system_ui_family_is_never_masked():
 
 
 # ---------------------------------------------------------------------------
+# browser source
+# ---------------------------------------------------------------------------
+
+
+def test_the_launchers_default_browser_is_the_fork_alone():
+    """Rule: launcher-default-browser-is-the-fork-alone."""
+    import yaml
+
+    repos = yaml.safe_load((REPO_ROOT / "python" / "src" / "camoufox" / "repos.yml").read_text(encoding="utf-8"))
+    default = next(b for b in repos["browsers"] if b["name"] == repos["default"]["browser"])
+    assert default["repo"] == "lang315/camoufox", explain("launcher-default-browser-is-the-fork-alone")
+
+
+# ---------------------------------------------------------------------------
 # teardown
 # ---------------------------------------------------------------------------
 

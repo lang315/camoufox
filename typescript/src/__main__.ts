@@ -60,6 +60,7 @@ import {
 	listAvailableVersions,
 	RepoConfig,
 	resolvedPlaywrightVersionRaw,
+	updateNeeded,
 	upgradeMessage,
 	Version,
 } from "./pkgman.js";
@@ -432,6 +433,7 @@ function setPinned(
  */
 class CamoufoxUpdate extends CamoufoxFetcher {
 	currentVerStr: string | null = null;
+	currentSha256?: string;
 
 	async init(): Promise<this> {
 		await super.init();
@@ -441,11 +443,20 @@ class CamoufoxUpdate extends CamoufoxFetcher {
 			if (!(error instanceof FileNotFoundError)) throw error;
 			this.currentVerStr = null;
 		}
+		this.currentSha256 = listInstalled().find((v) => v.isActive)?.sha256;
 		return this;
 	}
 
 	isUpdatedNeeded(): boolean {
-		return this.currentVerStr === null || this.currentVerStr !== this.verstr;
+		return (
+			this.currentVerStr === null ||
+			updateNeeded(
+				this.currentVerStr,
+				this.currentSha256,
+				this.verstr,
+				this.installedSha256,
+			)
+		);
 	}
 
 	async update(replace = false, iKnowWhatImDoing = false): Promise<void> {
