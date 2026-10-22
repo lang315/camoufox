@@ -290,7 +290,7 @@ index d642800d45..6ae9a39f90 100644
  
    // Create a new FontPrefs and replace the existing one.
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index 701750be08..2ccf0068ba 100644
+index 701750be08..0cc37a1d71 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
 @@ -721,6 +721,19 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
@@ -301,7 +301,7 @@ index 701750be08..2ccf0068ba 100644
 +  // identity is the host's own OS. The name is what GetSystemUIFontFamilies
 +  // gives (and aKey is its lowercased key); the family is what that name
 +  // resolves to.
-+  static bool CamouIsNativeSystemUIName(
++  bool CamouIsNativeSystemUIName(
 +      FontVisibilityProvider* aFontVisibilityProvider,
 +      mozilla::StyleGenericFontFamily aGenericType, nsAtom* aLangGroup,
 +      const nsACString& aKey);
