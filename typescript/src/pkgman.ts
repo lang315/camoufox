@@ -1049,9 +1049,6 @@ export async function listAvailableVersions(
 }
 
 /**
- * Get the full version string of the active install.
- */
-/**
  * Whether an install of `currentVerstr` must be replaced by the release
  * `verstr`. Two releases can carry the same version and build, so the asset's
  * sha256 decides when both are known.
@@ -1066,6 +1063,9 @@ export function updateNeeded(
 	return Boolean(currentSha256 && sha256 && currentSha256 !== sha256);
 }
 
+/**
+ * Get the full version string of the active install.
+ */
 export function installedVerStr(fromDir?: string): string {
 	// An explicit directory (the folder holding a sandbox/alt-version
 	// executable_path) reads that build's version.json instead of the active
