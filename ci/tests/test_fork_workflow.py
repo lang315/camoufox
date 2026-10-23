@@ -136,24 +136,21 @@ def test_the_gate_lets_install_skip_on_a_fork_only():
 
 # --- the gate's table ----------------------------------------------------------
 
-GATE_TIERS = (
-    "resolve static pythonlib typescript install build fetch-browser playwright "
-    "patch-guards build-tester native typescript-browser growth e2e sundial summary"
-).split()
-
 
 def _run_gate(results: dict, *, built="true", has_sundial="false", repository="lang315/camoufox"):
     """Run the gate job's own script with a synthetic `needs` and return the
     process and the mark printed for each tier."""
     import json
     import os
+    import re
     import subprocess
     import sys
     import textwrap
 
     gate = _job_block(WORKFLOW.read_text(encoding="utf-8"), "gate")
     script = gate.split("python3 - <<'PY'\n", 1)[1].split("\n          PY", 1)[0]
-    needs = {name: {"result": results.get(name, "success")} for name in GATE_TIERS}
+    tiers = re.search(r"\n    needs:\s*\[(.*?)\]", gate, re.DOTALL).group(1).replace("\n", " ").split(",")
+    needs = {name.strip(): {"result": results.get(name.strip(), "success")} for name in tiers}
     env = {
         **os.environ,
         "RESULTS": json.dumps(needs),
