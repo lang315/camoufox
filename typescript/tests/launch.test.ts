@@ -1260,6 +1260,15 @@ describe.skipIf(!MODEL.ok)(
 			const presets = fingerprints.loadPresets("150")?.presets[osName] ?? [];
 			expect(presets.length).toBeGreaterThan(0);
 			for (const [i, preset] of presets.entries()) {
+				// The host reports the preset's own core count: the launch replaces
+				// the preset's cores with the host's, and coherence drops an Intel Mac
+				// IGP beside a count outside intelMacIgpCores, so the result would
+				// follow the machine running the test (#271). The drop itself is
+				// covered by "a preset GPU is checked against the host core count".
+				deps.fixHardwareConcurrency = (config, canPin) =>
+					fingerprints.fixHardwareConcurrency(config, canPin, {
+						cpuCount: preset.navigator.hardwareConcurrency,
+					});
 				const config = await launchConfig({
 					os: osName,
 					fingerprint_preset: preset,
