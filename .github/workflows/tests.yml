@@ -388,8 +388,7 @@ jobs:
         # FAILS its tests rather than skipping them, so this list is the job's
         # contract. xvfb: the virtual-display lifecycle.
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends xvfb
+          python3 ci/apt_install.py xvfb
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: typescript/package.json
@@ -680,7 +679,7 @@ jobs:
         # in the same source directory land at different depths.
         run: |
           set -euo pipefail
-          command -v zstd >/dev/null 2>&1 || { sudo apt-get update -qq && sudo apt-get install -y zstd; }
+          command -v zstd >/dev/null 2>&1 || python3 ci/apt_install.py zstd
           mkdir -p restored
           zstd -d -c camoufox-dist.tar.zst | tar -C restored -xf -
           python3 -m ci.browser_inputs --overlay restored/bin
