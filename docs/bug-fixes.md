@@ -28,6 +28,23 @@ later change should read first.
 
 **What misled the investigation.** The exit code and the final line were right, so the gate looked correct. Only the table was wrong, and no test ran the script: the existing tests string-match the YAML.
 
+## #271: "every bundled preset launches with its own GPU" followed the core count of the machine running it
+
+**Fixed by:** the PR that pins the host core count to each preset's own in `python/tests/test_identity_salt.py::TestPinnedIdentityIsStable::test_every_bundled_preset_launches` and in the TypeScript test of the same name in `typescript/tests/launch.test.ts`. **Found by:** running `launch.test.ts` on an Apple M1 Mac with 10 logical CPUs.
+
+**Symptom.** `macos 1: expected 'Apple M1, or similar' to be 'Intel(R) HD Graphics 400, or similar'`. The Python twin fails the same way (`AssertionError: ('macos', 1)`). Both pass on the CI runners.
+
+**Root cause.** The launch replaces the preset's `navigator.hardwareConcurrency` with the host's, snapped into `plausibleCoreCounts` (`fix_hardware_concurrency`, `python/src/camoufox/fingerprints.py`). `coherence.drop_incoherent_source_values` then rejects a pre-Apple-Silicon Mac integrated GPU beside a count outside `intelMacIgpCores` (`[2, 4, 6, 8, 12, 16]`), and the GPU is drawn again. macOS preset 1 is that Intel GPU, so a host of 10 or 20 cores loses it and the launch names an Apple GPU instead. The result depends on the core count, not on the operating system: a Linux host faked to 10 cores fails the same way. The product behaves as documented, and `test_coherence.py` and the TypeScript test "a preset GPU is checked against the host core count" already test the drop. The defect was in the two tests, which left the host's count unpinned. The issue as filed blamed the launcher claiming the host's GPU on a Mac; that is a second path to an Apple GPU, not this one.
+
+**Fix.** Each test pins the host core count to the preset's own `navigator.hardwareConcurrency` before launching it, so the launch keeps the preset's cores and the test asks only whether every preset can launch with its own GPU. No product code changed. A preset recorded with 2 cores is snapped up to 4 by the launcher, and 4 is in `intelMacIgpCores`, so every bundled preset still passes the coherence rule.
+
+**Evidence.**
+- Red, Python: the unchanged test with the host faked to 8, 10 and 20 cores. 8 passes; 10 and 20 fail on `('macos', 1)`.
+- Red, TypeScript: the unchanged test with the same fake through `deps.fixHardwareConcurrency`. 8 passes; 10 and 20 fail with the message above.
+- Green: the fixed Python test passes with the host faked to 2, 10, 20 and 56 cores, and the fixed TypeScript test and the whole of `launch.test.ts` pass on an Apple M1 Mac with 10 cores.
+
+**What misled the investigation.** The failure appeared only on a Mac, and the filed cause (the launcher claiming the host GPU) fitted that. Faking a Linux host with 10 cores reproduced it, which showed the Mac was incidental.
+
 ## #265: the reference Firefox's service worker registration ran out of the page's 8 s budget on Windows
 
 **Fixed by:** the PR that adds `reference_verdict` to `e2e/util.py` and gives the service worker probe in `e2e/web/pages/apps.html` its own 20 s budget. **Found by:** e2e run 39734508472, Windows leg.
