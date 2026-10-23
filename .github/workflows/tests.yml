@@ -1382,19 +1382,22 @@ jobs:
           }
 
           problems = []
+          marks = {}
           for name, result in sorted(results.items()):
               if result == "success":
+                  marks[name] = "ok  "
                   continue
               if result == "skipped" and may_skip.get(name):
                   print(f"  - {name}: skipped (not applicable to this run)")
+                  marks[name] = "skip"
                   continue
+              marks[name] = "FAIL"
               problems.append(f"{name}: {result}")
 
           width = max(len(n) for n in results)
           print("\ntier results:")
           for name, result in sorted(results.items()):
-              mark = "ok  " if result == "success" else "FAIL"
-              print(f"  {mark}  {name:<{width}}  {result}")
+              print(f"  {marks[name]}  {name:<{width}}  {result}")
 
           if problems:
               print("\nnot mergeable:")
