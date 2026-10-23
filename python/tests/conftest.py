@@ -102,8 +102,8 @@ def no_browser_fetch(request, monkeypatch, tmp_path):
 
     The refusal is raised through pytest.fail(): its exception derives from
     BaseException, not Exception, so it escapes the `except Exception` that
-    addons.py:94 wraps around the uBlock Origin download (#110). ADDONS_DIR is
-    redirected because, with the refusal escaping, addons.py:96's rmtree no
+    maybe_download_addons wraps around the uBlock Origin download (#110).
+    ADDONS_DIR is redirected because, with the refusal escaping, its rmtree no
     longer runs and a trip would leave a directory in the real user cache.
 
     A test marked `network` downloads on purpose (test_geoip_sources checks
