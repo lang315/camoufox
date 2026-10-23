@@ -12,6 +12,23 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #279: the Python tests could reach the developer's real camoufox cache
+
+**Fixed by:** the PR that moves the environment redirect to the top of `python/tests/conftest.py`. **Found by:** reading `conftest.py` after the TypeScript suite wiped a real cache (#267, fixed by #269).
+
+**Symptom.** None yet in Python. The TypeScript suite had deleted `~/Library/Caches/camoufox`; the Python suite had the same exposure.
+
+**Root cause.** `no_browser_fetch` redirected only `addons.ADDONS_DIR`. `pkgman.py:64` (`INSTALL_DIR = Path(user_cache_dir("camoufox"))`) and `geolocation.py:31` (`GEOIP_DIR`) are computed when `camoufox` is first imported, and `multiversion.py:21-24` derives four more from `INSTALL_DIR`. `conftest.py` imports `camoufox` at module top, so a fixture that sets `HOME` runs after the constants are fixed. `multiversion.py:29-31` and `__main__.py:852` call `shutil.rmtree(INSTALL_DIR)`, so one test that reached them would delete the real cache.
+
+**Fix.** `conftest.py` creates a temp root and points `HOME`, `USERPROFILE`, `LOCALAPPDATA` and `XDG_CACHE_HOME` at it before importing `camoufox`, so every import-time constant and every call-time `user_cache_dir()` lands inside it. `pytest_sessionstart` scans the package's module-level paths and aborts the run before any test if one with a `camoufox` component is outside the root, so a new constant is covered without being listed. An autouse fixture empties the root after each test. Alternative rejected: monkeypatching each constant per test, which needs the copies in `addons`, `multiversion`, `utils` and `__main__` kept in step by hand.
+
+**Evidence.**
+- Red: `tests/test_cache_isolation.py` against the unchanged conftest, with `HOME` at a scratch directory: 12 failed, 1 passed.
+- Green: 16 passed. Pointing the guard at the wrong root makes the session abort with `cache paths outside the test root` before any test runs.
+- `python3 -m ci.run_pythonlib` with the real `HOME`: 708 passed, 0 failed; the real cache held 0 files before and after.
+
+**What misled the investigation.** Nothing; the exposure was read from the code, not reproduced.
+
 ## #275: the runtime-library install hung for the job's whole hour and printed nothing
 
 **Fixed by:** the PR that adds `ci/apt_install.py` and uses it for every runtime-library install in the workflows. **Found by:** Tests run 39801913772, attempt 1, job "Patch guards: spoofing".
