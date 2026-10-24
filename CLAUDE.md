@@ -125,6 +125,13 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `other_names_stall.py` is #253's. Run one by hand against a binary, or on all
   three OSes with `gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=other_names_stall.py`
   (a probe that takes `--zip`).
+  With `run_id`, only the leg of that build's OS tests anything: the other two
+  legs find no browser and pass green having tested nothing. Name them in any
+  report.
+- **The suites isolate the launcher cache** (TypeScript #269, Python #280) and
+  fail before any test if a cache path escapes the temp root. On macOS a launched
+  browser still creates an empty `~/Library/Caches/camoufox` by itself, so check
+  the file count, not whether the directory exists.
 
 ## Verifying spoofing claims (learned the hard way)
 
@@ -296,6 +303,10 @@ about a build without an unmerged patch that every run in fact carried.
   other half: it must also be guaranteed to be about the same thing.
 - **Grep the arms you did not change.** The highest-value finding in that review
   came out of logs already on disk.
+- **Name the launcher too.** The same binary read a font universe of 318 under
+  upstream's launcher and 319 under this fork's (#278): the fork's `utils.py`
+  sets `font.name-list.*` prefs upstream lacks. A count compared across runs is
+  about the binary *and* the launcher that configured it.
 
 *Corollary, about guards.* In a long single-step guard, register a failing check
 (`tripwires.append`, triaged at the end of the step) and never assert in place: an
