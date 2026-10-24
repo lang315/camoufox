@@ -12,7 +12,7 @@ its text was measured with the launch-level fonts, and once a worker had
 measured, so was the text on its page's main thread.
 
 The probe gives one context its own short lists through an init script, then
-opens it on several loopback addresses. Each address is its own site, so the
+opens it on several `*.localhost` names. Each name is its own site, so the
 pages spread across content processes, and each reports which of the
 launch-level fonts and voices it can see, measuring fonts on an OffscreenCanvas
 in a worker first and then on one on its main thread.
@@ -36,7 +36,7 @@ from helpers import resolve_binary  # noqa: E402
 
 CAMOUFOX = Path(__file__).resolve().parents[4] / "python" / "src" / "camoufox"
 
-HOSTS = [f"127.0.0.{n}" for n in range(1, 9)]
+HOSTS = [f"site{n}.localhost" for n in range(1, 9)]
 
 PROBE = """async (fonts) => {
   // document.fonts.check() is true for any font that needs no download,

@@ -12,6 +12,24 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #282: the cross-process font and voice guard could not run on macOS
+
+**Fixed by:** the PR that gives `context-lists-across-processes.py` `*.localhost` sites. **Found by:** running the guard on a Mac while checking the upstream sync (#278).
+
+**Symptom.** `python3 -m ci.run_patch_guards --only context-lists-across-processes` on macOS died with `Page.goto: Timeout 30000ms exceeded ... navigating to "http://127.0.0.2:<port>/"`.
+
+**Root cause.** `HOSTS = [f"127.0.0.{n}" for n in range(1, 9)]` used eight loopback addresses as eight sites. Linux routes all of `127.0.0.0/8` to `lo`; macOS configures only `127.0.0.1` on `lo0` (`ifconfig lo0 | grep inet`), so addresses 2-8 are unreachable.
+
+**Fix.** `HOSTS = [f"site{n}.localhost" for n in range(1, 9)]`. The server is unchanged: Firefox answers `localhost` and every name ending in `.localhost` as loopback without asking the OS resolver (`IsLoopbackHostname`, `netwerk/dns/DNS.cpp:231-244`, called from `nsHostResolver.cpp:539`, both at `FIREFOX_158_0_RELEASE`), so one list works on every OS and needs no resolver configuration on a runner.
+
+**Evidence.**
+- Red: the unchanged guard on macOS (fork.2, BuildID 20261022041804) failed at 127.0.0.2 as above.
+- Green: the same command passed (`1/1 guards passed`).
+- Control: the guard with its `setFontList`/`setSpeechVoices` init script removed fails on the first page (`FAIL fonts: the context list did not apply on site1.localhost (319 of the launch-level 319)`).
+- The parent's `ProcessIsolation` log (`MOZ_LOG=ProcessIsolation:5`) reads the same for the names and for one repeated `127.0.0.1`: every navigation logs `Not isolating '<origin>^userContextId=6' as isolation is disabled` and stays in remote type `web=^userContextId=6`. Pages spread across the context's content-process pool in both cases; a name is no more and no less a process of its own than an address was.
+
+**What misled the investigation.** Counting content processes with `ps` after the pages loaded read 9 for eight `*.localhost` names and 9 for one address loaded eight times: the pool is already full, so the count cannot tell the lists apart.
+
 ## #279: the Python tests could reach the developer's real camoufox cache
 
 **Fixed by:** the PR that moves the environment redirect to the top of `python/tests/conftest.py`. **Found by:** reading `conftest.py` after the TypeScript suite wiped a real cache (#267, fixed by #269).
