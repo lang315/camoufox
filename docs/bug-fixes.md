@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #283: e2e.yml legs with no browser passed green having tested nothing
+
+**Fixed by:** the PR that adds the `targets` job to `.github/workflows/e2e.yml`. **Found by:** e2e runs 39970634587 and 39992077720, each with two green legs that ran no test.
+
+**Symptom.** `gh workflow run e2e.yml -f run_id=<a one-platform build>` ended `success` with three green legs, two of which only printed `::notice::run <id> has no CamoufoxBuilds-<target>; nothing to test on this leg`.
+
+**Root cause.** A fixed three-entry matrix started every leg (checkout, Python, Go, apt, pip, `playwright install firefox`), and only the "Which browser" step found there was no artifact. It then wrote `E2E_SKIP=1` and exited 0, and the Run and Probe steps were skipped by `if: env.E2E_SKIP != '1'`. That is the skip-as-green AGENTS.md forbids: "A missing prerequisite fails in CI; it never passes as a skip."
+
+**Fix.** A first job, `targets`, lists the build run's non-expired artifacts (`gh api repos/<repo>/actions/runs/<id>/artifacts`) or the release's assets and keeps the targets whose `CamoufoxBuilds-<target>` or `-<asset>.zip` it holds. The e2e job takes that list as its matrix, so a leg with nothing to test never starts. An input that holds none fails in `targets` with `::error::run <id> holds no browser for ...`. `E2E_SKIP` and its two `if:` conditions are gone, and the target table lives only in `targets`. `ci/tests/test_e2e_workflow.py` runs the job's own resolver on synthetic name lists.
+
+**Evidence.**
+- Red: on `main` the five resolver tests fail because there is no `targets` job, and `test_the_skip_mechanism_is_gone` fails on `E2E_SKIP` (6 failed).
+- Green: 6 passed.
+- Live runs are in the PR.
+
+**What misled the investigation.** The runs were green. A run's conclusion says nothing about which legs ran a test; read the legs' logs.
 ## #282: the cross-process font and voice guard could not run on macOS
 
 **Fixed by:** the PR that gives `context-lists-across-processes.py` `*.localhost` sites. **Found by:** running the guard on a Mac while checking the upstream sync (#278).

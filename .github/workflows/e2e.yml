@@ -1,6 +1,7 @@
 # End-to-end user journeys on the three desktop OSes, against a build or a
 # release. Dispatch only: macOS and Windows runners cost more minutes, and a
-# Linux result is no evidence about either (CLAUDE.md lessons 3 and 8).
+# Linux result is no evidence about either (CLAUDE.md lessons 3 and 8). Only the
+# legs the build run or release holds a browser for run (the `targets` job).
 name: e2e (three OSes)
 
 on:
@@ -39,15 +40,59 @@ permissions:
   actions: read
 
 jobs:
+  # The legs to run: those the build run or the release holds a browser for. A
+  # leg with nothing to test would conclude `success` having tested nothing, so
+  # it is never started, and an input that holds no browser at all fails here.
+  targets:
+    name: Which legs
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ -n "$RUN_ID" ]; then
+            NAMES="$(gh api --paginate "repos/${{ github.repository }}/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[] | select(.expired | not) | .name')"
+          elif [ -n "$RELEASE" ]; then
+            NAMES="$(gh release view "$RELEASE" --repo "${{ github.repository }}" --json assets -q '.assets[].name')"
+          fi
+          export NAMES
+          python3 - <<'PY'
+          import json, os, sys
+
+          TARGETS = [
+              {"os": "ubuntu-24.04", "target": "linux-x86_64", "asset": "lin.x86_64"},
+              {"os": "macos-26", "target": "macos-arm64", "asset": "mac.arm64"},
+              {"os": "windows-2025", "target": "windows-x86_64", "asset": "win.x86_64"},
+          ]
+          names = os.environ.get("NAMES", "").split()
+          if os.environ["RUN_ID"]:
+              source = f"run {os.environ['RUN_ID']}"
+              legs = [t for t in TARGETS if f"CamoufoxBuilds-{t['target']}" in names]
+          elif os.environ["RELEASE"]:
+              source = f"release {os.environ['RELEASE']}"
+              legs = [t for t in TARGETS if any(n.endswith(f"-{t['asset']}.zip") for n in names)]
+          else:
+              print("::error::pass release or run_id")
+              sys.exit(1)
+          if not legs:
+              print(f"::error::{source} holds no browser for {', '.join(t['target'] for t in TARGETS)}")
+              sys.exit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write("matrix=" + json.dumps({"include": legs}) + "\n")
+          PY
+
   e2e:
     name: e2e (${{ matrix.target }})
+    needs: targets
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: ubuntu-24.04, target: linux-x86_64, asset: lin.x86_64 }
-          - { os: macos-26, target: macos-arm64, asset: mac.arm64 }
-          - { os: windows-2025, target: windows-x86_64, asset: win.x86_64 }
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 150
     steps:
@@ -74,33 +119,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "${{ inputs.run_id }}" ]; then
-            # A single-target build run holds one platform; the other legs have nothing to test.
-            if ! gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
-              -n "CamoufoxBuilds-${{ matrix.target }}" -D .ci-work/artifact; then
-              echo "::notice::run ${{ inputs.run_id }} has no CamoufoxBuilds-${{ matrix.target }}; nothing to test on this leg"
-              echo "E2E_SKIP=1" >> "$GITHUB_ENV"
-              exit 0
-            fi
+            gh run download "${{ inputs.run_id }}" --repo "${{ github.repository }}" \
+              -n "CamoufoxBuilds-${{ matrix.target }}" -D .ci-work/artifact
             # Absolute: the Run step works from e2e/, where a relative path does not resolve.
             zip="$PWD/$(ls .ci-work/artifact/*.zip | head -1)"
             echo "E2E_BROWSER=--zip=$zip" >> "$GITHUB_ENV"
-          elif [ -n "${{ inputs.release }}" ]; then
-            # A release need not carry every platform (fork.1 has no Linux build);
-            # that leg has nothing to test, which is a notice, not a failure.
-            asset="$(gh release view "${{ inputs.release }}" --repo "${{ github.repository }}" --json assets \
-              -q '.assets[].name' | grep -E -- '-${{ matrix.asset }}\.zip$' || true)"
-            if [ -z "$asset" ]; then
-              echo "::notice::release ${{ inputs.release }} has no ${{ matrix.asset }} build; nothing to test on this leg"
-              echo "E2E_SKIP=1" >> "$GITHUB_ENV"
-            fi
-            echo "E2E_BROWSER=--release=${{ inputs.release }}" >> "$GITHUB_ENV"
           else
-            echo "::error::pass release or run_id"; exit 1
+            echo "E2E_BROWSER=--release=${{ inputs.release }}" >> "$GITHUB_ENV"
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
           if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
       - name: Run
-        if: env.E2E_SKIP != '1' && inputs.probe == ''
+        if: inputs.probe == ''
         shell: bash
         working-directory: e2e
         env:
@@ -114,7 +144,7 @@ jobs:
           if [ -n "$E2E_K" ]; then args+=(-k "$E2E_K"); fi
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m pytest "${args[@]}"; else python -m pytest "${args[@]}"; fi
       - name: Probe
-        if: env.E2E_SKIP != '1' && inputs.probe != ''
+        if: inputs.probe != ''
         shell: bash
         env:
           PROBE: ${{ inputs.probe }}
