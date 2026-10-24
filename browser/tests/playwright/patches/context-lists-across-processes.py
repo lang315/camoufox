@@ -12,10 +12,12 @@ its text was measured with the launch-level fonts, and once a worker had
 measured, so was the text on its page's main thread.
 
 The probe gives one context its own short lists through an init script, then
-opens it on several `*.localhost` names. Each name is its own site, so the
-pages spread across content processes, and each reports which of the
-launch-level fonts and voices it can see, measuring fonts on an OffscreenCanvas
-in a worker first and then on one on its main thread.
+opens it on several `*.localhost` names. Site isolation is off by design
+(fission.webContentIsolationStrategy = 0 in camoufox.cfg), so a site does not
+choose its process: the context's content-process pool spreads the pages across
+processes. Each page reports which of the launch-level fonts and voices it can
+see, measuring fonts on an OffscreenCanvas in a worker first and then on one on
+its main thread.
 
 What PASS means: every page of the context, and a worker on each, sees the
 same fonts and voices as the first, and fewer than the launch level does.
