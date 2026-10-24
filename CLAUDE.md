@@ -125,9 +125,7 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `other_names_stall.py` is #253's. Run one by hand against a binary, or on all
   three OSes with `gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=other_names_stall.py`
   (a probe that takes `--zip`).
-  With `run_id`, only the leg of that build's OS tests anything: the other two
-  legs find no browser and pass green having tested nothing. Name them in any
-  report.
+  `e2e.yml` runs only the legs the build or release holds, and fails when it holds none.
 - **The suites isolate the launcher cache** (TypeScript #269, Python #280) and
   fail before any test if a cache path escapes the temp root. On macOS a launched
   browser still creates an empty `~/Library/Caches/camoufox` by itself, so check
