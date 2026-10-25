@@ -157,7 +157,7 @@ async def main():
         if bad:
             failures.append(name)
     if failures:
-        print(f"  FAIL: {', '.join(failures)} stalled the page {MAX_RATIO:.0f}x as long as the control or claimed the system face more than once")
+        print(f"  FAIL: {', '.join(failures)} stalled the page {MAX_RATIO:.0f}x as long as the control or did not claim the system face exactly once")
         return 1
     print(f"  PASS: no macOS base blocked the page {MAX_RATIO:.0f}x as long as the control, and each claims the system face once")
     return 0
