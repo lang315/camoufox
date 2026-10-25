@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>reach</title>
+<script>
+  // Each way web content could reach a URL, run for the real name and for a made-up one.
+  const settle = (p) => Promise.race([
+    p.then(() => ({ type: "ok", message: "" }), (e) => ({ type: e.name, message: e.message })),
+    new Promise((r) => setTimeout(() => r({ type: "timeout", message: "" }), 4000)),
+  ]);
+  const attempts = {
+    fetch: (url) => settle(fetch(url)),
+    worker: (url) => settle(new Promise((resolve, reject) => {
+      try {
+        const w = new Worker(url);
+        w.onerror = (e) => reject({ name: "WorkerError", message: e.message ?? "" });
+        w.onmessage = () => resolve();
+        setTimeout(resolve, 1500);
+      } catch (e) { reject(e); }
+    })),
+    iframe: (url) => settle(new Promise((resolve, reject) => {
+      const f = document.createElement("iframe");
+      f.onload = () => {
+        let href;
+        try { href = f.contentWindow.location.href; } catch (e) { href = "blocked:" + e.name; }
+        href === url ? resolve() : reject({ name: "NotLoaded", message: href });
+      };
+      f.src = url;
+      document.body.appendChild(f);
+    })),
+  };
+  window.__reach = async (real, control) => {
+    const out = {};
+    for (const [name, run] of Object.entries(attempts)) {
+      out[name] = { real: await run(real), control: await run(control) };
+    }
+    return out;
+  };
+</script>

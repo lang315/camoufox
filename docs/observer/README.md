@@ -23,8 +23,19 @@ observer, and the C++ ring buffer is never touched.
 
 ## Reading the results
 
-The records live in the parent process `Collector`. Read them from
-chrome-privileged script, for example Marionette's `using_context("chrome")`:
+The records live in the parent process `Collector`. With the observer armed,
+open **`about:observer`** in a tab: it lists every `(site, container)` row with
+its surfaces and requests, refreshes about every second, and has a "Copy JSON"
+button for the raw snapshot. The name exists only while `CAMOU_OBSERVE` is set;
+a disarmed browser answers it like any unknown `about:` page.
+
+The page is an unprivileged file served from `resource://gre/modules/`, fed by a
+`JSWindowActor` pair that matches only `about:observer`. It registers no chrome
+package, and web content cannot load, frame, fetch or start a worker on it
+(`browser/tests/build-tester/observer/test_about_observer.py`).
+
+The same data is readable from chrome-privileged script, for example Marionette's
+`using_context("chrome")`:
 
 ```js
 const { getCollector } = ChromeUtils.importESModule(
@@ -33,10 +44,10 @@ const { getCollector } = ChromeUtils.importESModule(
 getCollector().snapshot();
 ```
 
-`browser/tests/build-tester/observer/harness.py` does this. There is no panel:
-a page for it needs a chrome package, and a registered chrome package is
-visible to every web page (`additions-register-no-new-chrome-package` in
-`ci/tribal-rules.yml`).
+`browser/tests/build-tester/observer/harness.py` does this. A page with its own
+chrome package would be visible to every web page
+(`additions-register-no-new-chrome-package` in `ci/tribal-rules.yml`), which is
+why `about:observer` is not one.
 
 `snapshot()` returns one row per `(site, userContextId)` pair, each with:
 

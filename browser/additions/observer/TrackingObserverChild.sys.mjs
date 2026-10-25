@@ -36,6 +36,10 @@ export class TrackingObserverChild extends JSWindowActorChild {
   actorCreated() {
     arm(this);
   }
+  // The registered DOMWindowCreated event only creates the actor eagerly, but
+  // Firefox then calls handleEvent on it; without one it logs "Property
+  // 'handleEvent' is not callable" once per window.
+  handleEvent() {}
   didDestroy() {
     // contentWindow may already be torn down here; guard + swallow so a
     // teardown race never throws into the console (a page-observable tell).
