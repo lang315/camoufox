@@ -99,6 +99,8 @@ v, err := p.Evaluate(ctx, "mw:typeof window.myPageGlobal")
 
 Without the option an `mw:` expression fails with `Main world evaluation is disabled`.
 Only values come back: a DOM node is returned as the string `"ref: <Node>"`.
+An object reached twice comes back as the same value in both places; one that contains
+itself fails with `camoufox: main-world result contains a cycle`.
 
 ## Architecture
 

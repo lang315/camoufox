@@ -85,6 +85,15 @@ func TestEvaluateMainWorld(t *testing.T) {
 			t.Errorf("object round-trip = %#v, want %#v", v, want)
 		}
 
+		v, err = p.Evaluate(ctx, `mw:(() => { const o = {a: 1}; return [o, o]; })()`)
+		if wantShared := []any{map[string]any{"a": float64(1)}, map[string]any{"a": float64(1)}}; err != nil || !reflect.DeepEqual(v, wantShared) {
+			t.Errorf("shared reference = %#v, %v; want %#v, nil", v, err, wantShared)
+		}
+
+		if v, err := p.Evaluate(ctx, `mw:(() => { const o = {}; o.self = o; return o; })()`); err == nil || !strings.Contains(err.Error(), "cycle") {
+			t.Errorf("cyclic result = %#v, %v; want an error that names the cycle", v, err)
+		}
+
 		if v, err := p.Evaluate(ctx, "mw:Promise.resolve(window.secret)"); err != nil || v != float64(42) {
 			t.Errorf("main-world promise = %v, %v; want 42, nil", v, err)
 		}

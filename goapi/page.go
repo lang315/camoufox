@@ -440,7 +440,7 @@ func (p *Page) Evaluate(ctx context.Context, expression string) (any, error) {
 		return nil, fmt.Errorf("camoufox: decode evaluate result: %w", err)
 	}
 	if mainWorld {
-		return decodeSerialized(v), nil
+		return decodeSerialized(v)
 	}
 	return v, nil
 }
