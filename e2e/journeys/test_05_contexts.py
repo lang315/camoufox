@@ -19,12 +19,15 @@ def fp_of(page, site):
     return wait_out(page)
 
 
+CONTEXTS = 8
+
+
 def identity(fp, covered=False):
     # A covered launch reads RFP's random placeholder, which never agrees with itself and
-    # differs from every other read: it can say neither "same" nor "different". The audio
-    # hash is seeded per context and no launch covers it, so contexts differ by construction.
+    # differs from every other read: it can say neither "same" nor "different". Audio renders
+    # as stock Firefox does on every context, so it is not part of an identity.
     canvas = () if covered else (fp["canvas"],)
-    return (*canvas, fp["audio"], fp["main"]["ua"], fp["screen"]["w"], fp["screen"]["h"], str(fp.get("webgl")))
+    return (*canvas, fp["main"]["ua"], fp["screen"]["w"], fp["screen"]["h"], str(fp.get("webgl")))
 
 
 def test_two_contexts_share_nothing(drv, site, check):
@@ -44,11 +47,15 @@ def test_two_contexts_share_nothing(drv, site, check):
 def test_new_context_gives_each_context_its_own_identity(drv, site, check):
     print(cite("unique_context"))
     b = drv.launch(os="windows")
-    a, c = b.new_identity_context(), b.new_identity_context()
-    pa = a.new_page()
-    fa, fc = fp_of(pa, site), fp_of(c.new_page(), site)
+    contexts = [b.new_identity_context() for _ in range(CONTEXTS)]
+    a = contexts[0]
+    fa = fp_of(a.new_page(), site)
+    seen = {identity(fa, b.canvas_covered)} | {identity(fp_of(c.new_page(), site), b.canvas_covered) for c in contexts[1:]}
     covered = b.canvas_covered
-    check(identity(fa, covered) != identity(fc, covered), "the two contexts have different fingerprints")
+    # Nothing a page reads differs between two contexts by construction any more: an identity draws
+    # its UA, screen and GPU from recorded distributions, so two draws can agree. All of CONTEXTS
+    # agreeing is what a context that kept the launch's identity would show.
+    check(len(seen) > 1, f"{CONTEXTS} contexts did not all present one fingerprint ({len(seen)} distinct)")
     check(identity(fp_of(a.new_page(), site), covered) == identity(fa, covered), "two pages of one context agree")
     b.close()
     check.done()
