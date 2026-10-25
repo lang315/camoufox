@@ -164,9 +164,6 @@ func buildLayout() map[string]keyDesc {
 		if def.shiftKey != "" {
 			s := d
 			s.key, s.text = def.shiftKey, def.shiftKey
-			if def.shiftKeyCode != 0 {
-				s.keyCode = def.shiftKeyCode
-			}
 			shifted = &s
 		}
 		withShift := d

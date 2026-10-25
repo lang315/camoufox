@@ -2,6 +2,7 @@ package camoufox
 
 // Port of the US keyboard layout in playwright-core server/usKeyboardLayout.ts, the table
 // Playwright's own Firefox client uses, so a key reports the same fields from both clients.
+// The layout's shiftKeyCode is left out: Playwright's Firefox client sends keyCodeWithoutLocation, which Shift does not change.
 
 // layoutKey is one physical key of the layout.
 type layoutKey struct {
@@ -9,7 +10,6 @@ type layoutKey struct {
 	key          string
 	keyCode      int
 	shiftKey     string // key value with Shift held; "" when Shift changes nothing
-	shiftKeyCode int    // keyCode with Shift held, when it differs
 	keyCodeNoLoc int    // keyCode sent to the browser, when it differs from keyCode
 	location     int
 	text         string // text of a key whose key value is not one character
@@ -108,17 +108,17 @@ var usLayout = []layoutKey{
 	{code: "NumpadDivide", key: "/", keyCode: 111, location: 3},
 	{code: "NumpadMultiply", key: "*", keyCode: 106, location: 3},
 	{code: "NumpadSubtract", key: "-", keyCode: 109, location: 3},
-	{code: "Numpad7", key: "Home", keyCode: 36, shiftKey: "7", shiftKeyCode: 103, location: 3},
-	{code: "Numpad8", key: "ArrowUp", keyCode: 38, shiftKey: "8", shiftKeyCode: 104, location: 3},
-	{code: "Numpad9", key: "PageUp", keyCode: 33, shiftKey: "9", shiftKeyCode: 105, location: 3},
-	{code: "Numpad4", key: "ArrowLeft", keyCode: 37, shiftKey: "4", shiftKeyCode: 100, location: 3},
-	{code: "Numpad5", key: "Clear", keyCode: 12, shiftKey: "5", shiftKeyCode: 101, location: 3},
-	{code: "Numpad6", key: "ArrowRight", keyCode: 39, shiftKey: "6", shiftKeyCode: 102, location: 3},
+	{code: "Numpad7", key: "Home", keyCode: 36, shiftKey: "7", location: 3},
+	{code: "Numpad8", key: "ArrowUp", keyCode: 38, shiftKey: "8", location: 3},
+	{code: "Numpad9", key: "PageUp", keyCode: 33, shiftKey: "9", location: 3},
+	{code: "Numpad4", key: "ArrowLeft", keyCode: 37, shiftKey: "4", location: 3},
+	{code: "Numpad5", key: "Clear", keyCode: 12, shiftKey: "5", location: 3},
+	{code: "Numpad6", key: "ArrowRight", keyCode: 39, shiftKey: "6", location: 3},
 	{code: "NumpadAdd", key: "+", keyCode: 107, location: 3},
-	{code: "Numpad1", key: "End", keyCode: 35, shiftKey: "1", shiftKeyCode: 97, location: 3},
-	{code: "Numpad2", key: "ArrowDown", keyCode: 40, shiftKey: "2", shiftKeyCode: 98, location: 3},
-	{code: "Numpad3", key: "PageDown", keyCode: 34, shiftKey: "3", shiftKeyCode: 99, location: 3},
-	{code: "Numpad0", key: "Insert", keyCode: 45, shiftKey: "0", shiftKeyCode: 96, location: 3},
-	{code: "NumpadDecimal", key: "\u0000", keyCode: 46, shiftKey: ".", shiftKeyCode: 110, location: 3},
+	{code: "Numpad1", key: "End", keyCode: 35, shiftKey: "1", location: 3},
+	{code: "Numpad2", key: "ArrowDown", keyCode: 40, shiftKey: "2", location: 3},
+	{code: "Numpad3", key: "PageDown", keyCode: 34, shiftKey: "3", location: 3},
+	{code: "Numpad0", key: "Insert", keyCode: 45, shiftKey: "0", location: 3},
+	{code: "NumpadDecimal", key: "\u0000", keyCode: 46, shiftKey: ".", location: 3},
 	{code: "NumpadEnter", key: "Enter", keyCode: 13, location: 3, text: "\r"},
 }

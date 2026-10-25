@@ -157,7 +157,10 @@ func TestKeyboardPressEnter(t *testing.T) {
 	if err := kb.Press(ctx, "Enter"); err != nil {
 		t.Fatalf("Press: %v", err)
 	}
-	time.Sleep(300 * time.Millisecond)
+	// The submit is dispatched by the browser after Press returns: wait for it, with a deadline.
+	for deadline := time.Now().Add(10 * time.Second); keyLogEval(t, ctx, p, "String(document.body.dataset.submitted)") != "1" && time.Now().Before(deadline); {
+		time.Sleep(50 * time.Millisecond)
+	}
 	log := keyLogEval(t, ctx, p, "document.body.dataset.keys")
 	const want = "keydown:Enter:Enter:13 keypress:Enter:Enter:13 keyup:Enter:Enter:13"
 	if log != want {
@@ -179,6 +182,24 @@ func TestKeyboardTypeLogMatchesPlaywright(t *testing.T) {
 		"keydown:b:KeyB:66 keypress:b:KeyB:98 keyup:b:KeyB:66 " +
 		"keydown:Shift:ShiftLeft:16 keydown:}:BracketRight:221 keypress:}:BracketRight:125 keyup:}:BracketRight:221 keyup:Shift:ShiftLeft:16 " +
 		"keydown:c:KeyC:67 keypress:c:KeyC:99 keyup:c:KeyC:67"
+	if got := keyLogEval(t, ctx, p, "document.body.dataset.keys"); got != want {
+		t.Errorf("event log\n got: %s\nwant: %s", got, want)
+	}
+}
+
+// Playwright sends keyCodeWithoutLocation, so Shift+Numpad7 reports 36, not shiftKeyCode 103.
+func TestKeyboardShiftNumpadKeyCode(t *testing.T) {
+	p, kb, ctx := keyLogKeyboard(t)
+	if err := kb.Down(ctx, "Shift"); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	if err := kb.Press(ctx, "Numpad7"); err != nil {
+		t.Fatalf("Press: %v", err)
+	}
+	if err := kb.Up(ctx, "Shift"); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	const want = "keydown:Shift:ShiftLeft:16 keydown:7:Numpad7:36 keypress:7:Numpad7:55 keyup:7:Numpad7:36 keyup:Shift:ShiftLeft:16"
 	if got := keyLogEval(t, ctx, p, "document.body.dataset.keys"); got != want {
 		t.Errorf("event log\n got: %s\nwant: %s", got, want)
 	}
