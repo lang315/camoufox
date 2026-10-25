@@ -526,10 +526,10 @@ index 0000000000..16fb3f90aa
 +}  // namespace mozilla
 diff --git a/dom/base/RoverfoxStorageManager.h b/dom/base/RoverfoxStorageManager.h
 new file mode 100644
-index 0000000000..7974e3b4f6
+index 0000000000..4fd5b37ed2
 --- /dev/null
 +++ b/dom/base/RoverfoxStorageManager.h
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,82 @@
 +#ifndef mozilla_dom_RoverfoxStorageManager_h
 +#define mozilla_dom_RoverfoxStorageManager_h
 +
@@ -601,7 +601,6 @@ index 0000000000..7974e3b4f6
 +  static nsCString MakePrefName(const nsAString& key);
 +  static void SetPrefValue(const nsCString& prefName, const nsCString& value);
 +  static void ReadValue(const nsCString& prefName, nsACString& outValue);
-+  static void EnsureMirror();
 +  struct MemoSlot;
 +  static MemoSlot ReadMemoized(const char* aPrefix, uint32_t aId);
 +  static void BumpGeneration();
