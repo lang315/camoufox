@@ -85,6 +85,10 @@ func TestEvaluateMainWorld(t *testing.T) {
 			t.Errorf("object round-trip = %#v, want %#v", v, want)
 		}
 
+		if v, err := p.Evaluate(ctx, "mw:Promise.resolve(window.secret)"); err != nil || v != float64(42) {
+			t.Errorf("main-world promise = %v, %v; want 42, nil", v, err)
+		}
+
 		if _, err := p.Evaluate(ctx, `mw:(() => { throw new Error("boom") })()`); err == nil || !strings.Contains(err.Error(), "boom") {
 			t.Errorf("throwing expression error = %v, want it to mention boom", err)
 		}

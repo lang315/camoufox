@@ -29,8 +29,9 @@ func mainWorldArgs(expression string) []juggler.CallFunctionArgument {
 
 // decodeSerialized turns a value in Playwright's serialized form, which
 // main-world evaluation returns, into the plain JSON shape Evaluate returns
-// otherwise. A back-reference to an enclosing object decodes to nil, and a
-// tag with no plain equivalent (regexp, error, typed array) stays as decoded.
+// otherwise. A repeated or cyclic reference to an object already serialized
+// decodes to nil, and a tag with no plain equivalent (regexp, error, typed
+// array) stays as decoded.
 func decodeSerialized(v any) any {
 	switch t := v.(type) {
 	case []any:

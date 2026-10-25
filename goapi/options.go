@@ -200,7 +200,7 @@ func WithMDNSObfuscation(enable bool) Option {
 // WithMainWorldEval allows Page.Evaluate expressions prefixed with "mw:" to
 // run in the page's own global (pythonlib's main_world_eval). Evaluation is
 // isolated by default because script running in the page's world is visible
-// to the page; this is the per-call opt-out. Without it an "mw:" expression
+// to the page; this enables the "mw:" prefix, which opts out per call. Without it an "mw:" expression
 // fails with "Main world evaluation is disabled".
 func WithMainWorldEval(enable bool) Option {
 	return func(c *launchConfig) {
