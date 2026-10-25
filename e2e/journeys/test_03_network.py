@@ -42,8 +42,10 @@ def test_proxy(drv, site, http_proxy, socks_proxy, socks_proxy_noauth, kind, che
 def test_a_hanging_filter_list_download_does_not_hold_pages(drv, site, check):
     """#211: uBO holds every page while it loads its filter lists. A de-DE first run
     used to select a regional list that must be downloaded, so a hanging download
-    held pages for uBO's 30 s timeout per mirror. While any list download hangs, a
-    page must still load."""
+    held pages for uBO's 30 s timeout per mirror. The lists are now the packaged
+    ones and uBO updates none (policies.json), so a first run starts no download
+    and, with every outside host hanging, a page still loads. That uBO is active
+    is ubo-lists-frozen.py's question; this one is what a first run waits for."""
     from web.proxy import Proxy
 
     proxy = Proxy("http", hang_outside=True)
@@ -51,11 +53,6 @@ def test_a_hanging_filter_list_download_does_not_hold_pages(drv, site, check):
     try:
         b = drv.launch(os="windows", locale="de-DE", proxy=proxy.playwright())
         page = b.new_context().new_page()
-        # Navigate once a list download is in flight; how soon one starts depends on the host.
-        deadline = time.monotonic() + 90
-        while not lists() and time.monotonic() < deadline:
-            time.sleep(0.2)
-        in_flight = lists()
         t0 = time.monotonic()
         error = None
         try:
@@ -63,11 +60,12 @@ def test_a_hanging_filter_list_download_does_not_hold_pages(drv, site, check):
         except Exception as e:
             error = str(e)[:80]
         took = time.monotonic() - t0
+        in_flight = lists()
         b.close()
     finally:
         proxy.stop()
-    check(in_flight, "a filter-list download was held when the page navigated (else VACUOUS)", ledger=False)
-    check(error is None and took < 10, f"the page took {took:.1f} s ({error or 'loaded'}) while {in_flight} hung")
+    check(not in_flight, f"no filter-list download had started once the page loaded (saw {in_flight})")
+    check(error is None and took < 10, f"the page took {took:.1f} s ({error or 'loaded'}) with every outside host hanging")
     check.done()
 
 
