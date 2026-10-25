@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #291: the armed observer logged "Property 'handleEvent' is not callable" once per window
+
+**Fixed by:** the PR that adds `handleEvent()` to `TrackingObserverChild`. **Found by:** `CAMOU_OBSERVE=1` on the installed fork.3 app, which printed it 14 times in one session.
+
+**Symptom.** `JavaScript error: , line 0: TypeError: Property 'handleEvent' is not callable.` on the browser console, once per window, whenever the observer is armed.
+
+**Root cause.** `TrackingObserver.sys.mjs` registers the child actor with `events: { DOMWindowCreated: {} }`. For each such event `JSWindowActorProtocol::HandleEvent` creates the actor with `GetActor` when none exists (`dom/ipc/jsactor/JSWindowActorProtocol.cpp:174-193`, `createActor` defaults to true), then builds an `EventListener` on the actor object and calls it (`:200-204`). `TrackingObserverChild` had `actorCreated()` but no `handleEvent`, so the call threw.
+
+**Fix.** `TrackingObserverChild` gets an empty `handleEvent()`. The event stays: it is what creates the actor in every window, so the drain timer in `arm()` runs without anything calling `getActor`. Dropping the event would have stopped the actor from existing.
+
+**Evidence.**
+- Red: `browser/tests/build-tester/observer/test_observer_console.py` on the installed fork.3 (BuildID 20261024021008), armed: `armed: the console logged 15 handleEvent error(s)`.
+- Green: the same test on a copy of that app with only `TrackingObserverChild.sys.mjs` replaced in `omni.ja`: `armed: actor = registered | handleEvent console messages: []`, and the disarmed run (`CAMOU_OBSERVE` unset) reports `No such JSWindowActor 'TrackingObserver'`. `test_observer_records.py` on the same copy: `PASS: all 7 surfaces recorded` and `PASS: getImageData and readPixels recorded on a covered launch`.
+- Nothing in CI runs the observer harness, so the PR's Tests run does not exercise this.
+
+**What misled the investigation.** Nothing; the Firefox source names the call.
 ## #288: goapi could not evaluate in the main world, and `mw:` was silently ignored
 
 **Fixed by:** the PR that adds `WithMainWorldEval` to goapi. **Found by:** running a React-fiber selector through goapi on a live React page.
