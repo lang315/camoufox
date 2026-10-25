@@ -165,7 +165,9 @@ def released_library_options() -> dict:
     chunks = sorted((int(k.rsplit("_", 1)[1]), k) for k in env if k.startswith("CAMOU_CONFIG_"))
     config = orjson.loads("".join(env.pop(k) for _, k in chunks))
     config["audio:seed"] = OLD_SEED
-    env.update({k: v for k, v in get_env_vars(config, "lin").items() if k.startswith("CAMOU_CONFIG_")})
+    # path= reads the fontconfig from beside the binary under test, not an installed browser.
+    sent = get_env_vars(config, "lin", path=Path(options["executable_path"]))
+    env.update({k: v for k, v in sent.items() if k.startswith("CAMOU_CONFIG_")})
     return options
 
 

@@ -16,8 +16,11 @@ Firefox freezes on an emoji page, and a script can time it.
 
 The page lays out a line of emoji and a sentinel in a script that only a claimed
 Noto family covers, then runs a 50 ms timer and keeps its longest interval: the
-time the content process gave the page nothing. The sentinel's width changes
-when fallback reaches its font, which is the end of that reflow, so the page
+time the content process gave the page nothing. That includes the first forced
+layout, because a build that resolves fallback while it lays the page out
+(this fork's) pays the whole cost there, before any timer runs. The sentinel
+is resolved when its width equals that of the same text set in the Noto family
+by name, which is the end of the reflow on a build that defers it, so the page
 reports then. The verdict is a ratio against a control launch that claims the
 system face exactly once, so it reads how many times a base pays for that face
 and not how fast the runner is.
@@ -51,18 +54,21 @@ PAGE = """<!doctype html><meta charset="utf-8"><body>
 <p>&#x1F39B; &#x1F3AB; &#x1F39F; &#x1F5BC; &#x270F;&#xFE0F; &#x1F500; &#x1F511; &#x2194;&#xFE0F;
 &#x1F50D; &#x2B06;&#xFE0F; &#x1F440; &#x274C; &#x2620;&#xFE0F; &#x1F6E0; &#x1F4CB;</p>
 <span id="sentinel">&#x1E900;&#x1E901;</span>
+<span id="adlam" style="font-family: 'Noto Sans Adlam', monospace">&#x1E900;&#x1E901;</span>
 <span id="system" style="font-family: 'System Font', monospace">mmmmmmmmmmlli10OQ@#</span>
 <span id="mono" style="font-family: monospace">mmmmmmmmmmlli10OQ@#</span>
 <script>
 const width = id => document.getElementById(id).getBoundingClientRect().width;
-const unresolved = width('sentinel');
+const resolved = () => width('sentinel') === width('adlam');
+const first = performance.now();
+resolved();
 const start = performance.now();
-let last = start, longest = 0;
+let last = start, longest = start - first;
 (function tick() {
   const now = performance.now();
   longest = Math.max(longest, now - last);
   last = now;
-  if (width('sentinel') === unresolved) return setTimeout(tick, 50);
+  if (!resolved()) return setTimeout(tick, 50);
   document.documentElement.dataset.result = JSON.stringify({
     longest, resolvedAt: now - start, systemFont: width('system') !== width('mono'),
   });
