@@ -88,6 +88,9 @@ type Config struct {
 	// network:*
 	NetworkIPv4Only *bool `json:"network:ipv4Only,omitempty"`
 
+	// input:*
+	InputWindowsKeyboard *bool `json:"input:windowsKeyboard,omitempty"`
+
 	// battery:*
 
 	// fonts / voices
