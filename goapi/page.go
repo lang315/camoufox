@@ -384,21 +384,37 @@ func (q *navQueue) pop() (navObs, bool) {
 	return o, true
 }
 
-// Evaluate runs expression in the main world and returns the value.
-// Booleans / numbers / strings / JSON-serializable objects decode
+// Evaluate runs expression in the page's isolated world and returns the
+// value. Booleans / numbers / strings / JSON-serializable objects decode
 // straight into the returned any.
+//
+// An expression prefixed with "mw:" runs in the page's own global instead,
+// where page scripts' globals and DOM expandos are visible. The browser must
+// be launched with WithMainWorldEval(true). Only values cross back: a DOM node
+// comes back as the string "ref: <Node>".
 func (p *Page) Evaluate(ctx context.Context, expression string) (any, error) {
 	ctxID, err := p.awaitMainContext(ctx, 5*time.Second)
 	if err != nil {
 		return nil, err
 	}
-	params := juggler.EvaluateParams{
-		ExecutionContextID: ctxID,
-		Expression:         expression,
-		ReturnByValue:      true,
-	}
+	mainWorld := strings.HasPrefix(expression, mainWorldPrefix)
 	var res juggler.EvaluateResult
-	if err := p.session.Call(ctx, "Runtime.evaluate", params, &res); err != nil {
+	call := func(ctxID string) error {
+		if mainWorld {
+			return p.session.Call(ctx, "Runtime.callFunction", juggler.CallFunctionParams{
+				ExecutionContextID:  ctxID,
+				FunctionDeclaration: mainWorldFunction,
+				ReturnByValue:       true,
+				Args:                mainWorldArgs(expression),
+			}, &res)
+		}
+		return p.session.Call(ctx, "Runtime.evaluate", juggler.EvaluateParams{
+			ExecutionContextID: ctxID,
+			Expression:         expression,
+			ReturnByValue:      true,
+		}, &res)
+	}
+	if err := call(ctxID); err != nil {
 		// Context may have been destroyed by an in-flight navigation;
 		// wait for the next one and try once more.
 		if isContextGone(err) {
@@ -406,8 +422,7 @@ func (p *Page) Evaluate(ctx context.Context, expression string) (any, error) {
 			if err2 != nil {
 				return nil, err
 			}
-			params.ExecutionContextID = ctxID
-			if err := p.session.Call(ctx, "Runtime.evaluate", params, &res); err != nil {
+			if err := call(ctxID); err != nil {
 				return nil, err
 			}
 		} else {
@@ -423,6 +438,9 @@ func (p *Page) Evaluate(ctx context.Context, expression string) (any, error) {
 	var v any
 	if err := json.Unmarshal(res.Result.Value, &v); err != nil {
 		return nil, fmt.Errorf("camoufox: decode evaluate result: %w", err)
+	}
+	if mainWorld {
+		return decodeSerialized(v)
 	}
 	return v, nil
 }
