@@ -12,6 +12,39 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #298: goapi `Keyboard.Press("Enter")` sent a composition keydown and did not submit forms
+
+**Fixed by:** the PR that ports Playwright's US keyboard layout into goapi. **Found by:** a login form that never submitted after `Press("Enter")`.
+
+**Symptom.** `Press(ctx, "Enter")` returned nil, the page saw `keydown:Process:Enter:229` and no `keypress`, `keyup:Enter` arrived twice, and the form did not submit.
+
+**Root cause.** `namedKeys["Enter"]` in `goapi/keyboard.go` sent `text: "\r"`. In `PageAgent.js` `_dispatchKeyEvent` a keydown whose `text` differs from `key` goes through `tip.commitCompositionWith`, which dispatches the IME-style `Process`/229 keydown. Playwright's own client clears it: `ffInput.js` `RawKeyboardImpl.keydown` (playwright-core 1.58.0, lines 62-64) does `if (text === "\r") text = ""`, and 1.62.0 does the same in `lib/coreBundle.js`. The agent is right; the client was wrong, so Juggler is unchanged.
+
+**Fix.** `Down` clears `"\r"` the same way. The key table is now a port of `usKeyboardLayout.ts` (see #297).
+
+**Evidence.**
+- Red, on origin/main with the installed fork.3 (BuildID 20261024021008): `TestKeyboardPressEnter` got `keydown:Process:Enter:229 keyup:Enter:Enter:13 keyup:Enter:Enter:13` and `submitted = undefined`.
+- Green: `keydown:Enter:Enter:13 keypress:Enter:Enter:13 keyup:Enter:Enter:13`, `submitted = 1`. Playwright 1.58 `page.keyboard.press("Enter")` on the same binary logs the same three events and submits once.
+- `goapi.yml` runs no browser (#295), so these tests skip in CI; the local run is the evidence.
+
+**What misled the investigation.** The `keyup` that arrived twice looked like a second bug; it is the composition path's own keyup plus the explicit one.
+
+## #297: goapi `Keyboard.Press` failed on punctuation, so `Type(..., WithDelay)` dropped the rest of the text
+
+**Fixed by:** the PR that ports Playwright's US keyboard layout into goapi. **Found by:** a password ending in `{}` that was typed without them.
+
+**Symptom.** `Type("a{b}c", WithDelay(d))` wrote `a` and returned `key Down "{": ... NS_ERROR_ILLEGAL_VALUE [nsITextInputProcessor.keydown]`. Every character after the first non-alphanumeric one was lost.
+
+**Root cause.** `resolveKey` knew letters, digits and space. Any other rune got `code: codeForRune(r)` = `"Unidentified"` and `keyCode: charKeyCode[r]` = 0, and `nsITextInputProcessor.keydown` rejects that. `Down` also paired the shifted text with the unshifted key's code.
+
+**Fix.** `goapi/keyboard_layout.go` is the table from playwright-core `usKeyboardLayout.ts`, with `buildLayoutClosure`'s lookup rules (code, key value, shifted value, aliases). `Down`/`Up` send its code, keyCode and location. `Type` follows `input.ts` `Keyboard.type`: a character in the layout is pressed, anything else (CJK, emoji) goes through `Page.insertText`. `charKeyCode`, `codeForRune`, `shiftChar` and the per-key `namedKeys` are gone. An unknown key is now an error instead of a made-up code.
+
+**Evidence.**
+- Red, on origin/main with fork.3: `TestKeyboardTypeWithDelayPunctuation`, `TestKeyboardPressBrace` and `TestKeyboardTypeLogMatchesPlaywright` failed with the `NS_ERROR_ILLEGAL_VALUE` above.
+- Green: the same tests pass. `Press("{")` logs `keydown:Shift:ShiftLeft:16 keydown:{:BracketLeft:219 keypress:{:BracketLeft:123 keyup:{:BracketLeft:219 keyup:Shift:ShiftLeft:16`, identical to Playwright 1.58 on the same binary, and so does `Type("a{b}c")` event for event.
+
+**What misled the investigation.** The issue suggested adding the unshifted code to the old map. Playwright's layout already holds all of it, and the agent adds Shift itself.
+
 ## #291: the armed observer logged "Property 'handleEvent' is not callable" once per window
 
 **Fixed by:** the PR that adds `handleEvent()` to `TrackingObserverChild`. **Found by:** `CAMOU_OBSERVE=1` on the installed fork.3 app, which printed it 14 times in one session.
