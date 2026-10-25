@@ -100,14 +100,8 @@ def test_launch_options_does_not_consult_the_managed_install(tmp_path, monkeypat
     (tmp_path / "application.ini").write_bytes(APP_INI)
 
     try:
-        # exclude_addons=[UBO]: without it, launch_options() reaches
-        # add_default_addons() -> maybe_download_addons(), which downloads
-        # uBlock Origin from addons.mozilla.org before hitting the guarded
-        # line. If that download raises (no network, DNS failure, sandboxed
-        # CI), the except Exception below swallows it and the test passes
-        # without ever exercising the read under test. DefaultAddons has one
-        # member, so excluding it makes the addon step a no-op: no network
-        # call, no write under the addons dir.
+        # exclude_addons=[UBO]: the fake build bundles no uBlock Origin, so
+        # without it the addon step warns, which is not what this test reads.
         camoufox_utils.launch_options(
             executable_path=str(exe), headless=True, exclude_addons=[DefaultAddons.UBO]
         )

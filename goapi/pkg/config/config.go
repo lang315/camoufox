@@ -92,7 +92,6 @@ type Config struct {
 
 	// fonts / voices
 	Fonts      []string `json:"fonts,omitempty"`
-	AudioSeed  *uint32  `json:"audio:seed,omitempty"`
 	CanvasSeed *uint32  `json:"canvas:seed,omitempty"`
 
 	// geolocation / locale

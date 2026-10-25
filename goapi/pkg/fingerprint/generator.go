@@ -104,12 +104,6 @@ func Generate(cfg *config.Config, opts Options) error {
 		cfg.Voices = voices
 	}
 
-	// Per-launch fingerprint noise seeds (1..2^32-1; 0 is a no-op
-	// signal in the C++ side).
-	if cfg.AudioSeed == nil {
-		cfg.AudioSeed = config.Uint32(uint32(1 + rng.Uint32N(0xFFFFFFFE)))
-	}
-
 	// Rendering-consistency default (matches donutbrowser): suppress
 	// OS/theme-dependent chrome styling so canvas/screenshot surfaces do
 	// not leak the host theme. Caller-overridable.

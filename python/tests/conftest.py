@@ -17,7 +17,6 @@ os.environ["HOME"] = os.environ["USERPROFILE"] = str(CACHE_ROOT)
 os.environ["LOCALAPPDATA"] = str(CACHE_ROOT / "AppData" / "Local")
 os.environ["XDG_CACHE_HOME"] = str(CACHE_ROOT / ".cache")
 
-from camoufox import addons  # noqa: E402
 from camoufox import pkgman, utils  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -101,10 +100,8 @@ def no_browser_fetch(request, monkeypatch, tmp_path):
     test names itself rather than silently opening a socket to GitHub.
 
     The refusal is raised through pytest.fail(): its exception derives from
-    BaseException, not Exception, so it escapes the `except Exception` that
-    maybe_download_addons wraps around the uBlock Origin download (#110).
-    ADDONS_DIR is redirected because, with the refusal escaping, its rmtree no
-    longer runs and a trip would leave a directory in the real user cache.
+    BaseException, not Exception, so no `except Exception` on the way can
+    swallow it (#110).
 
     A test marked `network` downloads on purpose (test_geoip_sources checks
     what each source serves today), so its downloads are let through.
@@ -119,15 +116,15 @@ def no_browser_fetch(request, monkeypatch, tmp_path):
     if not request.node.get_closest_marker("network"):
         monkeypatch.setattr(pkgman, "webdl", _refuse)
         monkeypatch.setattr(pkgman.requests, "get", _refuse)
-    monkeypatch.setattr(addons, "ADDONS_DIR", tmp_path / "addons")
 
     # Tests that call launch_options() without `executable_path` or
     # `exclude_addons` would otherwise need a managed install and the default
-    # addons: read the bundle from the repo and skip the addon download.
+    # addons: read the bundle from the repo and skip the addon lookup, which a
+    # build with no bundled uBlock Origin answers with a warning.
     monkeypatch.setattr(utils, "get_path", repo_get_path)
     monkeypatch.setattr(utils, "installed_verstr", lambda: repo_version())
     monkeypatch.setattr(utils, "launch_path", lambda *_a, **_k: "/nonexistent/camoufox")
-    monkeypatch.setattr(utils, "add_default_addons", lambda addons_list, exclude_list=None: None)
+    monkeypatch.setattr(utils, "add_default_addons", lambda *_a, **_k: None)
 
 
 @pytest.fixture(autouse=True)

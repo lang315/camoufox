@@ -458,7 +458,7 @@ context, and only where canvas is not covered.
 | WebGL and WebGL2: vendor, renderer, parameters, extensions, shader precision, context attributes | One GPU fpgen recorded for Firefox on that OS. Values Firefox decides rather than the GPU follow the shipped Firefox ([`webgl-browser-owned-values-follow-firefox`](ci/tribal-rules.yml)) | The renderer string names the host's GPU, and its limits must agree with it | `webgl-spoofing` patch, `webgl.py` |
 | WebGPU: `navigator.gpu` and its adapter | `navigator.gpu` only where Firefox on the claimed device has it: Windows and Apple Silicon Macs. The adapter is the host's only when the identity claims the host's GPU; otherwise `requestAdapter()` returns `null`, as for a blocked or software GPU | The adapter's limits and features come from the real GPU | launcher, `host_rendering.py` |
 | Canvas pixels | On the host's OS, what the GPU and fonts produce, with this fork's seeded noise: one `canvas:seed` per launch and one `setCanvasSeed` per context. On another OS or GPU, random readback, as `privacy.resistFingerprinting` gives in LibreWolf, and no seed is sent ([the canvas on another OS](python/README.md#the-canvas-on-another-os)). As in stock Firefox, PNG exports (`toDataURL`, `toBlob`) carry a per-session `deBG` chunk | On one host, every context renders on the same GPU and fonts, so contexts could be linked by canvas. On another OS, the pixels would show the real OS. Stock Firefox adds no canvas noise, so this is a fork divergence ([tribal rules](ci/tribal-rules.yml)) | `canvas-spoofing` patch, launcher |
-| Audio: sample rate, output latency, max channels, and the audio fingerprint | The identity's values, seeded per identity | Audio output varies with hardware and drivers, so identities sharing one could be linked | `audio-context-spoofing`, `audio-fingerprint-manager` patches |
+| Audio: sample rate, output latency, max channels | The identity's values | They follow the claimed device's audio hardware | `audio-context-spoofing` patch |
 | Fonts: installed list, `system-ui`, CSS2 system fonts | The claimed OS's fonts, from a bundled set; see [docs/FONTS.md](docs/FONTS.md) | Installed fonts reveal the OS and the software on it | `font-list-spoofing`, `font-hijacker`, `system-ui-font-spoofing` patches |
 | Speech voices | The claimed OS's voices, which actually speak | The voice list is specific to each OS, and a voice that cannot speak is a tell | `voice-spoofing`, `speech-voices-spoofing` patches |
 | Microphones, cameras, speakers | OS-style labels and groups; see [docs/MEDIA-DEVICES.md](docs/MEDIA-DEVICES.md) | Device count and labels differ per machine and per OS | `media-device-spoofing` patch |
@@ -473,6 +473,7 @@ Left as stock Firefox has it, on purpose:
 | Trait | What a page sees | Why it is not spoofed |
 |---|---|---|
 | Text widths | What the font really measures | The same font on the same OS measures the same everywhere; widths no real machine produces are a fingerprint ([`no-glyph-spacing-noise`](ci/tribal-rules.yml)) |
+| Audio render (`OfflineAudioContext`, `AnalyserNode`) | What the host CPU computes, the same in every context and every launch | Stock Firefox renders one value per CPU architecture, whatever the OS, sound card or sample rate, so a noised value is one no real machine produces ([`audio-is-not-noised`](ci/tribal-rules.yml)) |
 
 Each context of one browser can carry its own identity:
 [docs/per-context-patches.md](docs/per-context-patches.md).
@@ -530,7 +531,7 @@ claims the host's OS. Details are in
 | Feature | Where |
 |---|---|
 | Load extracted addons without a debug server: `addons=["/path/to/addon"]` | launcher, `camoufox-window-module` patch |
-| uBlock Origin installed by default (`exclude_addons=[DefaultAddons.UBO]` to drop it). Its filter lists are pinned to the ones it bundles, with no regional list, so a first run downloads none before pages load (#211) | launcher, `distribution/policies.json` |
+| uBlock Origin installed by default: each browser release bundles the newest uBO release on AMO when it is built (`browser/scripts/fetch-ubo.py`), blocking with the default filter lists packaged in it, never downloaded at launch (`exclude_addons=[DefaultAddons.UBO]` to drop it). Its filter lists are pinned to the ones it bundles, with no regional list, so a first run downloads none before pages load (#211) | packaging, launcher, `policies.json` |
 | Addons cannot open tabs unless `allow_addon_new_tab=True` | `disable-extension-newtab` patch |
 | Addons run in private browsing | `all-addons-private-mode` patch |
 
@@ -560,6 +561,7 @@ The full option list is in the [Python README](python/README.md#launch-options).
 | Onboarding messages disabled | `ghostery/` patch |
 | No bundled search engines | `no-search-engines` patch |
 | Mozilla services and background traffic turned off | [`browser/settings/camoufox.cfg`](browser/settings/camoufox.cfg) |
+| Firefox's bundled certificate revocations (OneCRL) enforced in every profile, with no network fetch | `remote-security-settings` patch |
 | Stock browser UI: no theme, toolbar or dialog changes | |
 
 > [!NOTE]

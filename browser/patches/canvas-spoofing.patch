@@ -248,10 +248,10 @@ index 7bbc2aee9b..c9cdddb229 100644
      // It is safe to convert PlanarYCbCr format from YUV to RGB off-main-thread.
      // Other image formats could have problem to convert format off-main-thread.
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index ad24dc91a2..af5abf9a37 100644
+index 8d363383a9..7cf8ecd7c2 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -152,6 +152,7 @@ EXPORTS.mozilla.dom += [
+@@ -151,6 +151,7 @@ EXPORTS.mozilla.dom += [
      "BodyUtil.h",
      "BorrowedAttrInfo.h",
      "CacheExpirationTime.h",
@@ -259,7 +259,7 @@ index ad24dc91a2..af5abf9a37 100644
      "CCGCScheduler.h",
      "CharacterData.h",
      "CharacterDataBuffer.h",
-@@ -356,6 +357,7 @@ UNIFIED_SOURCES += [
+@@ -351,6 +352,7 @@ UNIFIED_SOURCES += [
      "BodyConsumer.cpp",
      "BodyUtil.cpp",
      "BorrowedAttrInfo.cpp",
@@ -268,19 +268,19 @@ index ad24dc91a2..af5abf9a37 100644
      "CharacterData.cpp",
      "CharacterDataBuffer.cpp",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index 8fd79e9868..ba36325c1c 100644
+index 49a25262ca..01cd3ffc03 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -89,6 +89,7 @@
+@@ -87,6 +87,7 @@
+ #include "mozilla/UniquePtr.h"
+ #include "mozilla/Utf16.h"
  #include "mozilla/dom/AudioContext.h"
- #include "AudioFingerprintManager.h"
- #include "RoverfoxStorageManager.h"
 +#include "CanvasSeedManager.h"
  #include "mozilla/dom/AutoEntryScript.h"
  #include "mozilla/dom/BarProps.h"
  #include "mozilla/dom/BindingDeclarations.h"
-@@ -7786,6 +7787,11 @@ void nsGlobalWindowInner::SetAudioFingerprintSeed(uint32_t seed,
-   RoverfoxStorageManager::RemoveSetter("setAudioFingerprintSeed");
+@@ -7772,6 +7773,11 @@ void nsGlobalWindowInner::UpdateSharedWorkerTimezoneOverride(
+   }
  }
  
 +void nsGlobalWindowInner::SetCanvasSeed(uint32_t seed, ErrorResult& aRv) {
@@ -292,12 +292,12 @@ index 8fd79e9868..ba36325c1c 100644
      bool aGranted) {
    // Invalidate cached StorageAllowed field so that calls to GetLocalStorage
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index eec89694f8..e9bc8f7026 100644
+index 3ce6fd2234..63f6686a9d 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -681,6 +681,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
-   // Audio fingerprint seed for per-context audio fingerprinting
-   void SetAudioFingerprintSeed(uint32_t seed, mozilla::ErrorResult& aRv);
+@@ -680,6 +680,9 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+ 
+   mozilla::dom::Worklet* GetPaintWorklet(mozilla::ErrorResult& aRv);
  
 +  // Canvas pixel perturbation seed for privacy-preserving canvas readback
 +  void SetCanvasSeed(uint32_t seed, mozilla::ErrorResult& aRv);
@@ -306,7 +306,7 @@ index eec89694f8..e9bc8f7026 100644
  
    mozilla::dom::IntlUtils* GetIntlUtils(mozilla::ErrorResult& aRv);
 diff --git a/dom/canvas/CanvasRenderingContext2D.cpp b/dom/canvas/CanvasRenderingContext2D.cpp
-index 0553126dbf..7773bd46b7 100644
+index 801d6b14b6..1238a43a1d 100644
 --- a/dom/canvas/CanvasRenderingContext2D.cpp
 +++ b/dom/canvas/CanvasRenderingContext2D.cpp
 @@ -59,6 +59,8 @@
@@ -318,7 +318,7 @@ index 0553126dbf..7773bd46b7 100644
  #include "mozilla/dom/FontFaceSet.h"
  #include "mozilla/dom/FontFaceSetImpl.h"
  #include "mozilla/dom/GeneratePlaceholderCanvasData.h"
-@@ -2260,6 +2262,22 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
+@@ -2275,6 +2277,22 @@ CanvasRenderingContext2D::SetContextOptions(JSContext* aCx,
    return NS_OK;
  }
  
@@ -341,7 +341,7 @@ index 0553126dbf..7773bd46b7 100644
  UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
      mozilla::CanvasUtils::ImageExtraction aExtractionBehavior,
      int32_t* out_format, gfx::IntSize* out_imageSize) {
-@@ -2279,6 +2297,28 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
+@@ -2294,6 +2312,28 @@ UniquePtr<uint8_t[]> CanvasRenderingContext2D::GetImageBuffer(
        *out_format = imgIEncoder::INPUT_FORMAT_HOSTARGB;
        *out_imageSize = data->GetSize();
        ret = SurfaceToPackedBGRA(data);
@@ -370,7 +370,7 @@ index 0553126dbf..7773bd46b7 100644
      }
    }
  
-@@ -6757,6 +6797,13 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+@@ -6815,6 +6855,13 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
      return NS_ERROR_OUT_OF_MEMORY;
    }
  
@@ -384,7 +384,7 @@ index 0553126dbf..7773bd46b7 100644
    do {
      uint8_t* randomData;
      const IntSize size = readback->GetSize();
-@@ -6803,6 +6850,15 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
+@@ -6861,6 +6908,15 @@ nsresult CanvasRenderingContext2D::GetImageDataArray(
                          aWidth * 4, SurfaceFormat::R8G8B8A8,
                          dstWriteRect.Size());
      }
@@ -401,7 +401,7 @@ index 0553126dbf..7773bd46b7 100644
  
    readback->Unmap();
 diff --git a/dom/canvas/ClientWebGLContext.cpp b/dom/canvas/ClientWebGLContext.cpp
-index 5aaa4279fd..313ce10e16 100644
+index 443f494ca0..b9ded4aa7a 100644
 --- a/dom/canvas/ClientWebGLContext.cpp
 +++ b/dom/canvas/ClientWebGLContext.cpp
 @@ -16,6 +16,8 @@
@@ -413,7 +413,7 @@ index 5aaa4279fd..313ce10e16 100644
  #include "gfxCrashReporterUtils.h"
  #include "js/PropertyAndElement.h"  // JS_DefineElement
  #include "js/ScalarType.h"          // js::Scalar::Type
-@@ -5448,6 +5450,12 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+@@ -5446,6 +5448,12 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
                                              state.mPixelPackState};
      bool succeeded = DoReadPixels(desc, *range);
      if (succeeded) {
@@ -426,7 +426,7 @@ index 5aaa4279fd..313ce10e16 100644
        CanvasUtils::ImageExtraction extraction =
            ImageExtractionResult(mCanvasElement, mOffscreenCanvas);
  
-@@ -5477,6 +5485,18 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
+@@ -5475,6 +5483,18 @@ void ClientWebGLContext::ReadPixels(GLint x, GLint y, GLsizei width,
                range->size_bytes(), pii->elementsPerPixel, pii->bytesPerElement,
                alphaChannelOffset, hasAlphaChannel);
          }
@@ -446,7 +446,7 @@ index 5aaa4279fd..313ce10e16 100644
      }
    });
 diff --git a/dom/canvas/OffscreenCanvasDisplayHelper.cpp b/dom/canvas/OffscreenCanvasDisplayHelper.cpp
-index 209d4980bc..2c41ef4abd 100644
+index cc55e6899b..43ee75dce1 100644
 --- a/dom/canvas/OffscreenCanvasDisplayHelper.cpp
 +++ b/dom/canvas/OffscreenCanvasDisplayHelper.cpp
 @@ -19,6 +19,7 @@
@@ -457,7 +457,7 @@ index 209d4980bc..2c41ef4abd 100644
  
  namespace mozilla::dom {
  
-@@ -579,11 +580,13 @@ void OffscreenCanvasDisplayHelper::MaybeRandomizePixels(
+@@ -597,11 +598,13 @@ void OffscreenCanvasDisplayHelper::MaybeRandomizePixels(
      gfx::IntSize aSize) {
    nsIPrincipal* principal = nullptr;
    nsICookieJarSettings* cookieJarSettings = nullptr;
@@ -471,7 +471,7 @@ index 209d4980bc..2c41ef4abd 100644
      } else if (mOffscreenCanvas) {
        principal = mOffscreenCanvas->GetParentObject()
                        ? mOffscreenCanvas->GetParentObject()->PrincipalOrNull()
-@@ -604,6 +607,14 @@ void OffscreenCanvasDisplayHelper::MaybeRandomizePixels(
+@@ -622,6 +625,14 @@ void OffscreenCanvasDisplayHelper::MaybeRandomizePixels(
          cookieJarSettings, principal, aData, aSize.width, aSize.height,
          aSize.width * aSize.height * 4, gfx::SurfaceFormat::A8R8G8B8_UINT32);
    }
@@ -487,10 +487,10 @@ index 209d4980bc..2c41ef4abd 100644
  
  UniquePtr<uint8_t[]> OffscreenCanvasDisplayHelper::GetImageBuffer(
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index ab1c306617..3bc45920a2 100644
+index a736c1d37a..e4677248a6 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
-@@ -972,3 +972,9 @@ partial interface Window {
+@@ -970,3 +970,9 @@ partial interface Window {
    [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
    readonly attribute DocumentPictureInPicture documentPictureInPicture;
  };

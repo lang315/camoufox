@@ -1,13 +1,8 @@
 """
-Regression coverage for daijro/camoufox#328: audio:seed and canvas:seed were
-re-randomized on every launch, with no way to pin them. Pinning goes through
-the `config` dict; the glyph-spacing seed no longer exists (D2).
-
-* from_preset() (fingerprints.py ~314-317) had *no* parameter through which a
-  caller could supply these seeds -- it always overwrote them with a fresh
-  random value, unconditionally. This was the actual bug: fixed by adding
-  optional fonts_spacing_seed/audio_seed/canvas_seed kwargs (still random by
-  default, when left unset).
+Regression coverage for daijro/camoufox#328: canvas:seed was re-randomized on
+every launch, with no way to pin it (so was audio:seed, which no longer exists:
+audio renders as stock Firefox does). Pinning goes through the `config` dict;
+the glyph-spacing seed no longer exists (D2).
 
 * launch_options()'s config dict (utils.py ~707-709) already only randomizes a
   seed when the key is *absent*, via set_into(). A caller pre-populating
@@ -29,24 +24,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from camoufox import utils  # noqa: E402
 from camoufox.addons import DefaultAddons  # noqa: E402
-from camoufox.fingerprints import from_preset  # noqa: E402
 from camoufox.utils import launch_options  # noqa: E402
-
-MINIMAL_PRESET = {
-    'navigator': {
-        'userAgent': 'Mozilla/5.0 (X11; Linux x86_64; rv:130.0) Gecko/20100101 Firefox/130.0',
-        'platform': 'Linux x86_64',
-    },
-    'screen': {'width': 1920, 'height': 1080},
-    'webgl': {},
-}
-
-
-# --- from_preset(): audio:seed is drawn per identity ------------------------
-
-def test_from_preset_draws_a_fresh_audio_seed_each_call():
-    assert from_preset(MINIMAL_PRESET)['audio:seed'] != from_preset(MINIMAL_PRESET)['audio:seed']
-
 
 # --- launch_options(): already correct, locked in as a regression guard -----
 
@@ -71,10 +49,10 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
     (tmp_path / 'application.ini').write_text('[App]\nVersion=150.0.2-beta.25\n')
 
     result = launch_options(
-        config={'audio:seed': 333444, 'canvas:seed': 555666},
+        config={'canvas:seed': 555666},
         headless=True,
         os='linux',
-        exclude_addons=[DefaultAddons.UBO],  # skip network addon download
+        exclude_addons=[DefaultAddons.UBO],  # the fake build bundles no addon
         executable_path=str(fake_exe),  # so get_env_vars() reads the fontconfig bundle above
         env={},
     )
@@ -85,5 +63,4 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
     )
     cfg = json.loads(''.join(v for _, v in camou_chunks))
 
-    assert cfg['audio:seed'] == 333444
     assert cfg['canvas:seed'] == 555666
