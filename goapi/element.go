@@ -334,3 +334,8 @@ func argNumber(n float64) juggler.CallFunctionArgument {
 	b, _ := json.Marshal(n)
 	return juggler.CallFunctionArgument{Value: b}
 }
+
+func argBool(v bool) juggler.CallFunctionArgument {
+	b, _ := json.Marshal(v)
+	return juggler.CallFunctionArgument{Value: b}
+}

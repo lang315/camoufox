@@ -28,6 +28,22 @@ later change should read first.
 - Nothing in CI runs the observer harness, so the PR's Tests run does not exercise this.
 
 **What misled the investigation.** Nothing; the Firefox source names the call.
+## #288: goapi could not evaluate in the main world, and `mw:` was silently ignored
+
+**Fixed by:** the PR that adds `WithMainWorldEval` to goapi. **Found by:** running a React-fiber selector through goapi on a live React page.
+
+**Symptom.** On a page whose scripts define `window.require` and whose React tree sets `__reactFiber$*` on DOM nodes, `p.Evaluate(ctx, "typeof window.require")` returned `"undefined"` and no element had a fiber key. The same expressions prefixed with `mw:`, with `allowMainWorld` set through `WithConfig`, returned the same values and no error.
+
+**Root cause.** Juggler serves `mw:` only in `Runtime.callFunction`, and only in Playwright's call shape: a declaration naming `utilityScript.evaluate`, called with `[utilityScript, isFunction, returnByValue, expression, argCount]` (`isMainWorldRequest`, `browser/additions/juggler/content/Runtime.js:67`). `Page.Evaluate` sent `Runtime.evaluate`, where `mw:` is a JavaScript label, so `mw: <expr>` ran `<expr>` in the isolated world. Its doc comment said "main world", which it never was.
+
+**Fix.** `WithMainWorldEval(true)` sets `allowMainWorld`. `Page.Evaluate` sends an `mw:` expression as `Runtime.callFunction` in Playwright's shape, through the same context wait and retry as before, and `decodeSerialized` turns the Playwright-serialized result into the plain values `Evaluate` returns otherwise. Playwright's serializer writes every object or array it reaches a second time as `{"ref": id}` (`serializeAsCallArgument`), not only cycles, so `decodeSerialized` resolves a ref to the value already decoded, as `parseEvaluationResultValue` does, and returns an error for a ref to an object still being decoded: a self-referencing Go map would overflow the stack in `fmt` (observed on Go 1.27.3), while `encoding/json` and `reflect.DeepEqual` handle one. Isolation stays the default (`ci/tribal-rules.yml`, `evaluate-is-isolated-by-default`).
+
+**Evidence.**
+- Red: before the change, on the page above, `mw:typeof window.require` returned `"undefined"` and `mw:` counted 0 elements with a `__reactFiber$` key; `window.wrappedJSObject` counted 232, so the expandos were there.
+- Green: with `WithMainWorldEval(true)`, `mw:typeof window.require` returns `"function"` and the direct count is 232.
+- `TestEvaluateMainWorld` (`CAMOUFOX_BIN`-gated) checks the disabled error, isolated vs main-world `window.secret`, an object round-trip and a thrown expression; `TestDecodeSerialized` covers every serialized tag the decoder maps.
+
+**What misled the investigation.** `mw:` returned plausible values and no error, which read as "main world reached, the page has no such global". `typeof window.wrappedJSObject` being `"object"` is the tell that an evaluation is behind Xray wrappers.
 
 ## #283: e2e.yml legs with no browser passed green having tested nothing
 
