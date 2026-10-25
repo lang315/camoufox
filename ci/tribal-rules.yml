@@ -871,6 +871,7 @@ rules:
     evidence:
       - "issue #847: a registered name is visible to any page through new Worker('chrome://<name>/...'), whatever the files under it do"
       - "issue #258: the tracking panel's \"% content camoufox\" package, registered in every build though the observer is off unless CAMOU_OBSERVE=1, was the only such name left after #847; nothing opened the panel, and the tests read the Collector through Marionette chrome context"
+      - "about:observer (armed-only) does not breach it: TrackingObserver.sys.mjs register(), which runs only when CAMOU_OBSERVE is set, registers the about module at runtime, so a disarmed build has no such about: name or contract; the page is a file under resource://gre/modules/, a host every Firefox registers, and no chrome package is declared. test_about_observer.py checks the disarmed refusal and that web content fails to reach the page exactly as it fails for a made-up name"
     rationale: >-
       browser/additions/**/jar.mn may only register names that
       scripts/data/contentaccessible-manifest.json records for a stock release.

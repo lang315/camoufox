@@ -1,4 +1,8 @@
 EXTRA_JS_MODULES += [
+    "AboutObserver.html",
+    "AboutObserver.sys.mjs",
+    "AboutObserverChild.sys.mjs",
+    "AboutObserverParent.sys.mjs",
     "Collector.sys.mjs",
     "NetHook.sys.mjs",
     "TrackingObserver.sys.mjs",
