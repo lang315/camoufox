@@ -38,12 +38,14 @@ GUARD_DIR = REPO_ROOT / "browser" / "tests" / "playwright" / "patches"
 GROUPS: Dict[str, Tuple[str, ...]] = {
     "spoofing": (
         "animation-timing",
-        "audio-frequency-noise",
+        "audio-matches-stock",
         "baseline-protections",
         "canvas-spoofing",
+        "context-app-version",
         "context-list-every-process",
         "context-lists-across-processes",
         "context-os-system-font",
+        "display-scale-resolution",
         "fingerprint-setter-seal",
         "generic-monospace-launch-mask",
         "fallback-miss-while-cmaps-load",
@@ -54,6 +56,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "media-devices-coherence",
         "spoofed-voice-speaks",
         "startup-prefs",
+        "system-font-alias-stall",
         "system-ui-font-spoofing",
         "timezone-stable",
         "touchscreen-digitizer",
@@ -81,11 +84,14 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "noop-mousemove-deadlock",
         "occluded-window-active",
         "trusted-events",
+        "ubo-lists-frozen",
         "visible-automation-cues",
     ),
     "parity": (
+        "certificate-revocations",
         "contentaccessible-parity",
         "firefox-version-pin",
+        "getter-cost-parity",
         "gfx-probes-packaged",
         "hardware-acceleration-policy",
         "popup-blocker-parity",
@@ -94,7 +100,9 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "stock-gpu-parity",
         "stock-parity-probes",
         "viewport-no-rdm",
+        "windows-crt-math",
         "windows-exe-manifest",
+        "windows-keyboard",
     ),
 }
 

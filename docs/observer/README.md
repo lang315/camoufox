@@ -121,7 +121,7 @@ happen asynchronously off that path.
 ## Scope / status
 
 All seven per-access surfaces are wired end-to-end: canvas and webgl
-(`canvas-spoofing.patch`), audio (`audio-fingerprint-manager.patch`), fonts
+(`canvas-spoofing.patch`), audio (`audio-observer-hook.patch`), fonts
 (`font-list-spoofing.patch`), navigator (`navigator-spoofing.patch`), screen
 (`screen-spoofing.patch`), webrtc (`webrtc-ip-spoofing.patch`). Verified at
 runtime — see `browser/tests/build-tester/observer/REPORT.md:16-29` and the re-runnable assert

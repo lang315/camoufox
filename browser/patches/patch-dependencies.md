@@ -32,7 +32,6 @@ be listed there.
 | Patch | Config keys |
 |-------|-------------|
 | `audio-context-spoofing.patch` | `AudioContext:sampleRate`, `AudioContext:outputLatency`, `AudioContext:maxChannelCount` |
-| `audio-fingerprint-manager.patch` | `audio:seed` |
 | `canvas-spoofing.patch` | `canvas:seed`, `canvas:noiseDensity`, `canvas:noiseStrength` |
 | `chromeutil.patch` | `debug` |
 | `css-media-spoofing.patch` | `cssMedia:colorGamut`, `cssMedia:prefersColorScheme`, `cssMedia:dynamicRange` |
@@ -58,6 +57,8 @@ be listed there.
 | `webrtc-ip-spoofing.patch` | `navigator.platform` (the host socket's port range). The per-context addresses are `webrtc_ipv4_<ctx>` and `webrtc_ipv6_<ctx>` in `RoverfoxStorageManager`, set by `setWebRTCIPv4`/`setWebRTCIPv6` |
 | `webrtc-ip-spoofing2.patch` | `webrtc:localipv4`, `webrtc:localipv6` |
 | `webrtc-launch-ip-fallback.patch` | `webrtc:ipv4`, `webrtc:ipv6`, read when a context set no address of its own (#163) |
+| `windows-keyboard.patch` | `input:windowsKeyboard` (launch-wide: the shortcut tables and GTK's key handling are process-level) |
+| `zz-stock-cost-parity.patch` | `navigator.hardwareConcurrency`, `navigator.maxTouchPoints`, `screen.*`, `window.screenX`, `window.screenY` (re-orders the getters above so stock's work runs first) |
 
 To regenerate the list: `grep -l 'MaskConfig::' patches/*.patch`.
 
@@ -73,17 +74,18 @@ already set up, and do not add the include or `LOCAL_INCLUDES` themselves:
 | `system-ui-font-spoofing.patch` | `font-hijacker.patch` for `MaskConfig.hpp` in `gfx/thebes/gfxPlatformFontList.cpp` and `/camoucfg` in `gfx/thebes/moz.build` |
 | `touchscreen-fingerprint-spoofing.patch` | `navigator-spoofing.patch` for `MaskConfig.hpp` in `dom/base/Navigator.cpp` |
 | `font-list-spoofing.patch` | `anti-font-fingerprinting.patch` for `gfxFontGroup::mUserContextId` |
-| `canvas-spoofing.patch`, `timezone-spoofing.patch`, `webrtc-ip-spoofing.patch` | `audio-fingerprint-manager.patch` for `RoverfoxStorageManager.h` in `dom/base/nsGlobalWindowInner.cpp` |
+| `audio-observer-hook.patch` | `audio-context-spoofing.patch` for `/camoucfg` in `dom/media/webaudio/moz.build`; the tracking observer's `AccessObserverDom.hpp` |
 | `cross-process-storage.patch` | `font-list-spoofing.patch` for `FontListManager::OnFontListStored()`, which its storage-pref callback calls |
 | `font-substitutes-gate.patch` | `font-hijacker.patch` for `MaskConfig.hpp` in `gfx/thebes/gfxDWriteFontList.cpp`; `font-list-spoofing.patch` for `gfxPlatformFontList::CamouIsFamilyAllowed()` and `FontListManager::ContextIdFor()`; `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
-| `font-system-fonts-css2.patch`, `system-ui-font-spoofing.patch`, `webrtc-ip-spoofing.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
+| `font-system-fonts-css2.patch`, `system-ui-font-spoofing.patch`, `webrtc-ip-spoofing.patch`, `zz-stock-cost-parity.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
+| `windows-keyboard.patch` | `touchscreen-fingerprint-spoofing.patch` for `/camoucfg` in `dom/events/moz.build` |
 
 ## RoverfoxStorageManager
 
-Per-context values set from Playwright (audio seed, WebRTC IP, timezone,
+Per-context values set from Playwright (WebRTC IP, timezone,
 screen, navigator, WebGL, font list, voices, ...) are kept in
 `RoverfoxStorageManager`, which `cross-process-storage.patch` adds under
-`dom/base/` with its cross-process put/get IPC. Every content process reads it:
+`dom/base/` with its cross-process put IPC. Every content process reads it:
 a context's documents can land in any of them, and only the first document
 calls the setter. The same patch provides the guard and removal every setter
 uses (`IsSetterOffered`, `MarkSetterUsed`, `RemoveSetter`), and
@@ -98,6 +100,16 @@ at hand. A browsing context is not used, because a document created by
 `document.implementation.createHTMLDocument()` or `DOMParser` has none, while it
 shares its creator's principal. A value is stored only under its own context;
 nothing writes a fallback copy under context 0.
+
+## Backports
+
+These patches carry upstream Firefox changes that `browser/upstream.sh`'s
+version does not have yet. Drop each one when the Firefox it moves to ships
+the change.
+
+| Patch | Upstream change |
+|-------|-----------------|
+| `remote-security-settings.patch` | The startup import of the bundled OneCRL list into certificate storage, from mozilla-firefox's `release` branch ([Bug 2084311](https://bugzilla.mozilla.org/show_bug.cgi?id=2084311)), and the `security-state/onecrl.json` dump of Firefox 158.0.1. Camoufox turns Remote Settings off, so without the import a fresh profile has no revocations. |
 
 ## Playwright
 

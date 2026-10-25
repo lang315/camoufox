@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from camoufox import addons, geolocation, multiversion, pkgman
+from camoufox import geolocation, multiversion, pkgman
 
 from conftest import CACHE_ROOT
 
@@ -36,10 +36,6 @@ def test_cache_constant_is_under_the_temp_root(name):
 @pytest.mark.parametrize("var", ["HOME", "USERPROFILE", "LOCALAPPDATA", "XDG_CACHE_HOME"])
 def test_cache_environment_is_under_the_temp_root(var):
     assert Path(os.environ[var]).resolve().is_relative_to(TEMP_ROOT)
-
-
-def test_addons_dir_is_redirected_per_test(tmp_path):
-    assert addons.ADDONS_DIR.is_relative_to(tmp_path)
 
 
 def test_guard_accepts_the_suite_as_configured(cache_paths_outside_root):

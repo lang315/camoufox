@@ -88,11 +88,13 @@ type Config struct {
 	// network:*
 	NetworkIPv4Only *bool `json:"network:ipv4Only,omitempty"`
 
+	// input:*
+	InputWindowsKeyboard *bool `json:"input:windowsKeyboard,omitempty"`
+
 	// battery:*
 
 	// fonts / voices
 	Fonts      []string `json:"fonts,omitempty"`
-	AudioSeed  *uint32  `json:"audio:seed,omitempty"`
 	CanvasSeed *uint32  `json:"canvas:seed,omitempty"`
 
 	// geolocation / locale

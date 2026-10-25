@@ -171,10 +171,10 @@ index 0000000000..a134ba615a
 +
 +#endif // mozilla_dom_WebRTCIPManager_h
 diff --git a/dom/base/moz.build b/dom/base/moz.build
-index 7e12a65344..8fceb2fe0d 100644
+index 774bbaaab5..8863722fd7 100644
 --- a/dom/base/moz.build
 +++ b/dom/base/moz.build
-@@ -304,10 +304,15 @@ EXPORTS.mozilla.dom += [
+@@ -303,10 +303,15 @@ EXPORTS.mozilla.dom += [
      "VideoFrameProvider.h",
      "ViewportMetaData.h",
      "VisualViewport.h",
@@ -187,14 +187,14 @@ index 7e12a65344..8fceb2fe0d 100644
 +# (it includes RoverfoxStorageManager.h which causes template issues)
 +SOURCES += ["WebRTCIPManager.cpp"]
 +
- # AudioFingerprintManager compiled separately to avoid namespace pollution
- # in unified builds (it includes RoverfoxStorageManager.h which can affect
- # alphabetically-later files like BarProps.cpp)
+ if CONFIG["FUZZING"]:
+     EXPORTS.mozilla.dom += [
+         "FuzzingFunctions.h",
 diff --git a/dom/base/nsGlobalWindowInner.cpp b/dom/base/nsGlobalWindowInner.cpp
-index d9f5e3d56f..bb767a45a7 100644
+index a5cc34e89a..1abe7144f1 100644
 --- a/dom/base/nsGlobalWindowInner.cpp
 +++ b/dom/base/nsGlobalWindowInner.cpp
-@@ -333,6 +333,8 @@
+@@ -331,6 +331,8 @@
  #include "xpcprivate.h"
  #include "xpcpublic.h"
  
@@ -203,7 +203,7 @@ index d9f5e3d56f..bb767a45a7 100644
  #ifdef MOZ_WEBSPEECH
  #  include "mozilla/dom/SpeechSynthesis.h"
  #endif
-@@ -7786,6 +7788,18 @@ void nsGlobalWindowInner::SetTimezone(const nsAString& timezone, ErrorResult& aR
+@@ -7784,6 +7786,18 @@ void nsGlobalWindowInner::SetTimezone(const nsAString& timezone, ErrorResult& aR
    RoverfoxStorageManager::RemoveSetter("setTimezone");
  }
  
@@ -223,10 +223,10 @@ index d9f5e3d56f..bb767a45a7 100644
    MOZ_ASSERT(aSharedWorker);
    MOZ_ASSERT(!mSharedWorkers.Contains(aSharedWorker));
 diff --git a/dom/base/nsGlobalWindowInner.h b/dom/base/nsGlobalWindowInner.h
-index fed5908e83..cfa30a4b20 100644
+index b7738dd0fc..6af59522fc 100644
 --- a/dom/base/nsGlobalWindowInner.h
 +++ b/dom/base/nsGlobalWindowInner.h
-@@ -692,6 +692,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
+@@ -689,6 +689,10 @@ class nsGlobalWindowInner final : public mozilla::dom::EventTarget,
  
    void SetTimezone(const nsAString& timezone, mozilla::ErrorResult& aRv);
  
@@ -741,10 +741,10 @@ index 9a3aa1311a..e564905a2e 100644
        addrs.AppendElement(addr);
      }
 diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
-index 3eca32b17b..88651b23cc 100644
+index 0f436dfbf9..561ae445a8 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
-@@ -965,6 +965,17 @@ partial interface Window {
+@@ -959,6 +959,17 @@ partial interface Window {
    undefined setTimezone(DOMString timezone);
  };
  

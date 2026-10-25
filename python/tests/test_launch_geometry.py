@@ -47,7 +47,7 @@ def host(screen_cons):
         # conftest.repo_get_path.
         mock.patch.object(utils, "get_path", repo_get_path)
     ), (
-        # The addon download would trip the fetcher guard (#110).
+        # The fake build bundles no addon; the lookup would only warn.
         mock.patch.object(utils, "add_default_addons", lambda *_a, **_k: None)
     ):
         yield

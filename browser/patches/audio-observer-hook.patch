@@ -1,0 +1,57 @@
+diff --git a/dom/media/webaudio/AnalyserNode.cpp b/dom/media/webaudio/AnalyserNode.cpp
+index 3c80514a1d..99734c413e 100644
+--- a/dom/media/webaudio/AnalyserNode.cpp
++++ b/dom/media/webaudio/AnalyserNode.cpp
+@@ -11,6 +11,9 @@
+ #include "mozilla/PodOperations.h"
+ #include "mozilla/dom/AnalyserNodeBinding.h"
+ #include "nsMathUtils.h"
++#include "nsPIDOMWindow.h"
++#include "nsIGlobalObject.h"
++#include "AccessObserverDom.hpp"
+ 
+ namespace mozilla {
+ 
+@@ -208,7 +211,18 @@ void AnalyserNode::SetSmoothingTimeConstant(double aValue, ErrorResult& aRv) {
+   mSmoothingTimeConstant = aValue;
+ }
+ 
++// Camoufox tracking-observer: record an analyser read (no-op when disarmed).
++static void RecordAudioRead(AudioContext* aContext) {
++  if (camoufox::AccessObserver::IsArmed()) {
++    nsIGlobalObject* global = aContext ? aContext->GetParentObject() : nullptr;
++    nsPIDOMWindowInner* win = global ? global->GetAsInnerWindow() : nullptr;
++    camoufox::RecordSurfaceFromDocument(win ? win->GetExtantDoc() : nullptr,
++                                        camoufox::SurfaceId::Audio);
++  }
++}
++
+ void AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray) {
++  RecordAudioRead(GetParentObject());
+   if (!FFTAnalysis()) {
+     // Might fail to allocate memory
+     return;
+@@ -225,6 +239,7 @@ void AnalyserNode::GetFloatFrequencyData(const Float32Array& aArray) {
+ }
+ 
+ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
++  RecordAudioRead(GetParentObject());
+   if (!FFTAnalysis()) {
+     // Might fail to allocate memory
+     return;
+@@ -249,6 +264,7 @@ void AnalyserNode::GetByteFrequencyData(const Uint8Array& aArray) {
+ }
+ 
+ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
++  RecordAudioRead(GetParentObject());
+   aArray.ProcessData([&](const Span<float>& aData, JS::AutoCheckCannotGC&&) {
+     size_t length = std::min(aData.Length(), size_t(FftSize()));
+ 
+@@ -257,6 +273,7 @@ void AnalyserNode::GetFloatTimeDomainData(const Float32Array& aArray) {
+ }
+ 
+ void AnalyserNode::GetByteTimeDomainData(const Uint8Array& aArray) {
++  RecordAudioRead(GetParentObject());
+   aArray.ProcessData([&](const Span<uint8_t>& aData, JS::AutoCheckCannotGC&&) {
+     size_t length = std::min(aData.Length(), size_t(FftSize()));
+ 
