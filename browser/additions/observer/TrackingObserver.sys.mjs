@@ -1,5 +1,6 @@
 import { Collector } from "./Collector.sys.mjs";
 import { NetHook } from "./NetHook.sys.mjs";
+import { registerAboutObserver } from "./AboutObserver.sys.mjs";
 
 // Env-based arm switch: a default (unarmed) profile registers nothing.
 // Mirrors the cached CAMOU_OBSERVE gate in AccessObserver::IsArmed()
@@ -52,6 +53,8 @@ function register() {
   gCollector = new Collector();
   gNetHook = new NetHook(gCollector);
   gNetHook.start();
+
+  registerAboutObserver();
 }
 
 export class TrackingObserver {
