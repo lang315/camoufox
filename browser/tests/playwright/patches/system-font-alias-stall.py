@@ -26,7 +26,13 @@ system face exactly once, so it reads how many times a base pays for that face
 and not how fast the runner is.
 
 What PASS means: no macOS base blocks the page MAX_RATIO times as long as a
-list that claims the system face once does.
+list that claims the system face once does, and every base claims it exactly
+once. The second half is the cause itself, counted: a name claims the system
+face when it sets three strings to the same widths as "System Font" and not as
+monospace. On this fork's builds, which resolve fallback while they lay the page
+out, the stall alone separates the sonoma base of #832 from a healthy one by only
+about 5x to 7x against a 6x threshold (measured on an emulated amd64 host), too
+thin to be the only check; the count reads 30 for that base and 1 for the rest.
 
     python browser/tests/playwright/patches/system-font-alias-stall.py
 """
@@ -89,6 +95,27 @@ def lists():
     return [("control", control)] + [(b["id"], sorted(set(b["fonts"]) | set(essential))) for b in bases]
 
 
+# Names whose rendering of three strings equals the system face's, and is not the
+# monospace fallback's. A name nothing resolves falls to monospace, so it never counts.
+ALIASES = """(names) => {
+  const probes = ["mmmmmmmmmmlli10OQ@#", "WWWW iiii 0123456789 gjpqy", "The quick brown fox"];
+  const span = document.createElement("span");
+  span.style.whiteSpace = "pre";
+  document.body.appendChild(span);
+  const widths = family => probes.map(t => {
+    span.style.fontFamily = family;
+    span.textContent = t;
+    return span.getBoundingClientRect().width;
+  });
+  const same = (a, b) => a.every((x, i) => x === b[i]);
+  const system = widths("'System Font', monospace"), mono = widths("monospace");
+  return names.filter(n => {
+    const w = widths(`"${n}", monospace`);
+    return same(w, system) && !same(w, mono);
+  }).length;
+}"""
+
+
 async def measure(fonts):
     """The page's longest unresponsive interval while fallback resolves, in ms."""
     from camoufox.async_api import AsyncCamoufox
@@ -101,6 +128,7 @@ async def measure(fonts):
             "() => document.documentElement.dataset.result", timeout=DEADLINE_MS, polling=250
         )
         result = json.loads(await handle.json_value())
+        result["aliases"] = await page.evaluate(ALIASES, fonts)
     if not result["systemFont"]:
         raise SystemExit("FAIL: 'System Font' is not installed, so nothing here pays for the "
                          "system face (is the font bundle staged?)")
@@ -115,18 +143,23 @@ async def main():
         if control is None:
             control = result["longest"]
             print(f"  control: longest block {control:.0f}ms ({len(fonts)} fonts claimed, "
-                  f"resolved at {result['resolvedAt']:.0f}ms)")
+                  f"resolved at {result['resolvedAt']:.0f}ms, {result['aliases']} name for the system face)")
+            if result["aliases"] != 1:
+                print("  FAIL: the control must claim the system face once; the alias count reads "
+                      f"{result['aliases']}, so it counts nothing")
+                return 1
             continue
         ratio = result["longest"] / control
-        verdict = "FAIL" if ratio >= MAX_RATIO else "ok"
-        print(f"  {verdict} {name}: longest block {result['longest']:.0f}ms, {ratio:.1f}x the control "
-              f"({len(fonts)} fonts claimed, resolved at {result['resolvedAt']:.0f}ms)")
-        if ratio >= MAX_RATIO:
+        bad = ratio >= MAX_RATIO or result["aliases"] != 1
+        print(f"  {'FAIL' if bad else 'ok'} {name}: longest block {result['longest']:.0f}ms, {ratio:.1f}x the control "
+              f"({len(fonts)} fonts claimed, resolved at {result['resolvedAt']:.0f}ms), "
+              f"{result['aliases']} name(s) for the system face")
+        if bad:
             failures.append(name)
     if failures:
-        print(f"  FAIL: {', '.join(failures)} blocked the page {MAX_RATIO:.0f}x as long as the control")
+        print(f"  FAIL: {', '.join(failures)} stalled the page {MAX_RATIO:.0f}x as long as the control or claimed the system face more than once")
         return 1
-    print(f"  PASS: no macOS base blocked the page {MAX_RATIO:.0f}x as long as the control")
+    print(f"  PASS: no macOS base blocked the page {MAX_RATIO:.0f}x as long as the control, and each claims the system face once")
     return 0
 
 
