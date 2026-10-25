@@ -80,6 +80,28 @@ func main() {
 }
 ```
 
+## Main-world evaluation
+
+`Page.Evaluate` runs in an isolated world: it sees the DOM but not the page's own
+JavaScript globals or the properties page scripts set on DOM nodes. Script running in
+the page's world is visible to the page, so isolation is the default and main-world
+evaluation is an opt-in, per call. Launch with `WithMainWorldEval(true)` and prefix the
+expression with `mw:`, as with pythonlib's `main_world_eval`:
+
+```go
+b, err := camoufox.Launch(ctx,
+    camoufox.WithExecutablePath("/path/to/camoufox/firefox"),
+    camoufox.WithMainWorldEval(true),
+)
+// ...
+v, err := p.Evaluate(ctx, "mw:typeof window.myPageGlobal")
+```
+
+Without the option an `mw:` expression fails with `Main world evaluation is disabled`.
+Only values come back: a DOM node is returned as the string `"ref: <Node>"`.
+An object reached twice comes back as the same value in both places; one that contains
+itself fails with `camoufox: main-world result contains a cycle`.
+
 ## Architecture
 
 ```
