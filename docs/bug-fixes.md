@@ -12,6 +12,23 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #303: CI never ran the tracking observer's tests
+
+**Fixed by:** the PR that adds `ci.run_observer` and the `observer` job. **Found by:** two earlier observer regressions (#291 and the Firefox 156 regression) that no check saw.
+
+**Symptom.** `browser/tests/build-tester/observer/test_*.py` passed on one Mac and nowhere else. A change that broke the observer left every CI check green, and the entries for #291 and for the Firefox 156 regression both record that nothing in CI runs the observer harness.
+
+**Root cause.** The four tests are scripts (`main()` runs at import), so pytest does not collect them, and no workflow or `ci/` runner invoked them. `harness.py` also defaulted to `BIN_DEFAULT`, a scratch path on one Mac: run anywhere else without `CFX_BIN` it tested whatever stale build sat there, or nothing.
+
+**Fix.** `ci/run_observer.py` runs each `test_*.py` as its own process with `CFX_BIN` set and takes the exit code as the verdict. A missing browser or a missing `marionette_driver` fails the gate instead of skipping. `tests.yml` gets an `observer` job under `xvfb-run -a`, listed in `summary`, `All tests passed`, `required=` and `ci/summarize.py`. `marionette_driver` was already pinned by `browser/tests/build-tester/requirements.txt`, which the job installs, so no dependency is added. On Linux the first CI run failed `test_observer_records.py` with `webgl: TypeError: can't access property "getParameter", g is null`: the harness hardcoded `headless=True`, and headless Firefox on Linux has no GL context (the same reason build-tester runs headful, #195). The harness now launches headful when `$DISPLAY` is set, as under `xvfb-run`; macOS, with no `DISPLAY`, stays headless. `BIN_DEFAULT` is deleted: `default_binary()` now exits with an error when `CFX_BIN` is unset.
+
+**Evidence.**
+- Red: with `harness.py` changed so it never sets `CAMOU_OBSERVE`, `python3 -m ci.run_observer` on fork.4 (BuildID 20261025104645): `0 passed, 4 failed`, e.g. `AssertionError: surfaces NOT recorded: ['audio', 'canvas', ...]`. The change was reverted.
+- Green: the same command unchanged: `4 passed, 0 failed`.
+- Not a valid red: deleting `7: "audio"` from `SURFACE_NAMES` stays green, because `test_observer_records.py` derives its expected set from that dict. The harness comment already says so; the dict is a hand copy of the C++ enum.
+
+**What misled the investigation.** The harness comment suggests a dropped surface is caught; it is not.
+
 ## #295: goapi's browser tests skipped in CI, so a skip passed as green
 
 **Fixed by:** the PR that adds the `goapi` job to `tests.yml`. **Found by:** the review of #289, whose `TestEvaluateMainWorld` was green in CI without ever launching a browser.

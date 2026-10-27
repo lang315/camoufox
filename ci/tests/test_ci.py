@@ -1126,7 +1126,7 @@ def test_required_suites_are_names_a_runner_actually_writes():
         "build", "build_tester", "patch_guards", "pythonlib", "sundial",
         "patch_guards_spoofing", "patch_guards_automation", "patch_guards_parity",
         "native", "native_rules", "native_browser", "native_growth",
-        "playwright", "skiplist_audit", "typescript", "typescript_browser", "goapi_browser", "e2e", "install",
+        "playwright", "skiplist_audit", "typescript", "typescript_browser", "goapi_browser", "observer", "e2e", "install",
     }
     unknown = required - producible
     assert not unknown, (
@@ -3246,3 +3246,41 @@ def test_go_test_output_is_read_by_verdict_including_subtests():
         "--- FAIL: TestB (0.20s)\nFAIL\n"
     )
     assert parse_go_test(out) == {"TestA": "pass", "TestB/sub": "skip", "TestB": "fail"}
+
+
+def _observer_dir(tmp_path):
+    tmp_path.mkdir()
+    (tmp_path / "test_ok.py").write_text(
+        "import os\nos.environ['CFX_BIN']\n"
+    )
+    (tmp_path / "test_bad.py").write_text("raise SystemExit('surface missing')\n")
+    (tmp_path / "probe_not_a_test.py").write_text("raise SystemExit(1)\n")
+    return tmp_path
+
+
+def test_observer_gate_runs_each_test_script_as_a_process(tmp_path, monkeypatch):
+    from ci import run_observer
+
+    binary = tmp_path / "camoufox"
+    binary.write_text("")
+    monkeypatch.setattr(run_observer, "OBSERVER", _observer_dir(tmp_path / "t"))
+    monkeypatch.setattr(run_observer, "has_marionette", lambda: True)
+    out = tmp_path / "out"
+    assert run_observer.main(["--binary", str(binary), "--evidence-dir", str(out)]) == 1
+    saved = json.loads((out / "observer.json").read_text())
+    assert saved["tests"] == {"test_bad.py": "fail", "test_ok.py": "pass"}
+
+
+def test_observer_gate_fails_instead_of_skipping_without_its_prerequisites(tmp_path, monkeypatch):
+    from ci import run_observer
+
+    binary = tmp_path / "camoufox"
+    binary.write_text("")
+    monkeypatch.setattr(run_observer, "OBSERVER", _observer_dir(tmp_path / "t"))
+    out = tmp_path / "out"
+    monkeypatch.setattr(run_observer, "has_marionette", lambda: False)
+    assert run_observer.main(["--binary", str(binary), "--evidence-dir", str(out)]) == 1
+    assert json.loads((out / "observer.json").read_text())["status"] == "error"
+    monkeypatch.setattr(run_observer, "has_marionette", lambda: True)
+    assert run_observer.main(["--binary", str(tmp_path / "missing"), "--evidence-dir", str(out)]) == 1
+    assert json.loads((out / "observer.json").read_text())["status"] == "error"

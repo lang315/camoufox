@@ -38,6 +38,7 @@ resolve ── static ─────────────── lint, tribal
 | `build-tester` | `ci.run_build_tester` | The raw binary against the anti-detect checks ([README](../browser/tests/build-tester/README.md)) |
 | `typescript-browser` | `ci.run_typescript --browser` | The npm launcher against a real browser |
 | `goapi` | `ci.run_goapi` | The Go launcher against a real browser. `goapi.yml` runs the package without one, where those tests skip; here `CAMOUFOX_BIN` is set and a test that finds no browser fails |
+| `observer` | `ci.run_observer` | The tracking observer's scripts (`browser/tests/build-tester/observer/test_*.py`), one process each; a missing browser or `marionette_driver` fails the gate |
 | `playwright` | `ci.run_playwright --shard i/6` | Upstream playwright-python's suite, plus [`browser/tests/playwright/camoufox/`](../browser/tests/playwright/camoufox/README.md) |
 | `native` | `ci.run_native --subset browser` | Leaks, context isolation, crash recovery ([below](#camoufoxs-own-suite)) |
 | `growth` | `ci.run_native --subset growth --shard i/7` | Memory growth, one test per runner |
@@ -216,7 +217,7 @@ Each tier gates the next, so a lint failure never reaches the build:
 | 0 static | lint, self-tests, settled decisions | seconds |
 | 1 unit | pythonlib, typescript | about a minute |
 | 2 browser | build (browser sources changed) or fetch (they did not) | minutes to hours |
-| 3a smoke | patch guards, skiplist audit, build-tester, typescript-browser, goapi, install | about 15 min |
+| 3a smoke | patch guards, skiplist audit, build-tester, typescript-browser, goapi, observer, install | about 15 min |
 | 3b full | Playwright × 6, native, growth × 7, stealth | about 40 min |
 | 4 gate | the required check | seconds |
 
@@ -284,6 +285,7 @@ Releases cut before manifests existed (up to `v156.0.1-beta.32`) pair by the tag
 | `python3 -m ci.run_typescript` | | `typescript/`'s tests |
 | `python3 -m ci.run_typescript --browser <bin>` | yes | The npm launcher end to end |
 | `python3 -m ci.run_goapi --binary <bin>` | yes | `goapi/`'s tests, browser-driven ones included |
+| `python3 -m ci.run_observer --binary <bin>` | yes | The observer's `test_*.py`; needs `pip install -r browser/tests/build-tester/requirements.txt` |
 | `python3 -m ci.run_install --tmpdir /mnt/tmpfs --browser <bin>` | yes | Packed packages, a real fetch, and a launch, click and typing through each installed package; the tmpdir must be its own filesystem |
 | `python3 -m ci.run_patch_guards --binary <bin>` | yes | Patch guards; `--group spoofing\|automation\|parity`, `--only <name>` |
 | `python3 -m ci.run_patch_guards --binary <bin> --only stock-gpu-parity` | yes | WebGL and WebGPU against stock Firefox of the same version, downloaded into `.ci-work` ([upgrade step](../docs/patch-upgrading-guide.md#browser-owned-gpu-values)) |
