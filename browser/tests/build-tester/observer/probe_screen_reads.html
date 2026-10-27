@@ -1,0 +1,14 @@
+<!doctype html><meta charset=utf-8><title>observer screen reads</title><body><script>
+// One read per observer drain window (the C++ buffer records a surface once per
+// ~500 ms window), so the screen count is the number of reads that reached
+// the hook, whatever caching sits behind them.
+(async () => {
+  const reads = ['availWidth', 'availHeight', 'width', 'height', 'availWidth', 'availHeight'];
+  for (const name of reads) {
+    void screen[name];
+    await new Promise(r => setTimeout(r, 1500));
+  }
+  window.__probeLog__ = { reads: reads.length };
+  window.__done__ = true;
+})();
+</script></body>

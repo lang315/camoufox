@@ -34,4 +34,12 @@ def main():
     assert not missing, f"covered launch: reads NOT recorded: {sorted(missing)} | probe={probe_log} | snap={snap}"
     print("PASS: getImageData and readPixels recorded on a covered launch")
 
+    # nsScreen caches the spoofed rect per context; the hook sits before the cache, so every
+    # read must still reach it. Six reads, each in its own drain window, count six times.
+    got, probe_log, snap = recorded("probe_screen_reads.html")
+    screen_count = sum(row["surfaces"].get("screen", 0) for row in snap)
+    print("screen reads counted:", screen_count, "of", probe_log["reads"])
+    assert screen_count >= probe_log["reads"], f"cached screen reads were not recorded: {screen_count} < {probe_log['reads']} | snap={snap}"
+    print("PASS: every screen read is recorded, not only the first")
+
 main()
