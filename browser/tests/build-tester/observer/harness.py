@@ -31,7 +31,8 @@ LAUNCH_DIFFERS_FROM_SHIPPED = [
     "FIREFOX_WEBGL_PREFS forces webgl.force-enabled and webgl.enable-webgl2, and sets "
     "media.peerconnection.ice.obfuscate_host_addresses=False, switching off a "
     "privacy protection the product ships with",
-    "headless: Session.__enter__ hardcodes headless=True. Headless Firefox has no GL "
+    "headless: Session.__enter__ passes headless=True unless $DISPLAY is set (CI runs "
+    "under xvfb, headful, because headless Firefox on Linux has no GL). Headless Firefox has no GL "
     "context, which is why the two webgl prefs above are forced; a webgl entry here "
     "is produced under those forced prefs, not under a shipped headful session",
 ]
@@ -107,7 +108,7 @@ class Session:
         else:
             os.environ.pop("CAMOU_CONFIG", None)
         from marionette_driver.marionette import Marionette
-        self.m = Marionette(bin=self.binary, port=0, headless=True, prefs=self.prefs)
+        self.m = Marionette(bin=self.binary, port=0, headless=not os.environ.get("DISPLAY"), prefs=self.prefs)
         self.m.start_session()
         return self
 

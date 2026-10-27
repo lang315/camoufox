@@ -1167,8 +1167,8 @@ jobs:
   observer:
     name: observer
     # The tracking observer's scripts (browser/tests/build-tester/observer/test_*.py)
-    # against the browser under test, one process each (#303). Headless through
-    # Marionette, so it needs no display of its own; xvfb-run is for GTK.
+    # against the browser under test, one process each (#303). Under xvfb-run the
+    # harness launches headful: headless Firefox on Linux has no GL, so WebGL is null.
     needs: [resolve, build, fetch-browser]
     if: >-
       always() && needs.resolve.result == 'success' &&
