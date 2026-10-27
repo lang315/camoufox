@@ -20,9 +20,14 @@ def recorded(page, prefs=None):
 def main():
     got, probe_log, snap = recorded("probe_all_surfaces.html")
     print("observer recorded:", sorted(got))
+    # The probe page is a second list of surfaces, written by hand: if the two disagree
+    # the enum parse lost a member or the page lags the enum, and either way the run
+    # covers less than it claims.
+    unlisted = set(probe_log) - EXPECTED
+    assert not unlisted, f"probe page pokes surfaces missing from the SurfaceId enum parse: {sorted(unlisted)}"
     missing = EXPECTED - got
     assert not missing, f"surfaces NOT recorded: {sorted(missing)} | probe={probe_log} | snap={snap}"
-    print("PASS: all 7 surfaces recorded")
+    print(f"PASS: all {len(EXPECTED)} surfaces recorded")
 
     # A launch whose canvas the RFP placeholder covers answers getImageData and
     # readPixels from Firefox's placeholder branch; the read must still be recorded (#199).
