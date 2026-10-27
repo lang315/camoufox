@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -13,9 +12,7 @@ import (
 )
 
 func TestExtractText(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -31,7 +28,7 @@ func TestExtractText(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)
@@ -59,9 +56,7 @@ func TestExtractText(t *testing.T) {
 }
 
 func TestSummary(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -77,7 +72,7 @@ func TestSummary(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)

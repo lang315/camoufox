@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -12,9 +11,7 @@ import (
 )
 
 func TestScrollToBottom(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -28,7 +25,7 @@ func TestScrollToBottom(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)
@@ -77,9 +74,7 @@ func TestScrollToBottom(t *testing.T) {
 }
 
 func TestScrollToAndBy(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -91,7 +86,7 @@ func TestScrollToAndBy(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)

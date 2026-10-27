@@ -1126,7 +1126,7 @@ def test_required_suites_are_names_a_runner_actually_writes():
         "build", "build_tester", "patch_guards", "pythonlib", "sundial",
         "patch_guards_spoofing", "patch_guards_automation", "patch_guards_parity",
         "native", "native_rules", "native_browser", "native_growth",
-        "playwright", "skiplist_audit", "typescript", "typescript_browser", "e2e", "install",
+        "playwright", "skiplist_audit", "typescript", "typescript_browser", "goapi_browser", "e2e", "install",
     }
     unknown = required - producible
     assert not unknown, (
@@ -3236,3 +3236,13 @@ def test_the_install_gate_launches_and_interacts_through_each_installed_package(
     assert {"build", "fetch-browser"} <= set(install["needs"])
     runs = "\n".join(s.get("run") or "" for s in install["steps"])
     assert '--browser "$CAMOUFOX_BINARY"' in runs
+
+
+def test_go_test_output_is_read_by_verdict_including_subtests():
+    from ci.run_goapi import parse_go_test
+
+    out = (
+        "=== RUN   TestA\n--- PASS: TestA (0.10s)\n=== RUN   TestB\n    --- SKIP: TestB/sub (0.00s)\n"
+        "--- FAIL: TestB (0.20s)\nFAIL\n"
+    )
+    assert parse_go_test(out) == {"TestA": "pass", "TestB/sub": "skip", "TestB": "fail"}
