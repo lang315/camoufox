@@ -3284,3 +3284,22 @@ def test_observer_gate_fails_instead_of_skipping_without_its_prerequisites(tmp_p
     monkeypatch.setattr(run_observer, "has_marionette", lambda: True)
     assert run_observer.main(["--binary", str(tmp_path / "missing"), "--evidence-dir", str(out)]) == 1
     assert json.loads((out / "observer.json").read_text())["status"] == "error"
+
+
+def test_observer_harness_reads_surface_ids_from_the_cpp_enum(monkeypatch):
+    import sys
+
+    observer = CI_ROOT.parent / "browser" / "tests" / "build-tester" / "observer"
+    monkeypatch.syspath_prepend(str(observer))
+    import harness
+
+    assert harness.SURFACE_NAMES == {
+        1: "canvas", 2: "webgl", 3: "webrtc", 4: "navigator", 5: "screen", 6: "fonts", 7: "audio",
+    }
+    added = "enum class SurfaceId : uint16_t {\n  A = 1, // c\n  B = 9,\n};"
+    assert harness.parse_surface_names(added) == {1: "a", 9: "b"}
+    with pytest.raises(ValueError):
+        harness.parse_surface_names("enum class SurfaceId { A = 1, B };")
+    with pytest.raises(ValueError):
+        harness.parse_surface_names("enum class Other { A = 1 };")
+    sys.modules.pop("harness", None)

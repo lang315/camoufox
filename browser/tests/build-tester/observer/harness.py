@@ -1,11 +1,24 @@
 from pathlib import Path
-import contextlib, functools, hashlib, http.server, json, os, socketserver, threading, time
+import contextlib, functools, hashlib, http.server, json, os, re, socketserver, threading, time
 
-# SurfaceId source of truth is the C++ enum in additions/camoucfg/AccessObserver.hpp.
-# Not importable from Python, so this is a hand-copy -- extend it when a surface is
-# added there, or the new surface silently drops out of test_observer_records.py's
-# EXPECTED coverage.
-SURFACE_NAMES = {1:"canvas",2:"webgl",3:"webrtc",4:"navigator",5:"screen",6:"fonts",7:"audio"}
+ACCESS_OBSERVER_HPP = Path(__file__).resolve().parents[3] / "additions" / "camoucfg" / "AccessObserver.hpp"
+
+
+def parse_surface_names(header):
+    """{id: lowercase name} from the `SurfaceId` enum, the source of truth for the ids.
+    Raises on a member without an explicit `= N`, so a shape this cannot read fails loudly."""
+    m = re.search(r"enum class SurfaceId\b[^{]*\{(.*?)\}", header, re.S)
+    if not m:
+        raise ValueError("no `enum class SurfaceId` in AccessObserver.hpp")
+    body = re.sub(r"//[^\n]*|/\*.*?\*/", "", m.group(1), flags=re.S)
+    members = [e for e in body.split(",") if e.strip()]
+    pairs = re.findall(r"(\w+)\s*=\s*(\d+)", body)
+    if len(pairs) != len(members):
+        raise ValueError(f"SurfaceId has a member without an explicit value: {members}")
+    return {int(n): name.lower() for name, n in pairs}
+
+
+SURFACE_NAMES = parse_surface_names(ACCESS_OBSERVER_HPP.read_text(encoding="utf-8"))
 # Deliberately an independent copy of build-tester/scripts/constants.py's dict, NOT an
 # import: this harness produces committed evidence artifacts, so its browser config must
 # not shift when the main suite retunes its own prefs. Keep the values in sync by hand.
