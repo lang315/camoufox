@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #295: goapi's browser tests skipped in CI, so a skip passed as green
+
+**Fixed by:** the PR that adds the `goapi` job to `tests.yml`. **Found by:** the review of #289, whose `TestEvaluateMainWorld` was green in CI without ever launching a browser.
+
+**Symptom.** 21 goapi test files started with `if os.Getenv("CAMOUFOX_BIN") == "" { t.Skip(...) }`, and `goapi.yml` runs `go test ./...` with no browser, so every browser-driven goapi test skipped and the job reported success.
+
+**Root cause.** AGENTS.md says a missing prerequisite fails in CI. The TypeScript and Python suites follow it (`typescript/tests/prereq.ts`, `e2e/util.py`: fail when `CI` is set unless the job lists the name in `CAMOUFOX_TEST_ALLOW_MISSING`); goapi had its own inline skip, repeated in every file, and nothing in `tests.yml` ran it against the browser the run built.
+
+**Fix.** `goapi/browser_test.go` has one helper, `browserBinary(t)`, that follows that convention with the name `browser`; the inline skips are gone. `goapi.yml` keeps its browserless run and allows the gap by name. A new `goapi` job in `tests.yml` runs `ci.run_goapi` under `xvfb-run` with the built browser, feeds the `goapi_browser` gate to `summary`, and is in the `All tests passed` needs.
+
+**Evidence.**
+- Red, on origin/main with `CI=true` and no binary: `--- SKIP: TestEvaluateMainWorld`, `--- SKIP: TestFillForm`, `--- SKIP: TestKeyboardPressEnter`, `ok`.
+- Green: the same run on the fix reports `--- FAIL` with `test prerequisite missing in CI: browser`; with `CAMOUFOX_TEST_ALLOW_MISSING=browser`, or without `CI`, it skips.
+
+**What misled the investigation.** The unit tests in the same package passed, so the job looked meaningful.
+
 ## #298: goapi `Keyboard.Press("Enter")` sent a composition keydown and did not submit forms
 
 **Fixed by:** the PR that ports Playwright's US keyboard layout into goapi. **Found by:** a login form that never submitted after `Press("Enter")`.

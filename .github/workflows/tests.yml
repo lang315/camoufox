@@ -1129,6 +1129,42 @@ jobs:
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------------------
+  goapi:
+    name: goapi (browser)
+    # The Go launcher against the browser under test. goapi.yml runs the package
+    # without a browser, where the gated tests skip by design; here CAMOUFOX_BIN
+    # is set and CI=true, so a test that finds no browser fails (#295).
+    needs: [resolve, build, fetch-browser]
+    if: >-
+      always() && needs.resolve.result == 'success' &&
+      (needs.build.result == 'success' || needs.fetch-browser.result == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+      - uses: ./.github/actions/prepare-browser
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/setup-go@v5
+        with:
+          # 1.23 like every other workflow here (see the e2e job).
+          go-version: "1.23"
+          cache-dependency-path: goapi/go.sum
+      - name: Run
+        run: xvfb-run -a python3 -m ci.run_goapi --binary "$CAMOUFOX_BINARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: results-goapi
+          path: .ci-work/results/
+          include-hidden-files: true
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------
   typescript-browser:
     name: typescript (browser)
     # Tier 3a. Launches the browser under test through the TS API -- headless,
@@ -1289,7 +1325,7 @@ jobs:
   summary:
     name: Summary
     needs: [resolve, static, pythonlib, typescript, install, build, fetch-browser, playwright,
-            patch-guards, build-tester, native, typescript-browser, growth, e2e, sundial]
+            patch-guards, build-tester, native, typescript-browser, goapi, growth, e2e, sundial]
     if: always() && needs.resolve.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
@@ -1329,7 +1365,7 @@ jobs:
           # summarize report "produced no result file" and fail the gate on
           # every pull request that did not touch the browser. Which is most of
           # them, and exactly the cheap path this pipeline advertises.
-          required="pythonlib typescript install typescript_browser native_rules patch_guards_spoofing patch_guards_automation patch_guards_parity skiplist_audit build_tester playwright native_browser native_growth e2e"
+          required="pythonlib typescript install typescript_browser goapi_browser native_rules patch_guards_spoofing patch_guards_automation patch_guards_parity skiplist_audit build_tester playwright native_browser native_growth e2e"
           if [ "${{ needs.resolve.outputs.browser_changed }}" = "true" ]; then
             required="$required build"
           fi
@@ -1399,7 +1435,7 @@ jobs:
     # did not run has not passed, and silently skipping one is the cheapest way
     # to a green tick.
     needs: [resolve, static, pythonlib, typescript, install, build, fetch-browser, playwright,
-            patch-guards, build-tester, native, typescript-browser, growth, e2e, sundial, summary]
+            patch-guards, build-tester, native, typescript-browser, goapi, growth, e2e, sundial, summary]
     if: always()
     runs-on: ubuntu-24.04
     permissions:

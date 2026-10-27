@@ -45,4 +45,8 @@ jobs:
         run: go build ./...
 
       - name: go test
+        # The tests that drive a browser run in tests.yml (the goapi job), which
+        # has one; here they skip, and the helper fails a skip in CI unless allowed.
+        env:
+          CAMOUFOX_TEST_ALLOW_MISSING: browser
         run: go test -timeout 5m ./...

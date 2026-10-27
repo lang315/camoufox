@@ -36,14 +36,12 @@ import (
 // does gate window.Notification, so the second launch's assertion is a control
 // and not a value that would read the same either way.
 func TestLaunchUsesAThrowawayProfile(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true),
 		camoufox.WithFirefoxUserPref("dom.webnotifications.enabled", false))
 	if err != nil {
@@ -65,7 +63,7 @@ func TestLaunchUsesAThrowawayProfile(t *testing.T) {
 
 	// A second launch that sets no notification pref must not inherit the first's.
 	b2, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("second launch: %v", err)
@@ -102,9 +100,7 @@ func notificationIsUndefined(ctx context.Context, b *camoufox.Browser) (any, err
 
 // The profile directory goapi creates must not survive Close().
 func TestCloseRemovesTheProfileDirectory(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
@@ -113,7 +109,7 @@ func TestCloseRemovesTheProfileDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)
@@ -134,15 +130,13 @@ func TestCloseRemovesTheProfileDirectory(t *testing.T) {
 // as-is -- it must NOT be deleted, since it is the caller's data and
 // deleting it would be destructive.
 func TestWithUserDataDirIsUsedAndPreserved(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	dir := t.TempDir()
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true),
 		camoufox.WithUserDataDir(dir))
 	if err != nil {

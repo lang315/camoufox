@@ -55,7 +55,7 @@ _ORDER = [
     "native_rules", "pythonlib", "typescript", "install", "patches_apply", "build", "patch_guards",
     "patch_guards_spoofing", "patch_guards_automation", "patch_guards_parity",
     "skiplist_audit", "native_browser", "build_tester", "playwright", "typescript_browser",
-    "native_growth", "sundial",
+    "native_growth", "goapi_browser", "sundial",
 ]
 
 
