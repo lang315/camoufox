@@ -1,7 +1,6 @@
 from pathlib import Path
 import contextlib, functools, hashlib, http.server, json, os, socketserver, threading, time
 
-BIN_DEFAULT = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
 # SurfaceId source of truth is the C++ enum in additions/camoucfg/AccessObserver.hpp.
 # Not importable from Python, so this is a hand-copy -- extend it when a surface is
 # added there, or the new surface silently drops out of test_observer_records.py's
@@ -14,8 +13,11 @@ FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True,
                        "media.peerconnection.ice.obfuscate_host_addresses": False}
 
 def default_binary():
-    """Resolved camoufox binary path: $CFX_BIN, else the local build."""
-    return os.environ.get("CFX_BIN", BIN_DEFAULT)
+    """The camoufox binary under test. No default: a stale path would test the wrong build."""
+    binary = os.environ.get("CFX_BIN")
+    if not binary:
+        raise SystemExit("CFX_BIN is not set; point it at the camoufox binary (or run python3 -m ci.run_observer --binary <bin>)")
+    return binary
 
 # This harness is NOT the browser the product ships. Every artifact carries this
 # list so no reader mistakes one for the other.
@@ -47,9 +49,7 @@ def provenance():
     p = Path(binary)
     if not p.is_file():
         raise SystemExit(
-            f"binary not found: {binary}\n"
-            "BIN_DEFAULT points at /tmp/cfx_sync4, which no longer "
-            "exists on any current host. Set CFX_BIN to the extracted build."
+            f"binary not found: {binary} (CFX_BIN)"
         )
     out = {
         "binary": binary,
