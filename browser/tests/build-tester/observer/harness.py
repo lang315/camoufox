@@ -1,7 +1,6 @@
 from pathlib import Path
 import contextlib, functools, hashlib, http.server, json, os, socketserver, threading, time
 
-BIN_DEFAULT = "/tmp/cfx_sync4/app/Camoufox.app/Contents/MacOS/camoufox"
 # SurfaceId source of truth is the C++ enum in additions/camoucfg/AccessObserver.hpp.
 # Not importable from Python, so this is a hand-copy -- extend it when a surface is
 # added there, or the new surface silently drops out of test_observer_records.py's
@@ -14,8 +13,11 @@ FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True,
                        "media.peerconnection.ice.obfuscate_host_addresses": False}
 
 def default_binary():
-    """Resolved camoufox binary path: $CFX_BIN, else the local build."""
-    return os.environ.get("CFX_BIN", BIN_DEFAULT)
+    """The camoufox binary under test. No default: a stale path would test the wrong build."""
+    binary = os.environ.get("CFX_BIN")
+    if not binary:
+        raise SystemExit("CFX_BIN is not set; point it at the camoufox binary (or run python3 -m ci.run_observer --binary <bin>)")
+    return binary
 
 # This harness is NOT the browser the product ships. Every artifact carries this
 # list so no reader mistakes one for the other.
@@ -29,7 +31,8 @@ LAUNCH_DIFFERS_FROM_SHIPPED = [
     "FIREFOX_WEBGL_PREFS forces webgl.force-enabled and webgl.enable-webgl2, and sets "
     "media.peerconnection.ice.obfuscate_host_addresses=False, switching off a "
     "privacy protection the product ships with",
-    "headless: Session.__enter__ hardcodes headless=True. Headless Firefox has no GL "
+    "headless: Session.__enter__ passes headless=True unless $DISPLAY is set (CI runs "
+    "under xvfb, headful, because headless Firefox on Linux has no GL). Headless Firefox has no GL "
     "context, which is why the two webgl prefs above are forced; a webgl entry here "
     "is produced under those forced prefs, not under a shipped headful session",
 ]
@@ -47,9 +50,7 @@ def provenance():
     p = Path(binary)
     if not p.is_file():
         raise SystemExit(
-            f"binary not found: {binary}\n"
-            "BIN_DEFAULT points at /tmp/cfx_sync4, which no longer "
-            "exists on any current host. Set CFX_BIN to the extracted build."
+            f"binary not found: {binary} (CFX_BIN)"
         )
     out = {
         "binary": binary,
@@ -107,7 +108,7 @@ class Session:
         else:
             os.environ.pop("CAMOU_CONFIG", None)
         from marionette_driver.marionette import Marionette
-        self.m = Marionette(bin=self.binary, port=0, headless=True, prefs=self.prefs)
+        self.m = Marionette(bin=self.binary, port=0, headless=not os.environ.get("DISPLAY"), prefs=self.prefs)
         self.m.start_session()
         return self
 
