@@ -12,6 +12,23 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #305: test_observer_records could not see a surface missing from harness.SURFACE_NAMES
+
+**Fixed by:** the PR that parses the surface ids from `AccessObserver.hpp`. **Found by:** the red proof for #303: deleting `7: "audio"` from the dict left `ci.run_observer` at 4 passed.
+
+**Symptom.** A surface the observer records but the harness does not list is never checked, and the run stays green.
+
+**Root cause.** `test_observer_records.py` set `EXPECTED = set(harness.SURFACE_NAMES.values())`, and `SURFACE_NAMES` was a hand copy of `enum class SurfaceId` in `browser/additions/camoucfg/AccessObserver.hpp`. The expected set was derived from the thing that had to be checked. The harness comment said to extend the copy by hand.
+
+**Fix.** `harness.parse_surface_names()` reads the enum (`Name = N`, lowercased) and raises on a member without an explicit value or a missing enum, so a shape it cannot read fails loudly. The hand copy and its comment are deleted. The test also asserts that every surface `probe_all_surfaces.html` pokes is in the parsed set, because a parse that silently loses a member would otherwise shrink the expected set and pass. Alternative not taken: exporting the ids from C++ to JS, which would need a browser change for a test-only need.
+
+**Evidence** (fork.4, BuildID 20261025104645, `ci.run_observer`):
+- Red (a): `Battery = 8` added to the enum, probe page unchanged: `AssertionError: surfaces NOT recorded: ['battery']`.
+- Red (b): `Audio` dropped from the parse, with only the parse change in place it stayed green (`PASS: all 6 surfaces recorded`); with the probe cross-check: `AssertionError: probe page pokes surfaces missing from the SurfaceId enum parse: ['audio']`.
+- Green: both reverted, `PASS: all 7 surfaces recorded`, `4 passed, 0 failed`.
+
+**What misled the investigation.** Red (b) first stayed green: the cross-check against the probe page was added because of it.
+
 ## #303: CI never ran the tracking observer's tests
 
 **Fixed by:** the PR that adds `ci.run_observer` and the `observer` job. **Found by:** two earlier observer regressions (#291 and the Firefox 156 regression) that no check saw.
