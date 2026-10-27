@@ -15,9 +15,7 @@ import (
 
 // TestSetInputFilesDirect tests branch A: direct SetInputFiles on an ElementHandle.
 func TestSetInputFilesDirect(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -29,7 +27,7 @@ func TestSetInputFilesDirect(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)
@@ -80,9 +78,7 @@ func TestSetInputFilesDirect(t *testing.T) {
 // fires Page.fileChooserOpened, and OnFileChooser runs its blocking RPCs off the
 // juggler readLoop so the picker click completes without self-deadlocking.
 func TestOnFileChooser(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -97,7 +93,7 @@ func TestOnFileChooser(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)

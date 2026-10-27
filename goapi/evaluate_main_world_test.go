@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -14,9 +13,7 @@ import (
 )
 
 func TestEvaluateMainWorld(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -27,7 +24,7 @@ func TestEvaluateMainWorld(t *testing.T) {
 	open := func(t *testing.T, ctx context.Context, opts ...camoufox.Option) *camoufox.Page {
 		t.Helper()
 		opts = append([]camoufox.Option{
-			camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+			camoufox.WithExecutablePath(bin),
 			camoufox.WithHeadless(true),
 		}, opts...)
 		b, err := camoufox.Launch(ctx, opts...)

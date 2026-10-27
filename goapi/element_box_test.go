@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -12,9 +11,7 @@ import (
 )
 
 func TestElementBoundingBox(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -27,7 +24,7 @@ func TestElementBoundingBox(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")), camoufox.WithHeadless(true))
+	b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(bin), camoufox.WithHeadless(true))
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}

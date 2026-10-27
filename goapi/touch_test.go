@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -14,9 +13,7 @@ import (
 )
 
 func TestTouchscreenTap(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -35,7 +32,7 @@ document.addEventListener('touchstart', function(e) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true),
 		camoufox.WithFirefoxUserPref("dom.w3c_touch_events.enabled", 1))
 	if err != nil {
@@ -78,9 +75,7 @@ document.addEventListener('touchstart', function(e) {
 }
 
 func TestTouchscreenTouchEvents(t *testing.T) {
-	if os.Getenv("CAMOUFOX_BIN") == "" {
-		t.Skip("set CAMOUFOX_BIN to run")
-	}
+	bin := browserBinary(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html")
@@ -106,7 +101,7 @@ func TestTouchscreenTouchEvents(t *testing.T) {
 	defer cancel()
 
 	b, err := camoufox.Launch(ctx,
-		camoufox.WithExecutablePath(os.Getenv("CAMOUFOX_BIN")),
+		camoufox.WithExecutablePath(bin),
 		camoufox.WithHeadless(true),
 		camoufox.WithFirefoxUserPref("dom.w3c_touch_events.enabled", 1))
 	if err != nil {

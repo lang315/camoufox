@@ -5,8 +5,8 @@ package camoufox_test
 // generator produces the right CAMOU_CONFIG), this launches the patched
 // browser and asserts the spoofs actually take effect in page JS.
 //
-// Gated on CAMOUFOX_BIN: skipped (not failed) when no binary is available, so
-// `go test ./...` stays green on a dev machine without a Linux/Windows build.
+// Gated on CAMOUFOX_BIN through browserBinary: skipped on a dev machine without a
+// binary, and a failure in CI.
 //
 //	CAMOUFOX_BIN=/path/to/camoufox go test ./goapi -run TestRuntimeSpoofs -v
 //
@@ -29,10 +29,7 @@ import (
 
 func launchForSpoofTest(t *testing.T) (context.Context, *camoufox.Page, *config.Config, func()) {
 	t.Helper()
-	exe := os.Getenv("CAMOUFOX_BIN")
-	if exe == "" {
-		t.Skip("set CAMOUFOX_BIN to a Camoufox binary to run runtime spoof verification")
-	}
+	exe := browserBinary(t)
 	cfg := &config.Config{}
 	if err := fingerprint.Generate(cfg, fingerprint.Options{
 		OS:   "windows",
