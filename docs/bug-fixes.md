@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #307: getter-cost-parity failed once on `history.length`, a getter Camoufox does not spoof
+
+**Fixed by:** the PR that removes `history.length` from the guard's `WINDOW` list and prints the host CPU on a failure. **Found by:** run 40441871195, job 122011451961, on the 158.0.1 sync.
+
+**Symptom.** `getter-cost-parity.py` failed on `history.length`: 83 ns in Camoufox against 32 ns in stock, in both Camoufox arms. A re-run of that job (122015141243) on the same commit and browser input key passed, and the guard has passed since.
+
+**Root cause.** `history.length` is not a spoofed getter. `window.history.length` has been `removed` in `browser/settings/properties.json` since 156.0.1-beta.32, no patch, hook or pref sits on its path, and in Firefox 158.0.1 `History.length` is `nsHistory::GetLength` (`dom/base/nsHistory.cpp:61`), then `ChildSHistory::Count` (`docshell/shistory/ChildSHistory.cpp:74`: `mLength` plus the pending deltas), with no pref or docShell-flag branch. The guard's `WINDOW` list ("spoofed getters") still carried it, so the guard measured the build-wide cost of Camoufox's binary against stock's (1.2-1.4x on getters the fork never touches, `history.length` at the top of that band, 1.4-1.75x across the CPUs sampled) against a 2x line. Four arms on one runner (AMD EPYC 7763, 8 launches each) showed the session-history prefs are not involved: stock with Camoufox's prefs read like stock (31.7 ns each), Camoufox with stock's prefs read like Camoufox (46.4 against 48.8 ns).
+
+**Fix.** `"history.length"` is deleted from `WINDOW`; no other entry and no threshold changes. This removes an entry that was out of the guard's scope, it does not loosen a bound. The guard also prints one `host CPU:` line on a failure, read from `/proc/cpuinfo` and omitted where that file does not exist; it never affects pass/fail. Alternatives not taken: listing `history.length` as a control (controls fail at the same 2x and 30 ns, so the red would only be renamed, and a 1.2-1.5x band next to a 2x line makes a flaky sanity check), and diffing the build flags (the band is uniform across getters, so ratios to a same-browser control do not move).
+
+**Not explained.** The 83 ns reading itself. Its stock figure (32 ns) matches the EPYC 7763's 31.7, but Camoufox read 83 ns there against 49 ns in all 8 launches on that CPU, with the run's own controls normal. A per-host ratio does not cover that, nothing found can force the state, and it has not recurred, so removing the entry stops the guard from measuring it rather than explaining it.
+
+**Evidence.** No red: deleting a list entry has no meaningful red. Green is the guard passing in the PR's CI.
+
+**What misled the investigation.** The list's name. `WINDOW` is "spoofed getters", so a slow read looked like a fork cost, and the first guess was a session-history pref (`max_total_viewers`, `fission.bfcacheInParent`). The code read and the four-arm split ruled that out. Upstream's copy of this guard carries the same stale entry, so the next sync must keep the deletion.
+
 ## #305: test_observer_records could not see a surface missing from harness.SURFACE_NAMES
 
 **Fixed by:** the PR that parses the surface ids from `AccessObserver.hpp`. **Found by:** the red proof for #303: deleting `7: "audio"` from the dict left `ci.run_observer` at 4 passed.
