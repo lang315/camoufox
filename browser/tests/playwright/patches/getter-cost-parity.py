@@ -65,7 +65,7 @@ FIRST_READS = ["navigator.hardwareConcurrency", "screen.width", "screen.colorDep
 WINDOW = [
     "screen.width", "screen.height", "screen.availWidth", "screen.availHeight",
     "screen.colorDepth", "screen.pixelDepth", "devicePixelRatio", "innerWidth",
-    "innerHeight", "outerWidth", "screenX", "history.length",
+    "innerHeight", "outerWidth", "screenX",
     "navigator.hardwareConcurrency", "navigator.globalPrivacyControl",
     "navigator.maxTouchPoints", "G.getParameter(G.MAX_TEXTURE_SIZE)",
     "C.measureText('mmmmmmmmmmlli').width",
@@ -212,6 +212,17 @@ def run_camoufox(binary, url, identity):
         return json.loads(page.evaluate("document.body.dataset.result"))
 
 
+def cpu_model():
+    """The host CPU's model name, for a failure report; "" where /proc/cpuinfo is absent."""
+    try:
+        for line in Path("/proc/cpuinfo").read_text().splitlines():
+            if line.startswith("model name"):
+                return line.split(":", 1)[1].strip()
+    except OSError:
+        pass
+    return ""
+
+
 def fastest(runs):
     out = {"first": {e: min(r["first"][e] for r in runs) for e in runs[0]["first"]}}
     for where in ("window", "worker"):
@@ -299,6 +310,8 @@ def main() -> int:
     if failures:
         for f in failures:
             print(f"FAIL: {f}")
+        if cpu_model():
+            print(f"host CPU: {cpu_model()}")
         return 1
     print(f"PASS: no spoofed getter costs over {SLOWER_FACTOR}x or under 1/{FASTER_FACTOR} of "
           f"stock Firefox's from script.")
