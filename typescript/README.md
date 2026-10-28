@@ -133,6 +133,9 @@ Those are browser settings, so a macOS context on it has them too, and a
 Windows context on a browser launched as another OS has the host's. `NewContext`
 does not refuse the mix. Pass `os` at launch for the OS whose behaviour matters,
 or use one browser per OS.
+A context of another OS on a browser launched as the host's OS draws only the
+host's fonts that its list admits
+([docs/fonts-gating.md](../docs/fonts-gating.md#a-context-of-another-os-in-a-host-os-launch-320)).
 
 ### The canvas on another OS
 
