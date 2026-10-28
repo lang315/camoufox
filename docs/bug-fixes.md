@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #310: the observer and goapi browser tests never ran on macOS or Windows
+
+**Fixed by:** the PR that adds both gates to the legs of `e2e.yml`. **Found by:** the observer harness failing on its first Windows run.
+
+**Symptom.** `ci.run_observer` (#303) and `ci.run_goapi` (#301) ran only on Linux, in `tests.yml`, and a pull request never builds macOS or Windows, so a regression in the observer or the Go launcher on those hosts reached a release unseen.
+
+**Root cause.** The runners were wired to the Linux jobs alone. The first Windows run (e2e run 40615989606, `e2e (windows-x86_64)`) then failed all four observer tests after they printed their PASS lines: `PermissionError: [WinError 32] ... observer\gecko.log`. `marionette_driver` writes `./gecko.log` and deletes the old one when it starts the next browser, and Windows will not delete a file the previous browser still holds. The scripts start a second session after the first closes (armed, then disarmed), so each hit it at the second start.
+
+**Fix.** `e2e.yml` gets three steps ahead of the journeys, on every leg: unpack the browser (`e2e/util.py --zip|--release` prints its path; the journeys' `binary` fixture now calls the same `fetch_release` and `unpack`), `ci.run_observer`, `ci.run_goapi`. A red gate does not skip the journeys (they run `!cancelled()`), and a dispatch with `probe` or `k` leaves the gates out. `harness.Session` gives each session a gecko log in its own temp directory, which also stops the tests writing `gecko.log` into the source tree. No dependency is added: `marionette_driver` is already in `browser/tests/build-tester/requirements.txt`.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The Windows log showed PASS lines before the traceback, which reads as a passing test with noisy teardown; the exit code and the `PermissionError` frame are what failed the run.
+
 ## #307: getter-cost-parity failed once on `history.length`, a getter Camoufox does not spoof
 
 **Fixed by:** the PR that removes `history.length` from the guard's `WINDOW` list and prints the host CPU on a failure. **Found by:** run 40441871195, job 122011451961, on the 158.0.1 sync.
