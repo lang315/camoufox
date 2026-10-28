@@ -1,0 +1,41 @@
+diff --git a/gfx/thebes/gfxFcPlatformFontList.cpp b/gfx/thebes/gfxFcPlatformFontList.cpp
+index 8ffce34..76848e3 100644
+--- a/gfx/thebes/gfxFcPlatformFontList.cpp
++++ b/gfx/thebes/gfxFcPlatformFontList.cpp
+@@ -24,6 +24,7 @@
+ #include "nsDirectoryServiceUtils.h"
+ #include "nsGkAtoms.h"
+ #include "nsIConsoleService.h"
++#include "nsIDirectoryEnumerator.h"
+ #include "nsIGfxInfo.h"
+ #include "nsPresContext.h"
+ #include "nsString.h"
+@@ -3212,7 +3213,27 @@ void gfxFcPlatformFontList::ActivateBundledFonts() {
+     }
+   }
+   if (!mBundledFontsPath.IsEmpty()) {
+-    FcConfigAppFontAddDir(nullptr, ToFcChar8Ptr(mBundledFontsPath.get()));
++    // Camoufox (#329): add only the files directly in fonts/, which are
++    // Firefox's own. FcConfigAppFontAddDir scans recursively, so naming the
++    // directory put every group of every OS on the application font list,
++    // past the per-OS directories the launcher's fontconfig names, and the
++    // allowlist filters by family name, not by origin.
++    nsCOMPtr<nsIFile> dir;
++    nsCOMPtr<nsIDirectoryEnumerator> entries;
++    if (NS_SUCCEEDED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(dir))) &&
++        NS_SUCCEEDED(dir->Append(u"fonts"_ns)) &&
++        NS_SUCCEEDED(dir->GetDirectoryEntries(getter_AddRefs(entries))) &&
++        entries) {
++      nsCOMPtr<nsIFile> file;
++      while (NS_SUCCEEDED(entries->GetNextFile(getter_AddRefs(file))) && file) {
++        bool isFile;
++        nsAutoCString path;
++        if (NS_SUCCEEDED(file->IsFile(&isFile)) && isFile &&
++            NS_SUCCEEDED(file->GetNativePath(path))) {
++          FcConfigAppFontAddFile(nullptr, ToFcChar8Ptr(path.get()));
++        }
++      }
++    }
+   }
+ }
+ #endif
