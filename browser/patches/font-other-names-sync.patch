@@ -2,7 +2,38 @@ diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList
 index 40212b6835..1f52f98726 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -2203,8 +2203,13 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -31,6 +31,7 @@
+ #include "mozilla/dom/ContentProcessMessageManager.h"
+ #include "mozilla/dom/Document.h"
+ #include "mozilla/dom/FontListManager.h"
++#include "mozilla/dom/NavigatorManager.h"
+ #include "mozilla/gfx/2D.h"
+ #include "mozilla/gfx/Logging.h"
+ #include "mozilla/glean/GfxMetrics.h"
+@@ -2191,7 +2192,21 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+   }
+ 
+   if (SharedFontList()) {
+-    fontlist::Family* family = SharedFontList()->FindFamily(key);
++    // Camoufox (#319): on Windows, FindFamily answers a legacy name with its
++    // base family's regular face until the names are loaded, which never
++    // reaches the block below. Real Windows does that, so a Windows claim
++    // keeps it; a Linux or macOS claim looks up primary names only, so the
++    // block reads the names now. Context 0 answers with the launch's OS.
++    bool camouLegacyFirst = false;
++    if (!mOtherFamilyNamesInitialized &&
++        CamouGenericTableApplies(aFontVisibilityProvider)) {
++      const auto camouOS = mozilla::dom::NavigatorManager::GetSpoofedOS(
++          mozilla::dom::FontListManager::ContextIdFor(aFontVisibilityProvider));
++      camouLegacyFirst = camouOS == MaskConfig::SpoofedOS::Linux ||
++                         camouOS == MaskConfig::SpoofedOS::MacOS;
++    }
++    fontlist::Family* family =
++        SharedFontList()->FindFamily(key, camouLegacyFirst);
+     // If not found, and other family names have not yet been initialized,
+     // initialize the rest of the list and try again. This is done lazily
+     // since reading name table entries is expensive.
+@@ -2199,8 +2214,13 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      // in practice, so avoid pulling in names at startup.
      if (!family && !mOtherFamilyNamesInitialized) {
        bool triggerLoading = true;
