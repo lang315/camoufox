@@ -1,0 +1,29 @@
+diff --git a/gfx/thebes/gfxTextRun.cpp b/gfx/thebes/gfxTextRun.cpp
+index 512ee54..0556312 100644
+--- a/gfx/thebes/gfxTextRun.cpp
++++ b/gfx/thebes/gfxTextRun.cpp
+@@ -4073,6 +4073,24 @@ void gfxFontGroup::ComputeRanges(nsTArray<TextRange>& aRanges, const T* aString,
+              lang.get(), static_cast<int>(aRunScript), fontMatches.get()));
+   }
+ #endif
++
++  // The block above is compiled out of release builds; this is the record of
++  // which face drew each range.
++  if (MOZ_UNLIKELY(CAMOU_LOG_FONTLIST_ENABLED())) {
++    nsAutoCString faces;
++    for (const TextRange& r : aRanges) {
++      nsAutoCString family;
++      if (r.font) {
++        family = r.font->GetFontEntry()->FamilyName();
++      }
++      faces.AppendPrintf(" [%u:%u u+%04x] %s / %s", r.start, r.end,
++                         uint32_t(aString[r.start]),
++                         r.font ? r.font->GetName().get() : "<null>",
++                         family.get());
++    }
++    CAMOU_LOG_FONTLIST(("CAMOU-FL face ctx=%u families=%s%s", mUserContextId,
++                        FamilyListToString(mFamilyList).get(), faces.get()));
++  }
+ }
+ 
+ gfxUserFontSet* gfxFontGroup::GetUserFontSet() { return mUserFontSet; }
