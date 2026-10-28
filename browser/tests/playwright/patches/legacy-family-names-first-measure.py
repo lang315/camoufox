@@ -14,7 +14,7 @@ read the names when a Camoufox font list applies to the page. (The pref
 gfx.font_loader.delay=0 also resolves the names, but it starts the font loader at
 once and lifts its time limit: launch took 1.7 s longer, measured.)
 
-A windows identity whose `fonts` are the three legacy names measures each of them in
+An identity whose `fonts` are the three legacy names measures each of them in
 a fresh browser, then measures them again every 2 s until the loader has run (the
 widths stop changing, 10 s at least, 30 s at most). The tell is a name whose first
 width differs from its settled width. A name that resolves keeps its width, so
@@ -26,10 +26,15 @@ the pass/fail control, because with these `fonts` the generics resolve to one of
 the allowed legacy faces themselves (on Linux, monospace draws DejaVu Sans
 Condensed, so that name's width equals the fallback's whether or not it resolved).
 
+The identity is a `windows` one, except on a Windows host: there it uses the host's
+fonts, which hold no DejaVu, so every width would be the fallback's. A Windows host
+gets `linux`, which reaches the Windows-only branch of SharedFontList::FindFamily that
+answers a legacy name with its base family's face before the names load (#319).
+
 Measured red on a macOS arm64 build without the patch: the first width was the
-fallback's in 8 launches of 8. Not measured red on Linux or Windows: no build
-without the patch was available there, so a green on those hosts says the names
-resolve at once, not that this guard can catch a miss on them. The per-context font
+fallback's in 8 launches of 8. Not measured red on Linux, where no build without
+the patch was available, so a green there says the names resolve at once, not that
+this guard can catch a miss on it. The per-context font
 list (Juggler setFontList) is not exercised: a context's list is intersected with
 the launch-level list, so it cannot be measured apart from the launch-level one.
 
@@ -65,7 +70,8 @@ def first_and_settled(binary):
     from playwright.sync_api import sync_playwright
 
     names = LEGACY + [NEVER]
-    opts = launch_options(headless=True, os="windows", fonts=names, executable_path=str(binary),
+    identity = "linux" if sys.platform == "win32" else "windows"
+    opts = launch_options(headless=True, os=identity, fonts=names, executable_path=str(binary),
                           i_know_what_im_doing=True)
     with sync_playwright() as p:
         browser = p.firefox.launch(**opts)

@@ -4,7 +4,7 @@
 
 font-other-names-sync.patch (#247) reads the "other family names" on a masked
 page's first lookup, so that lookup blocks while the names load. Each run
-launches a fresh browser with a Windows identity whose `fonts` are the three
+launches a fresh browser with an identity (`--os`, default `windows`) whose `fonts` are the three
 DejaVu legacy names, then measures all three in one page three times in a row
 and prints the milliseconds of each call. The first holds the stall; the second
 and third are the steady cost. `--zip` unpacks a release or build zip, which is how
@@ -51,17 +51,19 @@ def main() -> int:
     src.add_argument("--binary")
     src.add_argument("--zip")
     a.add_argument("--runs", type=int, default=5)
+    a.add_argument("--os", default="windows", choices=["windows", "macos", "linux"],
+                   help="identity OS; on a Windows host `windows` is the host's own and never takes the sync load")
     args = a.parse_args()
     with tempfile.TemporaryDirectory(prefix="stall-probe-") as tmp:
         binary = unpack(args.zip, Path(tmp)) if args.zip else Path(args.binary)
         print(f"binary: {binary}  BuildID={build_id(binary)}", flush=True)
-        return measure(binary, args.runs)
+        return measure(binary, args.runs, args.os)
 
 
-def measure(binary: Path, runs: int) -> int:
+def measure(binary: Path, runs: int, identity: str) -> int:
     firsts = []
     for i in range(runs):
-        with Camoufox(executable_path=str(binary), os="windows", headless=True, fonts=NAMES, i_know_what_im_doing=True) as b:
+        with Camoufox(executable_path=str(binary), os=identity, headless=True, fonts=NAMES, i_know_what_im_doing=True) as b:
             page = b.new_page()
             page.goto("about:blank")
             calls = [page.evaluate(JS, NAMES) for _ in range(3)]
