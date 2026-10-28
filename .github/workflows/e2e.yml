@@ -133,6 +133,12 @@ jobs:
       # never builds macOS or Windows. A dispatch that narrows the run to one
       # probe or one -k expression leaves them out. They run before the journeys, which
       # then run whatever they conclude, so a red gate does not hide the journeys.
+      # Defender scanning the unpacked tree stretched Windows goapi launches to 35 s and
+      # failed TestQueryResilient's 30 s budget (#310); excluded, the suite took 266 s, not 430 s.
+      - name: Exclude the unpack dir from Defender
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-MpPreference -ExclusionPath "$env:GITHUB_WORKSPACE\.ci-work"
       - name: Unpack the browser for the observer and goapi gates
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
