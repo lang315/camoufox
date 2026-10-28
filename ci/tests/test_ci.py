@@ -3123,6 +3123,60 @@ def test_leftover_browsers_sees_a_process_started_from_the_browsers_directory(tm
     assert not elsewhere
 
 
+def _run_guards_as(platform, tmp_path, monkeypatch, only):
+    """ci.run_patch_guards.main on a stand-in platform; returns (exit code, guards it ran, evidence)."""
+    import sys
+
+    from ci import run_patch_guards
+
+    ran = []
+
+    def fake_run(cmd, **kwargs):
+        ran.append(pathlib.Path(cmd[1]).stem)
+        return results_module_result(ok=True)
+
+    class results_module_result:
+        def __init__(self, ok):
+            self.ok, self.code = ok, 0 if ok else 1
+
+        def combined(self):
+            return ""
+
+    binary = tmp_path / "camoufox-bin"
+    binary.write_bytes(b"")
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(run_patch_guards, "run", fake_run)
+    monkeypatch.setattr(run_patch_guards, "leftover_browsers", lambda _: [])
+    code = run_patch_guards.main(
+        ["--binary", str(binary), "--evidence-dir", str(tmp_path / "ev"), "--only", *only]
+    )
+    return code, ran, results.load("patch_guards", tmp_path / "ev")
+
+
+def test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass(tmp_path, monkeypatch):
+    """ipv4-only-network builds a network namespace: on macOS it cannot pass or fail (#314)."""
+    code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["ipv4-only-network", "startup-prefs"])
+    assert code == 0
+    assert ran == ["startup-prefs"]
+    assert record["tests"] == {
+        "patches/ipv4-only-network.py": results.NOT_APPLICABLE,
+        "patches/startup-prefs.py": results.PASS,
+    }
+
+
+def test_a_linux_only_guard_still_runs_on_linux(tmp_path, monkeypatch):
+    """A missing prerequisite on Linux must fail, so the guard has to run there."""
+    code, ran, record = _run_guards_as("linux", tmp_path, monkeypatch, ["ipv4-only-network"])
+    assert ran == ["ipv4-only-network"]
+    assert record["tests"] == {"patches/ipv4-only-network.py": results.PASS}
+
+
+def test_every_linux_only_guard_is_a_guard():
+    from ci.run_patch_guards import LINUX_ONLY, guards
+
+    assert LINUX_ONLY <= {g.stem for g in guards()}
+
+
 # ---------------------------------------------------------------------------
 # memory growth: sharded onto pull requests, and gated
 # ---------------------------------------------------------------------------

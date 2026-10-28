@@ -110,6 +110,16 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 }
 
 
+# Guards that need Linux tooling the guard itself cannot supply elsewhere:
+# ipv4-only-network builds a network namespace (unshare, ip), the two WebGL
+# guards start headless="virtual" (Xvfb). On any other platform the runner
+# does not run them and counts them apart from the passes; on Linux a missing
+# prerequisite still fails. The set lives here, not in each guard, so the
+# runner can decide without starting the script and the list is read in one
+# place beside GROUPS.
+LINUX_ONLY = frozenset({"ipv4-only-network", "webgl-live-state", "webgl-renderer-pair"})
+
+
 def gate_name(group: Optional[str]) -> str:
     """patch_guards for the whole set, patch_guards_<group> for one group."""
     return f"patch_guards_{group}" if group else "patch_guards"
@@ -184,7 +194,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     failed: List[str] = []
+    not_applicable: List[str] = []
     for guard in selected:
+        if guard.stem in LINUX_ONLY and not sys.platform.startswith("linux"):
+            result.record(f"patches/{guard.name}", evidence.NOT_APPLICABLE)
+            not_applicable.append(guard.name)
+            log(f"  - {guard.name} not applicable on {sys.platform}")
+            continue
         proc = run([sys.executable, str(guard)], cwd=REPO_ROOT, env=env, timeout=args.timeout)
         outcome = evidence.PASS if proc.ok else evidence.FAIL
         result.record(f"patches/{guard.name}", outcome)
@@ -201,8 +217,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             log(f"  {guard.name} left {len(leftovers)} browser processes running: {', '.join(leftovers)}",
                 level="WARN")
 
-    passed = len(selected) - len(failed)
-    result.note(f"{passed}/{len(selected)} guards passed")
+    ran = len(selected) - len(not_applicable)
+    passed = ran - len(failed)
+    result.note(f"{passed}/{ran} guards passed, {len(not_applicable)} not applicable on {sys.platform}")
     status = evidence.PASS if not failed else evidence.FAIL
     result.finish(status).save(args.evidence_dir)
     return 0 if status == evidence.PASS else 1

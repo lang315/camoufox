@@ -310,8 +310,9 @@ def main() -> int:
     if failures:
         for f in failures:
             print(f"FAIL: {f}")
-        if cpu_model():
-            print(f"host CPU: {cpu_model()}")
+        cpu = cpu_model()
+        if cpu:
+            print(f"host CPU: {cpu}")
         return 1
     print(f"PASS: no spoofed getter costs over {SLOWER_FACTOR}x or under 1/{FASTER_FACTOR} of "
           f"stock Firefox's from script.")
