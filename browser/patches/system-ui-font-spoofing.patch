@@ -2,15 +2,7 @@ diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList
 index d642800d45..6ae9a39f90 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -31,6 +31,7 @@
- #include "mozilla/dom/ContentProcessMessageManager.h"
- #include "mozilla/dom/Document.h"
- #include "mozilla/dom/FontListManager.h"
-+#include "mozilla/dom/NavigatorManager.h"
- #include "mozilla/gfx/2D.h"
- #include "mozilla/gfx/Logging.h"
- #include "mozilla/glean/GfxMetrics.h"
-@@ -2167,7 +2168,12 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -2167,7 +2167,12 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
                                : FontVisibility::User;
  
    // Camoufox: content only ever resolves families from the spoofed font list.
@@ -24,7 +16,7 @@ index d642800d45..6ae9a39f90 100644
      return false;
    }
  
-@@ -2175,7 +2181,7 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -2175,7 +2180,7 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
    // for a context that installed a list of its own. The launch-level "fonts"
    // answer comes from MaskedFontListBlocks() above, which is the one place
    // the chrome exemption lives.
@@ -33,7 +25,7 @@ index d642800d45..6ae9a39f90 100644
      return false;
    }
  
-@@ -2672,9 +2678,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
+@@ -2672,9 +2677,56 @@ void gfxPlatformFontList::MaybeRemoveCmap(gfxCharacterMap* aCharMap,
    }
  }
  
@@ -90,7 +82,7 @@ index d642800d45..6ae9a39f90 100644
    // TODO: On macOS, use CTCreateUIFontForLanguage or such thing (though the
    // code below ends up using [NSFont systemFontOfSize: 0.0].
    nsFont systemFont;
-@@ -2816,17 +2869,112 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
+@@ -2816,17 +2868,112 @@ gfxPlatformFontList::GetPrefFontsLangGroupLocked(
    }
  
    auto index = static_cast<size_t>(aGenericType);
@@ -205,7 +197,7 @@ index d642800d45..6ae9a39f90 100644
  void gfxPlatformFontList::AddGenericFonts(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGenericType, nsAtom* aLanguage,
-@@ -2859,9 +3007,24 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2859,9 +3006,24 @@ void gfxPlatformFontList::AddGenericFonts(
    // Placed AFTER the math remap above so the row asked for is the row the
    // caller ends up wanting. Falls through to the pref memo when the helper
    // declines or its key resolves empty.
@@ -231,7 +223,7 @@ index d642800d45..6ae9a39f90 100644
        nsAutoCString camouKey, camouStep;
        bool camouAnswered = false;
        if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
-@@ -2891,6 +3054,7 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2891,6 +3053,7 @@ void gfxPlatformFontList::AddGenericFonts(
    PrefFontList* prefFonts = GetPrefFontsLangGroupLocked(aFontVisibilityProvider,
                                                          aGenericType, prefLang);
  
@@ -239,7 +231,7 @@ index d642800d45..6ae9a39f90 100644
    if (!prefFonts->IsEmpty()) {
      aFamilyList.SetCapacity(aFamilyList.Length() + prefFonts->Length());
      for (auto& f : *prefFonts) {
-@@ -2905,17 +3069,34 @@ void gfxPlatformFontList::AddGenericFonts(
+@@ -2905,17 +3068,34 @@ void gfxPlatformFontList::AddGenericFonts(
        } else if (f.mUnshared) {
          camouRaw = f.mUnshared->Name();
        }
@@ -277,7 +269,7 @@ index d642800d45..6ae9a39f90 100644
  }
  
  static nsAtom* PrefLangToLangGroups(uint32_t aIndex) {
-@@ -3540,6 +3721,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
+@@ -3540,6 +3720,11 @@ void gfxPlatformFontList::ClearLangGroupPrefFontsLocked() {
        pref = nullptr;
      }
    }

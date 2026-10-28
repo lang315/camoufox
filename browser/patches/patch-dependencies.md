@@ -37,7 +37,7 @@ be listed there.
 | `css-media-spoofing.patch` | `cssMedia:colorGamut`, `cssMedia:prefersColorScheme`, `cssMedia:dynamicRange` |
 | `fingerprint-injection.patch` | `navigator.*`, `screen.*`, `window.*` |
 | `font-hijacker.patch` | `fonts`, `navigator.platform` |
-| `font-other-names-sync.patch` | `font-list-spoofing.patch` for `gfxPlatformFontList::CamouGenericTableApplies()` |
+| `font-other-names-sync.patch` | `font-list-spoofing.patch` for `gfxPlatformFontList::CamouGenericTableApplies()` and `FontListManager::ContextIdFor()`; `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()`. It adds the `NavigatorManager.h` include to `gfxPlatformFontList.cpp`, which `system-ui-font-spoofing.patch` therefore must not add: a second copy makes GNU patch skip that patch's whole file as already applied |
 | `font-system-fonts-css2.patch` | `navigator.platform`, `window.devicePixelRatio` |
 | `force-default-pointer.patch` | `navigator.maxTouchPoints` |
 | `geolocation-spoofing.patch` | `geolocation:*` |
