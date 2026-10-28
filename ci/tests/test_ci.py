@@ -3164,6 +3164,15 @@ def test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass(tmp_path,
     }
 
 
+def test_a_run_where_no_guard_applies_fails_instead_of_passing_empty(tmp_path, monkeypatch):
+    """Every selected guard being Linux-only leaves nothing tested; that must not read as green."""
+    code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["ipv4-only-network"])
+    assert ran == []
+    assert code != 0
+    assert record["status"] == results.FAIL
+    assert any("no guard ran" in n for n in record["notes"])
+
+
 def test_a_linux_only_guard_still_runs_on_linux(tmp_path, monkeypatch):
     """A missing prerequisite on Linux must fail, so the guard has to run there."""
     code, ran, record = _run_guards_as("linux", tmp_path, monkeypatch, ["ipv4-only-network"])

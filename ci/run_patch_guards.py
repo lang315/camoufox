@@ -220,7 +220,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ran = len(selected) - len(not_applicable)
     passed = ran - len(failed)
     result.note(f"{passed}/{ran} guards passed, {len(not_applicable)} not applicable on {sys.platform}")
-    status = evidence.PASS if not failed else evidence.FAIL
+    if not ran:
+        result.note(f"no guard ran on {sys.platform}: every selected guard is Linux-only")
+    status = evidence.PASS if ran and not failed else evidence.FAIL
     result.finish(status).save(args.evidence_dir)
     return 0 if status == evidence.PASS else 1
 
