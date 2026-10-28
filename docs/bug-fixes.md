@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #311, #314: the patch-guard runner and several guards failed on Windows and saw nothing on macOS
+
+**Fixed by:** the PR that closes both. **Found by:** a run of the spoofing group on real Windows 10 against the fork.1 build.
+
+**Symptom.** `python -m ci.run_patch_guards` died after its first guard with `AttributeError: module 'os' has no attribute 'sysconf'`. Run guard by guard, `context-lists-across-processes.py` and `system-font-alias-stall.py` raised `UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d`, and `ipv4-only-network.py`, `webgl-live-state.py` and `webgl-renderer-pair.py` failed for lack of `unshare`, `ip` and a virtual display.
+
+**Root cause.** Three assumptions that Linux CI satisfied. `leftover_browsers` read `/proc` and called `os.sysconf("SC_CLK_TCK")`: that raises on Windows, and on macOS there is no `/proc`, so the loop found nothing and reported every guard clean, which made the check vacuous rather than failing. `read_text()` and `open()` without `encoding=` use the locale codec, cp1252 on Windows, which cannot decode bytes in `fonts.json`. And three guards build a Linux network namespace or an Xvfb display, which have no counterpart elsewhere.
+
+**Fix.** `leftover_browsers` lists processes with psutil (already in `ci/requirements.txt`) that run from the binary's directory, and raises when no process can be read at all. Every `read_text`, `write_text` and text-mode `open` in the guards, `ci/` and `e2e/` names `encoding="utf-8"`. `LINUX_ONLY` in `ci/run_patch_guards.py` makes the runner report those three guards as not applicable off Linux, counted apart from the passes ([tribal rule](../ci/tribal-rules.yml) `linux-only-guards-are-not-applicable-elsewhere`). Not taken: reading `/proc`, `ps` and PowerShell separately (three code paths for one list), and per-guard skips (a skip reads as green).
+
+**Evidence.** Red then green in `ci/tests/test_ci.py`: `test_text_files_are_read_and_written_as_utf_8` listed 51 call sites before the change and none after; `test_leftover_browsers_sees_a_process_started_from_the_browsers_directory` returned an empty list on macOS before the change; `test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass` ran `ipv4-only-network` on a darwin stand-in before the change and skipped it after.
+
+**What misled the investigation.** The leftover check passing on macOS read as "no leftovers"; it could not see any process. A first version of its test read the child's executable too early: on a macOS framework Python the launcher re-executes into `Python.app`, so the path differs until the script runs.
+
 ## #307: getter-cost-parity failed once on `history.length`, a getter Camoufox does not spoof
 
 **Fixed by:** the PR that removes `history.length` from the guard's `WINDOW` list and prints the host CPU on a failure. **Found by:** run 40441871195, job 122011451961, on the 158.0.1 sync.
