@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
 import os
+import platform
 import socket
+import subprocess
 import time
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any, List, Optional, Set
@@ -176,6 +181,57 @@ def find_binary(root: Path) -> Path:
     raise FileNotFoundError(f"no Camoufox executable under {root}")
 
 
+WORK = Path(__file__).resolve().parents[1] / ".ci-work" / "e2e"
+RELEASE_REPO = "lang315/camoufox"
+PLATFORM_ASSET = {("Darwin", "arm64"): "mac.arm64", ("Darwin", "x86_64"): "mac.x86_64",
+                  ("Windows", "AMD64"): "win.x86_64", ("Linux", "x86_64"): "lin.x86_64",
+                  ("Linux", "aarch64"): "lin.arm64"}
+
+
+def unpack(zp: Path) -> Path:
+    """Unpack a release or build zip under .ci-work/e2e and return the browser executable."""
+    dest = WORK / "unpacked" / zp.stem
+    if not dest.exists():
+        dest.mkdir(parents=True)
+        if os.name == "nt":
+            zipfile.ZipFile(zp).extractall(dest)
+        else:  # keeps the executable bits zipfile would drop
+            subprocess.run(["unzip", "-q", "-o", str(zp), "-d", str(dest)], check=True)
+    return find_binary(dest)
+
+
+def fetch_release(tag: str) -> Path:
+    """The zip of a RELEASE_REPO release for this platform, downloaded and checked against the release's digest."""
+    plat = PLATFORM_ASSET[(platform.system(), platform.machine())]
+    req = urllib.request.Request(f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}")
+    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+    if token:  # unauthenticated calls share a 60/hour limit per IP, which CI runners exhaust
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            rel = json.load(r)
+    except OSError as e:
+        raise RuntimeError(f"cannot read release {tag} from {RELEASE_REPO}: {e}") from e
+    asset = next((a for a in rel["assets"] if a["name"].endswith(f"-{plat}.zip")), None)
+    if asset is None:
+        raise RuntimeError(f"release {tag} has no {plat} build (it has: {[a['name'] for a in rel['assets']]}); "
+                           "test a build run's artifact with --zip instead")
+    zp = WORK / "release" / tag / asset["name"]
+    zp.parent.mkdir(parents=True, exist_ok=True)
+    if not zp.exists():
+        for attempt in range(3):
+            try:
+                urllib.request.urlretrieve(asset["browser_download_url"], zp)
+                break
+            except OSError:
+                if attempt == 2:
+                    raise
+    digest = hashlib.sha256(zp.read_bytes()).hexdigest()
+    if asset.get("digest"):
+        assert asset["digest"] == f"sha256:{digest}", f"{asset['name']}: downloaded {digest}, release says {asset['digest']}"
+    return zp
+
+
 def build_id(binary: Path) -> str:
     binary = Path(binary)
     for ini in (binary.parent / "application.ini", binary.parent.parent / "Resources" / "application.ini"):
@@ -240,3 +296,12 @@ TWO_READS_GL = """(() => {
   const px = () => { const p = new Uint8Array(4 * 16 * 16); gl.readPixels(0, 0, 16, 16, gl.RGBA, gl.UNSIGNED_BYTE, p); return p.join(); };
   return {readPixels: px() === px()};
 })()"""
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description="Unpack a release or build zip and print the browser executable's path.")
+    src = ap.add_mutually_exclusive_group(required=True)
+    src.add_argument("--zip", type=Path, help="a release or build zip")
+    src.add_argument("--release", help=f"a {RELEASE_REPO} release tag; its zip for this platform is downloaded")
+    args = ap.parse_args()
+    print(unpack(fetch_release(args.release) if args.release else args.zip.resolve()))
