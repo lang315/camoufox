@@ -225,6 +225,18 @@ spoofed OS, resolved as in system-ui (`NavigatorManager::GetSpoofedOS` of
   refuse and log `CAMOU-FL dwrite-subst os=<n> key=<name> allowed=0`.
 - A Windows identity, a lookup with no identity, and chrome keep stock
   substitution exactly.
+- Stock substitution is itself skipped when the original family is available.
+  `AddSubstitute` returns early when the shared list already holds the name
+  being substituted (`gfxDWriteFontList.cpp:2166-2174` at
+  `FIREFOX_158_0_1_RELEASE`), and `GetDirectWriteSubstitutes` does the same
+  (`:2222-2230`), unless `gfx.windows-font-substitutes.always` is true
+  (`StaticPrefList.yaml:7872`, default false). The bundle holds `Helvetica`
+  (`27__Helvetica.ttc`), `Times` (`69__Times.ttc`) and `Courier`
+  (`78__Courier.ttc`), so on a bundle-active launch those names are never
+  substituted. In a Windows launch the bundle is inactive
+  (`mStockFilesOnly`, `font-hijacker.patch`), the early return does not apply,
+  and the `kFontSubstitutes` row `Helvetica` to `Arial`
+  (`StandardFonts-win10.inc:232`) can take effect (#325).
 
 This is **gated by reading**. The measurement will be e2e `fonts_no_foreign_os`
 on a Windows host.
@@ -294,7 +306,7 @@ Neither launcher warns when such a context is created. Python's `UserWarning` fr
 
 With the four-name list, only Arial has an installed face, so every generic and every absent name resolves to it, and 784.05 is Arial's width. The issue read this as "the page sees no variation at all". Segoe UI, Courier New and Consolas differ from the never-font in the larger list, so the page is not blind. The log agrees: `CAMOU-FL gate ... allowed=1` for every name (nothing is refused), no `default-unfiltered` line, and `generic-map generic=1..4 step=none key=none`, so each generic falls back within the list.
 
-**A control that can differ (lesson 4).** The issue's never-font read 784.05 in every column and looked like "the same face everywhere". It is not a control for Arial: in a Windows identity `sans-serif` resolves to Arial, so the never-font under `sans-serif` equals Arial by construction. Arial is shown to be a resolved face by the serif, monospace and cursive columns of the Windows context in the same browser (never-font 735.97, 738.73, 764.37 against Arial 784.05 in all four). `Helvetica` reading Arial's width is the Windows registry substitution, see #325.
+**A control that can differ (lesson 4).** The issue's never-font read 784.05 in every column and looked like "the same face everywhere". It is not a control for Arial: in a Windows identity `sans-serif` resolves to Arial, so the never-font under `sans-serif` equals Arial by construction. Arial is shown to be a resolved face by the serif, monospace and cursive columns of the Windows context in the same browser (never-font 735.97, 738.73, 764.37 against Arial 784.05 in all four). `Helvetica` is metric-compatible with Arial, so this width cannot say which face drew it (#325). `dwrite-subst` logs only a refusal, and that context's list admits both names, so the log cannot produce a line there whether or not substitution ran.
 
 **Counterfactual, bundle active.** Run 40728559218, a macOS launch on the same Windows host: Helvetica Neue 797.13 x4, Menlo 809.2 x4, Arial 784.05 x4, never-font 797.13, 797.13, 809.2, 797.13. The faces the Windows-launch context lacks render when the bundle is active.
 
