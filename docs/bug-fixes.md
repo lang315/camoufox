@@ -34,7 +34,19 @@ Regression arm (`legacy-family-names-first-measure.py`, `windows_host_parity`, W
 | Segoe UI Light first | 439.75 | 468.08 (= never-font) |
 | never-font first | 468.08 | 468.08 |
 
-Five launches each, identical: fork.1 `Light=439.75 never=468.08`, fix `Light=468.08 never=468.08`. Time for Light to resolve after the first reading: 0.5 to 0.7 s on the fix build, with one 5.6 s outlier on fork.1 (run 0); the margin between "first" and "resolved" is therefore small, but the first reading is one synchronous call and the assertion is on that call. Guard on the DejaVu arm of the same file: fork.1 `[FAIL] legacy names whose first width was not their settled width: ['DejaVu Sans Condensed']`, exit 1; fix `[ok  ]`, `PASS`, exit 0.
+The guard itself, run at head `ec821a8078671abd4bb4ba406d53624413bedb53` on windows-2025 (probe run 40711684052, job 122898388041; an earlier probe, run 40694052562, ran a copy of the guard without this arm, so its numbers below are from `e2e/probes/t02_resolve321.py`, not the guard). Host arm, monospace, `host first` / `host settled`:
+
+| Check | fork.1 (exit 1) | fix build (exit 0, `PASS`) |
+|---|---|---|
+| first lookup of the base family's second legacy name reads as the never-font | `[FAIL]` 439.75 (expected 468.08) | `[ok  ]` 468.08 |
+| first lookup of the base family's first legacy name answers | `[ok  ]` | `[ok  ]` |
+| second legacy name settled on a width other than the never-font's | `[ok  ]` | `[ok  ]` |
+| second legacy name settled on its own face (same width under both generics) | `[ok  ]` 439.75 | `[ok  ]` 439.75 |
+| DejaVu arm: first width was not the settled width | `[FAIL]` `['DejaVu Sans Condensed']` | `[ok  ]` `[]` |
+
+Host first, fork.1: Semibold 457.92, Light 439.75, never-font 468.08; fix: 457.92, 468.08, 468.08. Settled on both: 473.82, 439.75, 468.08. The two generics' fallbacks are not a usable control: the settled never-font reads 468.08 under both, so a check that they differ failed on both builds (run 40709865242) and was replaced by the settled Light-against-never-font check above.
+
+`t02_resolve321.py`, 5 launches each, identical: fork.1 `Light=439.75 never=468.08`, fix `Light=468.08 never=468.08`. Time for Light to resolve after the first reading: 0.5 to 0.7 s on the fix build, with one 5.6 s outlier on fork.1 (run 0); the margin between "first" and "resolved" is small, but the first reading is one synchronous call and the assertion is on that call.
 
 Name-order parity, `all` arm, monospace row, widths in px (the three lists are the five names in the order above):
 
