@@ -242,11 +242,30 @@ on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
 
-## Legacy family names: first lookup (#247, #319)
+## Legacy family names: first lookup (#247, #319, #321, #322)
 
-A legacy family name (name ID 1, such as `DejaVu Sans Condensed`) is an "other family name" that Firefox loads lazily. `font-other-names-sync.patch` reads the names on a masked page's first lookup. On Windows, `SharedFontList::FindFamily` answers a legacy name with its base family's regular face before the load, which skips that read; the patch therefore, under `#ifdef XP_WIN` only, asks for primary names only when the claimed OS is Linux or macOS (elsewhere that would skip the alias table, and a macOS host publishes single-face aliases there at startup), and keeps the stock Windows answer for a Windows claim, as real Windows Firefox gives it.
+A legacy family name (name ID 1, such as `DejaVu Sans Condensed`) is an "other family name" that Firefox loads lazily. `font-other-names-sync.patch` reads the names on a masked page's first lookup. On Windows, `FontList::FindFamily` has a branch (`SharedFontList.cpp:1234-1317`) that strips the name's last word, reads the base family's face names once, and answers an alias hit with the base family's regular face before the load; a second name with the same base then misses ("already read") and reaches `InitOtherFamilyNames`, which stock defers to an idle task. The patch computes one predicate for both the lookup and the deferral: the page is masked and the names are not yet loaded and, on `XP_WIN`, the claimed OS is Linux or macOS. A Linux or macOS claim looks up primary names only (so the miss reaches the read) and reads at once. A Windows claim on a Windows host keeps stock Firefox's lookup and deferral (#321), as real Windows gives it. Elsewhere every masked claim reads the names at once. On a macOS host the alias table holds single-face aliases published at startup, so the `XP_WIN` gate keeps primary-names-only away from it.
 
-Known limit: `mOtherFamilyNamesInitialized` is process-wide. Once a Linux or macOS context forces the load, every later lookup in that process, a `windows` context included, gets the real face and not the base-first one. This applies to mixed-OS browsers and is not engineered around. Measured on a Linux launch with a `windows` context and a `macos` context (bug-fixes.md, #319). Related: #321 (a `windows` identity on Windows differs from stock on the first legacy lookup) and #322 (a `windows` identity on a non-Windows host answers a legacy face at once).
+Known limit: `mOtherFamilyNamesInitialized` is process-wide. Once a Linux or macOS context forces the load, every later lookup in that process, a `windows` context included, gets the real face and not the base-first one. This applies to mixed-OS browsers and is not engineered around. Measured on a Linux launch with a `windows` context and a `macos` context (bug-fixes.md, #319, #321).
+
+### Known gap: a `windows` identity on a macOS or Linux host (#322)
+
+A `windows` identity on a non-Windows host answers a legacy name with its own face on the first lookup. Real Windows answers the base family's face (or nothing) until its loader has run, a minute later by default (`gfx.font_loader.delay` is 60000 ms on Windows, 8000 elsewhere, and Camoufox does not set it). This is a documented gap, not a fix: nothing in the code changes for it.
+
+Both sides were measured, `DejaVu Sans Condensed`, `Light` and `Serif Condensed` as `"<name>", monospace` against `sans-serif`, widths in px:
+
+| | first reading | at 15 s |
+|---|---|---|
+| Camoufox `v158.0.1-beta.34-fork.1` macOS release (BuildID `20261027060636`, `MacOS/camoufox` sha1 `955b413c46e9059ec1a452d18b517ec092118a0c`), `windows` and `linux` identity, bundled DejaVu | Condensed 468.17, Light 517.95 (both identities, monospace and sans-serif alike) | not re-read; the first reading is already the settled one |
+| stock Firefox 158.0.1 on Windows (run 40677114619, job 122778294832, windows-2025; DejaVu installed per user) | Condensed 520.45 (monospace) against 468.08 (sans-serif), Light 435.42 against 468.08, Serif Condensed 475.73 against 468.08 | Condensed 468.17, Light 517.95, Serif Condensed 475.73, identical in 3 of 3 launches |
+
+The macOS reading is the browser the user ships on a Mac; it carries launcher `camoufox` from the same release, and the binary was matched to the release asset by sha1.
+
+**How many names this could show on.** Read from the launcher's Windows font data (`python/src/camoufox/fonts.json`, key `win`), not measured: 335 names, 72 whose base (the name minus its last word) is also listed, and 47 of those in 15 base groups of two or more. That count is an upper bound, because some of them are primary families of their own (`Segoe UI Emoji`, `Noto Sans Arabic`, `Roboto Mono`). Examples: `Segoe UI` with Black, Light, Semibold, Semilight, Historic, Symbol, Variable and Emoji; `Yu Gothic UI` with Light, Semibold and Semilight; `Yu Gothic` with Light, Medium and UI; `DejaVu Sans` with Condensed, Light and Mono; `Roboto` with Condensed, Mono and Slab.
+
+**What would see it.** A page that measures a second legacy name of one base family before Windows's loader has run, and compares the answer with what Windows gives. One legacy name alone is not enough: the first lookup is the same on both sides.
+
+**What would close it.** Port the Windows branch of `SharedFontList::FindFamily` and its members (`mFaceNamesRead` and the alias bookkeeping) to the macOS and Linux lists and gate it by the claimed OS. That is a large multi-file patch, measurable only through full macOS and Linux builds, and still inexact (Windows's own loader timing and the order of its face reads). It was not done, and the exposure above is why.
 
 ## Two contexts in one content process (Firefox 156)
 
