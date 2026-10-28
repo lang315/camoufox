@@ -112,9 +112,10 @@ def windows_host_parity(binary, failures):
     own face. The never-font is measured in the same call and the same generic pass, so
     both sides are about the same lookup state; Light's own width happens to differ from
     the never-font's, but nothing guarantees it, so the settled side compares Light with
-    itself under the other generic, which a resolved name keeps; that comparison is only
-    meaningful because the never-font reads differently under the two generics, which a
-    check of its own asserts on every run. The loader's delay is 60 s
+    itself under the other generic, which a resolved name keeps. That equality also holds for
+    an unresolved name once the generics' fallbacks agree (they do, settled, on the runner),
+    so a check of its own asserts that Light settled on a width other than the never-font's;
+    it fails if the host's Light ever measures like an absent font. The loader's delay is 60 s
     on Windows and camoufox.cfg does not set it, but the miss defers to the idle queue and
     the names were read by 15 s on the runner; the first reading is one synchronous call.
     """
@@ -126,8 +127,8 @@ def windows_host_parity(binary, failures):
           first["monospace"][light], first["monospace"][NEVER])
     check(failures, "first lookup of the base family's first legacy name answers (the arm is not vacuous)",
           first["monospace"][HOST_LEGACY[0]] != first["monospace"][NEVER], True)
-    check(failures, "the two generics' fallbacks differ, so equal widths mean a resolved face",
-          settled["monospace"][NEVER] != settled["sans-serif"][NEVER], True)
+    check(failures, "the second legacy name settled on a width other than the never-font's (a resolved face)",
+          settled["monospace"][light] != settled["monospace"][NEVER], True)
     check(failures, "the second legacy name settled on its own face (same width under both generics)",
           settled["monospace"][light], settled["sans-serif"][light])
 
