@@ -3091,24 +3091,36 @@ def test_text_files_are_read_and_written_as_utf_8():
     assert not _locale_encoded_text_io()
 
 
-def test_leftover_browsers_sees_content_processes(tmp_path):
-    """Firefox's Linux content processes run plugin-container, beside the binary."""
-    import shutil
+def test_leftover_browsers_sees_a_process_started_from_the_browsers_directory(tmp_path):
+    """A listing that cannot see a running process reports every guard clean.
+
+    It once read /proc, so it crashed on Windows and found nothing on macOS (#311).
+    """
     import subprocess
+    import sys
+
+    import psutil
 
     from ci.run_patch_guards import leftover_browsers
 
-    # A shell blocked on its builtin read: coreutils may be one binary that
-    # picks its command from argv[0], which a copy named plugin-container loses.
-    child = tmp_path / "plugin-container"
-    shutil.copy2(shutil.which("sh"), child)
-    proc = subprocess.Popen([child, "-c", "read line"], stdin=subprocess.PIPE)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; print('up', flush=True); time.sleep(60)"],
+        stdout=subprocess.PIPE,
+    )
     try:
-        found = leftover_browsers(tmp_path / "camoufox-bin")
+        # The interpreter that really runs is not always sys.executable: a venv
+        # links to it, and a macOS framework build re-executes Python.app, so
+        # the path is only settled once the script runs.
+        assert proc.stdout.readline().strip() == b"up"
+        exe = pathlib.Path(psutil.Process(proc.pid).exe())
+        found = leftover_browsers(exe.parent / "camoufox-bin")
+        elsewhere = leftover_browsers(tmp_path / "camoufox-bin")
     finally:
         proc.kill()
         proc.wait()
-    assert [f.split()[1] for f in found] == [str(proc.pid)]
+        proc.stdout.close()
+    assert f"pid {proc.pid} " in " ".join(found) + " "
+    assert not elsewhere
 
 
 # ---------------------------------------------------------------------------

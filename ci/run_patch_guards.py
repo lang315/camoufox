@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import psutil
+
 from . import results as evidence
 from ._util import EVIDENCE_DIR, REPO_ROOT, log, run
 
@@ -123,22 +125,24 @@ def leftover_browsers(binary: Path) -> List[str]:
 
     Guards share one runner. A browser a guard failed to close keeps its
     content processes -- and any spinning workers -- alive into every later
-    guard, which then sees a slower machine than it was written for. On Linux
-    those content processes run plugin-container, which sits beside the binary.
+    guard, which then sees a slower machine than it was written for. Content
+    processes run from the binary's own directory on every OS (beside it on
+    Linux and Windows, inside the .app on macOS), so that directory is the
+    match. psutil is already a CI requirement and reads /proc, the macOS
+    process table and the Windows API alike.
     """
-    binary = binary.resolve()
-    exes = {str(binary), str(binary.parent / "plugin-container")}
-    ticks = os.sysconf("SC_CLK_TCK")
-    found = []
-    for proc in Path("/proc").glob("[0-9]*"):
+    root = binary.resolve().parent
+    found, readable = [], 0
+    for proc in psutil.process_iter():
         try:
-            if os.readlink(proc / "exe") not in exes:
-                continue
-            fields = (proc / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
-        except OSError:
-            continue
-        cpu = (int(fields[11]) + int(fields[12])) / ticks
-        found.append(f"pid {proc.name} cpu {cpu:.1f}s")
+            exe, cpu = proc.exe(), proc.cpu_times()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue  # gone since listed, or another user's: never ours
+        readable += 1
+        if exe and Path(exe).is_relative_to(root):
+            found.append(f"pid {proc.pid} cpu {cpu.user + cpu.system:.1f}s")
+    if not readable:
+        raise RuntimeError("could not read any process's executable, so no leftover could be seen")
     return found
 
 
