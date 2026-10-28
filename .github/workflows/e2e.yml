@@ -129,8 +129,28 @@ jobs:
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
           if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
+      # The observer (#303) and goapi (#301) gates, here because a pull request
+      # never builds macOS or Windows. A dispatch that narrows the run to one
+      # probe or one -k expression leaves them out. They run before the journeys, which
+      # then run whatever they conclude, so a red gate does not hide the journeys.
+      - name: Unpack the browser for the observer and goapi gates
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: echo "CAMOUFOX_BINARY=$(python e2e/util.py $E2E_BROWSER)" >> "$GITHUB_ENV"
+      - name: Observer tests
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: |
+          (cd browser/tests/build-tester && pip install -r requirements.txt)
+          python python/scripts/pin-fpgen-model.py
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_observer --binary "$CAMOUFOX_BINARY"; else python -m ci.run_observer --binary "$CAMOUFOX_BINARY"; fi
+      - name: goapi browser tests
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; else python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; fi
       - name: Run
-        if: inputs.probe == ''
+        if: ${{ !cancelled() && inputs.probe == '' }}
         shell: bash
         working-directory: e2e
         env:
@@ -151,25 +171,6 @@ jobs:
         run: |
           # A probe takes --zip, which a release input does not give it: that fails at argparse, loudly.
           python "e2e/probes/$PROBE" $E2E_BROWSER --runs 8
-      # The observer (#303) and goapi (#301) gates, here because a pull request
-      # never builds macOS or Windows. A dispatch that narrows the run to one
-      # probe or one -k expression leaves them out.
-      - name: Unpack the browser for the observer and goapi gates
-        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
-        shell: bash
-        run: echo "CAMOUFOX_BINARY=$(python e2e/util.py $E2E_BROWSER)" >> "$GITHUB_ENV"
-      - name: Observer tests
-        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
-        shell: bash
-        run: |
-          (cd browser/tests/build-tester && pip install -r requirements.txt)
-          python python/scripts/pin-fpgen-model.py
-          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_observer --binary "$CAMOUFOX_BINARY"; else python -m ci.run_observer --binary "$CAMOUFOX_BINARY"; fi
-      - name: goapi browser tests
-        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
-        shell: bash
-        run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; else python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; fi
       - if: always() && inputs.mozlog
         uses: actions/upload-artifact@v4
         with:
