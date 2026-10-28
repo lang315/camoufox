@@ -832,6 +832,22 @@ rules:
       startup, which fallback-miss-while-cmaps-load.py needs pending. The patch
       changes one argument on the one lookup that needs it, for a masked page.
 
+  - id: legacy-family-names-windows-claim-stock-path
+    title: A Windows claim on a Windows host takes stock Firefox's legacy-name lookup and deferral
+    check: manual
+    evidence:
+      - "#321, run 40694052562: on windows-2025 the monospace row of the five-name arm is identical in stock 158.0.1 and the fix build, and differs from v158.0.1-beta.34-fork.1 on four of five names"
+      - "Firefox 158.0.1 gfx/thebes/SharedFontList.cpp:1234-1317: the XP_WIN branch of FontList::FindFamily answers a legacy name with its base family and defers the rest"
+      - "browser/tests/playwright/patches/legacy-family-names-first-measure.py, windows_host_parity"
+    rationale: >-
+      Real Windows Firefox is base-family-first and defers the other names, so
+      a Windows identity on a Windows host is closest to a real machine when it
+      runs the unmodified path. The patch forces the synchronous read only for a
+      Linux or macOS claim there. Forcing it for every masked claim, as #247 did,
+      let a page tell the two apart by measuring two legacy names of one base.
+      The same difference on a macOS or Linux host is a known gap (#322), see
+      docs/fonts-gating.md.
+
   - id: ipv4-only-network-not-disable-ipv6
     title: geoip without a proxy keeps IPv6 only where it agrees, and never uses network.dns.disableIPv6
     check: manual
