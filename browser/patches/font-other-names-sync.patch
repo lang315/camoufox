@@ -2,7 +2,15 @@ diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList
 index 40212b6835..1f52f98726 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -2191,7 +2191,22 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -31,6 +31,7 @@
+ #include "mozilla/dom/ContentProcessMessageManager.h"
+ #include "mozilla/dom/Document.h"
+ #include "mozilla/dom/FontListManager.h"
++#include "mozilla/dom/NavigatorManager.h"
+ #include "mozilla/gfx/2D.h"
+ #include "mozilla/gfx/Logging.h"
+ #include "mozilla/glean/GfxMetrics.h"
+@@ -2191,7 +2192,21 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
    }
  
    if (SharedFontList()) {
@@ -12,7 +20,6 @@ index 40212b6835..1f52f98726 100644
 +    // reaches the block below. Real Windows does that, so a Windows claim
 +    // keeps it; a Linux or macOS claim looks up primary names only, so the
 +    // block reads the names now. Context 0 answers with the launch's OS.
-+    // (NavigatorManager.h is included by system-ui-font-spoofing.patch.)
 +    bool camouLegacyFirst = false;
 +    if (!mOtherFamilyNamesInitialized &&
 +        CamouGenericTableApplies(aFontVisibilityProvider)) {
