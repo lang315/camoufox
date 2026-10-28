@@ -267,6 +267,33 @@ The macOS reading is the browser the user ships on a Mac; it carries launcher `c
 
 **What would close it.** Port the Windows branch of `SharedFontList::FindFamily` and its members (`mFaceNamesRead` and the alias bookkeeping) to the macOS and Linux lists and gate it by the claimed OS. That is a large multi-file patch, measurable only through full macOS and Linux builds, and still inexact (Windows's own loader timing and the order of its face reads). It was not done, and the exposure above is why.
 
+## A context of another OS in a host-OS launch (#320)
+
+A launch whose OS is the host's keeps the bundled fonts of the other OSes inactive: on Windows `MaskConfig::GetSpoofedOS() == Windows` makes `BundledFontFileEnumerator` list only Firefox's own bundled font (`font-hijacker.patch:149-152`), and on macOS `camouNativeIdentity` skips `ActivateBundledFonts` (`font-hijacker.patch:18-22`). The macOS and Linux fonts are in the Windows package (`browser/Makefile`, `package-windows --fonts windows macos linux`; 1513 files in `fonts/`, among them `27__Helvetica.ttc`, `31__HelveticaNeue.ttc` and `35__Menlo.ttc`), but they are never loaded. A context of another OS in such a launch, which exists only when the launch has `canvas_noise=True` (`NewContext` raises `ValueError` for another OS otherwise, `sync_api.py` docstring), therefore has only the host's families that its list admits. Its generics resolve within that list.
+
+Neither launcher warns when such a context is created. Python's `UserWarning` from `warn_fonts_excluded_by_launch` is about the launch font set, and the TypeScript launcher has no equivalent; no warning was added for this.
+
+**Windows host** (issue #320). Run 40727855673 (job 122955936144) and run 40728559218 (job 122958393809), windows-2025 (10.0.26100), `v158.0.1-beta.34-fork.1` win.x86_64, launcher from `main` at 199d4b41. `Camoufox 1.2.3 mmmmmmmmmmlli` at 48px, `"<name>", <generic>`, serif / sans-serif / monospace / cursive:
+
+| Context list | Name | Widths |
+|---|---|---|
+| `[Helvetica, Helvetica Neue, Menlo, Arial]` | every name, never-font included | 784.05 in all four generics |
+| the same plus `Segoe UI, Courier New, Consolas` | Segoe UI | 789.12 x4 |
+| | Courier New | 806.4 x4 |
+| | Consolas | 738.73 x4 |
+| | Arial | 784.05 x4 |
+| | never-font | 784.05, 784.05, 738.73, 784.05 |
+
+With the four-name list, only Arial has an installed face, so every generic and every absent name resolves to it, and 784.05 is Arial's width. The issue read this as "the page sees no variation at all". Segoe UI, Courier New and Consolas differ from the never-font in the larger list, so the page is not blind. The log agrees: `CAMOU-FL gate ... allowed=1` for every name (nothing is refused), no `default-unfiltered` line, and `generic-map generic=1..4 step=none key=none`, so each generic falls back within the list.
+
+**A control that can differ (lesson 4).** The issue's never-font read 784.05 in every column and looked like "the same face everywhere". It is not a control for Arial: in a Windows identity `sans-serif` resolves to Arial, so the never-font under `sans-serif` equals Arial by construction. Arial is shown to be a resolved face by the serif, monospace and cursive columns of the Windows context in the same browser (never-font 735.97, 738.73, 764.37 against Arial 784.05 in all four). `Helvetica` reading Arial's width is the Windows registry substitution, see #325.
+
+**Counterfactual, bundle active.** Run 40728559218, a macOS launch on the same Windows host: Helvetica Neue 797.13 x4, Menlo 809.2 x4, Arial 784.05 x4, never-font 797.13, 797.13, 809.2, 797.13. The faces the Windows-launch context lacks render when the bundle is active.
+
+**macOS host, mirror.** `v158.0.1-beta.34-fork.1` macOS release (BuildID 20261027060636, `MacOS/camoufox` sha1 `955b413c46e9059ec1a452d18b517ec092118a0c`), run locally on macOS (arm64, Darwin 24.6.0) with a scratch `HOME`, launch `os="macos"` with `canvas_noise=True`, a `windows` context whose fonts are `[Segoe UI, Arial, Courier New]`. Segoe UI [784.05, 784.05, 806.4, 784.05] equals the never-font [784.05, 784.05, 806.4, 784.05] (absent: no Windows faces on a Mac); Arial 784.05 x4 and Courier New 806.4 x4 are the host's. Gate lines `allowed=1` for all three, `generic-map generic=3 step=row key=courier new` and `step=none` for the others, no `default-unfiltered`. The same shape as the Windows case, with the host's families taking the generics.
+
+Not measured: a Linux host, Windows 10, and a context of another OS in a launch whose OS is the host's with the default launcher options (it raises). Whether a Windows context on a Mac should be able to draw Windows-only faces is a design question: the native identity keeps the bundle inactive on purpose.
+
 ## Two contexts in one content process (Firefox 156)
 
 The cross-context cache arms (#81, #82, #83) need two contexts whose documents
