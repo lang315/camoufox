@@ -242,6 +242,14 @@ on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
 
+**The face that drew each range: `CAMOU-FL face` (#325).** Firefox's own record of this, the `(textrun-fontmatching)` line at `gfxTextRun.cpp:3878-3924` (`FIREFOX_158_0_1_RELEASE`), sits inside `#ifndef RELEASE_OR_BETA`. It printed nothing on Linux, Windows or macOS at `MOZ_LOG=textrun:4`, while the ungated `TEXTRUN [` lines printed, so a release build has no record of the drawn face. `zzz-font-face-log.patch` adds one at the end of `gfxFontGroup::ComputeRanges`, through the same `fontlist` module as the other `CAMOU-FL` lines (`MOZ_LOG=fontlist:4`; it costs nothing when the module is off):
+
+```
+CAMOU-FL face ctx=<id> families=<requested family list> [<start>:<end> u+<first code unit>] <face name> / <family name> ...
+```
+
+It proves which face drew each range, and the family name tells two faces of one family apart. It says nothing about refusal: a name the gate refused never reaches it, so read `CAMOU-FL gate` for that.
+
 ## Legacy family names: first lookup (#247, #319, #321, #322)
 
 A legacy family name (name ID 1, such as `DejaVu Sans Condensed`) is an "other family name" that Firefox loads lazily. `font-other-names-sync.patch` reads the names on a masked page's first lookup. On Windows, `FontList::FindFamily` has a branch (`SharedFontList.cpp:1234-1317`) that strips the name's last word, reads the base family's face names once, and answers an alias hit with the base family's regular face before the load; a second name with the same base then misses ("already read") and reaches `InitOtherFamilyNames`, which stock defers to an idle task. The patch computes one predicate for both the lookup and the deferral: the page is masked and the names are not yet loaded and, on `XP_WIN`, the claimed OS is Linux or macOS. A Linux or macOS claim looks up primary names only (so the miss reaches the read) and reads at once. A Windows claim on a Windows host keeps stock Firefox's lookup and deferral (#321), as real Windows gives it. Elsewhere every masked claim reads the names at once. On a macOS host the alias table holds single-face aliases published at startup, so the `XP_WIN` gate keeps primary-names-only away from it.
