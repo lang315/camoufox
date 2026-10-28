@@ -242,6 +242,12 @@ on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
 
+## Legacy family names: first lookup (#247, #319)
+
+A legacy family name (name ID 1, such as `DejaVu Sans Condensed`) is an "other family name" that Firefox loads lazily. `font-other-names-sync.patch` reads the names on a masked page's first lookup. On Windows, `SharedFontList::FindFamily` answers a legacy name with its base family's regular face before the load, which skips that read; the patch therefore asks for primary names only when the claimed OS is Linux or macOS, and keeps the stock Windows answer for a Windows claim, as real Windows Firefox gives it.
+
+Known limit: `mOtherFamilyNamesInitialized` is process-wide. Once a Linux or macOS context forces the load, every later lookup in that process, a `windows` context included, gets the real face and not the base-first one. This applies to mixed-OS browsers and is not engineered around. Measured on a Linux launch with a `windows` context and a `macos` context (bug-fixes.md, #319). Related: #321 (a `windows` identity on Windows differs from stock on the first legacy lookup) and #322 (a `windows` identity on a non-Windows host answers a legacy face at once).
+
 ## Two contexts in one content process (Firefox 156)
 
 The cross-context cache arms (#81, #82, #83) need two contexts whose documents
