@@ -145,7 +145,7 @@ SYSTEM_UI_GENERIC = 7  # StyleGenericFontFamily::SystemUi in the generic-map lin
 
 def system_ui_steps(logdir: Path, uri: str):
     """(context ids that rendered `uri`, [(step, key)] of their system-ui lookups)."""
-    texts = [f.read_text(errors="replace") for f in logdir.glob("cfx*")]
+    texts = [f.read_text(errors="replace", encoding="utf-8") for f in logdir.glob("cfx*")]
     ctxs = {c for t in texts
             for c in re.findall(r"CAMOU-FL group \S+ ctx=(\d+) hop=\S+ uri=" + re.escape(uri), t)}
     steps = [(step, key.strip()) for t in texts

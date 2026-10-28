@@ -3062,6 +3062,35 @@ def test_the_patch_guard_matrix_runs_every_group():
     assert legs == set(GROUPS) | {"skiplist"}
 
 
+def _locale_encoded_text_io():
+    """read_text / write_text / open() calls in the guards, ci/ and e2e/ that name no encoding."""
+    import ast
+
+    from ci._util import REPO_ROOT
+
+    found = []
+    for root in ("browser/tests/playwright/patches", "ci", "e2e"):
+        for path in sorted((REPO_ROOT / root).rglob("*.py")):
+            if path.is_relative_to(CI_ROOT / "tests"):
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(node, ast.Call) or any(k.arg == "encoding" for k in node.keywords):
+                    continue
+                f = node.func
+                if isinstance(f, ast.Attribute) and f.attr in ("read_text", "write_text"):
+                    found.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+                elif isinstance(f, ast.Name) and f.id == "open":
+                    mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "mode"), None)
+                    if not (isinstance(mode, ast.Constant) and "b" in str(mode.value)):
+                        found.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    return found
+
+
+def test_text_files_are_read_and_written_as_utf_8():
+    """Windows decodes with cp1252 by default: fonts.json holds bytes it cannot read (#311)."""
+    assert not _locale_encoded_text_io()
+
+
 def test_leftover_browsers_sees_content_processes(tmp_path):
     """Firefox's Linux content processes run plugin-container, beside the binary."""
     import shutil

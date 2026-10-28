@@ -69,7 +69,7 @@ async def main() -> int:
 
     scans: dict = {}
     for f in logdir.glob("cfx*"):
-        for line in f.read_text(errors="replace").splitlines():
+        for line in f.read_text(errors="replace", encoding="utf-8").splitlines():
             m = LINE.search(line)
             if m:
                 scans.setdefault(f.name, {}).setdefault(int(m.group(1), 16), []).append(

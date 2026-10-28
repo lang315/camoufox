@@ -134,7 +134,7 @@ def leftover_browsers(binary: Path) -> List[str]:
         try:
             if os.readlink(proc / "exe") not in exes:
                 continue
-            fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
+            fields = (proc / "stat").read_text(encoding="utf-8").rsplit(")", 1)[1].split()
         except OSError:
             continue
         cpu = (int(fields[11]) + int(fields[12])) / ticks

@@ -89,8 +89,8 @@ def lists():
     families: enough families that fallback waits for their cmaps, as it does
     for a base, and none that names the system face again.
     """
-    bases = json.loads((CAMOUFOX / "font-bases.json").read_text())["mac"]
-    essential = json.loads((CAMOUFOX / "essential-fonts.json").read_text())["mac"]
+    bases = json.loads((CAMOUFOX / "font-bases.json").read_text(encoding="utf-8"))["mac"]
+    essential = json.loads((CAMOUFOX / "essential-fonts.json").read_text(encoding="utf-8"))["mac"]
     control = ["System Font"] + [f for f in essential if f.startswith("Noto ")]
     return [("control", control)] + [(b["id"], sorted(set(b["fonts"]) | set(essential))) for b in bases]
 

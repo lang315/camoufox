@@ -88,7 +88,7 @@ def test_packaged_locales_reads_loose_and_omni_ja(tmp_path):
 
     loose = tmp_path / "loose"
     (loose / "res").mkdir(parents=True)
-    (loose / "res" / "multilocale.txt").write_text("en-US,de\n")
+    (loose / "res" / "multilocale.txt").write_text("en-US,de\n", encoding="utf-8")
     assert util.packaged_locales(loose / "camoufox-bin") == ["en-US", "de"]
     packed = tmp_path / "packed"
     packed.mkdir()

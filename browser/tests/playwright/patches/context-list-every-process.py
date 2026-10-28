@@ -104,7 +104,7 @@ def context_processes(logdir, path):
     """{ctx id: [log text of each process that rendered a page at `path`]}"""
     by_ctx = {}
     for f in logdir.glob("cfx*"):
-        text = f.read_text(errors="replace")
+        text = f.read_text(errors="replace", encoding="utf-8")
         for ctx in set(re.findall(r"CAMOU-FL group \S+ ctx=(\d+) hop=\S+ uri=\S+" + re.escape(path), text)):
             by_ctx.setdefault(ctx, []).append(text)
     return by_ctx
@@ -116,7 +116,7 @@ def process_lines(logdir):
     share one log file."""
     by_pid = {}
     for f in sorted(logdir.glob("cfx*")):
-        for line in f.read_text(errors="replace").splitlines():
+        for line in f.read_text(errors="replace", encoding="utf-8").splitlines():
             m = re.search(r"\[(Child|Parent) (\d+):[^\]]*\]: \S+ (CAMOU-FL .*)", line)
             if m:
                 by_pid.setdefault(f"{m.group(1)} {m.group(2)}", []).append(m.group(3))
@@ -176,7 +176,7 @@ async def main() -> int:
 
     site = tempfile.mkdtemp(prefix="guard149-")
     for name in ("a.html", "b.html"):
-        Path(site, name).write_text("<!doctype html><meta charset=utf-8><body></body>")
+        Path(site, name).write_text("<!doctype html><meta charset=utf-8><body></body>", encoding="utf-8")
     port = serve(site)
     # Not /tmp: the Linux content sandbox gives content processes their own
     # view of it, so their per-process logs would not land where this reads.
@@ -248,7 +248,7 @@ async def main() -> int:
           f"with its list installed by the setter: {installed} (informational; only the "
           f"setter's process installs it, the others read it from the shared store)")
 
-    parent = "".join(f.read_text(errors="replace") for f in logdir.glob("cfx-main*"))
+    parent = "".join(f.read_text(errors="replace", encoding="utf-8") for f in logdir.glob("cfx-main*"))
     isolated = {}
     for behavior, host, suffix in re.findall(
             rf"Using IsolationBehavior (\w+) for http://(127\.0\.0\.1|localhost):{port}(\S*)", parent):
