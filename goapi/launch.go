@@ -42,6 +42,7 @@ type Browser struct {
 	defaultCtx *BrowserContext
 	info       juggler.BrowserGetInfoResult
 	attachSub  juggler.Subscription
+	detachSub  juggler.Subscription
 
 	// attachMu protects both the buffered events and the awaiter
 	// channels. NewPage either consumes a previously-buffered event
@@ -50,6 +51,9 @@ type Browser struct {
 	attachMu       sync.Mutex
 	attachBuffered map[string]*bufferedAttach
 	attachAwaiters map[string]chan *juggler.AttachedToTargetEvent
+	// newPageInflight counts NewPage calls per context id between issuing
+	// Browser.newPage and receiving its attach.
+	newPageInflight map[string]int
 }
 
 // bufferedAttach holds an early-arrival attachedToTarget event along
@@ -196,16 +200,17 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	pipe := juggler.NewPipe(parentRead, parentWrite, closePipes)
 	conn := juggler.NewConnection(pipe)
 	b := &Browser{
-		proc:           proc,
-		conn:           conn,
-		root:           conn.RootSession(),
-		debug:          lc.debug,
-		profileDir:     profileDir,
-		ownsProfileDir: ownsProfileDir,
-		contexts:       make(map[string]*BrowserContext),
-		pages:          make(map[string]*Page),
-		attachBuffered: make(map[string]*bufferedAttach),
-		attachAwaiters: make(map[string]chan *juggler.AttachedToTargetEvent),
+		proc:            proc,
+		conn:            conn,
+		root:            conn.RootSession(),
+		debug:           lc.debug,
+		profileDir:      profileDir,
+		ownsProfileDir:  ownsProfileDir,
+		contexts:        make(map[string]*BrowserContext),
+		pages:           make(map[string]*Page),
+		attachBuffered:  make(map[string]*bufferedAttach),
+		attachAwaiters:  make(map[string]chan *juggler.AttachedToTargetEvent),
+		newPageInflight: make(map[string]int),
 	}
 	b.subscribeAttach()
 	go b.sweepAttachBuffer()
@@ -420,10 +425,75 @@ func (b *Browser) subscribeAttach() {
 			}
 			return
 		}
+		// A page nobody awaits is one the browser opened itself (window.open,
+		// target=_blank), unless a NewPage on its context is still waiting for
+		// its own attach: that one may land before the awaiter exists, so it
+		// stays buffered. A popup carries an opener; a NewPage page does not.
+		mayBeNewPage := p.TargetInfo.OpenerID == "" && b.newPageInflight[p.TargetInfo.BrowserContextID] > 0
+		if p.TargetInfo.Type == "page" && !mayBeNewPage {
+			if bc := b.contextByID(p.TargetInfo.BrowserContextID); bc != nil {
+				b.attachMu.Unlock()
+				b.adoptPopup(bc, &p)
+				return
+			}
+		}
 		pp := p
 		b.attachBuffered[p.TargetInfo.TargetID] = &bufferedAttach{ev: &pp, at: time.Now()}
 		b.attachMu.Unlock()
 	})
+	b.detachSub = b.conn.On("Browser.detachedFromTarget", func(ev juggler.Event) {
+		var d juggler.DetachedFromTargetEvent
+		if err := json.Unmarshal(ev.Params, &d); err != nil {
+			return
+		}
+		b.mu.Lock()
+		p := b.pages[d.TargetID]
+		delete(b.pages, d.TargetID)
+		b.mu.Unlock()
+		if p != nil {
+			p.bc.dropPage(p)
+			p.finish()
+		}
+	})
+}
+
+// contextByID returns the context with this browserContextId, the default
+// context for "", and nil for an id this Browser never created.
+func (b *Browser) contextByID(id string) *BrowserContext {
+	if id == "" {
+		return b.DefaultContext()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.contexts[id]
+}
+
+// adoptPopup claims the session of a page the browser opened and, once its
+// main execution context exists, publishes it. The session is claimed on
+// the read loop so no event of it is lost; the wait runs on its own
+// goroutine, which keeps the read loop free to deliver the context event.
+func (b *Browser) adoptPopup(bc *BrowserContext, att *juggler.AttachedToTargetEvent) {
+	p := bc.attachPage(att)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := p.awaitMainContext(ctx, 30*time.Second); err != nil {
+			return // closed before it loaded; the detach event cleans up
+		}
+		bc.publish(p)
+	}()
+}
+
+func (b *Browser) newPageStarted(ctxID string) {
+	b.attachMu.Lock()
+	b.newPageInflight[ctxID]++
+	b.attachMu.Unlock()
+}
+
+func (b *Browser) newPageDone(ctxID string) {
+	b.attachMu.Lock()
+	b.newPageInflight[ctxID]--
+	b.attachMu.Unlock()
 }
 
 // sweepAttachBuffer drops orphan early-arrival events older than

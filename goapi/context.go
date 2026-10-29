@@ -14,8 +14,10 @@ type BrowserContext struct {
 	b  *Browser
 	id string // browserContextId, empty for default context
 
-	pagesMu sync.Mutex
-	pages   []*Page
+	pagesMu    sync.Mutex
+	pages      []*Page
+	onPage     map[uint64]func(*Page)
+	onPageNext uint64
 
 	dlMu         sync.Mutex
 	downloadsDir string // from SetDownloadOptions; the browser saves downloads here as <uuid>
@@ -94,4 +96,66 @@ func (c *BrowserContext) SetGeolocation(ctx context.Context, geo *juggler.Geoloc
 		Geolocation:      geo,
 	}
 	return c.b.root.Call(ctx, "Browser.setGeolocationOverride", params, nil)
+}
+
+// Pages returns the pages open in this context: those NewPage created and
+// those the browser opened itself (window.open, target=_blank).
+func (c *BrowserContext) Pages() []*Page {
+	c.pagesMu.Lock()
+	defer c.pagesMu.Unlock()
+	return append([]*Page(nil), c.pages...)
+}
+
+// OnPage registers fn for every page that opens in this context from now
+// on, NewPage's pages and popups alike. fn runs after the page's main
+// execution context exists, so it may Evaluate; a popup is still on
+// about:blank then, and navigates to its URL afterwards. It runs on the goroutine
+// that opened the page (NewPage's caller, or one per popup), so a slow fn
+// delays NewPage. The returned cancel removes the handler.
+func (c *BrowserContext) OnPage(fn func(*Page)) (cancel func()) {
+	c.pagesMu.Lock()
+	defer c.pagesMu.Unlock()
+	if c.onPage == nil {
+		c.onPage = make(map[uint64]func(*Page))
+	}
+	id := c.onPageNext
+	c.onPageNext++
+	c.onPage[id] = fn
+	return func() {
+		c.pagesMu.Lock()
+		delete(c.onPage, id)
+		c.pagesMu.Unlock()
+	}
+}
+
+// publish adds p to Pages and calls the OnPage handlers.
+func (c *BrowserContext) publish(p *Page) {
+	c.pagesMu.Lock()
+	select {
+	case <-p.closed: // detached while its main context was loading
+		c.pagesMu.Unlock()
+		return
+	default:
+	}
+	c.pages = append(c.pages, p)
+	handlers := make([]func(*Page), 0, len(c.onPage))
+	for _, fn := range c.onPage {
+		handlers = append(handlers, fn)
+	}
+	c.pagesMu.Unlock()
+	for _, fn := range handlers {
+		fn(p)
+	}
+}
+
+// dropPage removes a page the browser detached from the context's list.
+func (c *BrowserContext) dropPage(p *Page) {
+	c.pagesMu.Lock()
+	for i, q := range c.pages {
+		if q == p {
+			c.pages = append(c.pages[:i], c.pages[i+1:]...)
+			break
+		}
+	}
+	c.pagesMu.Unlock()
 }
