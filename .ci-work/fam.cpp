@@ -113,8 +113,16 @@ static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
       vector<IDWriteFontFile*> ff(n);
       if (SUCCEEDED(face->GetFiles(&n, ff.data()))) {
         for (auto* x : ff) {
+          Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll;
           const void* k = nullptr; UINT32 ks = 0;
-          if (SUCCEEDED(x->GetReferenceKey(&k, &ks))) files->insert(wstring((const wchar_t*)k, ks / sizeof(wchar_t) - ((ks >= 2 && ((const wchar_t*)k)[ks / 2 - 1] == 0) ? 1 : 0)));
+          if (SUCCEEDED(x->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) &&
+              SUCCEEDED(x->GetReferenceKey(&k, &ks))) {
+            UINT32 len = 0;
+            if (SUCCEEDED(ll->GetFilePathLengthFromKey(k, ks, &len))) {
+              wstring path(len + 1, 0);
+              if (SUCCEEDED(ll->GetFilePathFromKey(k, ks, path.data(), len + 1))) { path.resize(len); files->insert(path); }
+            }
+          }
           x->Release();
         }
       }
