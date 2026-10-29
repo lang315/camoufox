@@ -42,26 +42,12 @@ type Browser struct {
 	defaultCtx *BrowserContext
 	info       juggler.BrowserGetInfoResult
 	attachSub  juggler.Subscription
+	detachSub  juggler.Subscription
 
-	// attachMu protects both the buffered events and the awaiter
-	// channels. NewPage either consumes a previously-buffered event
-	// (if attachedToTarget arrived first) or registers a channel to
-	// be signalled when the matching event lands.
-	attachMu       sync.Mutex
-	attachBuffered map[string]*bufferedAttach
-	attachAwaiters map[string]chan *juggler.AttachedToTargetEvent
+	// pageAwaiters hands a NewPage the Page for the target Browser.newPage
+	// named, if its attach event has not been seen yet. Guarded by mu.
+	pageAwaiters map[string]chan *Page
 }
-
-// bufferedAttach holds an early-arrival attachedToTarget event along
-// with its arrival time so a sweeper can drop orphans (events that
-// never get claimed because NewPage was canceled). 30s TTL is plenty
-// — NewPage normally claims its event within ms of issuing the call.
-type bufferedAttach struct {
-	ev *juggler.AttachedToTargetEvent
-	at time.Time
-}
-
-const attachBufferTTL = 30 * time.Second
 
 // Launch spawns the Camoufox binary and connects via the Juggler pipe
 // transport. The returned Browser owns the subprocess; call Close.
@@ -204,11 +190,9 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		ownsProfileDir: ownsProfileDir,
 		contexts:       make(map[string]*BrowserContext),
 		pages:          make(map[string]*Page),
-		attachBuffered: make(map[string]*bufferedAttach),
-		attachAwaiters: make(map[string]chan *juggler.AttachedToTargetEvent),
+		pageAwaiters:   make(map[string]chan *Page),
 	}
 	b.subscribeAttach()
-	go b.sweepAttachBuffer()
 
 	// Default hardening prefs. Caller-supplied prefs override these via
 	// the lc.firefoxUserPrefs map (last-write-wins below).
@@ -410,64 +394,69 @@ func (b *Browser) subscribeAttach() {
 		if err := json.Unmarshal(ev.Params, &p); err != nil {
 			return
 		}
-		b.attachMu.Lock()
-		if ch, ok := b.attachAwaiters[p.TargetInfo.TargetID]; ok {
-			delete(b.attachAwaiters, p.TargetInfo.TargetID)
-			b.attachMu.Unlock()
-			select {
-			case ch <- &p:
-			default:
-			}
+		// Every attach is a page target. Whoever opened it -- NewPage, a
+		// popup, the browser itself -- it is wrapped at once, on the read
+		// loop, so none of its session's events are lost.
+		bc := b.contextByID(p.TargetInfo.BrowserContextID)
+		if p.TargetInfo.Type != "page" || bc == nil {
 			return
 		}
-		pp := p
-		b.attachBuffered[p.TargetInfo.TargetID] = &bufferedAttach{ev: &pp, at: time.Now()}
-		b.attachMu.Unlock()
+		page := bc.attachPage(&p)
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if _, err := page.awaitMainContext(ctx, 30*time.Second); err != nil {
+				return // closed before it loaded; the detach event cleans up
+			}
+			bc.publish(page)
+		}()
+	})
+	b.detachSub = b.conn.On("Browser.detachedFromTarget", func(ev juggler.Event) {
+		var d juggler.DetachedFromTargetEvent
+		if err := json.Unmarshal(ev.Params, &d); err != nil {
+			return
+		}
+		b.mu.Lock()
+		p := b.pages[d.TargetID]
+		delete(b.pages, d.TargetID)
+		b.mu.Unlock()
+		if p != nil {
+			p.bc.dropPage(p)
+			p.finish()
+		}
 	})
 }
 
-// sweepAttachBuffer drops orphan early-arrival events older than
-// attachBufferTTL. Runs until the connection closes.
-func (b *Browser) sweepAttachBuffer() {
-	t := time.NewTicker(attachBufferTTL / 2)
-	defer t.Stop()
-	for {
-		select {
-		case <-b.conn.Done():
-			return
-		case now := <-t.C:
-			b.attachMu.Lock()
-			for id, ba := range b.attachBuffered {
-				if now.Sub(ba.at) > attachBufferTTL {
-					delete(b.attachBuffered, id)
-				}
-			}
-			b.attachMu.Unlock()
-		}
+// contextByID returns the context with this browserContextId, the default
+// context for "", and nil for an id this Browser never created.
+func (b *Browser) contextByID(id string) *BrowserContext {
+	if id == "" {
+		return b.DefaultContext()
 	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.contexts[id]
 }
 
-// awaitAttach returns the attachedToTarget event for targetID,
-// pulling from the buffer if it arrived early or blocking on a
-// channel until it does.
-func (b *Browser) awaitAttach(ctx context.Context, targetID string) (*juggler.AttachedToTargetEvent, error) {
-	b.attachMu.Lock()
-	if ba, ok := b.attachBuffered[targetID]; ok {
-		delete(b.attachBuffered, targetID)
-		b.attachMu.Unlock()
-		return ba.ev, nil
+// awaitPage returns the Page for targetID, waiting for its attach event if it
+// has not arrived (the reply to Browser.newPage can precede it).
+func (b *Browser) awaitPage(ctx context.Context, targetID string) (*Page, error) {
+	b.mu.Lock()
+	if p, ok := b.pages[targetID]; ok {
+		b.mu.Unlock()
+		return p, nil
 	}
-	ch := make(chan *juggler.AttachedToTargetEvent, 1)
-	b.attachAwaiters[targetID] = ch
-	b.attachMu.Unlock()
+	ch := make(chan *Page, 1)
+	b.pageAwaiters[targetID] = ch
+	b.mu.Unlock()
 
 	select {
-	case ev := <-ch:
-		return ev, nil
+	case p := <-ch:
+		return p, nil
 	case <-ctx.Done():
-		b.attachMu.Lock()
-		delete(b.attachAwaiters, targetID)
-		b.attachMu.Unlock()
+		b.mu.Lock()
+		delete(b.pageAwaiters, targetID)
+		b.mu.Unlock()
 		return nil, ctx.Err()
 	case <-b.conn.Done():
 		return nil, errors.New("camoufox: connection closed before attachedToTarget")
