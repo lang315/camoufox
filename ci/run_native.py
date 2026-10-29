@@ -39,7 +39,7 @@ from .pw_camoufox_plugin import parse_shard
 SUITE_DIR = REPO_ROOT / "browser" / "tests" / "native"
 
 FILES = {
-    "rules": ["test_tribal_rules.py"],
+    "rules": ["test_tribal_rules.py", "test_build_tester_fontconfig.py"],
     "browser": [
         "test_no_leaks.py",
         "test_contexts_vs_browsers.py",

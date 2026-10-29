@@ -12,6 +12,24 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #329: on a Linux host, bundle activation added every font group, bypassing the per-OS directory gate
+
+**Fixed by:** the PR that adds `browser/patches/linux-bundled-fonts-toplevel.patch`. **Found by:** the #325 face-log measurement.
+
+**Symptom.** A Linux launch on a Linux host drew files from `fonts/M/` for names its font list admits: `Helvetica` drew `M/27__Helvetica.ttc`, `Arial` drew `M/0__arial.ttf`, `Times` drew `M/69__Times.ttc`, and the generics `serif`, `sans-serif` and `monospace` drew `M/69__Times.ttc`, `M/27__Helvetica.ttc` and `M/910__Courier New.ttf`. `fc-match -s` against the generated `FONTCONFIG_FILE` listed only `L` and `LW` files, with Nimbus Sans first for `Helvetica`.
+
+**Root cause.** `gfxFcPlatformFontList::ActivateBundledFonts()` (`gfxFcPlatformFontList.cpp:3095-3117` at FIREFOX_158_0_1_RELEASE) called `FcConfigAppFontAddDir` on `<GRE>/fonts`, and fontconfig scans that recursively. `browser/settings/camoufox.cfg` keeps `gfx.bundled-fonts.activate` at 1. Every group of every OS therefore sat on the application font list, past the group directories `utils._generate_fontconfig` names, and the allowlist filters by family name, not by origin (CLAUDE.md lesson 1).
+
+**Fix.** Add only the files directly in `fonts/` (Firefox's own `TwemojiMozilla.ttf`) with `FcConfigAppFontAddFile`. Which groups an OS reads stays decided in one place, the launcher's generator. build-tester now sets `FONTCONFIG_FILE` from that generator, and `smoke.yml` calls it instead of substituting the `fonts/` parent into the conf by hand.
+
+**Not tried / failed.** Setting `gfx.bundled-fonts.activate=0` through `custom_fonts_only=True` changed nothing, because the launcher applies that pref at runtime and the font list reads it at startup; it would also drop Firefox's own faces. Reading `groups.json` in C++ was rejected: it would be a second copy of the group choice.
+
+**Evidence.** Face log (`CAMOU-FL face`), same preset font list, Linux host. Red, the build of PR #328 (Tests run 40781286151, probe run 40791200138): `Helvetica` `M/27__Helvetica.ttc`. Green, this change's build (Tests run 40785905651, probe run 40791218227): `Helvetica` `L/openadd-NimbusSans-Regular.otf`, `Times` `L/openadd-NimbusRoman-Regular.otf`, `Courier` `L/openadd-NimbusMonoPS-Regular.otf`, `Arial` `L/z__Arimo[wght].ttf`, `Times New Roman` `L/z__Tinos-Regular.ttf`, `Courier New` `L/z__Cousine-Regular.ttf`. `Twemoji Mozilla` draws `fonts/TwemojiMozilla.ttf` in both builds. Removing `fonts/M`, `fonts/W` and `fonts/MW` from the red build moved every row the same way (probe run 40780901666).
+
+One guard moved: `system-ui-font-spoofing.py`, arm "macos context in a windows launch". Its precondition scored `Helvetica` against the width of `monospace`. In the red build that `monospace` drew `M/35__Menlo.ttc` inside a Windows launch, so the width differed from Arial's by accident of the leak; in the green build it draws `MW/382__arial.ttf`, the same face the `Helvetica` to `Arial` rewrite gives, so the control equalled the value under test. The arm is scored on the `step=system-ui key=arial` line, which both builds write; the width precondition is removed.
+
+**What misled the investigation.** `fc-match -s` against the generated conf looked right and was the wrong universe: it does not see application fonts. The `activate=0` arm read as "the mechanism is something else"; it only showed the pref had not reached startup. Every Linux font measurement since the groups were introduced was taken with the M and W faces on the path (CLAUDE.md lesson 8). The rule is in `ci/tribal-rules.yml`: `fc-activates-only-firefox-own-bundled-fonts`.
+
 ## #321: a `windows` identity on a Windows host differed from stock Firefox 158.0.1 on the first legacy-name lookups
 
 **Fixed by:** the PR that makes `browser/patches/font-other-names-sync.patch` leave a Windows claim on a Windows host on the stock path. **Found by:** the #319 review; measured against stock 158.0.1 on windows-2025.

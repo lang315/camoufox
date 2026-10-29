@@ -194,7 +194,8 @@ change while you work:
   only `patches/` and `camoufox/`. A deliberate difference from upstream goes
   in `ci/skiplist.yml`, with its reason.
 - **Tests against an unpackaged build** need `make -C browser stage-fonts` first.
-  Without it the browser has no content fonts.
+  Without it the launcher has no bundle to name. A raw launch of the Linux binary,
+  with no `FONTCONFIG_FILE` from `utils._generate_fontconfig`, draws the host's fonts.
 - **The stealth grade** (`ci/run_sundial.py`) reports a letter and a count, never
   the individual vectors.
 

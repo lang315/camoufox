@@ -37,6 +37,22 @@ from server import start_http_server
 from wsl import get_windows_host_ip, is_elf_binary
 
 
+def launcher_fontconfig(binary_path: str, os_name: str) -> dict:
+    """FONTCONFIG_FILE for a Linux launch as the launcher writes it (#329).
+
+    The browser adds only Firefox's own bundled fonts itself; which group
+    directories an OS reads is decided by utils._generate_fontconfig, so a raw
+    launch without this conf measures the host's fonts. A missing conf raises.
+    """
+    if not sys.platform.startswith("linux"):
+        return {}
+    from camoufox.utils import _generate_fontconfig
+
+    binary = Path(binary_path)
+    conf_dir = binary.parent / "fontconfig" / os_name
+    return {"FONTCONFIG_FILE": _generate_fontconfig(str(conf_dir), path=binary, os_dir=os_name)}
+
+
 # ─── Per-Context Phase ────────────────────────────────────────────────────────
 
 # The page hands its results over through a DOM node rather than a JS global,
@@ -315,6 +331,7 @@ async def run_tests(
                 browser = await firefox.launch(
                     executable_path=binary_path,
                     headless=False,
+                    env={**os.environ, **launcher_fontconfig(binary_path, "linux")},
                     firefox_user_prefs=FIREFOX_WEBGL_PREFS,
                 )
             except Exception as e:
@@ -339,7 +356,11 @@ async def run_tests(
 
             browser = None
             try:
-                env = {**dict(os.environ), "CAMOU_CONFIG": json.dumps(preset["camouConfig"])}
+                env = {
+                    **dict(os.environ),
+                    **launcher_fontconfig(binary_path, profile["os"]),
+                    "CAMOU_CONFIG": json.dumps(preset["camouConfig"]),
+                }
                 browser = await firefox.launch(
                     executable_path=binary_path,
                     headless=False,

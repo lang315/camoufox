@@ -80,6 +80,7 @@ already set up, and do not add the include or `LOCAL_INCLUDES` themselves:
 | `font-system-fonts-css2.patch`, `system-ui-font-spoofing.patch`, `webrtc-ip-spoofing.patch`, `zz-stock-cost-parity.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
 | `windows-keyboard.patch` | `touchscreen-fingerprint-spoofing.patch` for `/camoucfg` in `dom/events/moz.build` |
 | `zz-stock-cost-parity.patch` | `cross-process-storage.patch` for `RoverfoxStorageManager::Generation()`; `screen-spoofing.patch` for `ScreenDimensionManager` in `dom/base/nsScreen.cpp` |
+| `linux-bundled-fonts-toplevel.patch` | `font-list-spoofing.patch`, which edits the same file (`gfx/thebes/gfxFcPlatformFontList.cpp`) earlier in the order; it only needs the pristine `ActivateBundledFonts()` body and the `nsIConsoleService.h` include line, which that patch leaves alone |
 | `zzz-font-face-log.patch` | `anti-font-fingerprinting.patch` for `gfxFontGroup::mUserContextId`; `font-list-spoofing.patch` for `CAMOU_LOG_FONTLIST()` in `gfx/thebes/gfxTextRun.cpp`. It sorts after every other patch, so it applies last |
 
 ## RoverfoxStorageManager
