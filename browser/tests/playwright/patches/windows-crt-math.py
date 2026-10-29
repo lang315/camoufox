@@ -15,7 +15,8 @@ pow. browser/tests/ucrt-math/check.py covers the C alone, against ucrtbase.dll,
 on a much larger set.
 
 A control run with the pref off must differ, or the reference would not be
-telling the two apart.
+telling the two apart. A Windows host has no such control (its libm is the CRT),
+so there only the pref-on results are read.
 
     python browser/tests/playwright/patches/windows-crt-math.py
 """
@@ -65,7 +66,10 @@ def differing(got, want):
 def main() -> int:
     binary = resolve_binary()
     windows = mismatches(asyncio.run(run_probe(binary, {})))
-    control = mismatches(asyncio.run(run_probe(binary, {"javascript.options.use_ucrt_math": False})))
+    # A Windows host's libm is the CRT, so with the pref off its results match the
+    # reference too and the control cannot differ; only the pref-on arm is read there.
+    control = None if sys.platform == "win32" else mismatches(
+        asyncio.run(run_probe(binary, {"javascript.options.use_ucrt_math": False})))
 
     print(f"reference: {REFERENCE['firefox']} on Windows")
     failures = []
@@ -74,13 +78,16 @@ def main() -> int:
         if bad:
             failures.append(f"{key}: {bad} of {total} results differ from Windows")
 
-    control_bad = sum(control[f"cold {name}"][0] for name in ("sin", "cos", "tan"))
-    print(f"  control (use_ucrt_math off): {control_bad} sin/cos/tan results differ, as they must")
-    if not control_bad:
-        failures.append(
-            "with javascript.options.use_ucrt_math off the results still match Windows: "
-            "the reference no longer tells the host libm from the CRT"
-        )
+    if control is None:
+        print("  control (use_ucrt_math off): not run, a Windows host's libm is the CRT")
+    else:
+        control_bad = sum(control[f"cold {name}"][0] for name in ("sin", "cos", "tan"))
+        print(f"  control (use_ucrt_math off): {control_bad} sin/cos/tan results differ, as they must")
+        if not control_bad:
+            failures.append(
+                "with javascript.options.use_ucrt_math off the results still match Windows: "
+                "the reference no longer tells the host libm from the CRT"
+            )
 
     for failure in failures:
         print("FAIL:", failure)
