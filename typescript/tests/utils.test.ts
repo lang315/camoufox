@@ -135,7 +135,7 @@ describe("getEnvVars", () => {
 // test_fontconfig_groups.py (#186)
 describe("the runtime fontconfig's font directories", () => {
 	afterEach(() => vi.restoreAllMocks());
-	const bundle = (groups: string | null) => {
+	const bundle = (groups: string | null, dirs = ["L", "LW", "M", "W", "windows"]) => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-186-"));
 		vi.spyOn(utilsDeps, "osName").mockReturnValue("lin");
 		vi.spyOn(utilsDeps, "installDir").mockReturnValue(path.join(root, "cache"));
@@ -144,7 +144,8 @@ describe("the runtime fontconfig's font directories", () => {
 			path.join(root, "fontconfig", "windows", "fonts.conf"),
 			'<fontconfig><dir prefix="cwd">fonts</dir></fontconfig>',
 		);
-		for (const d of ["L", "LW", "M", "W", "windows"])
+		fs.mkdirSync(path.join(root, "fonts"), { recursive: true });
+		for (const d of dirs)
 			fs.mkdirSync(path.join(root, "fonts", d), { recursive: true });
 		if (groups !== null)
 			fs.writeFileSync(path.join(root, "fonts", "groups.json"), groups);
@@ -169,6 +170,15 @@ describe("the runtime fontconfig's font directories", () => {
 	});
 	it("a missing groups.json keeps the legacy per-OS layout", () => {
 		expect(scanned(bundle(null))).toEqual(["windows"]);
+	});
+	it("no groups.json and no per-OS directory fails instead of naming the parent (#331)", () => {
+		expect(() => getEnvVars({}, "win", bundle(null, ["L", "M"]))).toThrow();
+	});
+	it("a groups.json whose directories are missing fails instead of naming the parent (#331)", () => {
+		const readBy = { win: ["MW", "LMW"] };
+		expect(() =>
+			getEnvVars({}, "win", bundle(JSON.stringify({ readBy }), ["L", "M"])),
+		).toThrow();
 	});
 });
 
