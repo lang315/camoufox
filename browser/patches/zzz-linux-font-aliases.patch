@@ -1,0 +1,80 @@
+diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
+index ede3b60..f267917 100644
+--- a/gfx/thebes/gfxDWriteFontList.cpp
++++ b/gfx/thebes/gfxDWriteFontList.cpp
+@@ -2270,6 +2270,18 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
+   nsAutoCString keyName(aFamily);
+   BuildKeyNameFromFontName(keyName);
+ 
++  // Camoufox (#325): a Linux claim asks for the name itself. Windows
++  // substitutions are not fontconfig's, and the base class applies the Linux
++  // aliases to the name it is given.
++  if (!(aFontVisibilityProvider && aFontVisibilityProvider->IsChrome()) &&
++      mozilla::dom::NavigatorManager::GetSpoofedOS(
++          mozilla::dom::FontListManager::ContextIdFor(aFontVisibilityProvider)) ==
++          MaskConfig::SpoofedOS::Linux) {
++    return gfxPlatformFontList::FindAndAddFamiliesLocked(
++        aFontVisibilityProvider, aGeneric, keyName, aOutput, aFlags, aStyle,
++        aLanguage, aDevToCssSize);
++  }
++
+   const bool useHardcodedList =
+       aFontVisibilityProvider
+           ? aFontVisibilityProvider->ShouldResistFingerprinting(
+diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
+index a4d99f4..d14eab6 100644
+--- a/gfx/thebes/gfxPlatformFontList.cpp
++++ b/gfx/thebes/gfxPlatformFontList.cpp
+@@ -2154,6 +2154,25 @@ bool gfxPlatformFontList::FindAndAddFamilies(
+   return didFind;
+ }
+ 
++#ifndef MOZ_WIDGET_GTK
++#  include "FontAliasesLinux.hpp"
++
++static MaskConfig::SpoofedOS SystemUISpoofedOS(
++    FontVisibilityProvider* aFontVisibilityProvider);
++
++// Camoufox (#325): the Linux faces fontconfig substitutes for a name no Linux
++// face carries (FontAliasesLinux.hpp, generated from fonts.conf). A Linux claim
++// on a host without fontconfig has to apply them itself.
++static const char* const* CamouLinuxAliasTargets(const nsACString& aKey) {
++  for (const CamouFontAlias* alias = kCamouLinuxAliases; alias->name; ++alias) {
++    if (aKey.EqualsASCII(alias->name)) {
++      return alias->targets;
++    }
++  }
++  return nullptr;
++}
++#endif
++
+ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+     FontVisibilityProvider* aFontVisibilityProvider,
+     StyleGenericFontFamily aGeneric, const nsACString& aFamily,
+@@ -2162,6 +2181,26 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+   nsAutoCString key;
+   GenerateFontListKey(aFamily, key);
+ 
++#ifndef MOZ_WIDGET_GTK
++  // Camoufox (#325): a Linux claim asks for what fontconfig would give the
++  // name, never for the Apple or Microsoft face the flat package holds under
++  // it. Every target the gates admit is added, in fontconfig's order, as
++  // gfxFcPlatformFontList::FindAndAddFamiliesLocked does; none admitted is a
++  // miss, which is what the Linux host draws too (the list's default font).
++  // Targets are never keys, so the recursion cannot re-enter this block.
++  if (SystemUISpoofedOS(aFontVisibilityProvider) == MaskConfig::SpoofedOS::Linux) {
++    if (const char* const* targets = CamouLinuxAliasTargets(key)) {
++      bool found = false;
++      for (; *targets; ++targets) {
++        found |= gfxPlatformFontList::FindAndAddFamiliesLocked(
++            aFontVisibilityProvider, aGeneric, nsDependentCString(*targets),
++            aOutput, aFlags, aStyle, aLanguage, aDevToCssSize);
++      }
++      return found;
++    }
++  }
++#endif
++
+   bool allowHidden = bool(aFlags & FindFamiliesFlags::eSearchHiddenFamilies);
+   FontVisibility visibilityLevel =
+       aFontVisibilityProvider ? aFontVisibilityProvider->GetFontVisibility()
