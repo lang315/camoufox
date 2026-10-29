@@ -24,7 +24,7 @@ WIN10_GUID = b"8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a"
 
 
 def patch_content(patch: Path) -> bytes:
-    lines = patch.read_text().splitlines()
+    lines = patch.read_text(encoding="utf-8").splitlines()
     start = next(i for i, l in enumerate(lines) if l.startswith("+++ b/browser/app/camoufox.exe.manifest"))
     body = [l[1:] for l in lines[start + 2:] if l.startswith("+")]
     return ("\n".join(body) + "\n").encode()

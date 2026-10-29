@@ -55,7 +55,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 
 def list_hosts(addon_path: str) -> set:
     """Every host uBO's packaged asset registry names as a source."""
-    assets = json.loads(Path(addon_path, "assets", "assets.json").read_text())
+    assets = json.loads(Path(addon_path, "assets", "assets.json").read_text(encoding="utf-8"))
     urls = []
     for entry in assets.values():
         for key in ("contentURL", "cdnURLs", "patchURLs"):
@@ -103,7 +103,7 @@ def main() -> int:
     ubo_hosts = list_hosts(ubo)
 
     site = tempfile.mkdtemp()
-    Path(site, "ad.html").write_text(AD_PAGE)
+    Path(site, "ad.html").write_text(AD_PAGE, encoding="utf-8")
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=site))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"

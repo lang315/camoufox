@@ -37,6 +37,7 @@ PASS = "pass"
 FAIL = "fail"
 ERROR = "error"
 SKIP = "skip"
+NOT_APPLICABLE = "not_applicable"
 
 
 def run_id() -> str:

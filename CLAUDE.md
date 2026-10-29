@@ -95,6 +95,10 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   ```bash
   python3 -m ci.run_patch_guards --binary /path/to/camoufox-bin
   ```
+  The runner works on Linux, macOS and Windows. Three guards need Linux tooling
+  (`ipv4-only-network`, `webgl-live-state`, `webgl-renderer-pair`); on another
+  platform they are reported as "not applicable", never as passes. On Linux a
+  missing prerequisite fails.
 - **Playwright** — upstream playwright-python, fetched fresh at the tag
   `ci/versions.py` resolves for the browser, with `ci/skiplist.yml` applied and
   `browser/tests/playwright/camoufox/` overlaid. This is the automation-contract check, not the

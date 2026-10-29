@@ -411,7 +411,7 @@ def registry_versions() -> Tuple[List[str], List[str]]:
 
 
 def checked_in_version() -> str:
-    m = re.search(r'^version = "([^"]+)"', PYPROJECT.read_text(), re.M)
+    m = re.search(r'^version = "([^"]+)"', PYPROJECT.read_text(encoding="utf-8"), re.M)
     if not m:
         die("python/pyproject.toml has no version")
     return m[1]
@@ -512,7 +512,7 @@ def cmd_set_build(args: argparse.Namespace) -> int:
     if m["version"] != up["version"]:
         die(f"{args.tag} is Firefox {m['version']}, but upstream.sh builds {up['version']}")
     path = BROWSER_ROOT / "upstream.sh"
-    path.write_text(re.sub(r"^release=.*$", f"release={m['prefix']}.{m['n']}", path.read_text(), flags=re.M))
+    path.write_text(re.sub(r"^release=.*$", f"release={m['prefix']}.{m['n']}", path.read_text(encoding="utf-8"), flags=re.M), encoding="utf-8")
     log(f"upstream.sh: release={m['prefix']}.{m['n']}")
     return 0
 
@@ -652,14 +652,14 @@ def cmd_stamp(args: argparse.Namespace) -> int:
         "repo_name": "Official",
         "version": m["version"],
         "build": f"{m['prefix']}.{m['n']}",
-    }, indent=2) + "\n")
+    }, indent=2) + "\n", encoding="utf-8")
     PYPROJECT.write_text(re.sub(r'^version = "[^"]+"', f'version = "{args.py_version}"',
-                                PYPROJECT.read_text(), count=1, flags=re.M))
-    pkg = json.loads(PACKAGE_JSON.read_text())
+                                PYPROJECT.read_text(encoding="utf-8"), count=1, flags=re.M), encoding="utf-8")
+    pkg = json.loads(PACKAGE_JSON.read_text(encoding="utf-8"))
     pkg["version"] = args.npm_version
-    PACKAGE_JSON.write_text(json.dumps(pkg, indent="\t") + "\n")
+    PACKAGE_JSON.write_text(json.dumps(pkg, indent="\t") + "\n", encoding="utf-8")
     TS_VERSION.write_text(re.sub(r'(LIBRARY_VERSION\s*=\s*")[^"]+(")', rf"\g<1>{args.npm_version}\g<2>",
-                                 TS_VERSION.read_text(), count=1))
+                                 TS_VERSION.read_text(encoding="utf-8"), count=1), encoding="utf-8")
     log(f"stamped camoufox {args.py_version} / {NPM_PACKAGE} {args.npm_version} "
         f"with browser {args.browser_tag}")
     return 0

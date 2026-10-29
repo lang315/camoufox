@@ -960,3 +960,17 @@ rules:
       stable. Weekly was considered and rejected as too many updates for users
       to manage. A fix that cannot wait is cut by dispatching release.yml on
       main, and an open issue labelled `regression` holds the promotion.
+
+  - id: linux-only-guards-are-not-applicable-elsewhere
+    title: A patch guard that needs Linux tooling is "not applicable" on other platforms, never a pass, and a failure on Linux when its prerequisite is missing
+    check: manual   # ci/tests/test_ci.py::test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass
+    evidence:
+      - "issue #314: ipv4-only-network (unshare, ip) and the WebGL guards (Xvfb) failed on a real Windows host for lack of Linux tools"
+      - "issue #311: the runner itself was Linux-only"
+    rationale: >-
+      Folding them into the passes would claim a measurement nobody took; skipping
+      them silently on Linux would let a job that forgot a prerequisite pass having
+      tested nothing (AGENTS.md). So the runner's LINUX_ONLY set decides by
+      platform before starting the script, prints the guard under its own count,
+      and records it as not_applicable. The set sits beside GROUPS rather than in
+      each guard because the runner must decide without running the script.
