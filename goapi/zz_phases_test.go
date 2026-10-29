@@ -3,6 +3,8 @@ package camoufox_test
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -100,6 +102,14 @@ func TestZZPhases(t *testing.T) {
 			t.Fatal(err)
 		}
 		t3 := time.Now()
+		var ctlSrv *httptest.Server
+		if os.Getenv("ZZ_MOZLOG") == "1" && i == 0 {
+			ctlSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("zz-control")) }))
+			if err := p.Goto(ctx, ctlSrv.URL+"/zz-control-path"); err != nil {
+				t.Logf("CONTROL goto error: %v", err)
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
 		dir := reused
 		if arm == "fresh" {
 			dir = newestProfile()
@@ -112,6 +122,12 @@ func TestZZPhases(t *testing.T) {
 		t.Logf("PHASES moz=%s %s#%d launch=%.1f context=%.1f newpage=%.1f stages:%s | profile(after newpage) %s",
 			os.Getenv("ZZ_MOZLOG"), arm, i, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), t3.Sub(t2).Seconds(), deltas(marks, t0), snap)
 		t.Logf("NET moz=%s %s#%d wall=%.1fs cpu_sum=%.1fs %s", os.Getenv("ZZ_MOZLOG"), arm, i, t3.Sub(t0).Seconds(), cpu, netSummary(logBase))
+		if ctlSrv != nil {
+			// The arm is void unless the browser's own request to this local server appears in the log.
+			found := strings.Contains(readLogs(logBase), "zz-control-path")
+			t.Logf("CONTROL moz positive: request to local http server in log = %v (false = the MOZ_LOG arm is VOID)", found)
+			ctlSrv.Close()
+		}
 		cancel()
 	}
 }
@@ -166,4 +182,57 @@ func netSummary(base string) string {
 		hs = hs[:8]
 	}
 	return fmt.Sprintf("logfiles=%d lines=%d hosts=%d [%s]", len(files), lines, len(hosts), strings.Join(hs, " "))
+}
+
+func readLogs(base string) string {
+	files, _ := filepath.Glob(base + "*")
+	var sb strings.Builder
+	for _, f := range files {
+		b, _ := os.ReadFile(f)
+		sb.Write(b)
+	}
+	return sb.String()
+}
+
+// TestZZProfile takes a Gecko startup profile of each of 8 cold launches.
+func TestZZProfile(t *testing.T) {
+	dir := os.Getenv("ZZ_PROF_DIR")
+	if dir == "" {
+		t.Skip("probe only: ZZ_PROF_DIR unset")
+	}
+	_ = os.MkdirAll(dir, 0o755)
+	bin := browserBinary(t)
+	var rows []string
+	for i := 0; i < 8; i++ {
+		out := filepath.Join(dir, fmt.Sprintf("prof-%d.json", i))
+		env := append(os.Environ(),
+			"MOZ_PROFILER_STARTUP=1", "MOZ_PROFILER_STARTUP_FEATURES=js,stackwalk,cpu",
+			"MOZ_PROFILER_STARTUP_FILTERS=*", "MOZ_PROFILER_SHUTDOWN="+out)
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		t0 := time.Now()
+		b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(bin), camoufox.WithHeadless(true), camoufox.WithEnv(env...))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t1 := time.Now()
+		bc, _ := b.NewContext(ctx)
+		p, err := bc.NewPage(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t2 := time.Now()
+		_ = p.Close(ctx)
+		b.Close()
+		time.Sleep(3 * time.Second)
+		st, _ := os.Stat(out)
+		size := int64(-1)
+		if st != nil {
+			size = st.Size()
+		}
+		row := fmt.Sprintf("PROF prof-%d launch=%.1fs newpage=%.1fs profile_bytes=%d", i, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), size)
+		rows = append(rows, row)
+		t.Log(row)
+		cancel()
+	}
+	_ = os.WriteFile(filepath.Join(dir, "timings.txt"), []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 }

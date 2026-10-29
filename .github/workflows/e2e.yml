@@ -166,6 +166,17 @@ jobs:
         run: |
           cd goapi
           for moz in 0 1; do ZZ_MOZLOG=$moz CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPhases -v -count=1 2>&1 | grep -E "PHASES|NET |FAIL" ; done; true
+      - name: Startup profiles (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: cd goapi && ZZ_PROF_DIR="$GITHUB_WORKSPACE/.ci-work/zzprof" CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZProfile -v -count=1 2>&1 | grep -E "PROF|FAIL" ; true
+      - name: Upload startup profiles
+        if: ${{ !cancelled() && runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: zzprof
+          path: .ci-work/zzprof
+          retention-days: 7
       - name: Run
         if: ${{ !cancelled() && inputs.probe == '' }}
         shell: bash
