@@ -142,7 +142,12 @@ jobs:
       - name: Unpack the browser for the observer and goapi gates
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
-        run: echo "CAMOUFOX_BINARY=$(python e2e/util.py $E2E_BROWSER)" >> "$GITHUB_ENV"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Assigned first: inside echo "$(...)" a failed unpack would not fail the step.
+          binary="$(python e2e/util.py $E2E_BROWSER)"
+          echo "CAMOUFOX_BINARY=$binary" >> "$GITHUB_ENV"
       - name: Observer tests
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
