@@ -2,18 +2,58 @@ diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList
 index 40212b6835..1f52f98726 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -2203,8 +2203,13 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -31,6 +31,7 @@
+ #include "mozilla/dom/ContentProcessMessageManager.h"
+ #include "mozilla/dom/Document.h"
+ #include "mozilla/dom/FontListManager.h"
++#include "mozilla/dom/NavigatorManager.h"
+ #include "mozilla/gfx/2D.h"
+ #include "mozilla/gfx/Logging.h"
+ #include "mozilla/glean/GfxMetrics.h"
+@@ -2191,7 +2192,32 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+   }
+ 
+   if (SharedFontList()) {
+-    fontlist::Family* family = SharedFontList()->FindFamily(key);
++    // Camoufox (#247, #319, #321): whether this lookup reads the other family
++    // names now instead of deferring them. Windows answers a legacy name with
++    // its base family first, as real Windows does, so a Windows claim keeps
++    // that and the deferral; a Linux or macOS claim there looks up primary
++    // names only so the miss reaches the read, and elsewhere every masked
++    // claim reads them at once.
++    const bool camouForce = [&] {
++      if (mOtherFamilyNamesInitialized ||
++          !CamouGenericTableApplies(aFontVisibilityProvider)) {
++        return false;
++      }
++#ifdef XP_WIN
++      const auto os = mozilla::dom::NavigatorManager::GetSpoofedOS(
++          mozilla::dom::FontListManager::ContextIdFor(aFontVisibilityProvider));
++      return os == MaskConfig::SpoofedOS::Linux ||
++             os == MaskConfig::SpoofedOS::MacOS;
++#else
++      return true;
++#endif
++    }();
++    bool camouPrimaryOnly = false;
++#ifdef XP_WIN
++    camouPrimaryOnly = camouForce;
++#endif
++    fontlist::Family* family =
++        SharedFontList()->FindFamily(key, camouPrimaryOnly);
+     // If not found, and other family names have not yet been initialized,
+     // initialize the rest of the list and try again. This is done lazily
+     // since reading name table entries is expensive.
+@@ -2199,8 +2225,11 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      // in practice, so avoid pulling in names at startup.
      if (!family && !mOtherFamilyNamesInitialized) {
        bool triggerLoading = true;
-+      // Camoufox (#247): a page under a launch-level or per-context font list
-+      // would otherwise draw the fallback for a legacy family name until the
-+      // loader has run, so its first lookup reads the names now.
-+      bool camouMasked = CamouGenericTableApplies(aFontVisibilityProvider);
++      // Camoufox (#247): a masked page would otherwise draw the fallback for a
++      // legacy family name until the loader has run, so it reads the names now.
        bool mayDefer =
 -          !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading);
 +          !(aFlags & FindFamiliesFlags::eForceOtherFamilyNamesLoading) &&
-+          !camouMasked;
++          !camouForce;
        if (IsAscii(key)) {
          // If `key` is an ASCII name, only trigger loading if it includes a
          // space, and the "base" name (up to the last space) exists as a known

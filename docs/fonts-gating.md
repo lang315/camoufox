@@ -72,6 +72,8 @@ a bare "the gate allows everything" reading will not show you either.
 
 ## Font read paths: gating status
 
+Smoke's name-gate arms measure the Windows package's universe (all seven groups) on a Linux runner; the Linux directory gate is measured by the face log and `test_build_tester_fontconfig` (#329).
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
@@ -225,6 +227,18 @@ spoofed OS, resolved as in system-ui (`NavigatorManager::GetSpoofedOS` of
   refuse and log `CAMOU-FL dwrite-subst os=<n> key=<name> allowed=0`.
 - A Windows identity, a lookup with no identity, and chrome keep stock
   substitution exactly.
+- Stock substitution is itself skipped when the original family is available.
+  `AddSubstitute` returns early when the shared list already holds the name
+  being substituted (`gfxDWriteFontList.cpp:2166-2174` at
+  `FIREFOX_158_0_1_RELEASE`), and `GetDirectWriteSubstitutes` does the same
+  (`:2222-2230`), unless `gfx.windows-font-substitutes.always` is true
+  (`StaticPrefList.yaml:7872`, default false). The bundle holds `Helvetica`
+  (`27__Helvetica.ttc`), `Times` (`69__Times.ttc`) and `Courier`
+  (`78__Courier.ttc`), so on a bundle-active launch those names are never
+  substituted. In a Windows launch the bundle is inactive
+  (`mStockFilesOnly`, `font-hijacker.patch`), the early return does not apply,
+  and the `kFontSubstitutes` row `Helvetica` to `Arial`
+  (`StandardFonts-win10.inc:232`) can take effect (#325).
 
 This is **gated by reading**. The measurement will be e2e `fonts_no_foreign_os`
 on a Windows host.
@@ -241,6 +255,66 @@ was unmeasured until #148; see "macOS host (#148)" below. #82 is closed by measu
 on run 34544934746 against a RED on run 34544937587, a build differing by one
 statement — but arm (j2), its bare-donor variant, is still unmeasurable on this
 bundle, so it rests on one arm.
+
+**The face that drew each range: `CAMOU-FL face` (#325).** Firefox's own record of this, the `(textrun-fontmatching)` line at `gfxTextRun.cpp:3878-3924` (`FIREFOX_158_0_1_RELEASE`), sits inside `#ifndef RELEASE_OR_BETA`. It printed nothing on Linux, Windows or macOS at `MOZ_LOG=textrun:4`, while the ungated `TEXTRUN [` lines printed, so a release build has no record of the drawn face. `zzz-font-face-log.patch` adds one at the end of `gfxFontGroup::ComputeRanges`, through the same `fontlist` module as the other `CAMOU-FL` lines (`MOZ_LOG=fontlist:4`; it costs nothing when the module is off):
+
+```
+CAMOU-FL face ctx=<id> families=<requested family list> [<start>:<end> u+<first code unit>] <face name> / <family name> ...
+```
+
+It proves which face drew each range, and the family name tells two faces of one family apart. It says nothing about refusal: a name the gate refused never reaches it, so read `CAMOU-FL gate` for that.
+
+## Legacy family names: first lookup (#247, #319, #321, #322)
+
+A legacy family name (name ID 1, such as `DejaVu Sans Condensed`) is an "other family name" that Firefox loads lazily. `font-other-names-sync.patch` reads the names on a masked page's first lookup. On Windows, `FontList::FindFamily` has a branch (`SharedFontList.cpp:1234-1317`) that strips the name's last word, reads the base family's face names once, and answers an alias hit with the base family's regular face before the load; a second name with the same base then misses ("already read") and reaches `InitOtherFamilyNames`, which stock defers to an idle task. The patch computes one predicate for both the lookup and the deferral: the page is masked and the names are not yet loaded and, on `XP_WIN`, the claimed OS is Linux or macOS. A Linux or macOS claim looks up primary names only (so the miss reaches the read) and reads at once. A Windows claim on a Windows host keeps stock Firefox's lookup and deferral (#321), as real Windows gives it. Elsewhere every masked claim reads the names at once. On a macOS host the alias table holds single-face aliases published at startup, so the `XP_WIN` gate keeps primary-names-only away from it.
+
+Known limit: `mOtherFamilyNamesInitialized` is process-wide. Once a Linux or macOS context forces the load, every later lookup in that process, a `windows` context included, gets the real face and not the base-first one. This applies to mixed-OS browsers and is not engineered around. Measured on a Linux launch with a `windows` context and a `macos` context (bug-fixes.md, #319, #321).
+
+### Known gap: a `windows` identity on a macOS or Linux host (#322)
+
+A `windows` identity on a non-Windows host answers a legacy name with its own face on the first lookup. Real Windows answers the base family's face (or nothing) until its loader has run, a minute later by default (`gfx.font_loader.delay` is 60000 ms on Windows, 8000 elsewhere, and Camoufox does not set it). This is a documented gap, not a fix: nothing in the code changes for it.
+
+Both sides were measured, `DejaVu Sans Condensed`, `Light` and `Serif Condensed` as `"<name>", monospace` against `sans-serif`, widths in px:
+
+| | first reading | at 15 s |
+|---|---|---|
+| Camoufox `v158.0.1-beta.34-fork.1` macOS release (BuildID `20261027060636`, `MacOS/camoufox` sha1 `955b413c46e9059ec1a452d18b517ec092118a0c`), `windows` and `linux` identity, bundled DejaVu | Condensed 468.17, Light 517.95 (both identities, monospace and sans-serif alike) | not re-read; the first reading is already the settled one |
+| stock Firefox 158.0.1 on Windows (run 40677114619, job 122778294832, windows-2025; DejaVu installed per user) | Condensed 520.45 (monospace) against 468.08 (sans-serif), Light 435.42 against 468.08, Serif Condensed 475.73 against 468.08 | Condensed 468.17, Light 517.95, Serif Condensed 475.73, identical in 3 of 3 launches |
+
+The macOS reading is the browser the user ships on a Mac; it carries launcher `camoufox` from the same release, and the binary was matched to the release asset by sha1.
+
+**How many names this could show on.** Read from the launcher's Windows font data (`python/src/camoufox/fonts.json`, key `win`), not measured: 335 names, 72 whose base (the name minus its last word) is also listed, and 47 of those in 15 base groups of two or more. That count is an upper bound, because some of them are primary families of their own (`Segoe UI Emoji`, `Noto Sans Arabic`, `Roboto Mono`). Examples: `Segoe UI` with Black, Light, Semibold, Semilight, Historic, Symbol, Variable and Emoji; `Yu Gothic UI` with Light, Semibold and Semilight; `Yu Gothic` with Light, Medium and UI; `DejaVu Sans` with Condensed, Light and Mono; `Roboto` with Condensed, Mono and Slab.
+
+**What would see it.** A page that measures a second legacy name of one base family before Windows's loader has run, and compares the answer with what Windows gives. One legacy name alone is not enough: the first lookup is the same on both sides.
+
+**What would close it.** Port the Windows branch of `SharedFontList::FindFamily` and its members (`mFaceNamesRead` and the alias bookkeeping) to the macOS and Linux lists and gate it by the claimed OS. That is a large multi-file patch, measurable only through full macOS and Linux builds, and still inexact (Windows's own loader timing and the order of its face reads). It was not done, and the exposure above is why.
+
+## A context of another OS in a host-OS launch (#320)
+
+A launch whose OS is the host's keeps the bundled fonts of the other OSes inactive: on Windows `MaskConfig::GetSpoofedOS() == Windows` makes `BundledFontFileEnumerator` list only Firefox's own bundled font (`font-hijacker.patch:149-152`), and on macOS `camouNativeIdentity` skips `ActivateBundledFonts` (`font-hijacker.patch:18-22`). The macOS and Linux fonts are in the Windows package (`browser/Makefile`, `package-windows --fonts windows macos linux`; 1513 files in `fonts/`, among them `27__Helvetica.ttc`, `31__HelveticaNeue.ttc` and `35__Menlo.ttc`), but they are never loaded. A context of another OS in such a launch, which exists only when the launch has `canvas_noise=True` (`NewContext` raises `ValueError` for another OS otherwise, `sync_api.py` docstring), therefore has only the host's families that its list admits. Its generics resolve within that list.
+
+Neither launcher warns when such a context is created. Python's `UserWarning` from `warn_fonts_excluded_by_launch` is about the launch font set, and the TypeScript launcher has no equivalent; no warning was added for this.
+
+**Windows host** (issue #320). Run 40727855673 (job 122955936144) and run 40728559218 (job 122958393809), windows-2025 (10.0.26100), `v158.0.1-beta.34-fork.1` win.x86_64, launcher from `main` at 199d4b41. `Camoufox 1.2.3 mmmmmmmmmmlli` at 48px, `"<name>", <generic>`, serif / sans-serif / monospace / cursive:
+
+| Context list | Name | Widths |
+|---|---|---|
+| `[Helvetica, Helvetica Neue, Menlo, Arial]` | every name, never-font included | 784.05 in all four generics |
+| the same plus `Segoe UI, Courier New, Consolas` | Segoe UI | 789.12 x4 |
+| | Courier New | 806.4 x4 |
+| | Consolas | 738.73 x4 |
+| | Arial | 784.05 x4 |
+| | never-font | 784.05, 784.05, 738.73, 784.05 |
+
+With the four-name list, only Arial has an installed face, so every generic and every absent name resolves to it, and 784.05 is Arial's width. The issue read this as "the page sees no variation at all". Segoe UI, Courier New and Consolas differ from the never-font in the larger list, so the page is not blind. The log agrees: `CAMOU-FL gate ... allowed=1` for every name (nothing is refused), no `default-unfiltered` line, and `generic-map generic=1..4 step=none key=none`, so each generic falls back within the list.
+
+**A control that can differ (lesson 4).** The issue's never-font read 784.05 in every column and looked like "the same face everywhere". It is not a control for Arial: in a Windows identity `sans-serif` resolves to Arial, so the never-font under `sans-serif` equals Arial by construction. Arial is shown to be a resolved face by the serif, monospace and cursive columns of the Windows context in the same browser (never-font 735.97, 738.73, 764.37 against Arial 784.05 in all four). `Helvetica` is metric-compatible with Arial, so this width cannot say which face drew it (#325). `dwrite-subst` logs only a refusal, and that context's list admits both names, so the log cannot produce a line there whether or not substitution ran.
+
+**Counterfactual, bundle active.** Run 40728559218, a macOS launch on the same Windows host: Helvetica Neue 797.13 x4, Menlo 809.2 x4, Arial 784.05 x4, never-font 797.13, 797.13, 809.2, 797.13. The faces the Windows-launch context lacks render when the bundle is active.
+
+**macOS host, mirror.** `v158.0.1-beta.34-fork.1` macOS release (BuildID 20261027060636, `MacOS/camoufox` sha1 `955b413c46e9059ec1a452d18b517ec092118a0c`), run locally on macOS (arm64, Darwin 24.6.0) with a scratch `HOME`, launch `os="macos"` with `canvas_noise=True`, a `windows` context whose fonts are `[Segoe UI, Arial, Courier New]`. Segoe UI [784.05, 784.05, 806.4, 784.05] equals the never-font [784.05, 784.05, 806.4, 784.05] (absent: no Windows faces on a Mac); Arial 784.05 x4 and Courier New 806.4 x4 are the host's. Gate lines `allowed=1` for all three, `generic-map generic=3 step=row key=courier new` and `step=none` for the others, no `default-unfiltered`. The same shape as the Windows case, with the host's families taking the generics.
+
+Not measured: a Linux host, Windows 10, and a context of another OS in a launch whose OS is the host's with the default launcher options (it raises). Whether a Windows context on a Mac should be able to draw Windows-only faces is a design question: the native identity keeps the bundle inactive on purpose.
 
 ## Two contexts in one content process (Firefox 156)
 

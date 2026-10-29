@@ -129,8 +129,10 @@ async def test_os(target_os: str) -> bool:
 # no longer tell the context's platform from the launch's: the family system-ui
 # should land on does not render, and the fallbacks that do render are the
 # same whichever platform was asked. So the arm is scored on the log line the
-# step writes (docs/fonts-gating.md, "system-ui"), and widths only decide
-# whether the arm can be read at all.
+# step writes (docs/fonts-gating.md, "system-ui"). The widths are printed and
+# not scored: with the macOS-only faces really off the search path (#329), the
+# context's `monospace` falls to Arial too, so the monospace baseline equals
+# Helvetica's width by construction and cannot tell whether the rewrite worked.
 #
 # "Arial" is in the list because the rewrite makes it the family the gate is
 # asked about for the name "Helvetica": without it the step's lookup finds
@@ -220,21 +222,14 @@ async def test_mixed_os_context(max_attempts: int = 15) -> bool:
     if launch_platform != "Win32" or platform != "MacIntel":
         failures.append("the launch or the context did not take its platform -- "
                         "this arm measures nothing")
-    # Precondition, not the verdict. The step only logs when its lookup of
-    # "Helvetica" resolves, and that lookup is the canvas's named lookup. If the
-    # name does not render here, a missing step=system-ui line says nothing about
-    # which platform was asked.
-    if widths["Helvetica"] == baseline:
-        failures.append("Helvetica does not resolve in this font universe (the "
-                        "Helvetica -> Arial rewrite did not produce a rendered family) -- "
-                        "the step cannot log, so this arm measures nothing")
     if len(ctxs) != 1:
         failures.append(f"expected exactly one context id behind {MIXED_OS_URI}, found "
                         f"{sorted(ctxs)} -- the log cannot be attributed to the context")
     elif not steps:
         failures.append("no `CAMOU-FL generic-map ... generic=7` line for the context -- "
                         "either the log module did not capture the step or system-ui never "
-                        "reached the generic map (a product regression)")
+                        "reached the generic map (a product regression), or the "
+                        "Helvetica -> Arial rewrite produced no family and the step could not log")
     else:
         # The verdict. A `step=system-ui` line with a family can only come from
         # the context's own platform (MacIntel): its Helvetica is on the list and

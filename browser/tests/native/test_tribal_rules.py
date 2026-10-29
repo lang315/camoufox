@@ -432,6 +432,17 @@ def test_the_macos_package_ships_no_macos_only_fonts():
     assert fonts.group(1).split() == ["windows", "linux"], explain("macos-package-ships-no-macos-only-fonts")
 
 
+def test_fc_activates_only_firefox_own_bundled_fonts():
+    """Rule: fc-activates-only-firefox-own-bundled-fonts."""
+    patch = (BROWSER / "patches" / "linux-bundled-fonts-toplevel.patch").read_text(encoding="utf-8")
+    added = [line for line in patch.splitlines() if line.startswith("+") and not line.startswith("+++")]
+    removed = [line for line in patch.splitlines() if line.startswith("-") and not line.startswith("---")]
+    why = explain("fc-activates-only-firefox-own-bundled-fonts")
+    assert any("FcConfigAppFontAddFile(" in line for line in added), why
+    assert not any("FcConfigAppFontAddDir(" in line for line in added), why
+    assert any("FcConfigAppFontAddDir(" in line for line in removed), why
+
+
 def test_a_native_identitys_system_ui_family_is_never_masked():
     """Rule: native-system-ui-family-never-masked."""
     patch = (BROWSER / "patches" / "system-ui-font-spoofing.patch").read_text(encoding="utf-8")
