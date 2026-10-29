@@ -232,7 +232,7 @@ def unpack(archive: Path, into: Path) -> None:
         finally:
             subprocess.run(["hdiutil", "detach", str(mount)], check=True, capture_output=True)
     else:  # The installer is a 7-Zip archive whose core/ directory is the browser.
-        seven_zip = shutil.which("7z") or shutil.which("7za")
+        seven_zip = shutil.which("7z") or shutil.which("7zz") or shutil.which("7za")
         if not seven_zip:
             raise SystemExit("7z is required to unpack stock Firefox's Windows installer; install 7-Zip")
         subprocess.run([seven_zip, "x", "-y", f"-o{into}", str(archive), "core"], check=True, capture_output=True)
