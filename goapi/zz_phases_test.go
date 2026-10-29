@@ -102,6 +102,7 @@ func TestZZPhases(t *testing.T) {
 			t.Fatal(err)
 		}
 		t3 := time.Now()
+		plat, _ := p.Evaluate(ctx, "navigator.platform")
 		var ctlSrv *httptest.Server
 		if os.Getenv("ZZ_MOZLOG") == "1" && i == 0 {
 			ctlSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("zz-control")) }))
@@ -119,8 +120,8 @@ func TestZZPhases(t *testing.T) {
 		marks := camoufox.ZZTake()
 		_ = p.Close(ctx)
 		b.Close()
-		t.Logf("PHASES moz=%s %s#%d launch=%.1f context=%.1f newpage=%.1f stages:%s | profile(after newpage) %s",
-			os.Getenv("ZZ_MOZLOG"), arm, i, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), t3.Sub(t2).Seconds(), deltas(marks, t0), snap)
+		t.Logf("PHASES moz=%s %s#%d platform=%v launch=%.1f context=%.1f newpage=%.1f stages:%s | profile(after newpage) %s",
+			os.Getenv("ZZ_MOZLOG"), arm, i, plat, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), t3.Sub(t2).Seconds(), deltas(marks, t0), snap)
 		t.Logf("NET moz=%s %s#%d wall=%.1fs cpu_sum=%.1fs %s", os.Getenv("ZZ_MOZLOG"), arm, i, t3.Sub(t0).Seconds(), cpu, netSummary(logBase))
 		if ctlSrv != nil {
 			// The arm is void unless the browser's own request to this local server appears in the log.
@@ -221,6 +222,7 @@ func TestZZProfile(t *testing.T) {
 			t.Fatal(err)
 		}
 		t2 := time.Now()
+		plat, _ := p.Evaluate(ctx, "navigator.platform")
 		_ = p.Close(ctx)
 		b.Close()
 		time.Sleep(3 * time.Second)
@@ -229,7 +231,7 @@ func TestZZProfile(t *testing.T) {
 		if st != nil {
 			size = st.Size()
 		}
-		row := fmt.Sprintf("PROF prof-%d launch=%.1fs newpage=%.1fs profile_bytes=%d", i, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), size)
+		row := fmt.Sprintf("PROF prof-%d platform=%v launch=%.1fs newpage=%.1fs profile_bytes=%d", i, plat, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), size)
 		rows = append(rows, row)
 		t.Log(row)
 		cancel()
