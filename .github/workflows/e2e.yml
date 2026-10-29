@@ -129,8 +129,26 @@ jobs:
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
           if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
+      - name: Unpack the browser (family check)
+        if: ${{ inputs.k == 'zz_family' && runner.os == 'Windows' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          binary="$(python e2e/util.py $E2E_BROWSER)"
+          echo "CAMOUFOX_BINARY=$binary" >> "$GITHUB_ENV"
+      - name: Family grouping check (Windows)
+        if: ${{ inputs.k == 'zz_family' && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          Write-Output "VS: $vs"
+          cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" && cl /nologo /EHsc /O2 /std:c++17 /Fe:.ci-work\fam.exe .ci-work\fam.cpp dwrite.lib"
+          $fonts = Join-Path (Split-Path $env:CAMOUFOX_BINARY) "fonts"
+          Write-Output "fonts dir: $fonts ($((Get-ChildItem $fonts).Count) entries)"
+          .\.ci-work\fam.exe $fonts
       - name: Run
-        if: inputs.probe == ''
+        if: ${{ inputs.probe == '' && inputs.k != 'zz_family' }}
         shell: bash
         working-directory: e2e
         env:
