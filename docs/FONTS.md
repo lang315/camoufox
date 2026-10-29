@@ -77,6 +77,13 @@ What differs is how the groups are gated:
   `<dir>` per group the claimed OS reads. The parent is never named, because
   fontconfig scans `<dir>` **recursively** — naming it would put every other
   OS's faces on the search path.
+  The browser holds the same line: `gfxFcPlatformFontList::ActivateBundledFonts`
+  (`linux-bundled-fonts-toplevel.patch`) adds only the files directly in
+  `fonts/`, Firefox's own, and never the directory. Upstream added the directory
+  as an application font directory, which put every group on the search path
+  past this conf (#329). A raw launch of the Linux binary with no
+  `FONTCONFIG_FILE` therefore measures the host's fonts, not the bundle's; a
+  harness that reads fonts takes the conf from `utils._generate_fontconfig`.
 - **macOS and Windows packages** flatten the groups into one directory: CoreText
   and DirectWrite activate a single directory and cannot read subfolders. There
   is no directory gate on those hosts; the allowlist in

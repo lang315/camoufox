@@ -102,8 +102,8 @@ jobs:
           #   linux/   sans-serif=Noto Sans serif=Noto Serif    monospace=DejaVu Sans Mono
           #   macos/   sans-serif=Helvetica serif=Times         monospace=Menlo
           #   windows/ sans-serif=Arial  serif=Times New Roman  monospace=Consolas
-          # All three contain the `<dir prefix="cwd">fonts</dir>` needle, so the
-          # substitution guard below cannot catch a wrong pick. Picking the
+          # All three have the same shape, so only the identity check below can
+          # catch a wrong pick. Picking the
           # macOS file would silently make three arms mean something else: (n1)
           # would resolve serif to Times, which does not cover U+1C80, so the
           # ungated pref path produces no leak and the arm reads GREEN for the
@@ -663,7 +663,7 @@ jobs:
           # were in every font list and every arm measured a font universe no
           # shipped Camoufox has (recon open question 4). python/src/camoufox/
           # utils.py:238 sets FONTCONFIG_FILE for exactly this reason; this is
-          # the same substitution _generate_fontconfig (utils.py:58-92) makes.
+          # the same file: it calls _generate_fontconfig.
           #
           # CONSEQUENCE, stated up front because it decides three arms:
           # bundle/fontconfig/linux/fonts.conf resolves serif/sans-serif/
@@ -704,12 +704,8 @@ jobs:
           FC_DIR = os.path.join(os.environ.get("RUNNER_TEMP", "/tmp"), "camou-fc")
           os.makedirs(os.path.join(FC_DIR, "cache"), exist_ok=True)
           _conf = open(FONTS_CONF_SRC, encoding="utf-8").read()
-          _needle = '<dir prefix="cwd">fonts</dir>'
-          assert _needle in _conf, (
-              f"{FONTS_CONF_SRC} does not contain {_needle!r}; the bundle's fonts.conf "
-              f"has changed shape and this substitution would silently do nothing.")
           # Identity check, not a path check: all three bundled fonts.conf files
-          # carry the needle above, so only their generic families tell them apart.
+          # have the same shape, so only their generic families tell them apart.
           # The linux conf resolves serif / monospace / cursive to Noto Serif /
           # DejaVu Sans Mono / Z003; those names appear ONLY in the linux file
           # (verified: grep -c over the macos and windows files returns 0 for
@@ -721,14 +717,39 @@ jobs:
               f"{FONTS_CONF_SRC} does not name {_missing}: this is not the LINUX "
               f"fonts.conf, and arms (n1), (n2) and (n4) all rest on its generics. "
               f"See the unpack step's -path '*/fontconfig/linux/fonts.conf' pin.")
-          _conf = _conf.replace(_needle, "<dir>%s</dir>" % FONTS_DIR)
+          # The launcher's own generator writes the base conf (#329): the group
+          # directories the Linux identity reads, never the fonts/ parent.
+          #
+          # The name-gate arms below then run in the Windows package's universe,
+          # not Linux's: the flat Windows package activates all seven font groups
+          # in any non-Windows launch and only the name gate restricts a lookup
+          # (docs/FONTS.md). Arms (a) and (b) and MAC_ONLY need macOS-only faces on
+          # the search path, or the gate has nothing to refuse and their positive
+          # control (Helvetica Neue) cannot render. So the M, W and MW directories
+          # are appended to the launcher's list explicitly, one <dir> each, and
+          # the fonts/ parent is never named. The Linux directory gate is measured
+          # elsewhere: the `CAMOU-FL face` line and test_build_tester_fontconfig.
+          os.environ["XDG_CACHE_HOME"] = os.path.join(FC_DIR, "cache")
+          from pathlib import Path as _Path
+          from camoufox.utils import _generate_fontconfig
+          _base = _generate_fontconfig(
+              os.path.dirname(FONTS_CONF_SRC), path=_Path(os.environ["CAMOUFOX_BIN"]), os_dir="linux")
+          _conf = open(_base, encoding="utf-8").read()
+          _anchor = "<dir>%s</dir>" % os.path.join(FONTS_DIR, "LMW")
+          assert _conf.count(_anchor) == 1, (
+              f"{_base} has {_conf.count(_anchor)} of {_anchor!r}: the launcher's conf changed "
+              f"shape and the Windows-universe groups would not be added, so this step "
+              f"would silently measure the Linux universe.")
+          _extra = [os.path.join(FONTS_DIR, _g) for _g in ("M", "W", "MW")]
+          for _d in _extra:
+              assert os.path.isdir(_d), f"{_d} is not a directory in the package"
+          _conf = _conf.replace(_anchor, _anchor + "".join("\n\t<dir>%s</dir>" % _d for _d in _extra))
           FONTCONFIG_FILE = os.path.join(FC_DIR, "fonts.conf")
           with open(FONTCONFIG_FILE, "w", encoding="utf-8") as _fh:
               _fh.write(_conf)
           os.environ["FONTCONFIG_FILE"] = FONTCONFIG_FILE
-          os.environ["XDG_CACHE_HOME"] = os.path.join(FC_DIR, "cache")
-          print(f"  [setup] FONTCONFIG_FILE={FONTCONFIG_FILE} "
-                f"src={FONTS_CONF_SRC} fonts_dir={FONTS_DIR} "
+          print(f"  [setup] universe=Windows package (all seven groups); FONTCONFIG_FILE={FONTCONFIG_FILE} "
+                f"base={_base} src={FONTS_CONF_SRC} dirs={re.findall(r'<dir>(.*?)</dir>', _conf)} "
                 f"xdg_cache={os.environ['XDG_CACHE_HOME']}")
           # -------------------------------------------------------------------
 

@@ -584,6 +584,25 @@ rules:
       macOS-only group is never read there. A Windows or Linux identity reads
       only its own OS's groups, and the shared groups still ship.
 
+  - id: fc-activates-only-firefox-own-bundled-fonts
+    title: On Linux the browser activates only the files directly in fonts/; the groups come from the launcher's conf
+    check: automated
+    evidence:
+      - "issue #329: on a Linux host a Linux launch drew `fonts/M/27__Helvetica.ttc` for Helvetica, `fonts/M/69__Times.ttc` for Times and `fonts/M/0__arial.ttf` for Arial (CAMOU-FL face, e2e run 40779839195 on the Linux build of PR #328), while `fc-match -s` against the generated FONTCONFIG_FILE listed only L and LW files"
+      - "issue #329, removal arm (e2e run 40780901666): with fonts/M, fonts/W and fonts/MW moved out of the browser directory the same names drew `L/openadd-NimbusSans-Regular.otf`, `L/openadd-NimbusRoman-Regular.otf` and `L/openadd-NimbusMonoPS-Regular.otf`"
+      - "gfxFcPlatformFontList.cpp:3095-3117 at FIREFOX_158_0_1_RELEASE: ActivateBundledFonts() called FcConfigAppFontAddDir on <GRE>/fonts, which fontconfig scans recursively"
+    rationale: >-
+      Which font groups an OS reads is decided in one place,
+      utils._generate_fontconfig, which hands fontconfig one <dir> per group
+      and never the fonts/ parent. Upstream's ActivateBundledFonts added the
+      parent as an application font directory, which put every group of every
+      OS on the search path regardless of that conf; the allowlist filters by
+      family name, not by origin, so any admitted name drew whatever group
+      carried it. linux-bundled-fonts-toplevel.patch adds only the files
+      directly in fonts/ (Firefox's own bundled faces). A harness that launches
+      the Linux binary and reads fonts must set FONTCONFIG_FILE from the
+      launcher's generator; a raw launch measures the host's fonts.
+
   - id: native-system-ui-family-never-masked
     title: A native identity's system UI family is never refused by the launch font mask
     check: automated
@@ -831,6 +850,22 @@ rules:
       1.7 s longer, and by reading the code the loader would read every cmap at
       startup, which fallback-miss-while-cmaps-load.py needs pending. The patch
       changes one argument on the one lookup that needs it, for a masked page.
+
+  - id: legacy-family-names-windows-claim-stock-path
+    title: A Windows claim on a Windows host takes stock Firefox's legacy-name lookup and deferral
+    check: manual
+    evidence:
+      - "#321, run 40694052562: on windows-2025 the monospace row of the five-name arm is identical in stock 158.0.1 and the fix build, and differs from v158.0.1-beta.34-fork.1 on four of five names"
+      - "Firefox 158.0.1 gfx/thebes/SharedFontList.cpp:1234-1317: the XP_WIN branch of FontList::FindFamily answers a legacy name with its base family and defers the rest"
+      - "browser/tests/playwright/patches/legacy-family-names-first-measure.py, windows_host_parity"
+    rationale: >-
+      Real Windows Firefox is base-family-first and defers the other names, so
+      a Windows identity on a Windows host is closest to a real machine when it
+      runs the unmodified path. The patch forces the synchronous read only for a
+      Linux or macOS claim there. Forcing it for every masked claim, as #247 did,
+      let a page tell the two apart by measuring two legacy names of one base.
+      The same difference on a macOS or Linux host is a known gap (#322), see
+      docs/fonts-gating.md.
 
   - id: ipv4-only-network-not-disable-ipv6
     title: geoip without a proxy keeps IPv6 only where it agrees, and never uses network.dns.disableIPv6

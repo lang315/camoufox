@@ -26,6 +26,110 @@ later change should read first.
 
 **What misled the investigation.** The Windows log showed PASS lines before the traceback, which reads as a passing test with noisy teardown; the exit code and the `PermissionError` frame are what failed the run.
 
+## #329: on a Linux host, bundle activation added every font group, bypassing the per-OS directory gate
+
+**Fixed by:** the PR that adds `browser/patches/linux-bundled-fonts-toplevel.patch`. **Found by:** the #325 face-log measurement.
+
+**Symptom.** A Linux launch on a Linux host drew files from `fonts/M/` for names its font list admits: `Helvetica` drew `M/27__Helvetica.ttc`, `Arial` drew `M/0__arial.ttf`, `Times` drew `M/69__Times.ttc`, and the generics `serif`, `sans-serif` and `monospace` drew `M/69__Times.ttc`, `M/27__Helvetica.ttc` and `M/910__Courier New.ttf`. `fc-match -s` against the generated `FONTCONFIG_FILE` listed only `L` and `LW` files, with Nimbus Sans first for `Helvetica`.
+
+**Root cause.** `gfxFcPlatformFontList::ActivateBundledFonts()` (`gfxFcPlatformFontList.cpp:3095-3117` at FIREFOX_158_0_1_RELEASE) called `FcConfigAppFontAddDir` on `<GRE>/fonts`, and fontconfig scans that recursively. `browser/settings/camoufox.cfg` keeps `gfx.bundled-fonts.activate` at 1. Every group of every OS therefore sat on the application font list, past the group directories `utils._generate_fontconfig` names, and the allowlist filters by family name, not by origin (CLAUDE.md lesson 1).
+
+**Fix.** Add only the files directly in `fonts/` (Firefox's own `TwemojiMozilla.ttf`) with `FcConfigAppFontAddFile`. Which groups an OS reads stays decided in one place, the launcher's generator. build-tester now sets `FONTCONFIG_FILE` from that generator, and `smoke.yml` calls it instead of substituting the `fonts/` parent into the conf by hand.
+
+**Not tried / failed.** Setting `gfx.bundled-fonts.activate=0` through `custom_fonts_only=True` changed nothing, because the launcher applies that pref at runtime and the font list reads it at startup; it would also drop Firefox's own faces. Reading `groups.json` in C++ was rejected: it would be a second copy of the group choice.
+
+**Evidence.** Face log (`CAMOU-FL face`), same preset font list, Linux host. Red, the build of PR #328 (Tests run 40781286151, probe run 40791200138): `Helvetica` `M/27__Helvetica.ttc`. Green, this change's build (Tests run 40785905651, probe run 40791218227): `Helvetica` `L/openadd-NimbusSans-Regular.otf`, `Times` `L/openadd-NimbusRoman-Regular.otf`, `Courier` `L/openadd-NimbusMonoPS-Regular.otf`, `Arial` `L/z__Arimo[wght].ttf`, `Times New Roman` `L/z__Tinos-Regular.ttf`, `Courier New` `L/z__Cousine-Regular.ttf`. `Twemoji Mozilla` draws `fonts/TwemojiMozilla.ttf` in both builds. Removing `fonts/M`, `fonts/W` and `fonts/MW` from the red build moved every row the same way (probe run 40780901666).
+
+One guard moved: `system-ui-font-spoofing.py`, arm "macos context in a windows launch". Its precondition scored `Helvetica` against the width of `monospace`. In the red build that `monospace` drew `M/35__Menlo.ttc` inside a Windows launch, so the width differed from Arial's by accident of the leak; in the green build it draws `MW/382__arial.ttf`, the same face the `Helvetica` to `Arial` rewrite gives, so the control equalled the value under test. The arm is scored on the `step=system-ui key=arial` line, which both builds write; the width precondition is removed.
+
+**What misled the investigation.** `fc-match -s` against the generated conf looked right and was the wrong universe: it does not see application fonts. The `activate=0` arm read as "the mechanism is something else"; it only showed the pref had not reached startup. Every Linux font measurement since the groups were introduced was taken with the M and W faces on the path (CLAUDE.md lesson 8). The rule is in `ci/tribal-rules.yml`: `fc-activates-only-firefox-own-bundled-fonts`.
+
+## #321: a `windows` identity on a Windows host differed from stock Firefox 158.0.1 on the first legacy-name lookups
+
+**Fixed by:** the PR that makes `browser/patches/font-other-names-sync.patch` leave a Windows claim on a Windows host on the stock path. **Found by:** the #319 review; measured against stock 158.0.1 on windows-2025.
+
+**Symptom.** With `launch_options(os="windows", fonts=[...])` on a Windows host, two legacy names of one base family in the same page (for example `Segoe UI Light` and `Segoe UI Semibold`) read differently from stock Firefox. Width of `HxmW0 .8Qgy` at 72 px, `"<name>", monospace`, first reading, `all` arm (Semibold, Light, Semilight, Calibri Light, Franklin Gothic Medium): stock `[457.92, 435.42, 435.42, 420, 439.42]`, fork.1 `[457.92, 439.75, 449.02, 415.43, 439.42]`. Fork.1 showed the settled face of the later names at once; stock showed its not-yet-resolved fallback until the font loader had run. A page can compare the two.
+
+**Root cause.** The first lookup of each name is identical in stock and Camoufox (single-name arms agree). The difference is the second lookup of a name with the same base. `FontList::FindFamily` has an `#ifdef XP_WIN` branch (`SharedFontList.cpp:1234-1317`) that strips the last word, reads the base family's face names once (`mFaceNamesRead[match]`) and answers an alias hit with the base family. A later lookup of another name with that base finds the base "already read" and returns `nullptr`, so the caller reaches `InitOtherFamilyNames`. Stock defers that read to an idle task (`mayDefer`). #247 had forced a synchronous read there for every masked page, so a Windows claim resolved the second name at once. After #319 only Linux and macOS claims looked up primary names; the #247 `mayDefer = false` still applied to a Windows claim.
+
+**Fix.** One predicate, computed once in `FindAndAddFamiliesLocked` and used at both sites (the primary-names-only lookup and `mayDefer`): the page is masked and not already initialised, and on `XP_WIN` the claim (`GetSpoofedOS(ContextIdFor(provider))`) is Linux or macOS. A Windows claim on a Windows host therefore takes stock Firefox's code path, base-first answer and idle deferral included. Elsewhere every masked page still reads the names at once, as before. See `ci/tribal-rules.yml`, `legacy-family-names-windows-claim-stock-path`.
+
+**Not tried.** Setting `gfx.font_loader.delay` (the cost recorded under #247), and keeping the forced read and emulating the base answer by hand.
+
+**Evidence.** Probe run 40694052562 (job 122836062937, windows-2025, 10.0.26100) with the red build `v158.0.1-beta.34-fork.1` (BuildID `20261027085446`) and the fix build, run 40676976006 (job 122777829509, `windows-x86_64`, headSha `2fe0e61f1bec505b1de546eb15910920031e4908`; the docs commits after it touch none of the paths that decide a rebuild). Stock is Firefox 158.0.1 `win64/en-US` (installer sha256 `3259a2f8508e58cf2e383b6c99bfc64d6ddc86d1407b7c2f86f660af955b5d10`, checked against the https-served `SHA256SUMS`). Launcher: `camoufox` from this branch.
+
+Regression arm (`legacy-family-names-first-measure.py`, `windows_host_parity`, Windows host only): identity `windows`, fonts `Segoe UI Semibold`, `Segoe UI Light` and a never-installed name in one page and pass. The control is the never-installed name; Light's own width (439.75) differs from absent's (468.08), but that is not guaranteed on every host, so the arm asserts Light's first width equals the never-font's and its settled width is its own.
+
+| Reading, monospace | fork.1 (red) | fix build |
+|---|---|---|
+| Segoe UI Semibold first | 457.92 | 457.92 |
+| Segoe UI Light first | 439.75 | 468.08 (= never-font) |
+| never-font first | 468.08 | 468.08 |
+
+The guard itself, run at head `ec821a8078671abd4bb4ba406d53624413bedb53` on windows-2025 (probe run 40711684052, job 122898388041; an earlier probe, run 40694052562, ran a copy of the guard without this arm, so its numbers below are from `e2e/probes/t02_resolve321.py`, not the guard). Host arm, monospace, `host first` / `host settled`:
+
+| Check | fork.1 (exit 1) | fix build (exit 0, `PASS`) |
+|---|---|---|
+| first lookup of the base family's second legacy name reads as the never-font | `[FAIL]` 439.75 (expected 468.08) | `[ok  ]` 468.08 |
+| first lookup of the base family's first legacy name answers | `[ok  ]` | `[ok  ]` |
+| second legacy name settled on a width other than the never-font's | `[ok  ]` | `[ok  ]` |
+| second legacy name settled on its own face (same width under both generics) | `[ok  ]` 439.75 | `[ok  ]` 439.75 |
+| DejaVu arm: first width was not the settled width | `[FAIL]` `['DejaVu Sans Condensed']` | `[ok  ]` `[]` |
+
+Host first, fork.1: Semibold 457.92, Light 439.75, never-font 468.08; fix: 457.92, 468.08, 468.08. Settled on both: 473.82, 439.75, 468.08. The two generics' fallbacks are not a usable control: the settled never-font reads 468.08 under both, so a check that they differ failed on both builds (run 40709865242) and was replaced by the settled Light-against-never-font check above.
+
+`t02_resolve321.py`, 5 launches each, identical: fork.1 `Light=439.75 never=468.08`, fix `Light=468.08 never=468.08`. Time for Light to resolve after the first reading: 0.5 to 0.7 s on the fix build, with one 5.6 s outlier on fork.1 (run 0); the margin between "first" and "resolved" is small, but the first reading is one synchronous call and the assertion is on that call.
+
+Name-order parity, `all` arm, monospace row, widths in px (the three lists are the five names in the order above):
+
+| | first | at 15 s |
+|---|---|---|
+| stock 158.0.1 | 457.92, 435.42, 435.42, 420, 439.42 | 473.82, 439.75, 449.02, 415.43, 439.42 |
+| fix build | 457.92, 435.42, 435.42, 420, 439.42 | 473.82, 439.75, 449.02, 415.43, 439.42 |
+| fork.1 | 457.92, 439.75, 449.02, 415.43, 439.42 | 473.82, 439.75, 449.02, 415.43, 439.42 |
+
+The sans-serif row differs between stock and the fix build by one constant: unresolved names read the generic fallback, 468.08 in stock and 457.92 under the Windows identity, for every name alike. The same holds in all single-name arms and in `Light` then `Calibri Light` in either order (stock `[457.92, 420]` and `[420, 457.92]`, fix the same). So the rows match name by name; the generic's own width is not the same object in the two browsers and is not claimed equal.
+
+#319 proofs on the fix build, `DejaVu Sans Condensed` first reading, 3 launches each: `os=linux` 468.17, `os=macos` 468.17 (fork.1 520.45); the `windows` row unchanged (Semibold absent first, 473.82 settled).
+
+**Not explained.** Stock `only:Calibri Light` returned no reading in run 40674899610 (no POST within 60 s). In run 40694052562 it returned in 3 of 3 repeats (first `[420, 468.08]`, settled 415.43), but `only:Segoe UI Semibold` returned nothing (`proc.poll=1`: the stock process had exited). Two different stock arms failed to report once each; I did not establish why, and the camoufox arms never failed to report. `MOZ_LOG=fontinit:5` printed no `OtherFamilyNames` lines for any Camoufox arm, so the idle task's timing is read from widths, not from the log.
+
+**What misled the investigation.**
+- The issue's "=absent" and "=base" verdicts used the identity's generic fallback as the reference. On this font set the generic can equal `Segoe UI`'s width, so a resolved name and an unresolved one could read the same. Raw widths, and the invariant "a resolved name has the same width under monospace and sans-serif", were the control (lesson 4). The comparator in the probe is itself confounded by the state change between its monospace and sans passes, and was not used for conclusions.
+- #247's and #319's guards ran a non-Windows identity on the Windows leg, so the Windows-claim path on a Windows host had no arm at all.
+
+## #319: on a Windows host, a `linux` or `macos` identity measured `DejaVu Sans Condensed` as `DejaVu Sans` on the first lookup
+
+**Fixed by:** the PR that makes `browser/patches/font-other-names-sync.patch` look up primary names only for a Linux or macOS claim. **Found by:** the first assertion of `legacy-family-names-first-measure.py` failing on the Windows leg (run 40643268942).
+
+**Symptom.** On windows-2025 with `v158.0.1-beta.34-fork.1`, `launch_options(os="linux" or "macos", fonts=[the three legacy DejaVu names, ...])` measured `"DejaVu Sans Condensed", monospace` at 520.45 px on the first lookup of a fresh browser, and 468.17 px after 12 s. 520.45 is `DejaVu Sans`'s width; the fallback is 475.2. Identical in all 6 launches (3 per OS).
+
+**Root cause.** #247 made the first lookup read the other family names at once (`mayDefer` false). On Windows that code is never reached for a legacy name: `SharedFontList()->FindFamily(key)` in `gfxPlatformFontList::FindAndAddFamiliesLocked` has an `#ifdef XP_WIN` branch (`SharedFontList.h:146`, `aPrimaryNameOnly` false) that answers a legacy (GDI name ID 1) name with its base family's regular face until the loader has filled `AliasFamilies`. `DejaVu Sans Condensed` is answered as `DejaVu Sans`, so `family` is non-null and the `InitOtherFamilyNames` block below it is skipped.
+
+**Fix.** Under `#ifdef XP_WIN`, the lookup passes `aPrimaryNameOnly = true` when the page is masked (`CamouGenericTableApplies`) and the claimed OS is Linux or macOS (`NavigatorManager::GetSpoofedOS(ContextIdFor(provider))`: the context's platform, else the launch's). A primary-names-only miss falls into the existing #247 block, which reads the names and finds the family. A Windows claim keeps the stock branch, because real Windows Firefox is base-family-first. The gate is Windows-only because that is where the bug and the branch it bypasses are: primary-names-only also skips the alias table (`SharedFontList.cpp:1221-1225`), which on a macOS host holds single-face aliases such as Osaka-Mono published at startup (`gfxMacPlatformFontList::InitAliasesForSingleFaceList`), and a masked macOS or Linux claim there would have lost them and paid the synchronous load. Linux hosts set `mOtherFamilyNamesInitialized` at init. The hunk adds the `mozilla/dom/NavigatorManager.h` include, and `system-ui-font-spoofing.patch` no longer adds it; see the patch-order trap below. `patch-dependencies.md` records the new dependencies.
+
+**Not tried.** Forcing `gfx.font_loader.delay=0` (the cost already recorded under #247), and calling the loader synchronously on a Windows host only.
+
+**Evidence.** Build 40661180714 (`windows-x86_64`, branch `fix/319-dejavu-first-lookup`, headSha `92d555c082ee8ae8ed8fdb137f005d85589df58c`, BuildID `20261028091235`) against `v158.0.1-beta.34-fork.1` (BuildID `20261027085446`) as the red; both on windows-2025 (10.0.26100), launcher `camoufox` from this branch, probe run 40666976745, job 122744151446. Width of `HxmW0 .8Qgy` at 72 px, `"DejaVu Sans Condensed", monospace`, first reading, 3 launches per cell, all identical:
+
+| Arm | fork.1 (red) | fix build |
+|---|---|---|
+| `os=linux` launch | 520.45 | 468.17 |
+| `os=macos` launch | 520.45 | 468.17 |
+| `os=windows` launch, Segoe UI Semibold first / settled | absent / 473.82 | absent / 473.82 (the whole row unchanged) |
+| Linux launch, `windows` context | 520.45 | 520.45 (stock base-first, as intended) |
+| Linux launch, `macos` context | 520.45 | 468.17 |
+
+The regression test is the guard itself. `legacy-family-names-first-measure.py` now launches a `linux` identity on a Windows host (a `windows` one uses the host fonts, which hold no DejaVu), and `windows` elsewhere. On the same job: fork.1 `[FAIL] legacy names whose first width was not their settled width: ['DejaVu Sans Condensed'] (expected [])`, exit 1; fix build `PASS`, exit 0.
+
+Cost of the fix, `other_names_stall.py --os linux --runs 6` on the same two binaries, first call in ms per run: fork.1 6327, 6341, 6317, 6333, 7555, 9466; fix 7288, 6474, 6336, 6370, 6331, 6310. Second calls were 2 to 4 ms on fork.1 and 0 to 1 ms on the fix. The first call takes about 6.3 s on both builds, so that time is not the synchronous load, and the fix adds none measurable over it. What the 6.3 s is was not established.
+
+**What misled the investigation.**
+- #247's guard was green on Windows only because a `windows` identity there uses the host's fonts, not the bundle. The one arm that would hit the Windows branch (a non-host identity) was not on the Windows leg's path.
+- A filtered dry-run hid a failure. The first fix build (40647125718) failed on `system-ui-font-spoofing.patch` with `Reversed (or previously applied) patch detected! 9 out of 9 hunks ignored` and a `.rej`: both patches added the same include, so GNU patch took the later patch's first hunk as already applied and skipped the whole file. The dry-run output had been piped through a filter that dropped that line. Read the full dry-run for `Reversed`, `FAILED`, `fuzz`, `.rej` and the exit code.
+
+**Known limit.** `mOtherFamilyNamesInitialized` is process-wide. Once a Linux or macOS context has forced the load, every later lookup in that process, a `windows` context included, finds the real face and not the base-first one. That is a limit of mixed-OS browsers (see `docs/fonts-gating.md`), and it is not engineered around. Open parity gap: #322, a `windows` identity on a non-Windows host answers a legacy face at once (measured since; see `docs/fonts-gating.md`). #321, a `windows` identity on Windows differing from stock, is the entry above. Windows 10 was not tested.
+
 ## #307: getter-cost-parity failed once on `history.length`, a getter Camoufox does not spoof
 
 **Fixed by:** the PR that removes `history.length` from the guard's `WINDOW` list and prints the host CPU on a failure. **Found by:** run 40441871195, job 122011451961, on the 158.0.1 sync.
@@ -388,9 +492,9 @@ The macOS arm64 package built from this branch (build run 39097137899, BuildID `
 
 **Root cause.** macOS registers these faces under their typographic family (`DejaVu Sans`, `DejaVu Serif`, name ID 16). Firefox finds the legacy name (name ID 1) through "other family names", which `gfxPlatformFontList::FindAndAddFamiliesLocked` loads lazily: the first lookup of a name whose base name exists calls `InitOtherFamilyNames(mayDefer)` with `mayDefer` true, which queues the load and returns, and the lookup answers "no such family". The name resolves once the font loader has run, 8 s after launch by default (`gfx.font_loader.delay`).
 
-**Fix.** The lookup passes `mayDefer` false when `CamouGenericTableApplies` is true, the predicate the generic-family table already uses for "a Camoufox font list applies to this page" (the launch-level `fonts` list, or the current context's own). A masked page's first lookup reads the names at once. Chrome, and a launch with no font list, keep the stock deferral, and startup and the font loader are unchanged. `MOZ_LOG=fontinit:5` shows what the first lookup now does: `InitOtherFamilyNames without deferring took 2104.24 ms` on the parent's main thread, which is `ReadOtherFamilyNames` for every family. The first lookup took 2.17 to 2.24 s on all 8 launches here (macOS arm64), where fork.4's took 2 to 3 ms when it missed and 0.9 to 1.6 s when it blocked. `e2e/probes/other_names_stall.py` (#253), run on GitHub's hosted runners on the exact artifacts, read the first call at 1 to 3 ms (and 195 ms once) on Windows x64 (fork.5, BuildID `20261016091018`), 3 to 6 ms on Linux x86_64 (a `main` build at `28279bb`, BuildID `20261016130937`, not a release package) and 3.8 to 5.6 s on macOS arm64 (fork.5, BuildID `20261016094712`; 1.78 to 1.84 s on the maintainer's machine). The stall is a macOS effect, and the probe times the call without reading widths, so a fast first call on Linux or Windows is not evidence that the names resolved there. Why Windows has no stall is not established.
+**Fix.** The lookup passes `mayDefer` false when `CamouGenericTableApplies` is true, the predicate the generic-family table already uses for "a Camoufox font list applies to this page" (the launch-level `fonts` list, or the current context's own). A masked page's first lookup reads the names at once. Chrome, and a launch with no font list, keep the stock deferral, and startup and the font loader are unchanged. `MOZ_LOG=fontinit:5` shows what the first lookup now does: `InitOtherFamilyNames without deferring took 2104.24 ms` on the parent's main thread, which is `ReadOtherFamilyNames` for every family. The first lookup took 2.17 to 2.24 s on all 8 launches here (macOS arm64), where fork.4's took 2 to 3 ms when it missed and 0.9 to 1.6 s when it blocked. `e2e/probes/other_names_stall.py` (#253), run on GitHub's hosted runners on the exact artifacts, read the first call at 1 to 3 ms (and 195 ms once) on Windows x64 (fork.5, BuildID `20261016091018`), 3 to 6 ms on Linux x86_64 (a `main` build at `28279bb`, BuildID `20261016130937`, not a release package) and 3.8 to 5.6 s on macOS arm64 (fork.5, BuildID `20261016094712`; 1.78 to 1.84 s on the maintainer's machine). The stall is a macOS effect, and the probe times the call without reading widths, so a fast first call on Linux or Windows is not evidence that the names resolved there. Windows has no stall for a `windows` identity because `SharedFontList::FindFamily` answers a legacy name base-family-first there (the `#ifdef XP_WIN` branch), so the first lookup never reaches the load; a `linux` or `macos` identity on Windows does take it, see #319.
 
-**Alternatives.** `gfx.font_loader.delay=0` also resolves the names (0 launches in 8 miss), but it is read in three places in `gfxPlatformFontList.cpp`: it starts the loader at once, lifts the loader's time limit and makes the other names synchronous. Launch took 1.7 s longer (9.13 s to 10.85 s, same binary, 8 alternating launches). By reading the code, the loader would also read every cmap at startup, which `fallback-miss-while-cmaps-load.py` needs pending; that guard was not run with the pref. The decision is in `ci/tribal-rules.yml`. Not tried: the `#ifdef XP_WIN` branch of `SharedFontList::FindFamily`, which reads only the face names of the base family (milliseconds) and returns the base family's regular face first, as Windows does, and corrects it once the loader has run. It avoids the 2.1 s stall and gives a wrong width for the first seconds; this fix gives the right one at once.
+**Alternatives.** `gfx.font_loader.delay=0` also resolves the names (0 launches in 8 miss), but it is read in three places in `gfxPlatformFontList.cpp`: it starts the loader at once, lifts the loader's time limit and makes the other names synchronous. Launch took 1.7 s longer (9.13 s to 10.85 s, same binary, 8 alternating launches). By reading the code, the loader would also read every cmap at startup, which `fallback-miss-while-cmaps-load.py` needs pending; that guard was not run with the pref. The decision is in `ci/tribal-rules.yml`. The `#ifdef XP_WIN` branch of `SharedFontList::FindFamily` reads only the face names of the base family (milliseconds) and returns the base family's regular face first, as Windows does, and corrects it once the loader has run. It was not looked at here, and on a Windows host it is the reason this fix did not work for a `linux` or `macos` identity: see #319.
 
 **Evidence.** `legacy-family-names-first-measure.py` launches a Windows identity whose `fonts` are the three names, measures them once, then again every 2 s until the widths stop changing, and fails if a first width differs from the settled one. On the fork.4 build (`2ab689f`, macOS arm64) it fails: the first widths are 473.52 for all three names, the settled ones 468.17, 517.95 and 475.73. On a macOS arm64 build of this branch (build run 38853342981, head `186c7e3`, whose condition is the same expression this patch now takes from `CamouGenericTableApplies`) it passes: first and settled are identical. On the Linux x86_64 build the Tests run makes from the head of the pull request it passes (see the pull request for the run). The builds differ in more than this patch (`main` moved by the font-unit rates, their script and tests, none of which is compiled into the browser).
 
