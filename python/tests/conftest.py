@@ -79,7 +79,8 @@ def font_bundle_stand_in(tmp_path_factory):
 
     The fonts are a release asset, not repo content, so browser/bundle/fonts does
     not exist here. The runtime fontconfig raises when an OS has no group
-    directory (#331), so tests that launch on Linux get empty ones.
+    directory (#331), so tests that launch on Linux get empty ones. These tests
+    check launcher logic and measure no fonts.
     """
     fonts = tmp_path_factory.mktemp("fonts")
     groups = sorted({g for dirs in GROUP_DIRS.values() for g in dirs})
