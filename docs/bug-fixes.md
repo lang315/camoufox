@@ -12,6 +12,19 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #335: the macOS build failed in "Setup and bootstrap" because patch.py ran `~/.cargo/bin/rustup`
+
+**Fixed by:** the PR that makes `browser/scripts/patch.py` run `rustup` from `PATH`. **Found by:** `build.yml` run 40813393344, job 123249229239 (`build (macos, arm64)`, image `macos-26-arm64` 20261021.0445.8).
+
+**Symptom.** `sh: /Users/runner/.cargo/bin/rustup: No such file or directory`, `make: *** [set-target] Error 1`, then `fatal error: command '~/.cargo/bin/rustup target add "x86_64-apple-darwin"' failed`. Job 123236045061 of run 40809437503, on image 20261013.0424.1, passed the same step.
+
+**Root cause.** `add_rustup()` in `browser/scripts/patch.py` ran `~/.cargo/bin/rustup target add "<target>"`, a path only a rustup-installed toolchain has. Every other rustup call in the build, including the `build.yml` steps before it, uses `rustup` from `PATH`, so a runner whose own rustup lives elsewhere passes them and fails here.
+
+**Fix.** `add_rustup()` runs `rustup target add` from `PATH`. A leg without rustup on `PATH` still fails the build, with `fatal error: command 'rustup target add ...' failed`: `ci/tests/test_patch_rustup.py` pins both cases. Where rustup comes from on each leg that runs `patch.py`: the Linux runner legs (Linux, and Windows cross-compiled) and the macOS runner both run bare `rustup` in the `build.yml` steps ahead of "Setup and bootstrap"; `browser/Dockerfile` puts `/root/.cargo/bin` on `PATH`; `browser/scripts/install-deps.sh` sources `~/.cargo/env` after installing it.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The `build.yml` comment at the macOS install step already named image 20261021 and its rustup, and pinned the toolchains through `PATH`, so the image was thought handled. The log line `info: self-update is disabled for this build of rustup` appears on the passing image too, so it does not tell the images apart. That the older image had `~/.cargo/bin/rustup` is inferred from the two outcomes, not read: no job printed `command -v rustup`.
 ## #325: a Linux claim on a Windows or macOS host drew the Apple and Microsoft faces for Linux names
 
 **Fixed by:** the PR that adds `browser/patches/zzz-linux-font-aliases.patch`, `browser/additions/camoucfg/FontAliasesLinux.hpp` and `browser/scripts/gen-font-aliases.py`. **Found by:** the face log (`CAMOU-FL face`, #327) read on a Windows host.
