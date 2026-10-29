@@ -88,7 +88,9 @@ func uaOSDir(ua, hostOS string) string {
 //
 // As in pythonlib and the TypeScript launcher, an unreadable or corrupt file
 // is an error: an absent one is an old bundle and falls back to the legacy
-// layout, but a damaged one must not silently widen the scan.
+// layout, but a damaged one must not silently widen the scan. With neither a
+// group directory nor fonts/<os>/ the launch fails (#331): the fonts/ parent is
+// never named.
 func fontScanDirs(fontsDir, osDir string) ([]string, error) {
 	var dirs []string
 	osKey := map[string]string{"linux": "lin", "macos": "mac", "windows": "win"}[osDir]
@@ -116,7 +118,8 @@ func fontScanDirs(fontsDir, osDir string) ([]string, error) {
 	if d := filepath.Join(fontsDir, osDir); isDir(d) {
 		return []string{d}, nil
 	}
-	return []string{fontsDir}, nil
+	// Naming the parent would put every OS's faces on the search path (#331).
+	return nil, fmt.Errorf("camoufox: no font directory for %s in %s: groups.json is absent or none of its readBy directories exist, and there is no %s/ directory", osDir, fontsDir, osDir)
 }
 
 // writeRuntimeFontconfig stores conf under the user cache dir, named by its

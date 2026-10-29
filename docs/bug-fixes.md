@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #331: the launchers named the fonts/ parent when groups.json or the OS's group directories were missing
+
+**Fixed by:** the PR that makes `utils._generate_fontconfig`, `typescript/src/utils.ts` and `goapi/fontconfig.go` raise in that case. **Found by:** the #329 review.
+
+**Symptom.** A bundle with no `groups.json`, or with a `readBy` list whose directories were all absent, launched without error and with `<dir>fonts</dir>` in the runtime conf. fontconfig scans a `<dir>` recursively, so every OS's faces were on the search path, the universe leak of #329 reached through a different door.
+
+**Root cause.** Each launcher ended its scan-directory selection with a last resort: Python `scan_dirs = [fonts_dir]`, TypeScript `scanDirs = [fontsDir]`, goapi `return []string{fontsDir}, nil`. A damaged `groups.json` already raised (#186); an absent one, or one whose directories do not exist, did not.
+
+**Fix.** All three raise, naming the OS and the path, when neither a group directory nor `fonts/<os>/` exists. The legacy `fonts/<os>/` branch stays: upstream's Linux releases up to `152.0.4-beta.29` (2026-08-21) ship `fonts/{linux,macos,windows}` with no `groups.json`, grouped bundles start at `156.0.1-beta.32` (2026-09-28), and `repos.yml` lists upstream as the "Official" repo a user can select, so the layout is still installable. The `bundle-old` golden fixture in TypeScript pins that layout.
+
+**Evidence.** Red then green in each launcher. Python: `test_no_groups_json_and_no_per_os_directory_fails_instead_of_naming_the_parent` and `test_a_groups_json_whose_directories_are_missing_fails_instead_of_naming_the_parent` failed on main (2 failed, 3 passed) and pass after (5 passed). TypeScript: the two `(#331)` cases in `tests/utils.test.ts` failed (2 failed, 22 passed) and pass. Go: `TestFontconfigEnvLegacyBundleLayout` (its last assertion was `expected the fonts/ root`, now expects an error) and `TestFontconfigEnvFailsWhenNoReadByDirectoryExists` failed on main and pass. One fixture relied on the fallback: `test_executable_path_bundle.py` made an empty `fonts/` and asserted the parent was named; it now builds a one-group bundle and asserts the group is named and the parent is not.
+
+**What misled the investigation.** A comment in each launcher said a damaged `groups.json` must not widen the scan, which read as the fallback being closed; it covered the damaged file only.
+
 ## #329: on a Linux host, bundle activation added every font group, bypassing the per-OS directory gate
 
 **Fixed by:** the PR that adds `browser/patches/linux-bundled-fonts-toplevel.patch`. **Found by:** the #325 face-log measurement.
