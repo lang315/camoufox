@@ -18,8 +18,8 @@ this against chrome://juggler (daijro/camoufox#847):
     try { new Worker('chrome://juggler/content/content/WorkerMain.js'); BUILD_IS_NOT_STOCK; }
     catch (e) { /* SecurityError, as in stock Firefox */ }
 
-Three checks, against scripts/data/contentaccessible-manifest.json (recorded from
-a stock release by scripts/gen-contentaccessible-manifest.py): the files of
+Three checks, against scripts/data/contentaccessible-manifest*.json (one per OS, recorded from
+that OS's stock release by scripts/gen-contentaccessible-manifest.py): the files of
 every contentaccessible package and their SHA-256, and the names every manifest
 registers. Then a page actually loads a sample and constructs the Workers, so
 the static diff cannot pass while the surface is really different.
@@ -53,7 +53,7 @@ _spec.loader.exec_module(_generator)
 jar_hashes = _generator.jar_hashes
 tree_hashes = _generator.tree_hashes
 registrations = _generator.registrations
-MANIFEST = _generator.OUT
+MANIFEST = _generator.manifest_path({"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux"))
 
 # A page reads a file's bytes only through what the file does when loaded: an
 # image's pixels, a stylesheet's rules, a script's side effects. Markup loads as
@@ -135,7 +135,8 @@ def package_hashes(root: Path, jar: str, prefixes: list) -> dict:
 
 
 def static_check(binary: Path, manifest: dict, failures: list) -> None:
-    root = binary.parent
+    # A macOS app keeps omni.ja and application.ini in Contents/Resources, not beside the binary.
+    root = binary.parents[1] / "Resources" if sys.platform == "darwin" else binary.parent
     ini = root / "application.ini"
     if ini.exists():
         match = re.search(r"^Version=(.+)$", ini.read_text(errors="replace", encoding="utf-8"), re.M)

@@ -16,9 +16,13 @@ second. hCaptcha probes chrome://juggler this way.
 
     python3 scripts/gen-contentaccessible-manifest.py /path/to/firefox
 
-Writes scripts/data/contentaccessible-manifest.json, which
-tests/playwright/patches/contentaccessible-parity.py diffs a build against. Re-run it on a
-Firefox uplift; the guard refuses to compare across versions.
+The directory holding application.ini and omni.ja: the Firefox directory on Linux,
+Contents/Resources of Firefox.app on macOS, the unpacked installer's core/ on Windows.
+Each OS ships its own files (hiddenWindowMac.xhtml, preprocessed markup), so it writes
+scripts/data/contentaccessible-manifest.json for Linux and
+contentaccessible-manifest-macos.json or -windows.json for the others, which
+tests/playwright/patches/contentaccessible-parity.py diffs a build of that OS against.
+Re-run it on a Firefox uplift, once per OS; the guard refuses to compare across versions.
 """
 
 import hashlib
@@ -30,8 +34,20 @@ import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUT = REPO_ROOT / "scripts" / "data" / "contentaccessible-manifest.json"
+DATA = REPO_ROOT / "scripts" / "data"
 JARS = ("browser/omni.ja", "omni.ja")
+
+
+def manifest_path(os_name: str) -> Path:
+    """The manifest of one OS's stock release; Linux's keeps the original name."""
+    return DATA / ("contentaccessible-manifest.json" if os_name == "linux" else f"contentaccessible-manifest-{os_name}.json")
+
+
+def stock_os(root: Path) -> str:
+    """Which OS's release a Firefox directory is, from its layout."""
+    if (root / "firefox.exe").exists():
+        return "windows"
+    return "macos" if root.name == "Resources" else "linux"
 
 
 def zip_entries(jar: Path) -> dict:
@@ -169,10 +185,11 @@ def main() -> int:
         manifest["packages"][key] = {"prefixes": prefixes, "files": files}
         total += len(files)
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
+    out = manifest_path(stock_os(root))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     print(f"Firefox {manifest['firefox_version']}: {len(pkgs)} packages, {total} files")
-    print(f"wrote {OUT.relative_to(REPO_ROOT)}")
+    print(f"wrote {out.relative_to(REPO_ROOT)}")
     return 0
 
 
