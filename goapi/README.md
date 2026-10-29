@@ -80,6 +80,21 @@ func main() {
 }
 ```
 
+## Pages a context opens
+
+A `window.open` popup or a `target=_blank` link opens a page the caller never asked for. `BrowserContext.Pages` lists every open page of the context, `NewPage`'s included, and `OnPage` runs a function for each new one:
+
+```go
+popups := make(chan *camoufox.Page, 1)
+cancel := bc.OnPage(func(p *camoufox.Page) { popups <- p })
+defer cancel()
+
+_ = p.Click(ctx, "a[target=_blank]")
+popup := <-popups // still on about:blank; it navigates to the link afterwards
+```
+
+A page leaves `Pages` when the browser closes it. `OnPage` fires once the page's main execution context exists, so the function may `Evaluate`.
+
 ## Main-world evaluation
 
 `Page.Evaluate` runs in an isolated world: it sees the DOM but not the page's own
