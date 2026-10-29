@@ -22,7 +22,7 @@ index ede3b60..f267917 100644
        aFontVisibilityProvider
            ? aFontVisibilityProvider->ShouldResistFingerprinting(
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index a4d99f4..d14eab6 100644
+index a4d99f4..54ee38f 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -2154,6 +2154,25 @@ bool gfxPlatformFontList::FindAndAddFamilies(
@@ -51,7 +51,7 @@ index a4d99f4..d14eab6 100644
  bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGeneric, const nsACString& aFamily,
-@@ -2162,6 +2181,26 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -2162,6 +2181,31 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
  
@@ -61,14 +61,19 @@ index a4d99f4..d14eab6 100644
 +  // it. Every target the gates admit is added, in fontconfig's order, as
 +  // gfxFcPlatformFontList::FindAndAddFamiliesLocked does; none admitted is a
 +  // miss, which is what the Linux host draws too (the list's default font).
-+  // Targets are never keys, so the recursion cannot re-enter this block.
++  // A target that is itself a key is skipped, so the recursion cannot re-enter
++  // this block.
 +  if (SystemUISpoofedOS(aFontVisibilityProvider) == MaskConfig::SpoofedOS::Linux) {
 +    if (const char* const* targets = CamouLinuxAliasTargets(key)) {
 +      bool found = false;
 +      for (; *targets; ++targets) {
++        const nsDependentCString target(*targets);
++        if (CamouLinuxAliasTargets(target)) {
++          continue;  // a key as a target would recurse for ever
++        }
 +        found |= gfxPlatformFontList::FindAndAddFamiliesLocked(
-+            aFontVisibilityProvider, aGeneric, nsDependentCString(*targets),
-+            aOutput, aFlags, aStyle, aLanguage, aDevToCssSize);
++            aFontVisibilityProvider, aGeneric, target, aOutput, aFlags, aStyle,
++            aLanguage, aDevToCssSize);
 +      }
 +      return found;
 +    }
