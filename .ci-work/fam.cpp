@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using std::set;
@@ -88,7 +89,9 @@ static vector<string> LocalizedNames(IDWriteLocalizedStrings* s) {
 }
 
 struct Face { string ps; int weight, stretch, style; bool operator<(const Face& o) const {
-  return std::tie(ps, weight, stretch, style) < std::tie(o.ps, o.weight, o.stretch, o.style); } };
+  return std::tie(ps, weight, stretch, style) < std::tie(o.ps, o.weight, o.stretch, o.style); }
+  bool operator==(const Face& o) const {
+  return std::tie(ps, weight, stretch, style) == std::tie(o.ps, o.weight, o.stretch, o.style); } };
 
 static string PsName(IDWriteFont* f) {
   Ptr<IDWriteLocalizedStrings> s; BOOL ex = FALSE;
