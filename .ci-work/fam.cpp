@@ -90,10 +90,10 @@ static vector<string> LocalizedNames(IDWriteLocalizedStrings* s) {
   return out;
 }
 
-struct Face { string ps; int weight, stretch, style; bool operator<(const Face& o) const {
-  return std::tie(ps, weight, stretch, style) < std::tie(o.ps, o.weight, o.stretch, o.style); }
-  bool operator==(const Face& o) const {
-  return std::tie(ps, weight, stretch, style) == std::tie(o.ps, o.weight, o.stretch, o.style); } };
+struct Face { string ps; int weight, stretch, style; string path; unsigned idx = 0;
+  auto key() const { return std::tie(ps, path, idx, weight, stretch, style); }
+  bool operator<(const Face& o) const { return key() < o.key(); }
+  bool operator==(const Face& o) const { return key() == o.key(); } };
 
 static string PsName(IDWriteFont* f) {
   Ptr<IDWriteLocalizedStrings> s; BOOL ex = FALSE;
@@ -102,19 +102,22 @@ static string PsName(IDWriteFont* f) {
   return v.empty() ? "(none)" : v[0];
 }
 
-// Non-simulated faces of a family, as the shared list records them.
+// Non-simulated faces of a family, as the shared list records them, with the
+// file path and index-in-file of each face's first file.
 static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
   vector<Face> out;
   for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
     Ptr<IDWriteFont> f; if (FAILED(fam->GetFont(j, &f))) continue;
     if (f->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE) continue;
-    out.push_back({PsName(f.p), (int)f->GetWeight(), (int)f->GetStretch(), (int)f->GetStyle()});
-    if (files) {
-      Ptr<IDWriteFontFace> face; if (FAILED(f->CreateFontFace(&face))) continue;
+    Face fc{PsName(f.p), (int)f->GetWeight(), (int)f->GetStretch(), (int)f->GetStyle(), "", 0};
+    Ptr<IDWriteFontFace> face;
+    if (SUCCEEDED(f->CreateFontFace(&face))) {
+      fc.idx = face->GetIndex();
       UINT32 n = 0; face->GetFiles(&n, nullptr);
       vector<IDWriteFontFile*> ff(n);
       if (SUCCEEDED(face->GetFiles(&n, ff.data()))) {
-        for (auto* x : ff) {
+        for (UINT32 q = 0; q < n; q++) {
+          auto* x = ff[q];
           Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll;
           const void* k = nullptr; UINT32 ks = 0;
           if (SUCCEEDED(x->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) &&
@@ -122,13 +125,18 @@ static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
             UINT32 len = 0;
             if (SUCCEEDED(ll->GetFilePathLengthFromKey(k, ks, &len))) {
               wstring path(len + 1, 0);
-              if (SUCCEEDED(ll->GetFilePathFromKey(k, ks, path.data(), len + 1))) { path.resize(len); files->insert(path); }
+              if (SUCCEEDED(ll->GetFilePathFromKey(k, ks, path.data(), len + 1))) {
+                path.resize(len);
+                if (files) files->insert(path);
+                if (q == 0) { for (auto& c : path) c = towlower(c); fc.path = U8(path); }
+              }
             }
           }
           x->Release();
         }
       }
     }
+    out.push_back(fc);
   }
   return out;
 }
@@ -161,7 +169,7 @@ int run(int argc, wchar_t** argv) {
   // Today's lookup: family i by index in the full collection, then the face by
   // PostScript name. Both must give the same face (PS name, weight, stretch, style).
   int single = 0, multi = 0, miss = 0, ambiguous = 0, mismatch = 0, found = 0, dupInFull = 0, buildFail = 0;
-  size_t faceCount = 0, maxfiles = 0; double tsmall = 0;
+  size_t faceCount = 0, maxfiles = 0; std::map<std::tuple<string, string, unsigned, int, int, int>, int> globalKey; double tsmall = 0;
   std::vector<std::tuple<double, string, size_t>> times;
   for (UINT32 i = 0; i < nfam; i++) {
     Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
@@ -179,26 +187,27 @@ int run(int argc, wchar_t** argv) {
     double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
     tsmall += dt; times.push_back({dt, names[0], fv.size()});
     if (!sm) { buildFail++; printf("BUILD_FAIL family[%u] %s\n", i, names[0].c_str()); continue; }
-    std::map<string, vector<Face>> byPs;
+    std::map<std::tuple<string, string, unsigned, int, int, int>, int> inSmall;
     for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) {
       Ptr<IDWriteFontFamily> sf; if (FAILED(sm->GetFontFamily(k, &sf))) continue;
-      for (auto& f : Faces(sf.p, nullptr)) byPs[f.ps].push_back(f);
+      for (auto& f : Faces(sf.p, nullptr)) inSmall[f.key()]++;
     }
-    std::map<string, int> inFull;
-    for (auto& f : ref) inFull[f.ps]++;
-    std::set<string> dupSeen;
+    std::set<std::tuple<string, string, unsigned, int, int, int>> seen;
     for (auto& f : ref) {
-      if (inFull[f.ps] > 1) { dupInFull++; if (dupSeen.insert(f.ps).second) printf("DUP_IN_FULL family[%u] %s: PS name %s appears %d times in the full family\n", i, names[0].c_str(), f.ps.c_str(), inFull[f.ps]); continue; }
-      auto it = byPs.find(f.ps);
-      if (it == byPs.end()) { miss++; printf("MISS family[%u] %s: %s\n", i, names[0].c_str(), f.ps.c_str()); }
-      else if (it->second.size() > 1) { ambiguous++; printf("AMBIGUOUS family[%u] %s: %s matches %zu faces\n", i, names[0].c_str(), f.ps.c_str(), it->second.size()); }
-      else if (!(it->second[0] == f)) { mismatch++; printf("MISMATCH family[%u] %s: %s w=%d/%d s=%d/%d st=%d/%d\n", i, names[0].c_str(), f.ps.c_str(), f.weight, it->second[0].weight, f.stretch, it->second[0].stretch, f.style, it->second[0].style); }
+      auto kk = f.key();
+      globalKey[kk]++;
+      if (!seen.insert(kk).second) { dupInFull++; printf("DUP_KEY_IN_FULL family[%u] %s: ps=%s file=%s idx=%u w=%d st=%d sl=%d\n", i, names[0].c_str(), f.ps.c_str(), f.path.c_str(), f.idx, f.weight, f.stretch, f.style); continue; }
+      int n = inSmall.count(kk) ? inSmall[kk] : 0;
+      if (n == 0) { miss++; printf("MISS family[%u] %s: ps=%s file=%s idx=%u\n", i, names[0].c_str(), f.ps.c_str(), f.path.c_str(), f.idx); }
+      else if (n > 1) { ambiguous++; printf("AMBIGUOUS family[%u] %s: ps=%s matches %d\n", i, names[0].c_str(), f.ps.c_str(), n); }
       else found++;
     }
   }
+  int dupGlobal = 0; for (auto& kv : globalKey) if (kv.second > 1) dupGlobal++;
+  printf("GLOBAL_DUP_KEYS_ACROSS_FAMILIES %d\n", dupGlobal);
   std::sort(times.begin(), times.end(), [](auto& a, auto& b) { return std::get<0>(a) > std::get<0>(b); });
   for (size_t k = 0; k < times.size() && k < 5; k++) printf("SLOWEST %.3fs %s (%zu files)\n", std::get<0>(times[k]), std::get<1>(times[k]).c_str(), std::get<2>(times[k]));
-  printf("SUMMARY families=%u faces=%zu found_identical=%d miss=%d ambiguous_ps=%d mismatch=%d dup_ps_in_full_family=%d build_fail=%d single_file_families=%d multi_file_families=%d max_files_in_a_family=%zu small_total_seconds=%.2f\n",
+  printf("SUMMARY families=%u faces=%zu found_identical=%d miss=%d ambiguous=%d mismatch=%d dup_key_in_full_family=%d build_fail=%d single_file_families=%d multi_file_families=%d max_files_in_a_family=%zu small_total_seconds=%.2f\n",
          nfam, faceCount, found, miss, ambiguous, mismatch, dupInFull, buildFail, single, multi, maxfiles, tsmall);
   return 0;
 }
