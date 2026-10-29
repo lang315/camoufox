@@ -26,6 +26,34 @@ later change should read first.
 
 **What misled the investigation.** The leftover check passing on macOS read as "no leftovers"; it could not see any process. A first version of its test read the child's executable too early: on a macOS framework Python the launcher re-executes into `Python.app`, so the path differs until the script runs.
 
+## #335: the macOS build failed in "Setup and bootstrap" because patch.py ran `~/.cargo/bin/rustup`
+
+**Fixed by:** the PR that makes `browser/scripts/patch.py` run `rustup` from `PATH`. **Found by:** `build.yml` run 40813393344, job 123249229239 (`build (macos, arm64)`, image `macos-26-arm64` 20261021.0445.8).
+
+**Symptom.** `sh: /Users/runner/.cargo/bin/rustup: No such file or directory`, `make: *** [set-target] Error 1`, then `fatal error: command '~/.cargo/bin/rustup target add "x86_64-apple-darwin"' failed`. Job 123236045061 of run 40809437503, on image 20261013.0424.1, passed the same step.
+
+**Root cause.** `add_rustup()` in `browser/scripts/patch.py` ran `~/.cargo/bin/rustup target add "<target>"`, a path only a rustup-installed toolchain has. Every other rustup call in the build, including the `build.yml` steps before it, uses `rustup` from `PATH`, so a runner whose own rustup lives elsewhere passes them and fails here.
+
+**Fix.** `add_rustup()` runs `rustup target add` from `PATH`. A leg without rustup on `PATH` still fails the build, with `fatal error: command 'rustup target add ...' failed`: `ci/tests/test_patch_rustup.py` pins both cases. Where rustup comes from on each leg that runs `patch.py`: the Linux runner legs (Linux, and Windows cross-compiled) and the macOS runner both run bare `rustup` in the `build.yml` steps ahead of "Setup and bootstrap"; `browser/Dockerfile` puts `/root/.cargo/bin` on `PATH`; `browser/scripts/install-deps.sh` sources `~/.cargo/env` after installing it.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The `build.yml` comment at the macOS install step already named image 20261021 and its rustup, and pinned the toolchains through `PATH`, so the image was thought handled. The log line `info: self-update is disabled for this build of rustup` appears on the passing image too, so it does not tell the images apart. That the older image had `~/.cargo/bin/rustup` is inferred from the two outcomes, not read: no job printed `command -v rustup`.
+
+## #331: the launchers named the fonts/ parent when groups.json or the OS's group directories were missing
+
+**Fixed by:** the PR that makes `utils._generate_fontconfig`, `typescript/src/utils.ts` and `goapi/fontconfig.go` raise in that case. **Found by:** the #329 review.
+
+**Symptom.** A bundle with no `groups.json`, or with a `readBy` list whose directories were all absent, launched without error and with `<dir>fonts</dir>` in the runtime conf. fontconfig scans a `<dir>` recursively, so every OS's faces were on the search path, the universe leak of #329 reached through a different door.
+
+**Root cause.** Each launcher ended its scan-directory selection with a last resort: Python `scan_dirs = [fonts_dir]`, TypeScript `scanDirs = [fontsDir]`, goapi `return []string{fontsDir}, nil`. A damaged `groups.json` already raised (#186); an absent one, or one whose directories do not exist, did not.
+
+**Fix.** All three raise, naming the OS and the path, when neither a group directory nor `fonts/<os>/` exists. The legacy `fonts/<os>/` branch stays: upstream's Linux releases up to `152.0.4-beta.29` (2026-08-21) ship `fonts/{linux,macos,windows}` with no `groups.json`, grouped bundles start at `156.0.1-beta.32` (2026-09-28), and `repos.yml` lists upstream as the "Official" repo a user can select, so the layout is still installable. The `bundle-old` golden fixture in TypeScript pins that layout.
+
+**Evidence.** Red then green in each launcher. Python: `test_no_groups_json_and_no_per_os_directory_fails_instead_of_naming_the_parent` and `test_a_groups_json_whose_directories_are_missing_fails_instead_of_naming_the_parent` failed on main (2 failed, 3 passed) and pass after (5 passed). TypeScript: the two `(#331)` cases in `tests/utils.test.ts` failed (2 failed, 22 passed) and pass. Go: `TestFontconfigEnvLegacyBundleLayout` (its last assertion was `expected the fonts/ root`, now expects an error) and `TestFontconfigEnvFailsWhenNoReadByDirectoryExists` failed on main and pass. One fixture relied on the fallback: `test_executable_path_bundle.py` made an empty `fonts/` and asserted the parent was named; it now builds a one-group bundle and asserts the group is named and the parent is not.
+
+**What misled the investigation.** A comment in each launcher said a damaged `groups.json` must not widen the scan, which read as the fallback being closed; it covered the damaged file only.
+
 ## #329: on a Linux host, bundle activation added every font group, bypassing the per-OS directory gate
 
 **Fixed by:** the PR that adds `browser/patches/linux-bundled-fonts-toplevel.patch`. **Found by:** the #325 face-log measurement.
