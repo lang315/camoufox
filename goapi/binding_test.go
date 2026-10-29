@@ -97,6 +97,24 @@ func expectPayload(t *testing.T, ch <-chan string, want string) {
 	}
 }
 
+// expectPayloads waits until every wanted payload has arrived, in any order.
+func expectPayloads(t *testing.T, ch <-chan string, wants ...string) {
+	t.Helper()
+	missing := map[string]bool{}
+	for _, w := range wants {
+		missing[w] = true
+	}
+	deadline := time.After(10 * time.Second)
+	for len(missing) > 0 {
+		select {
+		case got := <-ch:
+			delete(missing, got)
+		case <-deadline:
+			t.Fatalf("no call with payloads %v within 10s", missing)
+		}
+	}
+}
+
 func expectNothing(t *testing.T, ch <-chan string) {
 	t.Helper()
 	select {
@@ -271,9 +289,11 @@ func TestExposeBindingIsInvisibleToPageScript(t *testing.T) {
 		t.Fatalf("AddInitScript: %v", err)
 	}
 	gotoLoad(t, ctx, p, srv.URL)
-	expectPayload(t, ch, "iso:function")     // control: the isolated world sees it
-	expectPayload(t, ch, "page:undefined")   // page script does not
-	expectPayload(t, ch, "mwinit:undefined") // neither does a main-world init script
+	// The init script runs at document start, before the page's own script, so the order is not fixed.
+	expectPayloads(t, ch,
+		"iso:function",     // control: the isolated world sees it
+		"page:undefined",   // page script does not
+		"mwinit:undefined") // neither does a main-world init script
 	if v, err := p.Evaluate(ctx, "mw:typeof window.report"); err != nil || v != "undefined" {
 		t.Fatalf("mw: evaluate read %v, %v; want undefined", v, err)
 	}
