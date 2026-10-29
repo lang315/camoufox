@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #325: a Linux claim on a Windows or macOS host drew the Apple and Microsoft faces for Linux names
+
+**Fixed by:** the PR that adds `browser/patches/zzz-linux-font-aliases.patch`, `browser/additions/camoucfg/FontAliasesLinux.hpp` and `browser/scripts/gen-font-aliases.py`. **Found by:** the face log (`CAMOU-FL face`, #327) read on a Windows host.
+
+**Symptom.** A launch with `os="linux"` on Windows or macOS measured text in the Apple and Microsoft files of the flat package. `Helvetica` drew `Helvetica`, `Arial` drew `Arial`, `Courier New` drew `Courier New`, and `serif`, `sans-serif` and `monospace` drew `Times`, `Helvetica` and `Courier New`. A Linux host draws `Nimbus Sans`, `Arimo`, `Cousine`, `Nimbus Roman`, `Nimbus Sans` and `Cousine` for the same requests with the same font list.
+
+**Root cause.** On Linux, fontconfig answers a named lookup through the aliases in `browser/bundle/fontconfig/linux/fonts.conf`, and Gecko takes every family before the sentinel (`gfxFcPlatformFontList.cpp:2564-2608`). DirectWrite and CoreText have no fontconfig, and the flat Windows and macOS packages hold the Apple and Microsoft files under those exact names, so the lookup found them. The generic path (`CamouGenericCandidate`) follows the same name resolution, so the generics drew them too.
+
+**Fix.** The browser applies the conf's answer itself. `gen-font-aliases.py` reads each Linux name no Linux face carries through `fc-pattern` against the staged bundle and writes `FontAliasesLinux.hpp`. `zzz-linux-font-aliases.patch` rewrites such a name to its admitted targets in `gfxPlatformFontList::FindAndAddFamiliesLocked` when the context claims Linux, and in `gfxDWriteFontList` before the DirectWrite substitution. A target that is itself an alias key is skipped, so the rewrite cannot recurse. `test_font_aliases_table.py` fails when the header differs from the bundle, and prints the diff.
+
+**Not tried / failed.** Removing the Apple and Microsoft files from a Linux claim's list was not possible: the allowlist filters by family name, and the same files serve the Windows and macOS contexts of the same package. Reading the answer from `fc-match` on the Windows host was not possible either, because it has no fontconfig. The generics' realism when no row key resolves is a separate gap (#333).
+
+**Evidence.** `e2e/journeys/test_09_linux_claim_fonts.py` reads the drawing face from the face log. Red: e2e run 40837110717 (job 123324742569) on the Windows build 40809452153 of main 0190fa38 fails with `Helvetica: drew 'Helvetica', the Linux host draws 'Nimbus Sans'` and nine more requests. Green: e2e run 40837114640 (job 123326864251) on the Windows build 40809427405 of the branch, 1 passed. The same test passes on the Linux leg of the branch's Tests run, which proves the expected table is what fontconfig draws.
+
+**What misled the investigation.** Ink quantization and `fc-match` output looked like a verdict and were not: neither reads the face that drew. The first Linux-host reference was itself a leak (#329). The first drift failure of the table test looked like a fontconfig version dependence and was a trailing blank line: the committed header ended in two newlines and the generator writes one, so the diff was one empty line, found only once the test printed it.
+
 ## #331: the launchers named the fonts/ parent when groups.json or the OS's group directories were missing
 
 **Fixed by:** the PR that makes `utils._generate_fontconfig`, `typescript/src/utils.ts` and `goapi/fontconfig.go` raise in that case. **Found by:** the #329 review.
