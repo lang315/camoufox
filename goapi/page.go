@@ -25,6 +25,7 @@ type Page struct {
 	contextReadyCh chan struct{}
 	closed         chan struct{}
 	finishOnce     sync.Once
+	publishOnce    sync.Once
 
 	framesMu sync.Mutex
 	frames   map[string]*Frame
@@ -36,28 +37,20 @@ type Page struct {
 // browser attaches the page session and the main execution context
 // is ready (so the first call to Evaluate has somewhere to land).
 func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
-	// Counted before the call so an attach that lands before the response
-	// is buffered for awaitAttach, not taken for a popup.
-	c.b.newPageStarted(c.id)
-	defer c.b.newPageDone(c.id)
-
 	params := juggler.BrowserNewPageParams{BrowserContextID: c.id}
 	var res juggler.BrowserNewPageResult
 	if err := c.b.root.Call(ctx, "Browser.newPage", params, &res); err != nil {
 		return nil, fmt.Errorf("camoufox: newPage: %w", err)
 	}
 
-	// Browser.attachedToTarget may have already landed (and been
-	// buffered) before the response was decoded. awaitAttach handles
-	// both ordering paths.
-	attachCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// The attach event may land before or after this reply; awaitPage
+	// handles both orders.
+	awaitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	att, err := c.b.awaitAttach(attachCtx, res.TargetID)
+	p, err := c.b.awaitPage(awaitCtx, res.TargetID)
 	if err != nil {
 		return nil, fmt.Errorf("camoufox: await attach: %w", err)
 	}
-
-	p := c.attachPage(att)
 	// Wait for the main-world execution context so the first
 	// Evaluate doesn't fail. about:blank fires this within ms.
 	if _, err := p.awaitMainContext(ctx, 30*time.Second); err != nil {
@@ -82,6 +75,10 @@ func (c *BrowserContext) attachPage(att *juggler.AttachedToTargetEvent) *Page {
 	}
 	c.b.mu.Lock()
 	c.b.pages[p.target.TargetID] = p
+	if ch, ok := c.b.pageAwaiters[p.target.TargetID]; ok {
+		delete(c.b.pageAwaiters, p.target.TargetID)
+		ch <- p
+	}
 	c.b.mu.Unlock()
 
 	p.subscribe()

@@ -202,3 +202,69 @@ func TestContextsDoNotCross(t *testing.T) {
 		t.Errorf("other context holds %d pages, want 1", len(other.Pages()))
 	}
 }
+
+func TestPopupsWhileNewPageIsInFlight(t *testing.T) {
+	srv := popupServer()
+	defer srv.Close()
+	ctx, b := launchPages(t)
+	bc, _ := b.NewContext(ctx)
+	opener, err := bc.NewPage(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := opener.Goto(ctx, srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(chan *camoufox.Page, 32)
+	defer bc.OnPage(func(p *camoufox.Page) { seen <- p })()
+
+	const rounds = 5
+	for i := 0; i < rounds; i++ {
+		type result struct {
+			p   *camoufox.Page
+			err error
+		}
+		done := make(chan result, 1)
+		go func() {
+			p, err := bc.NewPage(ctx)
+			done <- result{p, err}
+		}()
+		if err := opener.Click(ctx, "#open"); err != nil {
+			t.Fatal(err)
+		}
+		if r := <-done; r.err != nil {
+			t.Fatalf("round %d: NewPage: %v", i, r.err)
+		}
+	}
+	// 1 opener + `rounds` NewPage pages + `rounds` popups, each reported once.
+	want := 1 + 2*rounds
+	deadline := time.Now().Add(15 * time.Second)
+	for len(bc.Pages()) < want && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	time.Sleep(500 * time.Millisecond)
+	pages := bc.Pages()
+	if len(pages) != want {
+		t.Errorf("Pages() holds %d pages, want %d", len(pages), want)
+	}
+	uniq := map[*camoufox.Page]bool{}
+	for _, p := range pages {
+		if uniq[p] {
+			t.Error("a page is listed twice in Pages()")
+		}
+		uniq[p] = true
+	}
+	reported := map[*camoufox.Page]int{}
+	for len(seen) > 0 {
+		reported[<-seen]++
+	}
+	for p, n := range reported {
+		if n != 1 {
+			t.Errorf("OnPage reported a page %d times", n)
+		}
+		_ = p
+	}
+	if len(reported) != want-1 {
+		t.Errorf("OnPage reported %d pages, want %d (everything but the opener, which was created before the handler)", len(reported), want-1)
+	}
+}

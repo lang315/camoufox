@@ -128,24 +128,27 @@ func (c *BrowserContext) OnPage(fn func(*Page)) (cancel func()) {
 	}
 }
 
-// publish adds p to Pages and calls the OnPage handlers.
+// publish adds p to Pages and calls the OnPage handlers, once per page
+// whichever of NewPage and the attach handler gets here first.
 func (c *BrowserContext) publish(p *Page) {
-	c.pagesMu.Lock()
-	select {
-	case <-p.closed: // detached while its main context was loading
+	p.publishOnce.Do(func() {
+		c.pagesMu.Lock()
+		select {
+		case <-p.closed: // detached while its main context was loading
+			c.pagesMu.Unlock()
+			return
+		default:
+		}
+		c.pages = append(c.pages, p)
+		handlers := make([]func(*Page), 0, len(c.onPage))
+		for _, fn := range c.onPage {
+			handlers = append(handlers, fn)
+		}
 		c.pagesMu.Unlock()
-		return
-	default:
-	}
-	c.pages = append(c.pages, p)
-	handlers := make([]func(*Page), 0, len(c.onPage))
-	for _, fn := range c.onPage {
-		handlers = append(handlers, fn)
-	}
-	c.pagesMu.Unlock()
-	for _, fn := range handlers {
-		fn(p)
-	}
+		for _, fn := range handlers {
+			fn(p)
+		}
+	})
 }
 
 // dropPage removes a page the browser detached from the context's list.
