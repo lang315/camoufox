@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-
-	"github.com/lang315/camoufox/goapi/pkg/juggler"
 )
 
 // MutationOptions configures which mutation types are observed.
@@ -124,34 +122,15 @@ func (p *Page) WatchMutations(ctx context.Context, selector string, opts Mutatio
 	)
 	_ = subtree // always true in observer; kept in MutationOptions for API compatibility
 
-	params := juggler.PageAddBindingParams{
-		Name:   bindName,
-		Script: script,
-	}
-	if err := p.session.Call(ctx, "Page.addBinding", params, nil); err != nil {
-		return nil, nil, fmt.Errorf("camoufox: WatchMutations addBinding: %w", err)
-	}
-
 	ch := make(chan Mutation, 64)
-	conn := p.bc.b.conn
 
-	// done guards against handler running after cancel returns.
+	// done guards against the handler delivering after cancel returns.
 	var once sync.Once
 	done := make(chan struct{})
 
-	sub := conn.On("Page.bindingCalled", func(ev juggler.Event) {
-		if ev.SessionID != p.session.ID() {
-			return
-		}
-		var bc juggler.PageBindingCalledEvent
-		if err := json.Unmarshal(ev.Params, &bc); err != nil {
-			return
-		}
-		if bc.Name != bindName {
-			return
-		}
+	cancelBinding, err := p.addBinding(ctx, bindName, script, func(payload string) {
 		var records []Mutation
-		if err := json.Unmarshal([]byte(bc.Payload), &records); err != nil {
+		if err := json.Unmarshal([]byte(payload), &records); err != nil {
 			return
 		}
 		for _, m := range records {
@@ -164,10 +143,13 @@ func (p *Page) WatchMutations(ctx context.Context, selector string, opts Mutatio
 			}
 		}
 	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("camoufox: WatchMutations: %w", err)
+	}
 
 	cancel := func() {
 		once.Do(func() {
-			conn.Off(sub)
+			cancelBinding()
 			close(done)
 			// ch is intentionally NOT closed — callers drain buffered items safely.
 		})
