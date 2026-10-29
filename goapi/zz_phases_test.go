@@ -238,3 +238,32 @@ func TestZZProfile(t *testing.T) {
 	}
 	_ = os.WriteFile(filepath.Join(dir, "timings.txt"), []byte(strings.Join(rows, "\n")+"\n"), 0o644)
 }
+
+// TestZZPinned launches cold browsers with the identity's OS pinned, interleaved.
+func TestZZPinned(t *testing.T) {
+	bin := browserBinary(t)
+	oses := []string{"windows", "linux", "macos"}
+	for round := 0; round < 8; round++ {
+		for _, o := range oses {
+			ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+			t0 := time.Now()
+			b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(bin), camoufox.WithHeadless(true), camoufox.WithOS(o))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t1 := time.Now()
+			bc, _ := b.NewContext(ctx)
+			p, err := bc.NewPage(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t2 := time.Now()
+			plat, _ := p.Evaluate(ctx, "navigator.platform")
+			cpu := cpuSecs()
+			_ = p.Close(ctx)
+			b.Close()
+			t.Logf("PINNED os=%s round=%d platform=%v launch=%.1fs newpage=%.1fs cpu_sum=%.1fs", o, round, plat, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), cpu)
+			cancel()
+		}
+	}
+}

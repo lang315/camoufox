@@ -166,6 +166,10 @@ jobs:
         run: |
           cd goapi
           for moz in 0 1; do ZZ_MOZLOG=$moz CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPhases -v -count=1 2>&1 | grep -E "PHASES|NET |FAIL" ; done; true
+      - name: Pinned OS arm (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: cd goapi && CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPinned -v -count=1 2>&1 | grep -E "PINNED|FAIL" ; true
       - name: Startup profiles (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
         shell: bash
