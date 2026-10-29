@@ -3186,6 +3186,19 @@ def test_every_linux_only_guard_is_a_guard():
     assert LINUX_ONLY <= {g.stem for g in guards()}
 
 
+def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_only(tmp_path, monkeypatch):
+    from ci.run_patch_guards import NOT_ON, not_applicable_reason
+
+    for platform, guards_ in NOT_ON.items():
+        for stem, why in guards_.items():
+            assert not_applicable_reason(stem, platform) == why
+            others = {"darwin", "win32", "linux"} - {platform}
+            assert all(not_applicable_reason(stem, other) is None for other in others)
+    code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["system-font-alias-stall"])
+    assert ran == []
+    assert record["tests"] == {"patches/system-font-alias-stall.py": results.NOT_APPLICABLE}
+
+
 def test_a_display_guard_runs_on_the_hosts_display_off_linux(monkeypatch):
     """hidden_display starts Xvfb on Linux and fails without it; elsewhere the host has a display."""
     import sys

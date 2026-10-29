@@ -123,8 +123,29 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 # without starting the script and the list is read in one place beside GROUPS.
 LINUX_ONLY = frozenset({
     "ipv4-only-network", "webgl-live-state", "webgl-renderer-pair",
-    "occluded-window-active", "pointer-lock-offscreen", "windows-keyboard",
+    "occluded-window-active", "pointer-lock-offscreen",
 })
+
+# Guards that do not run on one platform for a reason of that platform, counted
+# apart from the passes with the reason in the log. windows-keyboard compares a
+# Windows identity with Windows' keyboard, which a Windows host has natively, and
+# on a macOS host runs its caret arm alone (the rest is GTK).
+NOT_ON = {
+    "darwin": {
+        "system-font-alias-stall":
+            "its count reads the host's font universe, and its ratio alone cannot go red on this host",
+    },
+    "win32": {
+        "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
+    },
+}
+
+
+def not_applicable_reason(stem: str, platform: str) -> Optional[str]:
+    """Why a guard does not run on `platform`, or None when it does."""
+    if stem in LINUX_ONLY and not platform.startswith("linux"):
+        return "it is Linux-only by subject"
+    return NOT_ON.get(platform, {}).get(stem)
 
 
 def gate_name(group: Optional[str]) -> str:
@@ -203,10 +224,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     failed: List[str] = []
     not_applicable: List[str] = []
     for guard in selected:
-        if guard.stem in LINUX_ONLY and not sys.platform.startswith("linux"):
+        reason = not_applicable_reason(guard.stem, sys.platform)
+        if reason:
             result.record(f"patches/{guard.name}", evidence.NOT_APPLICABLE)
             not_applicable.append(guard.name)
-            log(f"  - {guard.name} not applicable on {sys.platform}")
+            log(f"  - {guard.name} not applicable on {sys.platform}: {reason}")
             continue
         proc = run([sys.executable, str(guard)], cwd=REPO_ROOT, env=env, timeout=args.timeout)
         outcome = evidence.PASS if proc.ok else evidence.FAIL
