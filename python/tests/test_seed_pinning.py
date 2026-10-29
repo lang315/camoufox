@@ -42,7 +42,8 @@ def test_launch_options_preserves_pinned_seeds_via_config_dict(tmp_path, monkeyp
     (tmp_path / 'fontconfig' / 'linux' / 'fonts.conf').write_text(
         '<?xml version="1.0"?><fontconfig><dir prefix="cwd">fonts</dir></fontconfig>'
     )
-    (tmp_path / 'fonts').mkdir()
+    (tmp_path / 'fonts' / 'L').mkdir(parents=True)
+    (tmp_path / 'fonts' / 'groups.json').write_text('{"readBy": {"lin": ["L"]}}')
     # The generated runtime conf goes to the cache dir; keep it out of the real one.
     monkeypatch.setattr(utils, 'INSTALL_DIR', tmp_path / 'cache')
     # resolve_verstr() reads the supplied build's own version, and raises without one.

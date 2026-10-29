@@ -148,14 +148,23 @@ func TestFontconfigEnvLegacyBundleLayout(t *testing.T) {
 	if got := strings.Join(scanDirsOf(t, confPath(t, entry), fontsDir), ","); got != "macos" {
 		t.Errorf("legacy scan dirs %s, want macos", got)
 	}
-	// No fonts/<os> either: the fonts/ root itself.
-	entry, err = fontconfigEnv("linux", exe, winUA)
-	if err != nil {
-		t.Fatal(err)
+	// No fonts/<os> either: naming the fonts/ root would put every OS's faces on
+	// the search path, so the launch fails (#331).
+	if _, err = fontconfigEnv("linux", exe, winUA); err == nil {
+		t.Error("no groups.json and no fonts/windows: want an error, got none")
 	}
-	b, _ := os.ReadFile(confPath(t, entry))
-	if !strings.Contains(string(b), "<dir>"+fontsDir+"</dir>") {
-		t.Errorf("expected the fonts/ root, got:\n%s", b)
+}
+
+func TestFontconfigEnvFailsWhenNoReadByDirectoryExists(t *testing.T) {
+	exe, _ := fakeBundle(t)
+	fontsDir := filepath.Join(filepath.Dir(exe), "fonts")
+	for _, g := range []string{"W", "LW", "MW", "LMW"} {
+		if err := os.Remove(filepath.Join(fontsDir, g)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := fontconfigEnv("linux", exe, winUA); err == nil {
+		t.Error("groups.json names only missing directories: want an error, got none")
 	}
 }
 

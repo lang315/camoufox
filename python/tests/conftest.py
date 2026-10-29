@@ -1,6 +1,7 @@
 """Shared fixtures for the camoufox test suite."""
 
 import os
+import json
 import shutil
 import sys
 import tempfile
@@ -68,6 +69,29 @@ def empty_cache_root():
         shutil.rmtree(child, ignore_errors=True) if child.is_dir() else child.unlink()
 
 
+GROUP_DIRS = {"lin": ["L", "LM", "LW", "LMW"], "mac": ["M", "LM", "MW", "LMW"], "win": ["W", "LW", "MW", "LMW"]}
+_font_stand_in: dict = {}
+
+
+@pytest.fixture(scope="session", autouse=True)
+def font_bundle_stand_in(tmp_path_factory):
+    """The group directories a managed install holds.
+
+    The fonts are a release asset, not repo content, so browser/bundle/fonts does
+    not exist here. The runtime fontconfig raises when an OS has no group
+    directory (#331), so tests that launch on Linux get empty ones. These tests
+    check launcher logic and measure no fonts.
+    """
+    fonts = tmp_path_factory.mktemp("fonts")
+    groups = sorted({g for dirs in GROUP_DIRS.values() for g in dirs})
+    for group in groups:
+        (fonts / group).mkdir()
+    (fonts / "groups.json").write_text(json.dumps({"groups": groups, "readBy": GROUP_DIRS}))
+    _font_stand_in["fonts"] = fonts
+    yield fonts
+    _font_stand_in.clear()
+
+
 def repo_get_path(file: str) -> str:
     """What a managed install would carry, read from the repo instead.
 
@@ -78,7 +102,9 @@ def repo_get_path(file: str) -> str:
     finds no fonts.conf -- browser/settings/ has none.
     """
     head = str(file).replace("\\", "/").split("/")[0]
-    if head in ("fontconfig", "fontconfigs", "fonts"):
+    if head == "fonts":
+        return str(_font_stand_in["fonts"].joinpath(*str(file).replace("\\", "/").split("/")[1:]))
+    if head in ("fontconfig", "fontconfigs"):
         return str(REPO_ROOT / "browser" / "bundle" / file)
     return str(REPO_ROOT / "browser" / "settings" / file)
 
