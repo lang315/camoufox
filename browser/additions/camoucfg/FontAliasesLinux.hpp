@@ -50,4 +50,3 @@ static const CamouFontAlias kCamouLinuxAliases[] = {
     {nullptr, nullptr}};
 
 }  // namespace mozilla
-
