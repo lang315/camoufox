@@ -68,26 +68,31 @@ def faces(logdir):
     return out
 
 
-def test_a_linux_claim_draws_the_linux_faces(binary, monkeypatch):
+def test_a_linux_claim_draws_the_linux_faces(binary):
     from camoufox.fingerprints import get_random_preset
-    from camoufox.sync_api import Camoufox
+    from camoufox.sync_api import NewBrowser
+    from drivers.playwright_drivers import playwright
 
     logdir = Path(__file__).resolve().parents[2] / ".ci-work" / f"linux-claim-fonts-{os.getpid()}"
     logdir.mkdir(parents=True)
-    monkeypatch.setenv("MOZ_LOG", "fontlist:4,sync,append")
-    monkeypatch.setenv("MOZ_LOG_FILE", str(logdir / "cfx%PID"))
+    env = {"MOZ_LOG": "fontlist:4,sync,append", "MOZ_LOG_FILE": str(logdir / "cfx%PID")}
     for _ in range(15):
         try:
-            with Camoufox(os="linux", fonts=FONTS, canvas_noise=True, headless=True, executable_path=str(binary),
-                          fingerprint_preset=get_random_preset(os="linux"), i_know_what_im_doing=True) as browser:
-                page = browser.new_context().new_page()
-                page.goto("about:blank")
-                assert page.evaluate("navigator.platform").startswith("Linux")
-                page.evaluate(MEASURE, [f'"{n}"' for n in NAMES + NO_TARGET + [NEVER]] + GENERICS)
-            break
+            browser = NewBrowser(playwright(), os="linux", fonts=FONTS, canvas_noise=True, headless=True,
+                                 executable_path=str(binary), fingerprint_preset=get_random_preset(os="linux"),
+                                 i_know_what_im_doing=True, env=env)
         except ValueError as e:  # a preset whose GPU the host cannot claim
             if "WebGL" not in str(e):
                 raise
+            continue
+        try:
+            page = browser.new_context().new_page()
+            page.goto("about:blank")
+            assert page.evaluate("navigator.platform").startswith("Linux")
+            page.evaluate(MEASURE, [f'"{n}"' for n in NAMES + NO_TARGET + [NEVER]] + GENERICS)
+        finally:
+            browser.close()
+        break
     else:
         raise RuntimeError("no Linux preset launched")
 

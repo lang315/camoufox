@@ -26,6 +26,7 @@ on any difference.
 """
 
 import argparse
+import difflib
 import importlib.util
 import json
 import os
@@ -135,7 +136,8 @@ def main():
         if have != text:
             tmp = Path(tempfile.mkdtemp()) / "FontAliasesLinux.hpp"
             tmp.write_text(text, encoding="utf-8")
-            raise SystemExit(f"{args.out} differs from what the bundle produces; regenerate it (fresh copy: {tmp})")
+            diff = "".join(difflib.unified_diff(have.splitlines(True), text.splitlines(True), "committed", "bundle"))
+            raise SystemExit(f"{args.out} differs from what the bundle produces; regenerate it (fresh copy: {tmp})\n{diff}")
         print(f"{args.out} matches the bundle ({len(text.splitlines())} lines)")
         return
     Path(args.out).write_text(text, encoding="utf-8")
