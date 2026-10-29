@@ -3186,6 +3186,26 @@ def test_every_linux_only_guard_is_a_guard():
     assert LINUX_ONLY <= {g.stem for g in guards()}
 
 
+def test_a_display_guard_runs_on_the_hosts_display_off_linux(monkeypatch):
+    """hidden_display starts Xvfb on Linux and fails without it; elsewhere the host has a display."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "browser/tests/playwright/patches"))
+    try:
+        import helpers
+    finally:
+        sys.path.pop(0)
+    monkeypatch.setattr(helpers.shutil, "which", lambda name: None)
+    monkeypatch.setattr(helpers.sys, "platform", "darwin")
+    with helpers.hidden_display() as display:
+        assert display == ""
+    monkeypatch.setattr(helpers.sys, "platform", "linux")
+    with pytest.raises(SystemExit, match="Xvfb is required"):
+        with helpers.hidden_display():
+            pass
+
+
 # ---------------------------------------------------------------------------
 # memory growth: sharded onto pull requests, and gated
 # ---------------------------------------------------------------------------

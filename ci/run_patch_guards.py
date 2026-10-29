@@ -112,13 +112,19 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 
 
 # Guards that need Linux tooling the guard itself cannot supply elsewhere:
-# ipv4-only-network builds a network namespace (unshare, ip), the two WebGL
-# guards start headless="virtual" (Xvfb). On any other platform the runner
-# does not run them and counts them apart from the passes; on Linux a missing
-# prerequisite still fails. The set lives here, not in each guard, so the
-# runner can decide without starting the script and the list is read in one
-# place beside GROUPS.
-LINUX_ONLY = frozenset({"ipv4-only-network", "webgl-live-state", "webgl-renderer-pair"})
+# A guard is Linux-only when its subject is: ipv4-only-network builds a
+# network namespace (unshare, ip), the two WebGL guards start headless="virtual"
+# (Xvfb), occluded-window-active is X11 window occlusion, pointer-lock-offscreen
+# is nsWindowX11.cpp (GTK/X11 only) and windows-keyboard drives GTK with xdotool.
+# A guard that needs Xvfb only for a display is not here: it runs on the host's
+# display elsewhere. On any other platform the runner does not run a Linux-only
+# guard and counts it apart from the passes; on Linux a missing prerequisite
+# still fails. The set lives here, not in each guard, so the runner can decide
+# without starting the script and the list is read in one place beside GROUPS.
+LINUX_ONLY = frozenset({
+    "ipv4-only-network", "webgl-live-state", "webgl-renderer-pair",
+    "occluded-window-active", "pointer-lock-offscreen", "windows-keyboard",
+})
 
 
 def gate_name(group: Optional[str]) -> str:

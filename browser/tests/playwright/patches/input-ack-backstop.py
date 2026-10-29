@@ -63,6 +63,7 @@ import tempfile
 import time
 from pathlib import Path
 
+import psutil
 from camoufox.async_api import AsyncCamoufox
 from helpers import hidden_display, launch_kwargs
 
@@ -175,24 +176,17 @@ async def drag_on_busy_page(browser) -> int:
     return await gpu_process_killed()
 
 
-def gpu_process(binary):
+def gpu_process():
     """This test's browser's GPU process: a descendant of this process."""
-    for pid in filter(str.isdigit, os.listdir("/proc")):
+    for proc in psutil.Process().children(recursive=True):
         try:
-            # A relaunched one comes from the fork server, which rewrites its
-            # command line as one space-separated string.
-            with open(f"/proc/{pid}/cmdline", "rb") as f:
-                argv = f.read().replace(b"\0", b" ").decode(errors="replace").split()
-            if argv[-1:] != ["gpu"] or os.path.realpath(argv[0]) != os.path.realpath(binary):
-                continue
-            p = int(pid)
-            while p > 1:
-                with open(f"/proc/{p}/stat", encoding="utf-8") as f:
-                    p = int(f.read().rsplit(")", 1)[1].split()[1])
-                if p == os.getpid():
-                    return int(pid)
-        except OSError:
+            # A relaunched one comes from the fork server on Linux, which
+            # rewrites its command line as one space-separated string.
+            argv = " ".join(proc.cmdline()).split()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
+        if argv[-1:] == ["gpu"]:
+            return proc.pid
     return None
 
 
@@ -206,7 +200,6 @@ async def gpu_process_killed() -> int:
             'user_pref("layers.gpu-process.force-enabled", true);\n', encoding="utf-8")
         kwargs = launch_kwargs(headless=False, os="linux", humanize=False,
                                persistent_context=True, user_data_dir=profile)
-        binary = kwargs["executable_path"]
         async with AsyncCamoufox(**kwargs) as context:
             page = await context.new_page()
             await page.set_content('<body style="margin:0;height:200000px"></body>')
@@ -218,7 +211,7 @@ async def gpu_process_killed() -> int:
                 # Let the relaunched GPU process come up first.
                 for _ in range(10):
                     await asyncio.wait_for(page.mouse.wheel(0, 100), timeout=RECOVERY_TIMEOUT_S)
-                pid = gpu_process(binary)
+                pid = gpu_process()
                 if pid in (None, killed):
                     print("  FAIL: the browser runs no GPU process, so nothing was tested")
                     return 1

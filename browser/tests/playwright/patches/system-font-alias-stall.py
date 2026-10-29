@@ -22,13 +22,13 @@ layout, because a build that resolves fallback while it lays the page out
 is resolved when its width equals that of the same text set in the Noto family
 by name, which is the end of the reflow on a build that defers it, so the page
 reports then. The verdict is a ratio against a control launch that claims the
-system face exactly once, so it reads how many times a base pays for that face
+system face once by its own name, so it reads how many times a base pays for that face
 and not how fast the runner is.
 
 What PASS means: no macOS base blocks the page MAX_RATIO times as long as a
 list that claims the system face once does, and every base claims it exactly
-once. The second half is the cause itself, counted: a name claims the system
-face when it sets three strings to the same widths as "System Font" and not as
+once. The second half is the cause itself, counted, and only off a macOS host:
+a name claims the system face when it sets three strings to the same widths as "System Font" and not as
 monospace. On this fork's builds, which resolve fallback while they lay the page
 out, the stall alone separates the sonoma base of #832 from a healthy one by only
 about 5x to 7x against a 6x threshold (measured on an emulated amd64 host), too
@@ -52,6 +52,11 @@ ORIGIN = "https://camoufox.test/"
 # 0.9-1.6 for every healthy base and 27-30 for sonoma before #832, idle or
 # with every core busy, so the threshold sits about 4x from each.
 MAX_RATIO = 6.0
+# On a macOS host the system face is the host's own and many of its names (the
+# bases hold 24 to 48 on this runner against the control's 4) resolve to it, so the
+# count is the host's font universe, not the cost of a claim. It is read where the
+# bundle is the only source of the face, and the ratio decides on a macOS host.
+COUNTS_CLAIMS = sys.platform != "darwin"
 # Only bounds the wait. A base that stalls past it fails like one that stalls less.
 DEADLINE_MS = 120_000
 
@@ -143,14 +148,14 @@ async def main():
         if control is None:
             control = result["longest"]
             print(f"  control: longest block {control:.0f}ms ({len(fonts)} fonts claimed, "
-                  f"resolved at {result['resolvedAt']:.0f}ms, {result['aliases']} name for the system face)")
-            if result["aliases"] != 1:
+                  f"resolved at {result['resolvedAt']:.0f}ms, {result['aliases']} name(s) for the system face)")
+            if COUNTS_CLAIMS and result["aliases"] != 1:
                 print("  FAIL: the control must claim the system face once; the alias count reads "
                       f"{result['aliases']}, so it counts nothing")
                 return 1
             continue
         ratio = result["longest"] / control
-        bad = ratio >= MAX_RATIO or result["aliases"] != 1
+        bad = ratio >= MAX_RATIO or (COUNTS_CLAIMS and result["aliases"] != 1)
         print(f"  {'FAIL' if bad else 'ok'} {name}: longest block {result['longest']:.0f}ms, {ratio:.1f}x the control "
               f"({len(fonts)} fonts claimed, resolved at {result['resolvedAt']:.0f}ms), "
               f"{result['aliases']} name(s) for the system face")
@@ -159,7 +164,8 @@ async def main():
     if failures:
         print(f"  FAIL: {', '.join(failures)} stalled the page {MAX_RATIO:.0f}x as long as the control or did not claim the system face exactly once")
         return 1
-    print(f"  PASS: no macOS base blocked the page {MAX_RATIO:.0f}x as long as the control, and each claims the system face once")
+    print(f"  PASS: no macOS base blocked the page {MAX_RATIO:.0f}x as long as the control"
+          + (", and each claims the system face once" if COUNTS_CLAIMS else " (the claim count is not read on a macOS host)"))
     return 0
 
 
