@@ -129,6 +129,12 @@ jobs:
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
           if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
+      - name: Unpack the browser for the voices guard
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: echo "CAMOUFOX_BINARY=$(python e2e/util.py $E2E_BROWSER)" >> "$GITHUB_ENV"
       - name: Run
         if: inputs.probe == ''
         shell: bash
@@ -151,6 +157,12 @@ jobs:
         run: |
           # A probe takes --zip, which a release input does not give it: that fails at argparse, loudly.
           python "e2e/probes/$PROBE" $E2E_BROWSER --runs 8
+      - name: Spoofed voices reach the page (#313)
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        env:
+          CAMOUFOX_EXECUTABLE_PATH: ${{ env.CAMOUFOX_BINARY }}
+        run: python browser/tests/playwright/patches/spoofed-voice-speaks.py
       - if: always() && inputs.mozlog
         uses: actions/upload-artifact@v4
         with:
