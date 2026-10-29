@@ -60,7 +60,7 @@ def launch_and_capture(binary: Path, profile: Path) -> str:
     (profile / "user.js").write_text(
         'user_pref("browser.search.log", true);\n'
         'user_pref("devtools.console.stdout.chrome", true);\n'
-    )
+    , encoding="utf-8")
     proc = subprocess.Popen(
         [str(binary), "-profile", str(profile), "-headless", "-no-remote", "about:blank"],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",

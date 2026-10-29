@@ -186,7 +186,7 @@ def main() -> int:
         return 1
     with tempfile.TemporaryDirectory() as files:
         for name, text in FILES.items():
-            Path(files, name).write_text(text)
+            Path(files, name).write_text(text, encoding="utf-8")
         env = {**os.environ, INSIDE: "1", "NET_FILES": files}
         cmd = ["unshare", "-rm", "sh", "-c", UNREACHABLE_RESOLVER, "sh",
                "unshare", "-rnm", "sh", "-c", SETUP, "sh", sys.executable, *sys.argv]

@@ -138,7 +138,7 @@ def static_check(binary: Path, manifest: dict, failures: list) -> None:
     root = binary.parent
     ini = root / "application.ini"
     if ini.exists():
-        match = re.search(r"^Version=(.+)$", ini.read_text(errors="replace"), re.M)
+        match = re.search(r"^Version=(.+)$", ini.read_text(errors="replace", encoding="utf-8"), re.M)
         # Camoufox appends its own release to the Firefox version ("152.0.4-beta.30");
         # only the Firefox part decides whether the recorded file set still applies.
         built = match.group(1).strip().split("-")[0] if match else "unknown"
@@ -250,7 +250,7 @@ def main() -> int:
     if not MANIFEST.exists():
         print(f"FAIL: {MANIFEST.relative_to(BROWSER_ROOT)} is missing; generate it first")
         return 1
-    manifest = json.loads(MANIFEST.read_text())
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     binary = resolve_binary()
     failures = []
 

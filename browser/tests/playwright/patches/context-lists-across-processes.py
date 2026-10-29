@@ -73,7 +73,7 @@ class Quiet(SimpleHTTPRequestHandler):
 async def main() -> int:
     from camoufox.async_api import AsyncCamoufox
 
-    candidates = json.loads((CAMOUFOX / "fonts.json").read_text())["win"]
+    candidates = json.loads((CAMOUFOX / "fonts.json").read_text(encoding="utf-8"))["win"]
     root = Path(__file__).resolve().parent / "assets"
     server = ThreadingHTTPServer(("0.0.0.0", 0), partial(Quiet, directory=str(root)))
     threading.Thread(target=server.serve_forever, daemon=True).start()

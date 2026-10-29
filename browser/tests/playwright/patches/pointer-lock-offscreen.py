@@ -68,7 +68,7 @@ def barriers(log_path):
     """(x1, y1, x2, y2) of every barrier the shim has seen made so far."""
     marker = "barrier-trap-shim-call "
     return [tuple(int(v) for v in line[len(marker):].split())
-            for line in Path(log_path).read_text(errors="replace").splitlines()
+            for line in Path(log_path).read_text(errors="replace", encoding="utf-8").splitlines()
             if line.startswith(marker)]
 
 
@@ -79,7 +79,7 @@ def run(binary, shim, x, y):
     """
     port = free_port()
     with tempfile.TemporaryDirectory() as profile:
-        Path(profile, "user.js").write_text(f'user_pref("marionette.port", {port});\n')
+        Path(profile, "user.js").write_text(f'user_pref("marionette.port", {port});\n', encoding="utf-8")
         env = {**os.environ, "LD_PRELOAD": str(shim), "MOZ_CRASHREPORTER_DISABLE": "1"}
         log_path = Path(profile, "stderr.log")
         log = open(log_path, "wb")
@@ -115,7 +115,7 @@ def run(binary, shim, x, y):
             proc.kill()
             proc.wait()
             log.close()
-            said = log_path.read_text(errors="replace")
+            said = log_path.read_text(errors="replace", encoding="utf-8")
             if "barrier-trap-shim:" in said:
                 raise SystemExit(said[said.index("barrier-trap-shim:"):].splitlines()[0])
         made = barriers(log_path)

@@ -105,7 +105,7 @@ async def main() -> int:
     from camoufox.fingerprints import generate_context_fingerprint, get_random_preset
 
     site = tempfile.mkdtemp(prefix="guard150-")
-    Path(site, "p.html").write_text("<!doctype html><meta charset=utf-8><body></body>")
+    Path(site, "p.html").write_text("<!doctype html><meta charset=utf-8><body></body>", encoding="utf-8")
     port = serve(site)
     url = f"http://127.0.0.1:{port}/p.html"
 

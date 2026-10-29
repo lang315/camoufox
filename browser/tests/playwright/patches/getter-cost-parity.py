@@ -178,7 +178,7 @@ def run_stock(binary, url):
         'user_pref("browser.shell.checkDefaultBrowser", false);\n'
         'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
         'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);\n'
-        'user_pref("browser.aboutwelcome.enabled", false);\n')
+        'user_pref("browser.aboutwelcome.enabled", false);\n', encoding="utf-8")
     return profile, subprocess.Popen(
         [str(binary), "--headless", "--no-remote", "--profile", profile, url],
         env=no_proxy_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -215,7 +215,7 @@ def run_camoufox(binary, url, identity):
 def cpu_model():
     """The host CPU's model name, for a failure report; "" where /proc/cpuinfo is absent."""
     try:
-        for line in Path("/proc/cpuinfo").read_text().splitlines():
+        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
             if line.startswith("model name"):
                 return line.split(":", 1)[1].strip()
     except OSError:
@@ -310,8 +310,9 @@ def main() -> int:
     if failures:
         for f in failures:
             print(f"FAIL: {f}")
-        if cpu_model():
-            print(f"host CPU: {cpu_model()}")
+        cpu = cpu_model()
+        if cpu:
+            print(f"host CPU: {cpu}")
         return 1
     print(f"PASS: no spoofed getter costs over {SLOWER_FACTOR}x or under 1/{FASTER_FACTOR} of "
           f"stock Firefox's from script.")

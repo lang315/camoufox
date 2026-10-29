@@ -15,7 +15,7 @@ from drivers import go
 
 def test_a_driver_that_never_answers_times_out(monkeypatch, tmp_path):
     silent = tmp_path / "silent.py"
-    silent.write_text("import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n")
+    silent.write_text("import sys, time\nsys.stdin.readline()\ntime.sleep(60)\n", encoding="utf-8")
     monkeypatch.setattr(go, "RPC_TIMEOUT_S", 1)
     real_popen = go.subprocess.Popen
     monkeypatch.setattr(go.subprocess, "Popen", lambda argv, **kw: real_popen([sys.executable, str(silent)], **kw))
@@ -35,7 +35,7 @@ def test_a_reply_outside_the_host_codepage_reaches_the_caller(monkeypatch, tmp_p
     echo = tmp_path / "echo.py"
     echo.write_text("import sys, json\nreq = json.loads(sys.stdin.readline())\n"
                     "sys.stdout.buffer.write(json.dumps({'id': req['id'], 'result': '\\u201d'}, ensure_ascii=False).encode() + b'\\n')\n"
-                    "sys.stdout.flush()\n")
+                    "sys.stdout.flush()\n", encoding="utf-8")
     monkeypatch.setattr(go, "RPC_TIMEOUT_S", 10)
     real_popen = go.subprocess.Popen
     monkeypatch.setattr(go.subprocess, "Popen", lambda argv, **kw: real_popen([sys.executable, str(echo)], **kw))

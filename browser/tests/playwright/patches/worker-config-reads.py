@@ -151,7 +151,7 @@ def check_race(binary, url, failures):
 def main() -> int:
     binary = resolve_binary()
     site = tempfile.mkdtemp()
-    Path(site, "p.html").write_text("<!doctype html><meta charset=utf-8><body>x</body>")
+    Path(site, "p.html").write_text("<!doctype html><meta charset=utf-8><body>x</body>", encoding="utf-8")
     srv = QuietServer(("127.0.0.1", 0), functools.partial(Quiet, directory=site))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/p.html"

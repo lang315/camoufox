@@ -182,7 +182,7 @@ async def run(
                     results.append(json.loads(await handle.json_value()))
             finally:
                 await browser.close()
-        text = "".join(f.read_text(errors="replace") for f in logdir.glob("cfx*"))
+        text = "".join(f.read_text(errors="replace", encoding="utf-8") for f in logdir.glob("cfx*"))
     finally:
         shutil.rmtree(logdir, ignore_errors=True)
 

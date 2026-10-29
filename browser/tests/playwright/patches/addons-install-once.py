@@ -51,7 +51,7 @@ class QuietServer(http.server.ThreadingHTTPServer):
 def background_loads(log_dir: Path) -> int:
     # MOZ_LOG_FILE gets a suffix per process; count every file rather than
     # guess which one is the parent's.
-    return sum(len(BACKGROUND_LOAD.findall(p.read_text(errors="replace")))
+    return sum(len(BACKGROUND_LOAD.findall(p.read_text(errors="replace", encoding="utf-8")))
                for p in log_dir.glob("log*"))
 
 
@@ -60,7 +60,7 @@ def main() -> int:
 
     binary = resolve_binary()
     site = tempfile.mkdtemp()
-    Path(site, "p.html").write_text("<!doctype html><meta charset=utf-8><body>x</body>")
+    Path(site, "p.html").write_text("<!doctype html><meta charset=utf-8><body>x</body>", encoding="utf-8")
     srv = QuietServer(("127.0.0.1", 0), functools.partial(Quiet, directory=site))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_address[1]}/p.html"

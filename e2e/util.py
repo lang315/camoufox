@@ -236,7 +236,7 @@ def build_id(binary: Path) -> str:
     binary = Path(binary)
     for ini in (binary.parent / "application.ini", binary.parent.parent / "Resources" / "application.ini"):
         if ini.exists():
-            for line in ini.read_text(errors="replace").splitlines():
+            for line in ini.read_text(errors="replace", encoding="utf-8").splitlines():
                 if line.startswith("BuildID="):
                     return line.split("=", 1)[1]
     return "unknown"
@@ -251,7 +251,7 @@ def packaged_locales(binary: Path) -> Optional[List[str]]:
         loose = root / "res" / "multilocale.txt"
         try:
             if loose.exists():
-                text = loose.read_text()
+                text = loose.read_text(encoding="utf-8")
             else:
                 text = zipfile.ZipFile(root / "omni.ja").read("res/multilocale.txt").decode()
         except (OSError, KeyError, zipfile.BadZipFile):
