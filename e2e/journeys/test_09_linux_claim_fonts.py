@@ -61,7 +61,7 @@ def faces(logdir):
     """request -> family of the face that drew its first range, from the `CAMOU-FL face` lines."""
     out = {}
     for path in glob.glob(str(logdir / "cfx*")):
-        for line in Path(path).read_text(errors="replace").splitlines():
+        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
             m = re.search(r"CAMOU-FL face ctx=(\d+) families=(.*?) \[\d+:\d+ u\+\w+\] (.*?)(?= \[\d+:\d+ u\+\w+\]|$)", line)
             if m and m.group(1) != "0":
                 out.setdefault(m.group(2).strip('"'), m.group(3).rsplit(" / ", 1)[-1].strip())
