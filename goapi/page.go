@@ -35,12 +35,14 @@ type Page struct {
 // browser attaches the page session and the main execution context
 // is ready (so the first call to Evaluate has somewhere to land).
 func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
+	zzMark("newpage_enter")
 	params := juggler.BrowserNewPageParams{BrowserContextID: c.id}
 	var res juggler.BrowserNewPageResult
 	if err := c.b.root.Call(ctx, "Browser.newPage", params, &res); err != nil {
 		return nil, fmt.Errorf("camoufox: newPage: %w", err)
 	}
 
+	zzMark("newpage_response")
 	// Browser.attachedToTarget may have already landed (and been
 	// buffered) before the response was decoded. awaitAttach handles
 	// both ordering paths.
@@ -51,6 +53,7 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 		return nil, fmt.Errorf("camoufox: await attach: %w", err)
 	}
 
+	zzMark("newpage_attached")
 	p := &Page{
 		bc:             c,
 		target:         att.TargetInfo,
@@ -79,6 +82,7 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 		_ = p.Close(ctx)
 		return nil, fmt.Errorf("camoufox: new page's main execution context: %w", err)
 	}
+	zzMark("newpage_main_context")
 	return p, nil
 }
 

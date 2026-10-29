@@ -66,6 +66,7 @@ const attachBufferTTL = 30 * time.Second
 // Launch spawns the Camoufox binary and connects via the Juggler pipe
 // transport. The returned Browser owns the subprocess; call Close.
 func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
+	zzMark("launch_enter")
 	lc := &launchConfig{
 		geoIPTimeout: 8 * time.Second,
 	}
@@ -117,6 +118,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 			return nil, fmt.Errorf("camoufox: generate fingerprint: %w", err)
 		}
 	}
+	zzMark("fingerprint_done")
 	if lc.debug {
 		cfg.Debug = config.Bool(true)
 	}
@@ -149,6 +151,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		}
 		ownsProfileDir = true
 	}
+	zzMark("profile_dir_created")
 	launched := false
 	defer func() {
 		if ownsProfileDir && !launched {
@@ -187,7 +190,9 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	// the child-side pipe handles. On Windows this is a raw
 	// CreateProcessW that wires the juggler pipe to CRT fds 3/4; on Unix
 	// it is cmd.Start() with fd 3/4 inherited via ExtraFiles.
+	zzMark("pre_start")
 	proc, err := startBrowser(cmd, lc.debug)
+	zzMark("process_started")
 	if err != nil {
 		_ = closePipes()
 		return nil, fmt.Errorf("camoufox: start: %w", err)
@@ -266,6 +271,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		addCanvasPlaceholder(prefs)
 	}
 	setWebGPU(prefs, uaOSDir(cfg.NavigatorUserAgent, config.HostOS()), cfg.WebGLVendor)
+	zzMark("pre_enable")
 	if err := b.enable(ctx, prefs); err != nil {
 		_ = b.Close()
 		return nil, err
@@ -276,6 +282,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 			return nil, err
 		}
 	}
+	zzMark("enabled")
 	launched = true
 	return b, nil
 }
@@ -399,6 +406,7 @@ func (b *Browser) enable(ctx context.Context, userPrefs map[string]any) error {
 	if err := b.root.Call(ctx, "Browser.enable", params, nil); err != nil {
 		return fmt.Errorf("camoufox: Browser.enable: %w", err)
 	}
+	zzMark("browser_enable_returned")
 	// Best-effort: cache version/userAgent.
 	_ = b.root.Call(ctx, "Browser.getInfo", nil, &b.info)
 	return nil
