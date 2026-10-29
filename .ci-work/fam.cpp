@@ -146,26 +146,26 @@ int wmain(int argc, wchar_t** argv) {
     vector<wstring> fv(files.begin(), files.end());
     if (fv.size() > maxfiles) maxfiles = fv.size();
     auto s0 = std::chrono::steady_clock::now();
-    Ptr<IDWriteFontCollection> small; small.p = Build(fv);
+    Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
     double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
     tsmall += dt; if (dt > tmax) tmax = dt;
-    if (!small) { printf("DIFF family[%u] %s: small collection failed (%zu files)\n", i, names[0].c_str(), fv.size()); diffs++; continue; }
+    if (!sm) { printf("DIFF family[%u] %s: sm collection failed (%zu files)\n", i, names[0].c_str(), fv.size()); diffs++; continue; }
     for (auto& nm : names) {
       wstring w(nm.begin(), nm.end());
       int wl = MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, nullptr, 0);
       w.assign(wl, 0); MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, w.data(), wl);
       UINT32 idx = 0; BOOL ex = FALSE;
-      if (FAILED(small->FindFamilyName(w.c_str(), &idx, &ex)) || !ex) {
-        printf("DIFF family[%u] %s: name '%s' not found in small collection (%zu files)\n", i, names[0].c_str(), nm.c_str(), fv.size());
+      if (FAILED(sm->FindFamilyName(w.c_str(), &idx, &ex)) || !ex) {
+        printf("DIFF family[%u] %s: name '%s' not found in sm collection (%zu files)\n", i, names[0].c_str(), nm.c_str(), fv.size());
         nameMiss++; diffs++; continue;
       }
-      Ptr<IDWriteFontFamily> sf; small->GetFontFamily(idx, &sf);
+      Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(idx, &sf);
       auto got = Faces(sf.p, nullptr);
       set<Face> a(ref.begin(), ref.end()), b(got.begin(), got.end());
       if (a != b || ref.size() != got.size()) {
-        printf("DIFF family[%u] %s via '%s': full has %zu faces, small has %zu (%zu files)\n", i, names[0].c_str(), nm.c_str(), ref.size(), got.size(), fv.size());
+        printf("DIFF family[%u] %s via '%s': full has %zu faces, sm has %zu (%zu files)\n", i, names[0].c_str(), nm.c_str(), ref.size(), got.size(), fv.size());
         for (auto& x : a) if (!b.count(x)) printf("   only in full : %s w=%d s=%d st=%d\n", x.ps.c_str(), x.weight, x.stretch, x.style);
-        for (auto& x : b) if (!a.count(x)) printf("   only in small: %s w=%d s=%d st=%d\n", x.ps.c_str(), x.weight, x.stretch, x.style);
+        for (auto& x : b) if (!a.count(x)) printf("   only in sm: %s w=%d s=%d st=%d\n", x.ps.c_str(), x.weight, x.stretch, x.style);
         diffs++;
       }
     }
