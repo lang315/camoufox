@@ -136,6 +136,7 @@ static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
 int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
+  SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* e) -> LONG { printf("SEH %08lx at %p\n", e->ExceptionRecord->ExceptionCode, e->ExceptionRecord->ExceptionAddress); return EXCEPTION_EXECUTE_HANDLER; });
   try { return run(argc, argv); }
   catch (const std::exception& e) { printf("EXCEPTION %s\n", e.what()); return 3; }
   catch (...) { printf("EXCEPTION unknown\n"); return 3; }
@@ -168,6 +169,7 @@ int run(int argc, wchar_t** argv) {
     auto names = LocalizedNames(ns.p);
     set<wstring> files; auto ref = Faces(fam.p, &files);
     if (ref.empty()) continue;
+    printf("FAM %u %s faces=%zu\n", i, names[0].c_str(), ref.size());
     faceCount += ref.size();
     vector<wstring> fv(files.begin(), files.end());
     (fv.size() == 1 ? single : multi)++;
@@ -184,8 +186,9 @@ int run(int argc, wchar_t** argv) {
     }
     std::map<string, int> inFull;
     for (auto& f : ref) inFull[f.ps]++;
+    std::set<string> dupSeen;
     for (auto& f : ref) {
-      if (inFull[f.ps] > 1) { dupInFull++; printf("DUP_IN_FULL family[%u] %s: PS name %s appears %d times in the full family\n", i, names[0].c_str(), f.ps.c_str(), inFull[f.ps]); continue; }
+      if (inFull[f.ps] > 1) { dupInFull++; if (dupSeen.insert(f.ps).second) printf("DUP_IN_FULL family[%u] %s: PS name %s appears %d times in the full family\n", i, names[0].c_str(), f.ps.c_str(), inFull[f.ps]); continue; }
       auto it = byPs.find(f.ps);
       if (it == byPs.end()) { miss++; printf("MISS family[%u] %s: %s\n", i, names[0].c_str(), f.ps.c_str()); }
       else if (it->second.size() > 1) { ambiguous++; printf("AMBIGUOUS family[%u] %s: %s matches %zu faces\n", i, names[0].c_str(), f.ps.c_str(), it->second.size()); }
