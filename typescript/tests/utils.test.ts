@@ -135,7 +135,10 @@ describe("getEnvVars", () => {
 // test_fontconfig_groups.py (#186)
 describe("the runtime fontconfig's font directories", () => {
 	afterEach(() => vi.restoreAllMocks());
-	const bundle = (groups: string | null, dirs = ["L", "LW", "M", "W", "windows"]) => {
+	const bundle = (
+		groups: string | null,
+		dirs = ["L", "LW", "M", "W", "windows"],
+	) => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "camoufox-186-"));
 		vi.spyOn(utilsDeps, "osName").mockReturnValue("lin");
 		vi.spyOn(utilsDeps, "installDir").mockReturnValue(path.join(root, "cache"));
