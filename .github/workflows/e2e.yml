@@ -134,7 +134,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: echo "CAMOUFOX_BINARY=$(python e2e/util.py $E2E_BROWSER)" >> "$GITHUB_ENV"
+        run: |
+          # Assigned first: inside echo "$(...)" a failed unpack would not fail the step.
+          binary="$(python e2e/util.py $E2E_BROWSER)"
+          echo "CAMOUFOX_BINARY=$binary" >> "$GITHUB_ENV"
       - name: Run
         if: inputs.probe == ''
         shell: bash
