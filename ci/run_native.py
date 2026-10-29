@@ -44,6 +44,7 @@ FILES = {
         "test_no_leaks.py",
         "test_contexts_vs_browsers.py",
         "test_crash_recovery.py",
+        "test_font_aliases_table.py",
     ],
     # Slow by construction: each mechanism is churned twice, at n and 4n, to
     # measure whether growth scales with the count -- ~38 minutes in one
