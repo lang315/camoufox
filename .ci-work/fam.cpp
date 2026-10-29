@@ -2,7 +2,7 @@
 // like the full bundled collection does? Usage: fam.exe <fonts dir>
 #define NOMINMAX
 #include <windows.h>
-#include <dwrite.h>
+#include <dwrite_3.h>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -141,6 +141,54 @@ static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
   return out;
 }
 
+
+using Key = std::tuple<string, string, unsigned, int, int, int>;
+struct Raw { Key key; string axes; };
+// Every font of the family in GetFont order (simulations included), with the
+// variation axis values of its face.
+static vector<Raw> RawFaces(IDWriteFontFamily* fam) {
+  vector<Raw> out;
+  for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
+    Raw r{Key{"(fail)", "", 0, 0, 0, 0}, ""};
+    Ptr<IDWriteFont> f;
+    if (SUCCEEDED(fam->GetFont(j, &f))) {
+      Face fc{PsName(f.p), (int)f->GetWeight(), (int)f->GetStretch(), (int)f->GetStyle(), "", 0};
+      Ptr<IDWriteFontFace> face;
+      if (SUCCEEDED(f->CreateFontFace(&face))) {
+        fc.idx = face->GetIndex();
+        UINT32 n = 0; face->GetFiles(&n, nullptr);
+        vector<IDWriteFontFile*> ff(n);
+        if (SUCCEEDED(face->GetFiles(&n, ff.data()))) {
+          for (UINT32 q = 0; q < n; q++) {
+            auto* x = ff[q];
+            Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll;
+            const void* k = nullptr; UINT32 ks = 0;
+            if (q == 0 && SUCCEEDED(x->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) &&
+                SUCCEEDED(x->GetReferenceKey(&k, &ks))) {
+              UINT32 len = 0;
+              if (SUCCEEDED(ll->GetFilePathLengthFromKey(k, ks, &len))) {
+                wstring path(len + 1, 0);
+                if (SUCCEEDED(ll->GetFilePathFromKey(k, ks, path.data(), len + 1))) { path.resize(len); for (auto& c : path) c = towlower(c); fc.path = U8(path); }
+              }
+            }
+            x->Release();
+          }
+        }
+        Ptr<IDWriteFontFace5> f5;
+        if (SUCCEEDED(face->QueryInterface(__uuidof(IDWriteFontFace5), (void**)&f5.p))) {
+          UINT32 ac = f5->GetFontAxisValueCount();
+          vector<DWRITE_FONT_AXIS_VALUE> av(ac);
+          if (ac && SUCCEEDED(f5->GetFontAxisValues(av.data(), ac))) {
+            for (auto& a : av) { char b[64]; snprintf(b, sizeof b, "%08x=%g;", (unsigned)a.axisTag, a.value); r.axes += b; }
+          }
+        }
+      }
+      r.key = fc.key();
+    }
+    out.push_back(r);
+  }
+  return out;
+}
 static const char* gStage = "start";
 int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
@@ -170,7 +218,7 @@ int run(int argc, wchar_t** argv) {
   // Today's lookup: family i by index in the full collection, then the face by
   // PostScript name. Both must give the same face (PS name, weight, stretch, style).
   int single = 0, multi = 0, miss = 0, ambiguous = 0, mismatch = 0, found = 0, dupInFull = 0, buildFail = 0;
-  size_t faceCount = 0, maxfiles = 0; std::map<std::tuple<string, string, unsigned, int, int, int>, int> globalKey; double tsmall = 0;
+  size_t faceCount = 0, maxfiles = 0; int orderOk = 0, orderBadFam = 0, axisCompared = 0, varFam = 0, varFaces = 0; std::map<std::tuple<string, string, unsigned, int, int, int>, int> globalKey; double tsmall = 0;
   std::vector<std::tuple<double, string, size_t>> times;
   for (UINT32 i = 0; i < nfam; i++) {
     Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
@@ -188,6 +236,28 @@ int run(int argc, wchar_t** argv) {
     double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
     tsmall += dt; times.push_back({dt, names[0], fv.size()});
     if (!sm) { buildFail++; printf("BUILD_FAIL family[%u] %s\n", i, names[0].c_str()); continue; }
+    {
+      gStage = "order-check";
+      auto rawF = RawFaces(fam.p);
+      vector<vector<Raw>> rawS; std::map<Key, std::set<size_t>> holders;
+      for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) {
+        Ptr<IDWriteFontFamily> sf; if (FAILED(sm->GetFontFamily(k, &sf))) { rawS.push_back({}); continue; }
+        rawS.push_back(RawFaces(sf.p));
+        for (auto& r : rawS.back()) holders[r.key].insert(rawS.size() - 1);
+      }
+      bool bad = false, var = false;
+      for (size_t j = 0; j < rawF.size(); j++) {
+        if (!rawF[j].axes.empty()) var = true;
+        auto h = holders.find(rawF[j].key);
+        if (h == holders.end() || h->second.size() != 1) { bad = true; printf("ORDER_NOHOLDER family[%u] %s idx=%zu holders=%zu\n", i, names[0].c_str(), j, h == holders.end() ? 0 : h->second.size()); continue; }
+        auto& sv = rawS[*h->second.begin()];
+        if (j >= sv.size() || !(sv[j].key == rawF[j].key)) { bad = true; printf("ORDER_DIFF family[%u] %s idx=%zu\n", i, names[0].c_str(), j); }
+        else if (sv[j].axes != rawF[j].axes) { bad = true; printf("AXIS_DIFF family[%u] %s idx=%zu full=%s small=%s\n", i, names[0].c_str(), j, rawF[j].axes.c_str(), sv[j].axes.c_str()); }
+        else { orderOk++; if (!rawF[j].axes.empty()) axisCompared++; }
+      }
+      if (bad) orderBadFam++;
+      if (var) { varFam++; varFaces += rawF.size(); }
+    }
     gStage = "faces-of-small"; std::map<std::tuple<string, string, unsigned, int, int, int>, int> inSmall;
     for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) {
       Ptr<IDWriteFontFamily> sf; if (FAILED(sm->GetFontFamily(k, &sf))) continue;
@@ -208,6 +278,7 @@ int run(int argc, wchar_t** argv) {
   printf("GLOBAL_DUP_KEYS_ACROSS_FAMILIES %d\n", dupGlobal);
   std::sort(times.begin(), times.end(), [](auto& a, auto& b) { return std::get<0>(a) > std::get<0>(b); });
   for (size_t k = 0; k < times.size() && k < 5; k++) printf("SLOWEST %.3fs %s (%zu files)\n", std::get<0>(times[k]), std::get<1>(times[k]).c_str(), std::get<2>(times[k]));
+  printf("ORDER faces_ok=%d families_with_order_or_axis_diff=%d axis_values_compared=%d variable_families=%d variable_family_faces=%d\n", orderOk, orderBadFam, axisCompared, varFam, varFaces);
   printf("SUMMARY families=%u faces=%zu found_identical=%d miss=%d ambiguous=%d mismatch=%d dup_key_in_full_family=%d build_fail=%d single_file_families=%d multi_file_families=%d max_files_in_a_family=%zu small_total_seconds=%.2f\n",
          nfam, faceCount, found, miss, ambiguous, mismatch, dupInFull, buildFail, single, multi, maxfiles, tsmall);
   return 0;
