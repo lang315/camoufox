@@ -72,6 +72,8 @@ a bare "the gate allows everything" reading will not show you either.
 
 ## Font read paths: gating status
 
+Smoke's name-gate arms measure the Windows package's universe (all seven groups) on a Linux runner; the Linux directory gate is measured by the face log and `test_build_tester_fontconfig` (#329).
+
 **Font read paths known to be ungated** (as of the #44 review; check before
 assuming a font change is complete): `SystemFindFontForChar` /
 `GlobalFontFallback` / `CommonFontFallback`; `FontFaceSet::InsertRuleFontFace`;
