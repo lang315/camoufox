@@ -99,10 +99,12 @@ def test_a_linux_claim_draws_the_linux_faces(binary):
     drawn = faces(logdir)
     failures = []
     for request, family in EXPECTED.items():
+        print(f"CAMOU-FL alias {request!r} drew {drawn.get(request)!r}, want {family!r}")
         if drawn.get(request) != family:
             failures.append(f"{request}: drew {drawn.get(request)!r}, the Linux host draws {family!r}")
     default = drawn.get(NEVER)
     for request in NO_TARGET:
+        print(f"CAMOU-FL control {request!r} drew {drawn.get(request)!r}, list default {default!r}")
         if not default or drawn.get(request) != default:
             failures.append(f"{request}: admitted with no admitted target drew {drawn.get(request)!r}, "
                             f"want the list's default {default!r}")
