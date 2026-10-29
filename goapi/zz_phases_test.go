@@ -79,8 +79,10 @@ func TestZZPhases(t *testing.T) {
 		}
 		camoufox.ZZTake()
 		logBase := filepath.Join(t.TempDir(), "moz.log")
-		opts = append(opts, camoufox.WithEnv(append(os.Environ(),
-			"MOZ_LOG=timestamp,sync,nsHttp:3,nsSocketTransport:3,nsHostResolver:3", "MOZ_LOG_FILE="+logBase)...))
+		if os.Getenv("ZZ_MOZLOG") == "1" {
+			opts = append(opts, camoufox.WithEnv(append(os.Environ(),
+				"MOZ_LOG=timestamp,sync,nsHttp:3,nsSocketTransport:3,nsHostResolver:3", "MOZ_LOG_FILE="+logBase)...))
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		t0 := time.Now()
 		b, err := camoufox.Launch(ctx, opts...)
@@ -107,9 +109,9 @@ func TestZZPhases(t *testing.T) {
 		marks := camoufox.ZZTake()
 		_ = p.Close(ctx)
 		b.Close()
-		t.Logf("PHASES %s#%d launch=%.1f context=%.1f newpage=%.1f stages:%s | profile(after newpage) %s",
-			arm, i, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), t3.Sub(t2).Seconds(), deltas(marks, t0), snap)
-		t.Logf("NET %s#%d wall=%.1fs cpu_sum=%.1fs %s", arm, i, t3.Sub(t0).Seconds(), cpu, netSummary(logBase))
+		t.Logf("PHASES moz=%s %s#%d launch=%.1f context=%.1f newpage=%.1f stages:%s | profile(after newpage) %s",
+			os.Getenv("ZZ_MOZLOG"), arm, i, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), t3.Sub(t2).Seconds(), deltas(marks, t0), snap)
+		t.Logf("NET moz=%s %s#%d wall=%.1fs cpu_sum=%.1fs %s", os.Getenv("ZZ_MOZLOG"), arm, i, t3.Sub(t0).Seconds(), cpu, netSummary(logBase))
 		cancel()
 	}
 }

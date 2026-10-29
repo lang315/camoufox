@@ -163,7 +163,9 @@ jobs:
       - name: Phases probe
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
-        run: cd goapi && CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPhases -v -count=1 2>&1 | grep -E "PHASES|FAIL|ok" ; true
+        run: |
+          cd goapi
+          for moz in 0 1; do ZZ_MOZLOG=$moz CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPhases -v -count=1 2>&1 | grep -E "PHASES|NET |FAIL" ; done; true
       - name: Run
         if: ${{ !cancelled() && inputs.probe == '' }}
         shell: bash
