@@ -155,6 +155,10 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; else python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; fi
+      - name: Phases probe
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: cd goapi && CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPhases -v -count=1 2>&1 | grep -E "PHASES|FAIL|ok" ; true
       - name: Run
         if: ${{ !cancelled() && inputs.probe == '' }}
         shell: bash
