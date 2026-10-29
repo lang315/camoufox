@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -146,7 +147,17 @@ int wmain(int argc, wchar_t** argv) {
   if (!full) { printf("full collection failed\n"); return 2; }
   UINT32 nfam = full->GetFontFamilyCount();
   printf("FILES %zu FAMILIES %u FULL_BUILD_SECONDS %.2f\n", all.size(), nfam, tfull);
-  int diffs = 0, nameMiss = 0; size_t faceCount = 0; double tsmall = 0, tmax = 0; size_t maxfiles = 0;
+  // For every shared-list entry (family i, one of its localized names n), the
+  // S3b lookup is: FindFamilyName(one-family collection, n), then match each
+  // face of family i by PostScript name in the family found.
+  // Today's lookup is the index in the full collection, else FindFamilyName(full, n).
+  int fails = 0, failsToday = 0, entries = 0, single = 0, multi = 0, ambiguous = 0;
+  size_t faceCount = 0; double tsmall = 0; size_t maxfiles = 0;
+  std::vector<std::pair<double, string>> times;
+  auto widen = [](const string& nm) {
+    int wl = MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, nullptr, 0);
+    wstring w(wl, 0); MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, w.data(), wl); return w;
+  };
   for (UINT32 i = 0; i < nfam; i++) {
     Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
     Ptr<IDWriteLocalizedStrings> ns; if (FAILED(fam->GetFamilyNames(&ns))) continue;
@@ -154,34 +165,46 @@ int wmain(int argc, wchar_t** argv) {
     set<wstring> files; auto ref = Faces(fam.p, &files);
     faceCount += ref.size();
     if (ref.empty()) continue;
+    set<Face> want(ref.begin(), ref.end());
     vector<wstring> fv(files.begin(), files.end());
+    (fv.size() == 1 ? single : multi)++;
     if (fv.size() > maxfiles) maxfiles = fv.size();
     auto s0 = std::chrono::steady_clock::now();
     Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
     double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
-    tsmall += dt; if (dt > tmax) tmax = dt;
-    if (!sm) { printf("DIFF family[%u] %s: sm collection failed (%zu files)\n", i, names[0].c_str(), fv.size()); diffs++; continue; }
+    tsmall += dt; times.push_back({dt, names[0] + " (" + std::to_string(fv.size()) + " files)"});
     for (auto& nm : names) {
-      wstring w(nm.begin(), nm.end());
-      int wl = MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, nullptr, 0);
-      w.assign(wl, 0); MultiByteToWideChar(CP_UTF8, 0, nm.c_str(), -1, w.data(), wl);
+      entries++;
+      auto w = widen(nm);
+      // S3b
+      bool ok = false; string why;
       UINT32 idx = 0; BOOL ex = FALSE;
-      if (FAILED(sm->FindFamilyName(w.c_str(), &idx, &ex)) || !ex) {
-        printf("DIFF family[%u] %s: name '%s' not found in sm collection (%zu files)\n", i, names[0].c_str(), nm.c_str(), fv.size());
-        nameMiss++; diffs++; continue;
+      if (!sm) why = "small collection failed";
+      else if (FAILED(sm->FindFamilyName(w.c_str(), &idx, &ex)) || !ex) why = "name not found";
+      else {
+        Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(idx, &sf);
+        auto got = Faces(sf.p, nullptr); set<Face> g(got.begin(), got.end());
+        ok = true;
+        for (auto& x : want) if (!g.count(x)) { ok = false; why = "face " + x.ps + " not matched (found family has " + std::to_string(got.size()) + " faces, first " + (got.empty() ? string("-") : got[0].ps) + ")"; break; }
       }
-      Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(idx, &sf);
-      auto got = Faces(sf.p, nullptr);
-      set<Face> a(ref.begin(), ref.end()), b(got.begin(), got.end());
-      if (a != b || ref.size() != got.size()) {
-        printf("DIFF family[%u] %s via '%s': full has %zu faces, sm has %zu (%zu files)\n", i, names[0].c_str(), nm.c_str(), ref.size(), got.size(), fv.size());
-        for (auto& x : a) if (!b.count(x)) printf("   only in full : %s w=%d s=%d st=%d\n", x.ps.c_str(), x.weight, x.stretch, x.style);
-        for (auto& x : b) if (!a.count(x)) printf("   only in sm: %s w=%d s=%d st=%d\n", x.ps.c_str(), x.weight, x.stretch, x.style);
-        diffs++;
+      // Today
+      bool todayOK = false;
+      {
+        UINT32 fi = 0; BOOL fe = FALSE;
+        bool byIndex = (nm == names[0]);
+        Ptr<IDWriteFontFamily> tf;
+        if (byIndex) tf.p = fam.p, tf.p->AddRef();
+        else if (SUCCEEDED(full->FindFamilyName(w.c_str(), &fi, &fe)) && fe) full->GetFontFamily(fi, &tf);
+        if (tf) { auto got = Faces(tf.p, nullptr); set<Face> g(got.begin(), got.end()); todayOK = true; for (auto& x : want) if (!g.count(x)) { todayOK = false; break; } }
+        if (!byIndex && fe && fi != i) ambiguous++;
       }
+      if (!ok) { fails++; if (!todayOK) failsToday++;
+        printf("S3B_FAIL family[%u] %s via '%s' (%zu files): %s; today's lookup %s\n", i, names[0].c_str(), nm.c_str(), fv.size(), why.c_str(), todayOK ? "FINDS the faces" : "ALSO fails"); }
     }
   }
-  printf("SUMMARY families=%u non_simulated_faces=%zu diffs=%d name_misses=%d small_total_seconds=%.2f small_max_seconds=%.3f max_files_in_a_family=%zu\n",
-         nfam, faceCount, diffs, nameMiss, tsmall, tmax, maxfiles);
+  std::sort(times.begin(), times.end(), [](auto& a, auto& b) { return a.first > b.first; });
+  for (size_t k = 0; k < times.size() && k < 5; k++) printf("SLOWEST %.3fs %s\n", times[k].first, times[k].second.c_str());
+  printf("SUMMARY families=%u entries(family x localized name)=%d non_simulated_faces=%zu single_file_families=%d multi_file_families=%d names_resolving_to_another_family_in_full=%d s3b_fails=%d of_which_today_also_fails=%d small_total_seconds=%.2f max_files_in_a_family=%zu\n",
+         nfam, entries, faceCount, single, multi, ambiguous, fails, failsToday, tsmall, maxfiles);
   return 0;
 }
