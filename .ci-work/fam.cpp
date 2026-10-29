@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <exception>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -132,7 +133,14 @@ static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
   return out;
 }
 
+int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
+  setvbuf(stdout, nullptr, _IONBF, 0);
+  try { return run(argc, argv); }
+  catch (const std::exception& e) { printf("EXCEPTION %s\n", e.what()); return 3; }
+  catch (...) { printf("EXCEPTION unknown\n"); return 3; }
+}
+int run(int argc, wchar_t** argv) {
   if (argc < 2) { printf("usage: fam <fonts dir>\n"); return 2; }
   if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), (IUnknown**)&gF))) { printf("no factory\n"); return 2; }
   wstring dir = argv[1];
