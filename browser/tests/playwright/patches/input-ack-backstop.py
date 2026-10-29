@@ -187,7 +187,7 @@ def gpu_process(binary):
                 continue
             p = int(pid)
             while p > 1:
-                with open(f"/proc/{p}/stat") as f:
+                with open(f"/proc/{p}/stat", encoding="utf-8") as f:
                     p = int(f.read().rsplit(")", 1)[1].split()[1])
                 if p == os.getpid():
                     return int(pid)
@@ -203,7 +203,7 @@ async def gpu_process_killed() -> int:
     with tempfile.TemporaryDirectory() as profile, hidden_display():
         Path(profile, "user.js").write_text(
             'user_pref("layers.gpu-process.enabled", true);\n'
-            'user_pref("layers.gpu-process.force-enabled", true);\n')
+            'user_pref("layers.gpu-process.force-enabled", true);\n', encoding="utf-8")
         kwargs = launch_kwargs(headless=False, os="linux", humanize=False,
                                persistent_context=True, user_data_dir=profile)
         binary = kwargs["executable_path"]

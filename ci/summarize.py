@@ -206,6 +206,8 @@ def render(merged: Dict[str, dict], required: List[str], problems: List[str], me
         elif tally:
             failed = tally.get("fail", 0) + tally.get("error", 0)
             detail = f"{tally.get('pass', 0)} passed, {failed} failed, {tally.get('total', 0)} collected"
+            if tally.get("not_applicable"):
+                detail += f", {tally['not_applicable']} not applicable on this platform"
             shards = (record.get("metrics") or {}).get("shards")
             if shards:
                 detail += f" (across {shards} shards)"

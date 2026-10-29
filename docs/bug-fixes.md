@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #311, #314: the patch-guard runner and several guards failed on Windows and saw nothing on macOS
+
+**Fixed by:** the PR that closes both. **Found by:** a run of the spoofing group on real Windows 10 against the fork.1 build.
+
+**Symptom.** `python -m ci.run_patch_guards` died after its first guard with `AttributeError: module 'os' has no attribute 'sysconf'`. Run guard by guard, `context-lists-across-processes.py` and `system-font-alias-stall.py` raised `UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d`, and `ipv4-only-network.py`, `webgl-live-state.py` and `webgl-renderer-pair.py` failed for lack of `unshare`, `ip` and a virtual display.
+
+**Root cause.** Three assumptions that Linux CI satisfied. `leftover_browsers` read `/proc` and called `os.sysconf("SC_CLK_TCK")`: that raises on Windows, and on macOS there is no `/proc`, so the loop found nothing and reported every guard clean, which made the check vacuous rather than failing. `read_text()` and `open()` without `encoding=` use the locale codec, cp1252 on Windows, which cannot decode bytes in `fonts.json`. And three guards build a Linux network namespace or an Xvfb display, which have no counterpart elsewhere.
+
+**Fix.** `leftover_browsers` lists processes with psutil (already in `ci/requirements.txt`) that run from the binary's directory, and raises when no process can be read at all. Every `read_text`, `write_text` and text-mode `open` in the guards, `ci/` and `e2e/` names `encoding="utf-8"`. `LINUX_ONLY` in `ci/run_patch_guards.py` makes the runner report those three guards as not applicable off Linux, counted apart from the passes ([tribal rule](../ci/tribal-rules.yml) `linux-only-guards-are-not-applicable-elsewhere`). Not taken: reading `/proc`, `ps` and PowerShell separately (three code paths for one list), and per-guard skips (a skip reads as green).
+
+**Evidence.** Red then green in `ci/tests/test_ci.py`: `test_text_files_are_read_and_written_as_utf_8` listed 51 call sites before the change and none after; `test_leftover_browsers_sees_a_process_started_from_the_browsers_directory` returned an empty list on macOS before the change; `test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass` ran `ipv4-only-network` on a darwin stand-in before the change and skipped it after.
+
+**What misled the investigation.** The leftover check passing on macOS read as "no leftovers"; it could not see any process. A first version of its test read the child's executable too early: on a macOS framework Python the launcher re-executes into `Python.app`, so the path differs until the script runs.
+
 ## #335: the macOS build failed in "Setup and bootstrap" because patch.py ran `~/.cargo/bin/rustup`
 
 **Fixed by:** the PR that makes `browser/scripts/patch.py` run `rustup` from `PATH`. **Found by:** `build.yml` run 40813393344, job 123249229239 (`build (macos, arm64)`, image `macos-26-arm64` 20261021.0445.8).
@@ -25,6 +39,21 @@ later change should read first.
 **Evidence.** See the PR.
 
 **What misled the investigation.** The `build.yml` comment at the macOS install step already named image 20261021 and its rustup, and pinned the toolchains through `PATH`, so the image was thought handled. The log line `info: self-update is disabled for this build of rustup` appears on the passing image too, so it does not tell the images apart. That the older image had `~/.cargo/bin/rustup` is inferred from the two outcomes, not read: no job printed `command -v rustup`.
+## #325: a Linux claim on a Windows or macOS host drew the Apple and Microsoft faces for Linux names
+
+**Fixed by:** the PR that adds `browser/patches/zzz-linux-font-aliases.patch`, `browser/additions/camoucfg/FontAliasesLinux.hpp` and `browser/scripts/gen-font-aliases.py`. **Found by:** the face log (`CAMOU-FL face`, #327) read on a Windows host.
+
+**Symptom.** A launch with `os="linux"` on Windows or macOS measured text in the Apple and Microsoft files of the flat package. `Helvetica` drew `Helvetica`, `Arial` drew `Arial`, `Courier New` drew `Courier New`, and `serif`, `sans-serif` and `monospace` drew `Times`, `Helvetica` and `Courier New`. A Linux host draws `Nimbus Sans`, `Arimo`, `Cousine`, `Nimbus Roman`, `Nimbus Sans` and `Cousine` for the same requests with the same font list.
+
+**Root cause.** On Linux, fontconfig answers a named lookup through the aliases in `browser/bundle/fontconfig/linux/fonts.conf`, and Gecko takes every family before the sentinel (`gfxFcPlatformFontList.cpp:2564-2608`). DirectWrite and CoreText have no fontconfig, and the flat Windows and macOS packages hold the Apple and Microsoft files under those exact names, so the lookup found them. The generic path (`CamouGenericCandidate`) follows the same name resolution, so the generics drew them too.
+
+**Fix.** The browser applies the conf's answer itself. `gen-font-aliases.py` reads each Linux name no Linux face carries through `fc-pattern` against the staged bundle and writes `FontAliasesLinux.hpp`. `zzz-linux-font-aliases.patch` rewrites such a name to its admitted targets in `gfxPlatformFontList::FindAndAddFamiliesLocked` when the context claims Linux, and in `gfxDWriteFontList` before the DirectWrite substitution. A target that is itself an alias key is skipped, so the rewrite cannot recurse. `test_font_aliases_table.py` fails when the header differs from the bundle, and prints the diff.
+
+**Not tried / failed.** Removing the Apple and Microsoft files from a Linux claim's list was not possible: the allowlist filters by family name, and the same files serve the Windows and macOS contexts of the same package. Reading the answer from `fc-match` on the Windows host was not possible either, because it has no fontconfig. The generics' realism when no row key resolves is a separate gap (#333).
+
+**Evidence.** `e2e/journeys/test_09_linux_claim_fonts.py` reads the drawing face from the face log. Red: e2e run 40837110717 (job 123324742569) on the Windows build 40809452153 of main 0190fa38 fails with `Helvetica: drew 'Helvetica', the Linux host draws 'Nimbus Sans'` and nine more requests. Green: e2e run 40837114640 (job 123326864251) on the Windows build 40809427405 of the branch, 1 passed. The same test passes on the Linux leg of the branch's Tests run, which proves the expected table is what fontconfig draws.
+
+**What misled the investigation.** Ink quantization and `fc-match` output looked like a verdict and were not: neither reads the face that drew. The first Linux-host reference was itself a leak (#329). The first drift failure of the table test looked like a fontconfig version dependence and was a trailing blank line: the committed header ended in two newlines and the generator writes one, so the diff was one empty line, found only once the test printed it.
 
 ## #331: the launchers named the fonts/ parent when groups.json or the OS's group directories were missing
 

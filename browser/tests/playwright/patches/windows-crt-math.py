@@ -29,8 +29,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import resolve_binary  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-REFERENCE = json.loads((HERE / "assets" / "windows-crt-math.json").read_text())
-PROBE = (HERE.parents[1] / "ucrt-math" / "probe.js").read_text()
+REFERENCE = json.loads((HERE / "assets" / "windows-crt-math.json").read_text(encoding="utf-8"))
+PROBE = (HERE.parents[1] / "ucrt-math" / "probe.js").read_text(encoding="utf-8")
 TIMEOUT_MS = 120_000
 
 

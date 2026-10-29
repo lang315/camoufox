@@ -92,7 +92,7 @@ def serve():
 
 def packaging_drops_probes() -> list:
     """The names package.py refuses to ship, as the source declares them."""
-    text = (BROWSER_ROOT / "scripts" / "package.py").read_text()
+    text = (BROWSER_ROOT / "scripts" / "package.py").read_text(encoding="utf-8")
     unneeded = text.split("UNNEEDED_PATHS = {", 1)[1].split("}", 1)[0]
     return [name for name in PROBES if f"'{name}'" in unneeded or f'"{name}"' in unneeded]
 
@@ -104,7 +104,7 @@ def webgl_report(binary: Path) -> dict:
     Path(profile, "user.js").write_text(
         'user_pref("browser.shell.checkDefaultBrowser", false);\n'
         'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);\n'
-    )
+    , encoding="utf-8")
     stderr = Path(profile, "stderr.log")
     with stderr.open("wb") as err:
         proc = subprocess.Popen(
@@ -124,7 +124,7 @@ def webgl_report(binary: Path) -> dict:
     # What the probes said, if they said anything: an empty gfxInfo reads the
     # same to the page whether glxtest is missing or ran and failed.
     report["gfx_stderr"] = [
-        line for line in stderr.read_text(errors="replace").splitlines()
+        line for line in stderr.read_text(errors="replace", encoding="utf-8").splitlines()
         if "glxtest" in line or "vaapitest" in line or "GfxInfo" in line
     ][-10:]
     shutil.rmtree(profile, ignore_errors=True)
