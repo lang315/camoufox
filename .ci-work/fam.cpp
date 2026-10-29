@@ -141,10 +141,11 @@ static vector<Face> Faces(IDWriteFontFamily* fam, set<wstring>* files) {
   return out;
 }
 
+static const char* gStage = "start";
 int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
-  SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* e) -> LONG { printf("SEH %08lx at %p\n", e->ExceptionRecord->ExceptionCode, e->ExceptionRecord->ExceptionAddress); return EXCEPTION_EXECUTE_HANDLER; });
+  SetUnhandledExceptionFilter([](EXCEPTION_POINTERS* e) -> LONG { HMODULE m = nullptr; char mn[260] = "?"; GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)e->ExceptionRecord->ExceptionAddress, &m); if (m) GetModuleFileNameA(m, mn, 260); printf("SEH %08lx at %p module %s +%llx stage %s\n", e->ExceptionRecord->ExceptionCode, e->ExceptionRecord->ExceptionAddress, mn, (unsigned long long)((char*)e->ExceptionRecord->ExceptionAddress - (char*)m), gStage); return EXCEPTION_EXECUTE_HANDLER; });
   try { return run(argc, argv); }
   catch (const std::exception& e) { printf("EXCEPTION %s\n", e.what()); return 3; }
   catch (...) { printf("EXCEPTION unknown\n"); return 3; }
@@ -175,7 +176,7 @@ int run(int argc, wchar_t** argv) {
     Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
     Ptr<IDWriteLocalizedStrings> ns; if (FAILED(fam->GetFamilyNames(&ns))) continue;
     auto names = LocalizedNames(ns.p);
-    set<wstring> files; auto ref = Faces(fam.p, &files);
+    gStage = "faces-of-full-family"; set<wstring> files; auto ref = Faces(fam.p, &files);
     if (ref.empty()) continue;
     printf("FAM %u %s faces=%zu\n", i, names[0].c_str(), ref.size());
     faceCount += ref.size();
@@ -183,11 +184,11 @@ int run(int argc, wchar_t** argv) {
     (fv.size() == 1 ? single : multi)++;
     if (fv.size() > maxfiles) maxfiles = fv.size();
     auto s0 = std::chrono::steady_clock::now();
-    Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
+    gStage = "build-small"; Ptr<IDWriteFontCollection> sm; sm.p = Build(fv); gStage = "after-build";
     double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - s0).count();
     tsmall += dt; times.push_back({dt, names[0], fv.size()});
     if (!sm) { buildFail++; printf("BUILD_FAIL family[%u] %s\n", i, names[0].c_str()); continue; }
-    std::map<std::tuple<string, string, unsigned, int, int, int>, int> inSmall;
+    gStage = "faces-of-small"; std::map<std::tuple<string, string, unsigned, int, int, int>, int> inSmall;
     for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) {
       Ptr<IDWriteFontFamily> sf; if (FAILED(sm->GetFontFamily(k, &sf))) continue;
       for (auto& f : Faces(sf.p, nullptr)) inSmall[f.key()]++;
