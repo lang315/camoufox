@@ -21,8 +21,8 @@ so a machine whose GPU fpgen never recorded fails.
 
 Stock Firefox is downloaded from archive.mozilla.org, checked against the
 release's SHA256SUMS, whose signature gpg checks against Mozilla's release
-signing key, and cached under .ci-work. That is implemented for Linux;
-elsewhere, pass both stock binaries.
+signing key, and cached under .ci-work, on Linux, macOS (hdiutil) and Windows
+(7-Zip). To use binaries of your own, pass both stock binaries.
 
     python browser/tests/playwright/patches/stock-gpu-parity.py
     python browser/tests/playwright/patches/stock-gpu-parity.py --stock FIREFOX --recorded-stock FIREFOX
@@ -60,7 +60,12 @@ from camoufox.host_rendering import renders_on_hardware  # noqa: E402
 from camoufox.utils import launch_options, resolve_verstr  # noqa: E402
 
 ARCHIVE = "https://archive.mozilla.org/pub/firefox/releases/{version}/"
-LINUX_PACKAGE = "linux-{machine}/en-US/firefox-{version}.tar.xz"
+# Per host: the release file, the directory it unpacks to and the binary inside it.
+STOCK_PACKAGES = {
+    "Linux": ("linux-{machine}/en-US/firefox-{version}.tar.xz", "firefox", "firefox/firefox"),
+    "Darwin": ("mac/en-US/Firefox {version}.dmg", "Firefox.app", "Firefox.app/Contents/MacOS/firefox"),
+    "Windows": ("{windows}/en-US/Firefox Setup {version}.exe", "core", "core/firefox.exe"),
+}
 OS_NAMES = {"Linux": "linux", "Darwin": "macos", "Windows": "windows"}
 OS_KEYS = {"linux": "lin", "macos": "mac", "windows": "win"}
 CONTEXTS = {"webgl": "webGl", "webgl2": "webGl2"}
@@ -88,9 +93,15 @@ function gl(kind, constants) {
   const out = {webgl: gl('webgl', WebGLRenderingContext), webgl2: gl('webgl2', WebGL2RenderingContext),
                webgpu: {gpu: !!navigator.gpu}};
   if (navigator.gpu) {
-    const a = await navigator.gpu.requestAdapter();
-    out.webgpu.adapter = a && {features: [...a.features].sort(),
-        limits: Object.fromEntries(Object.keys(Object.getPrototypeOf(a.limits)).map(k => [k, a.limits[k]]))};
+    // An older stock release throws where a newer one answers null (146 on macOS:
+    // "WebGPU is disabled by blocklist"); either way the page must still report.
+    try {
+      const a = await navigator.gpu.requestAdapter();
+      out.webgpu.adapter = a && {features: [...a.features].sort(),
+          limits: Object.fromEntries(Object.keys(Object.getPrototypeOf(a.limits)).map(k => [k, a.limits[k]]))};
+    } catch (e) {
+      out.webgpu.adapterError = String(e);
+    }
   }
   await fetch('/result', {method: 'POST', body: JSON.stringify(out)});
 })();
@@ -122,7 +133,10 @@ def probe(binary: Path, env: Dict[str, str]) -> Dict[str, Any]:
     threading.Thread(target=server.serve_forever, daemon=True).start()
     profile = tempfile.mkdtemp(prefix="stock-gpu-parity-")
     # The launchers force WebGL on for every identity, so stock gets it too.
-    Path(profile, "user.js").write_text('user_pref("webgl.force-enabled", true);\n', encoding="utf-8")
+    # Stock Firefox updates itself in place, which would change the version the
+    # download was verified as and exit the first launch to apply it.
+    Path(profile, "user.js").write_text(
+        'user_pref("webgl.force-enabled", true);\nuser_pref("app.update.enabled", false);\n', encoding="utf-8")
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     proc = subprocess.Popen(
         [str(binary), "-headless", "-no-remote", "-profile", profile, url],
@@ -133,14 +147,19 @@ def probe(binary: Path, env: Dict[str, str]) -> Dict[str, Any]:
             raise SystemExit(f"{binary} did not report within 120s")
         return server.result
     finally:
-        # Every process of this browser carries the throwaway profile path.
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-        else:
-            subprocess.run(["pkill", "-9", "-f", profile], capture_output=True)
-        proc.wait()
+        stop_browser(proc, profile)
         server.shutdown()
-        shutil.rmtree(profile, ignore_errors=True)
+
+
+def stop_browser(proc: subprocess.Popen, profile: str) -> None:
+    """End `proc` and its children, then delete its profile."""
+    # Every process of this browser carries the throwaway profile path.
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
+    else:
+        subprocess.run(["pkill", "-9", "-f", profile], capture_output=True)
+    proc.wait()
+    shutil.rmtree(profile, ignore_errors=True)
 
 
 def ini_version(binary: Path) -> str:
@@ -160,27 +179,30 @@ def stock_firefox(flag: str, version: str) -> Path:
     """The stock binary passed with `flag`, or the release downloaded once."""
     if flag in sys.argv:
         binary = Path(sys.argv[sys.argv.index(flag) + 1]).resolve()
-    elif platform.system() == "Linux":
-        binary = download_stock(version)
     else:
-        raise SystemExit(f"downloading stock Firefox is implemented for Linux; pass {flag} with Firefox {version}")
+        binary = download_stock(version)
     if ini_version(binary) != version:
         raise SystemExit(f"{binary} is Firefox {ini_version(binary)}, not {version}")
     return binary
 
 
 def download_stock(version: str) -> Path:
-    package = LINUX_PACKAGE.format(machine=platform.machine(), version=version)
-    binary = WORK_DIR / "stock-firefox" / version / platform.machine() / "firefox" / "firefox"
+    package, unpacked, inside = STOCK_PACKAGES[platform.system()]
+    machine = platform.machine()
+    package = package.format(
+        machine=machine, version=version,
+        windows="win64-aarch64" if machine.lower() in ("arm64", "aarch64") else "win64")
+    binary = WORK_DIR / "stock-firefox" / version / machine / inside
     if binary.exists():
         return binary
     base = ARCHIVE.format(version=version)
     sums = {name: digest for digest, name in (line.split("  ", 1) for line in signed_sums(base).splitlines())}
     if package not in sums:
         raise SystemExit(f"{base}SHA256SUMS lists no {package}")
-    binary.parent.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(dir=binary.parent.parent) as tmp:
-        archive = Path(tmp, "firefox.tar.xz")
+    root = WORK_DIR / "stock-firefox" / version / machine
+    root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=root) as tmp:
+        archive = Path(tmp, Path(package).name)
         digest = hashlib.sha256()
         url = base + urllib.parse.quote(package)
         with urllib.request.urlopen(url, timeout=300) as resp, archive.open("wb") as out:  # noqa: S310
@@ -189,11 +211,31 @@ def download_stock(version: str) -> Path:
                 out.write(chunk)
         if digest.hexdigest() != sums[package]:
             raise SystemExit(f"{package}: SHA-256 {digest.hexdigest()} is not the release's {sums[package]}")
-        with tarfile.open(archive) as tar:
-            tar.extractall(tmp, filter="data")
+        unpack(archive, Path(tmp))
         # Renamed into place last, so an interrupted run leaves nothing cached.
-        Path(tmp, "firefox").rename(binary.parent)
+        Path(tmp, unpacked).rename(root / unpacked)
     return binary
+
+
+def unpack(archive: Path, into: Path) -> None:
+    """Unpack a verified release file: a tarball, a disk image or the Windows installer."""
+    if archive.suffix == ".xz":
+        with tarfile.open(archive) as tar:
+            tar.extractall(into, filter="data")
+    elif archive.suffix == ".dmg":
+        mount = into / "mount"
+        mount.mkdir()
+        subprocess.run(["hdiutil", "attach", "-nobrowse", "-readonly", "-mountpoint", str(mount), str(archive)],
+                       check=True, capture_output=True)
+        try:
+            subprocess.run(["ditto", str(mount / "Firefox.app"), str(into / "Firefox.app")], check=True)
+        finally:
+            subprocess.run(["hdiutil", "detach", str(mount)], check=True, capture_output=True)
+    else:  # The installer is a 7-Zip archive whose core/ directory is the browser.
+        seven_zip = shutil.which("7z") or shutil.which("7za")
+        if not seven_zip:
+            raise SystemExit("7z is required to unpack stock Firefox's Windows installer; install 7-Zip")
+        subprocess.run([seven_zip, "x", "-y", f"-o{into}", str(archive), "core"], check=True, capture_output=True)
 
 
 def signed_sums(base: str) -> str:
@@ -209,12 +251,12 @@ def signed_sums(base: str) -> str:
             with urllib.request.urlopen(base + name, timeout=60) as resp:  # noqa: S310
                 Path(tmp, name).write_bytes(resp.read())
         subprocess.run(
-            [gpg, "--homedir", str(home), "--batch", "--quiet", "--import", str(Path(tmp, "KEY"))],
+            [gpg, "--homedir", home.as_posix(), "--batch", "--quiet", "--import", Path(tmp, "KEY").as_posix()],
             check=True, capture_output=True,
         )
         verify = subprocess.run(
-            [gpg, "--homedir", str(home), "--batch", "--status-fd", "1",
-             "--verify", str(Path(tmp, "SHA256SUMS.asc")), str(Path(tmp, "SHA256SUMS"))],
+            [gpg, "--homedir", home.as_posix(), "--batch", "--status-fd", "1",
+             "--verify", Path(tmp, "SHA256SUMS.asc").as_posix(), Path(tmp, "SHA256SUMS").as_posix()],
             capture_output=True, text=True,
         )
         # VALIDSIG ends with the primary key of whichever subkey signed.

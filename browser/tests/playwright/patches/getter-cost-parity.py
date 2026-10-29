@@ -141,14 +141,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
 
+def stock_gpu_parity():
+    spec = importlib.util.spec_from_file_location("stock_gpu_parity", HERE / "stock-gpu-parity.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def stock_firefox():
     """Stock Firefox of the version Camoufox is built from: --stock, else the
     release stock-gpu-parity downloads and checks against Mozilla's signed
     SHA256SUMS."""
-    spec = importlib.util.spec_from_file_location("stock_gpu_parity", HERE / "stock-gpu-parity.py")
-    stock_gpu_parity = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(stock_gpu_parity)
-    return stock_gpu_parity.stock_firefox("--stock", read_upstream_sh()["version"])
+    return stock_gpu_parity().stock_firefox("--stock", read_upstream_sh()["version"])
 
 
 def prepare_stock(binary):
@@ -185,11 +189,8 @@ def run_stock(binary, url):
 
 
 def stop_stock(profile, proc):
-    # Every process of this browser carries the throwaway profile path, and a
-    # content process left behind would slow every later guard on the runner.
-    subprocess.run(["pkill", "-9", "-f", profile], capture_output=True)
-    proc.wait()
-    shutil.rmtree(profile, ignore_errors=True)
+    # A content process left behind would slow every later guard on the runner.
+    stock_gpu_parity().stop_browser(proc, profile)
 
 
 def run_camoufox(binary, url, identity):
