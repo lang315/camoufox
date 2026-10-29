@@ -56,8 +56,6 @@ input then lands where it was sent.
 """
 
 import asyncio
-import os
-import signal
 import sys
 import tempfile
 import time
@@ -219,7 +217,7 @@ async def gpu_process_killed() -> int:
                 t0 = time.time()
                 burst = asyncio.gather(*[page.mouse.wheel(0, 100) for _ in range(30)])
                 await asyncio.sleep(0.15)
-                os.kill(pid, signal.SIGKILL)
+                psutil.Process(pid).kill()
                 killed = pid
                 try:
                     await asyncio.wait_for(burst, timeout=BOUNDED_S)
