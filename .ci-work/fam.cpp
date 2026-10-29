@@ -175,8 +175,8 @@ int run(int argc, wchar_t** argv) {
   for (UINT32 i = 0; i < nfam; i++) {
     Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
     Ptr<IDWriteLocalizedStrings> ns; if (FAILED(fam->GetFamilyNames(&ns))) continue;
-    auto names = LocalizedNames(ns.p);
-    gStage = "faces-of-full-family"; set<wstring> files; auto ref = Faces(fam.p, &files);
+    auto names = LocalizedNames(ns.p); if (names.empty()) names.push_back("(noname)");
+    printf("ENTER %u %s\n", i, names[0].c_str()); gStage = "faces-of-full-family"; set<wstring> files; auto ref = Faces(fam.p, &files);
     if (ref.empty()) continue;
     printf("FAM %u %s faces=%zu\n", i, names[0].c_str(), ref.size());
     faceCount += ref.size();
