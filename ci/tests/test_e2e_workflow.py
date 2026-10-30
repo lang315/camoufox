@@ -7,6 +7,8 @@ artifacts of the build run or the assets of the release.
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -88,3 +90,39 @@ def test_an_input_that_holds_no_browser_fails_loudly():
 
 def test_the_skip_mechanism_is_gone():
     assert "E2E_SKIP" not in WORKFLOW.read_text(encoding="utf-8")
+
+
+def test_util_unpacks_a_zip_and_prints_the_browser_path(tmp_path):
+    """The observer and goapi steps need the browser's path, which the journeys'
+    `binary` fixture only computes inside pytest: `e2e/util.py --zip` prints it."""
+    import zipfile
+
+    archive = tmp_path / "e2e-unpack-test.zip"
+    with zipfile.ZipFile(archive, "w") as z:
+        z.writestr("camoufox/application.ini", "[App]\nBuildID=1\n")
+        z.writestr("camoufox/camoufox-bin", "")
+    proc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "e2e" / "util.py"), "--zip", str(archive)],
+        capture_output=True, text=True,
+    )
+    unpacked = REPO_ROOT / ".ci-work" / "e2e" / "unpacked" / archive.stem
+    try:
+        assert proc.returncode == 0, proc.stderr
+        printed = proc.stdout.strip().splitlines()[-1]
+        assert printed.endswith("camoufox-bin") and os.path.exists(printed), proc.stdout
+    finally:
+        shutil.rmtree(unpacked, ignore_errors=True)
+
+
+def _swallowed_substitutions(text: str) -> list[str]:
+    return [ln.strip() for ln in text.splitlines()
+            if re.search(r'echo\b.*\$\(.*GITHUB_ENV', ln)]
+
+
+def test_no_step_writes_a_command_substitution_straight_into_the_env_file():
+    """`echo "X=$(cmd)" >> "$GITHUB_ENV"` exits 0 when `cmd` fails, so the step
+    passes with X empty: a macOS unpack that hit a 403 went on to run the gates
+    with no browser (D run 40841174691). Assign first, then echo."""
+    assert _swallowed_substitutions(WORKFLOW.read_text(encoding="utf-8")) == []
+    old = 'run: echo "CAMOUFOX_BINARY=$(python e2e/util.py $E2E_BROWSER)" >> "$GITHUB_ENV"'
+    assert _swallowed_substitutions(old), "the check must catch the pattern it exists for"
