@@ -207,7 +207,10 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.mozbuild
-          key: mozbuild-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('browser/upstream.sh') }}
+          # actions/cache never overwrites a key, so a key fixed per upstream.sh would
+          # keep the first state saved for it forever. run_id makes every run save a
+          # fresh state; restore-keys then restore the newest one.
+          key: mozbuild-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('browser/upstream.sh') }}-${{ github.run_id }}
           restore-keys: |
             mozbuild-${{ matrix.target }}-${{ matrix.arch }}-
             mozbuild-${{ matrix.target }}-
@@ -218,8 +221,9 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           # ccache is content-addressed, so a stale restore is safe and still
           # gives a high hit rate — restore-keys fall back to the newest ccache
-          # for this leg even when patches (and thus the exact key) change.
-          key: ccache-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('browser/upstream.sh') }}
+          # for this leg. The key ends in run_id so every run saves its own
+          # (see the mozbuild cache above).
+          key: ccache-${{ matrix.target }}-${{ matrix.arch }}-${{ hashFiles('browser/upstream.sh') }}-${{ github.run_id }}
           restore-keys: |
             ccache-${{ matrix.target }}-${{ matrix.arch }}-
             ccache-${{ matrix.target }}-

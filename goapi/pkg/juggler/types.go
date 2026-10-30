@@ -294,6 +294,12 @@ type BindingCalledEvent struct {
 	Payload            json.RawMessage `json:"payload"`
 }
 
+// BrowserSetBypassCSPParams — Browser.setBypassCSP (Protocol.js).
+type BrowserSetBypassCSPParams struct {
+	BrowserContextID string `json:"browserContextId,omitempty"`
+	BypassCSP        bool   `json:"bypassCSP"`
+}
+
 // BrowserSetGeolocationOverrideParams — Browser.setGeolocationOverride.
 type BrowserSetGeolocationOverrideParams struct {
 	BrowserContextID string       `json:"browserContextId,omitempty"`

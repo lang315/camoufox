@@ -31,6 +31,9 @@ type Page struct {
 	frames   map[string]*Frame
 
 	subs []juggler.Subscription // owned by this page, deregistered on Close
+
+	bindMu sync.Mutex
+	bound  map[string]struct{} // names passed to addBinding; Juggler cannot unbind them
 }
 
 // NewPage opens a fresh page in this context. It blocks until the
