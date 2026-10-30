@@ -189,6 +189,101 @@ static vector<Raw> RawFaces(IDWriteFontFamily* fam) {
   }
   return out;
 }
+
+// ---- dump mode (#345): the live FontIsSharedFace comparison, field by field ----
+static string EnglishOrFirst(IDWriteLocalizedStrings* s) {
+  UINT32 idx = 0; BOOL ex = FALSE;
+  if (FAILED(s->FindLocaleName(L"en-us", &idx, &ex)) || !ex) idx = 0;
+  UINT32 len = 0; s->GetStringLength(idx, &len);
+  wstring w(len + 1, 0); s->GetString(idx, w.data(), len + 1); w.resize(len);
+  return U8(w);
+}
+// gfxDWriteFontList.cpp GetDirectWriteFaceName(PSNAME_ID): English locale, else the first string.
+static string PsEnglish(IDWriteFont* f) {
+  Ptr<IDWriteLocalizedStrings> s; BOOL ex = FALSE;
+  if (FAILED(f->GetInformationalStrings(DWRITE_INFORMATIONAL_STRING_POSTSCRIPT_NAME, &s, &ex)) || !ex || !s) return "(none)";
+  return EnglishOrFirst(s.p);
+}
+struct Live { string psFirst, psEn, path; unsigned idx = 0; int w = 0, st = 0, sl = 0; int sim = 0; string axes; bool ok = false; };
+static Live ReadLive(IDWriteFont* f) {
+  Live l; l.psFirst = PsName(f); l.psEn = PsEnglish(f);
+  l.w = f->GetWeight(); l.st = f->GetStretch(); l.sl = f->GetStyle(); l.sim = (int)f->GetSimulations();
+  Ptr<IDWriteFontFace> face;
+  if (FAILED(f->CreateFontFace(&face))) return l;
+  l.idx = face->GetIndex();
+  UINT32 n = 0; face->GetFiles(&n, nullptr);
+  vector<IDWriteFontFile*> ff(n);
+  if (n && SUCCEEDED(face->GetFiles(&n, ff.data()))) {
+    for (UINT32 q = 0; q < n; q++) {
+      auto* x = ff[q];
+      Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll; const void* k = nullptr; UINT32 ks = 0;
+      if (q == 0 && SUCCEEDED(x->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) && SUCCEEDED(x->GetReferenceKey(&k, &ks))) {
+        UINT32 len = 0;
+        if (SUCCEEDED(ll->GetFilePathLengthFromKey(k, ks, &len))) { wstring pth(len + 1, 0); if (SUCCEEDED(ll->GetFilePathFromKey(k, ks, pth.data(), len + 1))) { pth.resize(len); l.path = U8(pth); l.ok = true; } }
+      }
+      x->Release();
+    }
+  }
+  Ptr<IDWriteFontFace5> f5;
+  if (SUCCEEDED(face->QueryInterface(__uuidof(IDWriteFontFace5), (void**)&f5.p))) {
+    UINT32 ac = f5->GetFontAxisValueCount(); vector<DWRITE_FONT_AXIS_VALUE> av(ac);
+    if (ac && SUCCEEDED(f5->GetFontAxisValues(av.data(), ac))) for (auto& a : av) { char b[64]; snprintf(b, sizeof b, "%c%c%c%c=%g;", (char)(a.axisTag & 255), (char)((a.axisTag >> 8) & 255), (char)((a.axisTag >> 16) & 255), (char)(a.axisTag >> 24), a.value); l.axes += b; }
+    l.axes += f5->HasVariations() ? "VAR" : "static";
+  }
+  return l;
+}
+// FontIsSharedFace, reporting the first field that differs (psName from the chosen source).
+static string Why(const Live& shared, const Live& f, bool english) {
+  if (f.sim != 0) return "simulated";
+  if (!f.ok) return "nofile";
+  if (f.idx != shared.idx) return "fileindex";
+  if (f.path != shared.path) return "path";
+  if (f.w != shared.w) return "weight";
+  if (f.st != shared.st) return "width";
+  if (f.sl != shared.sl) return "slant";
+  if ((english ? f.psEn : f.psFirst) != (english ? shared.psEn : shared.psFirst)) return "psname";
+  return "";
+}
+static void Dump(IDWriteFontCollection* full, const set<string>& want) {
+  for (UINT32 i = 0; i < full->GetFontFamilyCount(); i++) {
+    Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
+    Ptr<IDWriteLocalizedStrings> ns; if (FAILED(fam->GetFamilyNames(&ns))) continue;
+    auto names = LocalizedNames(ns.p); bool hit = false;
+    for (auto n : names) { for (auto& c : n) c = (char)tolower((unsigned char)c); if (want.count(n)) hit = true; }
+    if (!hit) continue;
+    set<wstring> files; (void)Faces(fam.p, &files);
+    vector<wstring> fv(files.begin(), files.end());
+    Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
+    printf("DUMPFAM full[%u] %s files=%zu small_families=%u\n", i, names[0].c_str(), fv.size(), sm ? sm->GetFontFamilyCount() : 0);
+    for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
+      Ptr<IDWriteFont> f; if (FAILED(fam->GetFont(j, &f))) continue;
+      Live sh = ReadLive(f.p);
+      printf("DUMPFULL %u/%u ps_first=%s ps_en=%s w=%d st=%d sl=%d sim=%d file=%s fidx=%u %s\n", i, j, sh.psFirst.c_str(), sh.psEn.c_str(), sh.w, sh.st, sh.sl, sh.sim, sh.path.c_str(), sh.idx, sh.axes.c_str());
+      if (sh.sim != 0 || !sm) continue;
+      // live lookup, once per name source
+      for (int english = 0; english < 2; english++) {
+        int holderFam = -1, holderCount = 0; string firstWhy;
+        for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) {
+          Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(k, &sf);
+          for (UINT32 q = 0; q < sf->GetFontCount(); q++) {
+            Ptr<IDWriteFont> g; if (FAILED(sf->GetFont(q, &g))) continue;
+            if (Why(sh, ReadLive(g.p), english).empty()) { if (holderFam < 0) holderFam = (int)k; holderCount++; }
+          }
+        }
+        string verdict;
+        if (sm->GetFontFamilyCount() == 1) holderFam = 0;
+        if (holderFam < 0) verdict = "NO_HOLDER";
+        else {
+          Ptr<IDWriteFontFamily> hf; sm->GetFontFamily((UINT32)holderFam, &hf);
+          Ptr<IDWriteFont> g;
+          if (j >= hf->GetFontCount() || FAILED(hf->GetFont(j, &g))) verdict = "INDEX_OUT_OF_RANGE";
+          else { Live lg = ReadLive(g.p); string w = Why(sh, lg, english != 0); verdict = w.empty() ? "HIT" : "MISS_" + w + " small_ps_first=" + lg.psFirst + " small_ps_en=" + lg.psEn + " small_w=" + std::to_string(lg.w) + " small_fidx=" + std::to_string(lg.idx) + " " + lg.axes; }
+        }
+        printf("DUMPLIVE %u/%u name_source=%s holders_found=%d holder_family=%d verdict=%s\n", i, j, english ? "english-or-first" : "first", holderCount, holderFam, verdict.c_str());
+      }
+    }
+  }
+}
 static const char* gStage = "start";
 int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
@@ -211,6 +306,12 @@ int run(int argc, wchar_t** argv) {
   Ptr<IDWriteFontCollection> full; full.p = Build(all);
   double tfull = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   if (!full) { printf("full collection failed\n"); return 2; }
+  if (argc > 2) {  // dump mode: fam.exe <fonts dir> <family,family,...>
+    set<string> want; string a = U8(argv[2]); size_t p0 = 0;
+    for (;;) { size_t c = a.find(',', p0); want.insert(a.substr(p0, c == string::npos ? c : c - p0)); if (c == string::npos) break; p0 = c + 1; }
+    Dump(full.p, want);
+    return 0;
+  }
   UINT32 nfam = full->GetFontFamilyCount();
   printf("FILES %zu FAMILIES %u FULL_BUILD_SECONDS %.2f\n", all.size(), nfam, tfull);
   // S3b lookup: in the one-family collection, ignore family names and find each

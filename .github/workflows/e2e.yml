@@ -140,13 +140,15 @@ jobs:
       - name: Family grouping check (Windows)
         if: ${{ inputs.k == 'zz_family' && runner.os == 'Windows' }}
         shell: pwsh
+        env:
+          FAM_DUMP: noto serif armenian,noto serif hebrew,noto serif lao,ubuntu,ubuntu sans mono
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           Write-Output "VS: $vs"
           cmd /c "`"$vs\VC\Auxiliary\Build\vcvars64.bat`" && cl /nologo /EHsc /O2 /std:c++17 /Fe:.ci-work\fam.exe .ci-work\fam.cpp dwrite.lib"
           $fonts = Join-Path (Split-Path $env:CAMOUFOX_BINARY) "fonts"
           Write-Output "fonts dir: $fonts ($((Get-ChildItem $fonts).Count) entries)"
-          .\.ci-work\fam.exe $fonts
+          .\.ci-work\fam.exe $fonts "${env:FAM_DUMP}"
       - name: Run
         if: ${{ inputs.probe == '' && inputs.k != 'zz_family' }}
         shell: bash
