@@ -22,7 +22,7 @@ later change should read first.
 
 **Fix.** The `Build` step sets `MOZ_NOSPAM=1` and has `timeout-minutes: 240`, 52 minutes over the slowest passing Build step (188 minutes, macOS arm64), so any other hang fails in four hours instead of six. `MOZ_AUTOMATION` was not used because it changes more than notifications.
 
-**Evidence.** `test_the_build_step_cannot_hang_on_mach_s_notifier_or_run_to_the_job_limit` in `ci/tests/test_fork_workflow.py` failed on main (`MOZ_NOSPAM` absent) and passes with the change. The macOS build that exercises the fix is in the PR.
+**Evidence.** `test_the_build_step_cannot_hang_on_mach_s_notifier_or_run_to_the_job_limit` in `ci/tests/test_fork_workflow.py` failed on main (`MOZ_NOSPAM` absent) and passes with the change. The effect is read from the Firefox 158.0.1 source, `python/mozbuild/mozbuild/base.py`, `BuildBase.notify`: line 652 is `if "MOZ_NOSPAM" in os.environ or "MOZ_AUTOMATION" in os.environ:`, line 653 is `return`, and `terminal-notifier` is looked up at line 657 and run at line 663, after that return. No macOS build has run with the change, so the fix is unexercised until the first macOS build from main after the merge; that build's log must show no `terminal-notifier` line after `Build complete`.
 
 **What misled the investigation.** The REST logs endpoint returned the job without any `Build` step output, which made the run look like it died in setup; `gh run view --log --job` has the step. The ccache miss rate (99.98%) looked like the cause of the long run, but the compile had finished in 105 minutes.
 
