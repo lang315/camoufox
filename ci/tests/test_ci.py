@@ -3062,24 +3062,128 @@ def test_the_patch_guard_matrix_runs_every_group():
     assert legs == set(GROUPS) | {"skiplist"}
 
 
-def test_leftover_browsers_sees_content_processes(tmp_path):
-    """Firefox's Linux content processes run plugin-container, beside the binary."""
-    import shutil
+def _locale_encoded_text_io():
+    """read_text / write_text / open() calls in the guards, ci/ and e2e/ that name no encoding."""
+    import ast
+
+    from ci._util import REPO_ROOT
+
+    found = []
+    for root in ("browser/tests/playwright/patches", "ci", "e2e"):
+        for path in sorted((REPO_ROOT / root).rglob("*.py")):
+            if path.is_relative_to(CI_ROOT / "tests"):
+                continue
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                if not isinstance(node, ast.Call) or any(k.arg == "encoding" for k in node.keywords):
+                    continue
+                f = node.func
+                if isinstance(f, ast.Attribute) and f.attr in ("read_text", "write_text"):
+                    found.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+                elif isinstance(f, ast.Name) and f.id == "open":
+                    mode = node.args[1] if len(node.args) > 1 else next((k.value for k in node.keywords if k.arg == "mode"), None)
+                    if not (isinstance(mode, ast.Constant) and "b" in str(mode.value)):
+                        found.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    return found
+
+
+def test_text_files_are_read_and_written_as_utf_8():
+    """Windows decodes with cp1252 by default: fonts.json holds bytes it cannot read (#311)."""
+    assert not _locale_encoded_text_io()
+
+
+def test_leftover_browsers_sees_a_process_started_from_the_browsers_directory(tmp_path):
+    """A listing that cannot see a running process reports every guard clean.
+
+    It once read /proc, so it crashed on Windows and found nothing on macOS (#311).
+    """
     import subprocess
+    import sys
+
+    import psutil
 
     from ci.run_patch_guards import leftover_browsers
 
-    # A shell blocked on its builtin read: coreutils may be one binary that
-    # picks its command from argv[0], which a copy named plugin-container loses.
-    child = tmp_path / "plugin-container"
-    shutil.copy2(shutil.which("sh"), child)
-    proc = subprocess.Popen([child, "-c", "read line"], stdin=subprocess.PIPE)
+    proc = subprocess.Popen(
+        [sys.executable, "-c", "import time; print('up', flush=True); time.sleep(60)"],
+        stdout=subprocess.PIPE,
+    )
     try:
-        found = leftover_browsers(tmp_path / "camoufox-bin")
+        # The interpreter that really runs is not always sys.executable: a venv
+        # links to it, and a macOS framework build re-executes Python.app, so
+        # the path is only settled once the script runs.
+        assert proc.stdout.readline().strip() == b"up"
+        exe = pathlib.Path(psutil.Process(proc.pid).exe())
+        found = leftover_browsers(exe.parent / "camoufox-bin")
+        elsewhere = leftover_browsers(tmp_path / "camoufox-bin")
     finally:
         proc.kill()
         proc.wait()
-    assert [f.split()[1] for f in found] == [str(proc.pid)]
+        proc.stdout.close()
+    assert f"pid {proc.pid} " in " ".join(found) + " "
+    assert not elsewhere
+
+
+def _run_guards_as(platform, tmp_path, monkeypatch, only):
+    """ci.run_patch_guards.main on a stand-in platform; returns (exit code, guards it ran, evidence)."""
+    import sys
+
+    from ci import run_patch_guards
+
+    ran = []
+
+    def fake_run(cmd, **kwargs):
+        ran.append(pathlib.Path(cmd[1]).stem)
+        return results_module_result(ok=True)
+
+    class results_module_result:
+        def __init__(self, ok):
+            self.ok, self.code = ok, 0 if ok else 1
+
+        def combined(self):
+            return ""
+
+    binary = tmp_path / "camoufox-bin"
+    binary.write_bytes(b"")
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setattr(run_patch_guards, "run", fake_run)
+    monkeypatch.setattr(run_patch_guards, "leftover_browsers", lambda _: [])
+    code = run_patch_guards.main(
+        ["--binary", str(binary), "--evidence-dir", str(tmp_path / "ev"), "--only", *only]
+    )
+    return code, ran, results.load("patch_guards", tmp_path / "ev")
+
+
+def test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass(tmp_path, monkeypatch):
+    """ipv4-only-network builds a network namespace: on macOS it cannot pass or fail (#314)."""
+    code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["ipv4-only-network", "startup-prefs"])
+    assert code == 0
+    assert ran == ["startup-prefs"]
+    assert record["tests"] == {
+        "patches/ipv4-only-network.py": results.NOT_APPLICABLE,
+        "patches/startup-prefs.py": results.PASS,
+    }
+
+
+def test_a_run_where_no_guard_applies_fails_instead_of_passing_empty(tmp_path, monkeypatch):
+    """Every selected guard being Linux-only leaves nothing tested; that must not read as green."""
+    code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["ipv4-only-network"])
+    assert ran == []
+    assert code != 0
+    assert record["status"] == results.FAIL
+    assert any("no guard ran" in n for n in record["notes"])
+
+
+def test_a_linux_only_guard_still_runs_on_linux(tmp_path, monkeypatch):
+    """A missing prerequisite on Linux must fail, so the guard has to run there."""
+    code, ran, record = _run_guards_as("linux", tmp_path, monkeypatch, ["ipv4-only-network"])
+    assert ran == ["ipv4-only-network"]
+    assert record["tests"] == {"patches/ipv4-only-network.py": results.PASS}
+
+
+def test_every_linux_only_guard_is_a_guard():
+    from ci.run_patch_guards import LINUX_ONLY, guards
+
+    assert LINUX_ONLY <= {g.stem for g in guards()}
 
 
 # ---------------------------------------------------------------------------

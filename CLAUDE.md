@@ -95,6 +95,10 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   ```bash
   python3 -m ci.run_patch_guards --binary /path/to/camoufox-bin
   ```
+  The runner works on Linux, macOS and Windows. Three guards need Linux tooling
+  (`ipv4-only-network`, `webgl-live-state`, `webgl-renderer-pair`); on another
+  platform they are reported as "not applicable", never as passes. On Linux a
+  missing prerequisite fails.
 - **Playwright** — upstream playwright-python, fetched fresh at the tag
   `ci/versions.py` resolves for the browser, with `ci/skiplist.yml` applied and
   `browser/tests/playwright/camoufox/` overlaid. This is the automation-contract check, not the
@@ -126,8 +130,8 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   three OSes with `gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=other_names_stall.py`
   (a probe that takes `--zip`).
   `e2e.yml` runs only the legs the build or release holds, and fails when it holds none.
-  Each leg also runs the observer and goapi gates (`ci.run_observer`, `ci.run_goapi`) before the journeys, so macOS and
-  Windows get the coverage `tests.yml` gives Linux (#310); a dispatch with `probe` or `k` leaves them out.
+  Each leg also runs the observer and goapi gates (`ci.run_observer`, `ci.run_goapi`) before the journeys, so macOS gets
+  the coverage `tests.yml` gives Linux (#310; the Windows leg waits for #345); a dispatch with `probe` or `k` leaves them out.
 - **The suites isolate the launcher cache** (TypeScript #269, Python #280) and
   fail before any test if a cache path escapes the temp root. On macOS a launched
   browser still creates an empty `~/Library/Caches/camoufox` by itself, so check

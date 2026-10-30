@@ -160,7 +160,7 @@ def overlay(checkout: Path) -> List[str]:
 
     marker = checkout / OVERLAY_MANIFEST
     try:
-        previous = set(json.loads(marker.read_text()))
+        previous = set(json.loads(marker.read_text(encoding="utf-8")))
     except (OSError, ValueError):
         previous = set()
 
@@ -181,7 +181,7 @@ def overlay(checkout: Path) -> List[str]:
         (target / stale).unlink(missing_ok=True)
         log(f"removed stale overlay {stale}")
 
-    marker.write_text(json.dumps(sorted(copied), indent=2))
+    marker.write_text(json.dumps(sorted(copied), indent=2), encoding="utf-8")
     log(f"overlaid {len(copied)} Camoufox test module(s): {', '.join(copied) or 'none'}")
     return copied
 

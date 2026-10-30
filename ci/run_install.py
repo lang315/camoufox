@@ -100,7 +100,7 @@ def pin(tag: str) -> None:
         "repo_name": "Official",
         "version": m["version"],
         "build": f"{m['prefix']}.{m['n']}",
-    }, indent=2) + "\n")
+    }, indent=2) + "\n", encoding="utf-8")
 
 
 def same_filesystem(a: Path, b: Path) -> bool:

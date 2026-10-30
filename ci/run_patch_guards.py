@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import psutil
+
 from . import results as evidence
 from ._util import EVIDENCE_DIR, REPO_ROOT, log, run
 
@@ -109,6 +111,16 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 }
 
 
+# Guards that need Linux tooling the guard itself cannot supply elsewhere:
+# ipv4-only-network builds a network namespace (unshare, ip), the two WebGL
+# guards start headless="virtual" (Xvfb). On any other platform the runner
+# does not run them and counts them apart from the passes; on Linux a missing
+# prerequisite still fails. The set lives here, not in each guard, so the
+# runner can decide without starting the script and the list is read in one
+# place beside GROUPS.
+LINUX_ONLY = frozenset({"ipv4-only-network", "webgl-live-state", "webgl-renderer-pair"})
+
+
 def gate_name(group: Optional[str]) -> str:
     """patch_guards for the whole set, patch_guards_<group> for one group."""
     return f"patch_guards_{group}" if group else "patch_guards"
@@ -124,22 +136,24 @@ def leftover_browsers(binary: Path) -> List[str]:
 
     Guards share one runner. A browser a guard failed to close keeps its
     content processes -- and any spinning workers -- alive into every later
-    guard, which then sees a slower machine than it was written for. On Linux
-    those content processes run plugin-container, which sits beside the binary.
+    guard, which then sees a slower machine than it was written for. Content
+    processes run from the binary's own directory on every OS (beside it on
+    Linux and Windows, inside the .app on macOS), so that directory is the
+    match. psutil is already a CI requirement and reads /proc, the macOS
+    process table and the Windows API alike.
     """
-    binary = binary.resolve()
-    exes = {str(binary), str(binary.parent / "plugin-container")}
-    ticks = os.sysconf("SC_CLK_TCK")
-    found = []
-    for proc in Path("/proc").glob("[0-9]*"):
+    root = binary.resolve().parent
+    found, readable = [], 0
+    for proc in psutil.process_iter():
         try:
-            if os.readlink(proc / "exe") not in exes:
-                continue
-            fields = (proc / "stat").read_text().rsplit(")", 1)[1].split()
-        except OSError:
-            continue
-        cpu = (int(fields[11]) + int(fields[12])) / ticks
-        found.append(f"pid {proc.name} cpu {cpu:.1f}s")
+            exe, cpu = proc.exe(), proc.cpu_times()
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue  # gone since listed, or another user's: never ours
+        readable += 1
+        if exe and Path(exe).is_relative_to(root):
+            found.append(f"pid {proc.pid} cpu {cpu.user + cpu.system:.1f}s")
+    if not readable:
+        raise RuntimeError("could not read any process's executable, so no leftover could be seen")
     return found
 
 
@@ -181,7 +195,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 1
 
     failed: List[str] = []
+    not_applicable: List[str] = []
     for guard in selected:
+        if guard.stem in LINUX_ONLY and not sys.platform.startswith("linux"):
+            result.record(f"patches/{guard.name}", evidence.NOT_APPLICABLE)
+            not_applicable.append(guard.name)
+            log(f"  - {guard.name} not applicable on {sys.platform}")
+            continue
         proc = run([sys.executable, str(guard)], cwd=REPO_ROOT, env=env, timeout=args.timeout)
         outcome = evidence.PASS if proc.ok else evidence.FAIL
         result.record(f"patches/{guard.name}", outcome)
@@ -198,9 +218,12 @@ def main(argv: Optional[List[str]] = None) -> int:
             log(f"  {guard.name} left {len(leftovers)} browser processes running: {', '.join(leftovers)}",
                 level="WARN")
 
-    passed = len(selected) - len(failed)
-    result.note(f"{passed}/{len(selected)} guards passed")
-    status = evidence.PASS if not failed else evidence.FAIL
+    ran = len(selected) - len(not_applicable)
+    passed = ran - len(failed)
+    result.note(f"{passed}/{ran} guards passed, {len(not_applicable)} not applicable on {sys.platform}")
+    if not ran:
+        result.note(f"no guard ran on {sys.platform}: every selected guard is Linux-only")
+    status = evidence.PASS if ran and not failed else evidence.FAIL
     result.finish(status).save(args.evidence_dir)
     return 0 if status == evidence.PASS else 1
 

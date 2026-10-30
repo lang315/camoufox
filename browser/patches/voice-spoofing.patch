@@ -10,7 +10,7 @@ index ca6ffacb21..fb661fd69e 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ['/camoucfg']
 diff --git a/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp b/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
-index e046255242..afcccea51b 100644
+index e046255242..c6fff7927d 100644
 --- a/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
 +++ b/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
 @@ -23,7 +23,9 @@
@@ -23,11 +23,13 @@ index e046255242..afcccea51b 100644
  using mozilla::intl::LocaleService;
  
  #undef LOG
-@@ -166,6 +168,20 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
-       // Start up all speech synth services.
-       NS_CreateServicesFromCategory(NS_SPEECH_SYNTH_STARTED, nullptr,
-                                     NS_SPEECH_SYNTH_STARTED);
-+      // Load voices from MaskConfig
+@@ -163,6 +165,22 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
+     gSynthVoiceRegistry = new nsSynthVoiceRegistry();
+     ClearOnShutdown(&gSynthVoiceRegistry);
+     if (XRE_IsParentProcess()) {
++      // Load voices from MaskConfig, before the services start: one that
++      // registers voices synchronously (SAPI on Windows) notifies content as
++      // soon as it runs, and that first voiceschanged must already carry them.
 +      if (auto voices = MaskConfig::MVoices()) {
 +        for (const auto& [lang, name, uri, isDefault, isLocal] :
 +             voices.value()) {
@@ -41,10 +43,10 @@ index e046255242..afcccea51b 100644
 +          }
 +        }
 +      }
-     }
-   }
- 
-@@ -302,6 +318,21 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
+       // Start up all speech synth services.
+       NS_CreateServicesFromCategory(NS_SPEECH_SYNTH_STARTED, nullptr,
+                                     NS_SPEECH_SYNTH_STARTED);
+@@ -302,6 +320,21 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
      return NS_ERROR_NOT_AVAILABLE;
    }
  
@@ -66,7 +68,7 @@ index e046255242..afcccea51b 100644
    return AddVoiceImpl(aService, aUri, aName, aLang, aLocalService,
                        aQueuesUtterances);
  }
-@@ -374,6 +405,16 @@ nsSynthVoiceRegistry::NotifyVoicesChanged() {
+@@ -374,6 +407,16 @@ nsSynthVoiceRegistry::NotifyVoicesChanged() {
  
  NS_IMETHODIMP
  nsSynthVoiceRegistry::NotifyVoicesError(const nsAString& aError) {
@@ -83,7 +85,7 @@ index e046255242..afcccea51b 100644
    if (XRE_IsParentProcess()) {
      nsTArray<SpeechSynthesisParent*> ssplist;
      GetAllSpeechSynthActors(ssplist);
-@@ -776,6 +817,30 @@ void nsSynthVoiceRegistry::SpeakImpl(VoiceData* aVoice, nsSpeechTask* aTask,
+@@ -776,6 +819,30 @@ void nsSynthVoiceRegistry::SpeakImpl(VoiceData* aVoice, nsSpeechTask* aTask,
         NS_ConvertUTF16toUTF8(aText).get(),
         NS_ConvertUTF16toUTF8(aVoice->mUri).get(), aRate, aPitch));
  

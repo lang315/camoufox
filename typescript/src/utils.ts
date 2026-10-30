@@ -382,7 +382,10 @@ function generateFontconfig(
 		if (osDir && isDir(path.join(fontsDir, osDir))) {
 			scanDirs = [path.join(fontsDir, osDir)];
 		} else {
-			scanDirs = [fontsDir];
+			// Naming the parent would put every OS's faces on the search path (#331).
+			throw new Error(
+				`No font directory for os '${osDir}' in ${fontsDir}: groups.json is absent or none of its readBy directories exist, and there is no ${osDir}/ directory. The Camoufox bundle is incomplete.`,
+			);
 		}
 	}
 

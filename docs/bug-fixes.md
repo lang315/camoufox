@@ -14,17 +14,88 @@ later change should read first.
 
 ## #310: the observer and goapi browser tests never ran on macOS or Windows
 
-**Fixed by:** the PR that adds both gates to the legs of `e2e.yml`. **Found by:** the observer harness failing on its first Windows run.
+**Fixed by:** the PR that adds both gates to the macOS and Linux legs of `e2e.yml` (Windows follows #345). **Found by:** the observer harness failing on its first Windows run.
 
 **Symptom.** `ci.run_observer` (#303) and `ci.run_goapi` (#301) ran only on Linux, in `tests.yml`, and a pull request never builds macOS or Windows, so a regression in the observer or the Go launcher on those hosts reached a release unseen.
 
 **Root cause.** The runners were wired to the Linux jobs alone. The first Windows run (e2e run 40615989606, `e2e (windows-x86_64)`) then failed three of the four observer tests (`[observer] 1 passed, 3 failed (4 collected)`), after they printed their PASS lines: `PermissionError: [WinError 32] ... observer\gecko.log`. `marionette_driver` writes `./gecko.log` and deletes the old one when it starts the next browser, and Windows will not delete a file the previous browser still holds. The scripts start a second session after the first closes (armed, then disarmed), so each of those hit it at the second start (`test_readout.py` starts one session and passed).
 
-**Fix.** `e2e.yml` gets three steps ahead of the journeys, on every leg: unpack the browser (`e2e/util.py --zip|--release` prints its path; the journeys' `binary` fixture now calls the same `fetch_release` and `unpack`), `ci.run_observer`, `ci.run_goapi`. A red gate does not skip the journeys (they run `!cancelled()`), and a dispatch with `probe` or `k` leaves the gates out. `harness.Session` gives each session a gecko log in its own temp directory, which also stops the tests writing `gecko.log` into the source tree. No dependency is added: `marionette_driver` is already in `browser/tests/build-tester/requirements.txt`.
+**Fix.** `e2e.yml` gets three steps ahead of the journeys, on every leg but Windows: unpack the browser (`e2e/util.py --zip|--release` prints its path; the journeys' `binary` fixture now calls the same `fetch_release` and `unpack`), `ci.run_observer`, `ci.run_goapi`. A red gate does not skip the journeys (they run `!cancelled()`), and a dispatch with `probe` or `k` leaves the gates out. `harness.Session` gives each session a gecko log in its own temp directory, which also stops the tests writing `gecko.log` into the source tree. No dependency is added: `marionette_driver` is already in `browser/tests/build-tester/requirements.txt`. The gates stay off the Windows leg: for an identity that is not Windows, every browser process spends about 6 CPU-seconds indexing the bundled fonts (#345), and on a loaded runner goapi's 30 s main-context wait expires (`TestScrollToBottom`, `TestScrollToAndBy`, job 123480161524). Raising the timeout would hide it.
 
 **Evidence.** See the PR.
 
 **What misled the investigation.** The Windows log showed PASS lines before the traceback, which reads as a passing test with noisy teardown; the exit code and the `PermissionError` frame are what failed the run.
+
+## #311, #314: the patch-guard runner and several guards failed on Windows and saw nothing on macOS
+
+**Fixed by:** the PR that closes both. **Found by:** a run of the spoofing group on real Windows 10 against the fork.1 build.
+
+**Symptom.** `python -m ci.run_patch_guards` died after its first guard with `AttributeError: module 'os' has no attribute 'sysconf'`. Run guard by guard, `context-lists-across-processes.py` and `system-font-alias-stall.py` raised `UnicodeDecodeError: 'charmap' codec can't decode byte 0x9d`, and `ipv4-only-network.py`, `webgl-live-state.py` and `webgl-renderer-pair.py` failed for lack of `unshare`, `ip` and a virtual display.
+
+**Root cause.** Three assumptions that Linux CI satisfied. `leftover_browsers` read `/proc` and called `os.sysconf("SC_CLK_TCK")`: that raises on Windows, and on macOS there is no `/proc`, so the loop found nothing and reported every guard clean, which made the check vacuous rather than failing. `read_text()` and `open()` without `encoding=` use the locale codec, cp1252 on Windows, which cannot decode bytes in `fonts.json`. And three guards build a Linux network namespace or an Xvfb display, which have no counterpart elsewhere.
+
+**Fix.** `leftover_browsers` lists processes with psutil (already in `ci/requirements.txt`) that run from the binary's directory, and raises when no process can be read at all. Every `read_text`, `write_text` and text-mode `open` in the guards, `ci/` and `e2e/` names `encoding="utf-8"`. `LINUX_ONLY` in `ci/run_patch_guards.py` makes the runner report those three guards as not applicable off Linux, counted apart from the passes ([tribal rule](../ci/tribal-rules.yml) `linux-only-guards-are-not-applicable-elsewhere`). Not taken: reading `/proc`, `ps` and PowerShell separately (three code paths for one list), and per-guard skips (a skip reads as green).
+
+**Evidence.** Red then green in `ci/tests/test_ci.py`: `test_text_files_are_read_and_written_as_utf_8` listed 51 call sites before the change and none after; `test_leftover_browsers_sees_a_process_started_from_the_browsers_directory` returned an empty list on macOS before the change; `test_a_linux_only_guard_is_not_applicable_elsewhere_and_not_a_pass` ran `ipv4-only-network` on a darwin stand-in before the change and skipped it after.
+
+**What misled the investigation.** The leftover check passing on macOS read as "no leftovers"; it could not see any process. A first version of its test read the child's executable too early: on a macOS framework Python the launcher re-executes into `Python.app`, so the path differs until the script runs.
+
+## #335: the macOS build failed in "Setup and bootstrap" because patch.py ran `~/.cargo/bin/rustup`
+
+**Fixed by:** the PR that makes `browser/scripts/patch.py` run `rustup` from `PATH`. **Found by:** `build.yml` run 40813393344, job 123249229239 (`build (macos, arm64)`, image `macos-26-arm64` 20261021.0445.8).
+
+**Symptom.** `sh: /Users/runner/.cargo/bin/rustup: No such file or directory`, `make: *** [set-target] Error 1`, then `fatal error: command '~/.cargo/bin/rustup target add "x86_64-apple-darwin"' failed`. Job 123236045061 of run 40809437503, on image 20261013.0424.1, passed the same step.
+
+**Root cause.** `add_rustup()` in `browser/scripts/patch.py` ran `~/.cargo/bin/rustup target add "<target>"`, a path only a rustup-installed toolchain has. Every other rustup call in the build, including the `build.yml` steps before it, uses `rustup` from `PATH`, so a runner whose own rustup lives elsewhere passes them and fails here.
+
+**Fix.** `add_rustup()` runs `rustup target add` from `PATH`. A leg without rustup on `PATH` still fails the build, with `fatal error: command 'rustup target add ...' failed`: `ci/tests/test_patch_rustup.py` pins both cases. Where rustup comes from on each leg that runs `patch.py`: the Linux runner legs (Linux, and Windows cross-compiled) and the macOS runner both run bare `rustup` in the `build.yml` steps ahead of "Setup and bootstrap"; `browser/Dockerfile` puts `/root/.cargo/bin` on `PATH`; `browser/scripts/install-deps.sh` sources `~/.cargo/env` after installing it.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The `build.yml` comment at the macOS install step already named image 20261021 and its rustup, and pinned the toolchains through `PATH`, so the image was thought handled. The log line `info: self-update is disabled for this build of rustup` appears on the passing image too, so it does not tell the images apart. That the older image had `~/.cargo/bin/rustup` is inferred from the two outcomes, not read: no job printed `command -v rustup`.
+## #325: a Linux claim on a Windows or macOS host drew the Apple and Microsoft faces for Linux names
+
+**Fixed by:** the PR that adds `browser/patches/zzz-linux-font-aliases.patch`, `browser/additions/camoucfg/FontAliasesLinux.hpp` and `browser/scripts/gen-font-aliases.py`. **Found by:** the face log (`CAMOU-FL face`, #327) read on a Windows host.
+
+**Symptom.** A launch with `os="linux"` on Windows or macOS measured text in the Apple and Microsoft files of the flat package. `Helvetica` drew `Helvetica`, `Arial` drew `Arial`, `Courier New` drew `Courier New`, and `serif`, `sans-serif` and `monospace` drew `Times`, `Helvetica` and `Courier New`. A Linux host draws `Nimbus Sans`, `Arimo`, `Cousine`, `Nimbus Roman`, `Nimbus Sans` and `Cousine` for the same requests with the same font list.
+
+**Root cause.** On Linux, fontconfig answers a named lookup through the aliases in `browser/bundle/fontconfig/linux/fonts.conf`, and Gecko takes every family before the sentinel (`gfxFcPlatformFontList.cpp:2564-2608`). DirectWrite and CoreText have no fontconfig, and the flat Windows and macOS packages hold the Apple and Microsoft files under those exact names, so the lookup found them. The generic path (`CamouGenericCandidate`) follows the same name resolution, so the generics drew them too.
+
+**Fix.** The browser applies the conf's answer itself. `gen-font-aliases.py` reads each Linux name no Linux face carries through `fc-pattern` against the staged bundle and writes `FontAliasesLinux.hpp`. `zzz-linux-font-aliases.patch` rewrites such a name to its admitted targets in `gfxPlatformFontList::FindAndAddFamiliesLocked` when the context claims Linux, and in `gfxDWriteFontList` before the DirectWrite substitution. A target that is itself an alias key is skipped, so the rewrite cannot recurse. `test_font_aliases_table.py` fails when the header differs from the bundle, and prints the diff.
+
+**Not tried / failed.** Removing the Apple and Microsoft files from a Linux claim's list was not possible: the allowlist filters by family name, and the same files serve the Windows and macOS contexts of the same package. Reading the answer from `fc-match` on the Windows host was not possible either, because it has no fontconfig. The generics' realism when no row key resolves is a separate gap (#333).
+
+**Evidence.** `e2e/journeys/test_09_linux_claim_fonts.py` reads the drawing face from the face log. Red: e2e run 40837110717 (job 123324742569) on the Windows build 40809452153 of main 0190fa38 fails with `Helvetica: drew 'Helvetica', the Linux host draws 'Nimbus Sans'` and nine more requests. Green: e2e run 40837114640 (job 123326864251) on the Windows build 40809427405 of the branch, 1 passed. The same test passes on the Linux leg of the branch's Tests run, which proves the expected table is what fontconfig draws.
+
+**What misled the investigation.** Ink quantization and `fc-match` output looked like a verdict and were not: neither reads the face that drew. The first Linux-host reference was itself a leak (#329). The first drift failure of the table test looked like a fontconfig version dependence and was a trailing blank line: the committed header ended in two newlines and the generator writes one, so the diff was one empty line, found only once the test printed it.
+
+## #313: on Windows the first `voiceschanged` carried no spoofed voices
+
+**Fixed by:** the PR that moves the `MaskConfig::MVoices` block of `voice-spoofing.patch` ahead of the speech services. **Found by:** `spoofed-voice-speaks.py` on the `v158.0.1-beta.34-fork.1` Windows build.
+
+**Symptom.** On real Windows a launch with `voices` in `CAMOU_CONFIG` read 0 voices on its first `voiceschanged`: `speechSynthesis.getVoices()` was empty at that event and held the spoofed voices only at the second.
+
+**Root cause.** `nsSynthVoiceRegistry::GetInstance()` (`dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp:167` at FIREFOX_158_0_1_RELEASE) started the services with `NS_CreateServicesFromCategory(NS_SPEECH_SYNTH_STARTED, ...)` before the patch added the `MVoices`. `SapiService` registers its voices synchronously inside that call and then `NotifyVoicesChanged()` (`SapiService.cpp:239-248`), so the content process got its first `voiceschanged` (`SpeechSynthesis.cpp:317-324`) from the host's voices alone, and the spoofed ones came with the second.
+
+**Fix.** The `MVoices` block runs before `NS_CreateServicesFromCategory`, in `voice-spoofing.patch`. Regenerated by the #131 procedure: both blob hashes match the patch's `index` line, the unedited baseline regenerates byte-for-byte, and `CAMOU_PATCH=gpatch scripts/patch.py 158.0.1 beta.34` applies the whole stack with exit 0 and no fuzz. `e2e.yml` runs `spoofed-voice-speaks.py` on every leg, unedited.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The first reading took the voices after the first event and concluded that spoofed voices never reach the page on Windows. The page does get them, at the second event; the defect is the first. The timelines (`[ms, count]` per event) show it: before, 1 fake voice gave `[[5,0],[5,1]]`; after, `[[5,1],[5,1]]`.
+
+## #331: the launchers named the fonts/ parent when groups.json or the OS's group directories were missing
+
+**Fixed by:** the PR that makes `utils._generate_fontconfig`, `typescript/src/utils.ts` and `goapi/fontconfig.go` raise in that case. **Found by:** the #329 review.
+
+**Symptom.** A bundle with no `groups.json`, or with a `readBy` list whose directories were all absent, launched without error and with `<dir>fonts</dir>` in the runtime conf. fontconfig scans a `<dir>` recursively, so every OS's faces were on the search path, the universe leak of #329 reached through a different door.
+
+**Root cause.** Each launcher ended its scan-directory selection with a last resort: Python `scan_dirs = [fonts_dir]`, TypeScript `scanDirs = [fontsDir]`, goapi `return []string{fontsDir}, nil`. A damaged `groups.json` already raised (#186); an absent one, or one whose directories do not exist, did not.
+
+**Fix.** All three raise, naming the OS and the path, when neither a group directory nor `fonts/<os>/` exists. The legacy `fonts/<os>/` branch stays: upstream's Linux releases up to `152.0.4-beta.29` (2026-08-21) ship `fonts/{linux,macos,windows}` with no `groups.json`, grouped bundles start at `156.0.1-beta.32` (2026-09-28), and `repos.yml` lists upstream as the "Official" repo a user can select, so the layout is still installable. The `bundle-old` golden fixture in TypeScript pins that layout.
+
+**Evidence.** Red then green in each launcher. Python: `test_no_groups_json_and_no_per_os_directory_fails_instead_of_naming_the_parent` and `test_a_groups_json_whose_directories_are_missing_fails_instead_of_naming_the_parent` failed on main (2 failed, 3 passed) and pass after (5 passed). TypeScript: the two `(#331)` cases in `tests/utils.test.ts` failed (2 failed, 22 passed) and pass. Go: `TestFontconfigEnvLegacyBundleLayout` (its last assertion was `expected the fonts/ root`, now expects an error) and `TestFontconfigEnvFailsWhenNoReadByDirectoryExists` failed on main and pass. One fixture relied on the fallback: `test_executable_path_bundle.py` made an empty `fonts/` and asserted the parent was named; it now builds a one-group bundle and asserts the group is named and the parent is not.
+
+**What misled the investigation.** A comment in each launcher said a damaged `groups.json` must not widen the scan, which read as the fallback being closed; it covered the damaged file only.
 
 ## #329: on a Linux host, bundle activation added every font group, bypassing the per-OS directory gate
 

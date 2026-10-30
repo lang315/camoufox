@@ -44,7 +44,7 @@ const { getCollector } = ChromeUtils.importESModule(
 getCollector().snapshot();
 ```
 
-`browser/tests/build-tester/observer/harness.py` does this. CI runs its `test_*.py` scripts in the `observer` job (Linux) and on the macOS and Windows legs of `e2e.yml`; locally,
+`browser/tests/build-tester/observer/harness.py` does this. CI runs its `test_*.py` scripts in the `observer` job (Linux) and on the macOS leg of `e2e.yml`; locally,
 `python3 -m ci.run_observer --binary <camoufox-bin>` does the same, and `CFX_BIN` must name the binary when you run one script by hand. A page with its own
 chrome package would be visible to every web page
 (`additions-register-no-new-chrome-package` in `ci/tribal-rules.yml`), which is

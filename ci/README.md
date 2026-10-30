@@ -37,8 +37,8 @@ resolve ── static ─────────────── lint, tribal
 | `patch-guards` | `ci.run_patch_guards --group spoofing\|automation\|parity`, `ci.run_skiplist_audit` | One guard per shipped behaviour ([`browser/tests/playwright/`](../browser/tests/playwright/README.md)); every skiplist entry still fails |
 | `build-tester` | `ci.run_build_tester` | The raw binary against the anti-detect checks ([README](../browser/tests/build-tester/README.md)) |
 | `typescript-browser` | `ci.run_typescript --browser` | The npm launcher against a real browser |
-| `goapi` | `ci.run_goapi` | The Go launcher against a real browser. `goapi.yml` runs the package without one, where those tests skip; here `CAMOUFOX_BIN` is set and a test that finds no browser fails. `e2e.yml` runs it on the macOS and Windows legs too (#310) |
-| `observer` | `ci.run_observer` | The tracking observer's scripts (`browser/tests/build-tester/observer/test_*.py`), one process each; a missing browser or `marionette_driver` fails the gate. `e2e.yml` runs it on the macOS and Windows legs too (#310) |
+| `goapi` | `ci.run_goapi` | The Go launcher against a real browser. `goapi.yml` runs the package without one, where those tests skip; here `CAMOUFOX_BIN` is set and a test that finds no browser fails. `e2e.yml` runs it on the macOS leg too (#310; Windows waits for #345) |
+| `observer` | `ci.run_observer` | The tracking observer's scripts (`browser/tests/build-tester/observer/test_*.py`), one process each; a missing browser or `marionette_driver` fails the gate. `e2e.yml` runs it on the macOS leg too (#310; Windows waits for #345) |
 | `playwright` | `ci.run_playwright --shard i/6` | Upstream playwright-python's suite, plus [`browser/tests/playwright/camoufox/`](../browser/tests/playwright/camoufox/README.md) |
 | `native` | `ci.run_native --subset browser` | Leaks, context isolation, crash recovery ([below](#camoufoxs-own-suite)) |
 | `growth` | `ci.run_native --subset growth --shard i/7` | Memory growth, one test per runner |
@@ -287,7 +287,7 @@ Releases cut before manifests existed (up to `v156.0.1-beta.32`) pair by the tag
 | `python3 -m ci.run_goapi --binary <bin>` | yes | `goapi/`'s tests, browser-driven ones included |
 | `python3 -m ci.run_observer --binary <bin>` | yes | The observer's `test_*.py`; needs `pip install -r browser/tests/build-tester/requirements.txt` |
 | `python3 -m ci.run_install --tmpdir /mnt/tmpfs --browser <bin>` | yes | Packed packages, a real fetch, and a launch, click and typing through each installed package; the tmpdir must be its own filesystem |
-| `python3 -m ci.run_patch_guards --binary <bin>` | yes | Patch guards; `--group spoofing\|automation\|parity`, `--only <name>` |
+| `python3 -m ci.run_patch_guards --binary <bin>` | yes | Patch guards; `--group spoofing\|automation\|parity`, `--only <name>`. Runs on Linux, macOS and Windows. `ipv4-only-network`, `webgl-live-state` and `webgl-renderer-pair` need `unshare`/`ip` or Xvfb: elsewhere the runner skips them and counts them as not applicable, apart from the passes (`LINUX_ONLY`) |
 | `python3 -m ci.run_patch_guards --binary <bin> --only stock-gpu-parity` | yes | WebGL and WebGPU against stock Firefox of the same version, downloaded into `.ci-work` ([upgrade step](../docs/patch-upgrading-guide.md#browser-owned-gpu-values)) |
 | `python3 -m ci.run_build_tester --binary <bin>` | yes | build-tester |
 | `python3 -m ci.run_skiplist_audit --binary <bin>` | yes | Every skiplist entry still fails |

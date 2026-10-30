@@ -173,7 +173,7 @@ class Patcher:
 def add_rustup(*targets):
     """Add rust targets"""
     for rust_target in targets:
-        run(f'~/.cargo/bin/rustup target add "{rust_target}"')
+        run(f'rustup target add "{rust_target}"')
 
 
 def _update_rustup(target):

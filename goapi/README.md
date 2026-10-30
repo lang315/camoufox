@@ -80,6 +80,21 @@ func main() {
 }
 ```
 
+## Pages a context opens
+
+A `window.open` popup or a `target=_blank` link opens a page the caller never asked for. `BrowserContext.Pages` lists every open page of the context, `NewPage`'s included, and `OnPage` runs a function for each new one:
+
+```go
+popups := make(chan *camoufox.Page, 1)
+cancel := bc.OnPage(func(p *camoufox.Page) { popups <- p })
+defer cancel()
+
+_ = p.Click(ctx, "a[target=_blank]")
+popup := <-popups // still on about:blank; it navigates to the link afterwards
+```
+
+A page leaves `Pages` when the browser closes it. `OnPage` fires once the page's main execution context exists, so the function may `Evaluate`.
+
 ## Main-world evaluation
 
 `Page.Evaluate` runs in an isolated world: it sees the DOM but not the page's own
@@ -101,6 +116,34 @@ Without the option an `mw:` expression fails with `Main world evaluation is disa
 Only values come back: a DOM node is returned as the string `"ref: <Node>"`.
 An object reached twice comes back as the same value in both places; one that contains
 itself fails with `camoufox: main-world result contains a cycle`.
+
+## Calling back into Go from the page
+
+`Page.ExposeBinding` installs `window[name]` in the same isolated world as `Evaluate` and
+`WatchMutations`, then runs a script there on every document. The script calls
+`window[name](payload)` to hand a string to a Go function; JSON-encode anything structured.
+
+```go
+cancel, err := p.ExposeBinding(ctx, "report", `
+    document.addEventListener("step", function (e) { window.report(String(e.detail)); }, true);
+`, func(payload string) { fmt.Println("page said:", payload) })
+if err != nil { panic(err) }
+defer cancel()
+```
+
+`fn` runs on the connection's read loop: it must return promptly and must not call the browser, so hand work to a goroutine (calls arrive in page order).
+
+The binding is not visible to the page: page script and a `mw:` init script read
+`typeof window.report` as `"undefined"`. A main-world script reaches it by dispatching
+a `CustomEvent` on `document`, as above; that event is visible to the page, so it is a
+trace the caller accepts. On a new document the binding and its script run before any
+init script, so a `mw:` init script may dispatch at once. On the document current when
+`ExposeBinding` is called, earlier events are not delivered. A name is bound once per
+page, and `cancel` stops delivery only: Juggler cannot remove `window.report`.
+
+`BrowserContext.SetBypassCSP(ctx, true)` turns off Content-Security-Policy enforcement for
+the context's next navigations, so a page served with `connect-src 'none'` can still
+reach a local server such as a devtools backend.
 
 ## Architecture
 

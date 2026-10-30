@@ -24,11 +24,16 @@ type Page struct {
 	mainContextID  string
 	contextReadyCh chan struct{}
 	closed         chan struct{}
+	finishOnce     sync.Once
+	publishOnce    sync.Once
 
 	framesMu sync.Mutex
 	frames   map[string]*Frame
 
 	subs []juggler.Subscription // owned by this page, deregistered on Close
+
+	bindMu sync.Mutex
+	bound  map[string]struct{} // names passed to addBinding; Juggler cannot unbind them
 }
 
 // NewPage opens a fresh page in this context. It blocks until the
@@ -41,16 +46,28 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 		return nil, fmt.Errorf("camoufox: newPage: %w", err)
 	}
 
-	// Browser.attachedToTarget may have already landed (and been
-	// buffered) before the response was decoded. awaitAttach handles
-	// both ordering paths.
-	attachCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	// The attach event may land before or after this reply; awaitPage
+	// handles both orders.
+	awaitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	att, err := c.b.awaitAttach(attachCtx, res.TargetID)
+	p, err := c.b.awaitPage(awaitCtx, res.TargetID)
 	if err != nil {
 		return nil, fmt.Errorf("camoufox: await attach: %w", err)
 	}
+	// Wait for the main-world execution context so the first
+	// Evaluate doesn't fail. about:blank fires this within ms.
+	if _, err := p.awaitMainContext(ctx, 30*time.Second); err != nil {
+		_ = p.Close(ctx)
+		return nil, fmt.Errorf("camoufox: new page's main execution context: %w", err)
+	}
+	c.publish(p)
+	return p, nil
+}
 
+// attachPage wraps the page target an attachedToTarget event names and
+// claims its session. It is the one place a Page is built, for NewPage
+// and for pages the browser opens on its own.
+func (c *BrowserContext) attachPage(att *juggler.AttachedToTargetEvent) *Page {
 	p := &Page{
 		bc:             c,
 		target:         att.TargetInfo,
@@ -59,11 +76,12 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 		closed:         make(chan struct{}),
 		frames:         make(map[string]*Frame),
 	}
-	c.pagesMu.Lock()
-	c.pages = append(c.pages, p)
-	c.pagesMu.Unlock()
 	c.b.mu.Lock()
 	c.b.pages[p.target.TargetID] = p
+	if ch, ok := c.b.pageAwaiters[p.target.TargetID]; ok {
+		delete(c.b.pageAwaiters, p.target.TargetID)
+		ch <- p
+	}
 	c.b.mu.Unlock()
 
 	p.subscribe()
@@ -73,13 +91,7 @@ func (c *BrowserContext) NewPage(ctx context.Context) (*Page, error) {
 	// be before the handlers above exist. The connection buffers a
 	// session's events from its attach event onward; claim them now.
 	c.b.conn.ReplaySession(att.SessionID)
-	// Wait for the main-world execution context so the first
-	// Evaluate doesn't fail. about:blank fires this within ms.
-	if _, err := p.awaitMainContext(ctx, 30*time.Second); err != nil {
-		_ = p.Close(ctx)
-		return nil, fmt.Errorf("camoufox: new page's main execution context: %w", err)
-	}
-	return p, nil
+	return p
 }
 
 func (p *Page) subscribe() {
@@ -513,16 +525,18 @@ func isContextGone(err error) bool {
 
 // Close shuts the page down via Page.close.
 func (p *Page) Close(ctx context.Context) error {
-	defer func() {
+	defer p.finish()
+	return p.session.Call(ctx, "Page.close", map[string]any{"runBeforeUnload": false}, nil)
+}
+
+// finish releases what the page owns: its event handlers and its closed
+// channel. Close and the browser's detach event both end here, once.
+func (p *Page) finish() {
+	p.finishOnce.Do(func() {
 		for _, s := range p.subs {
 			p.bc.b.conn.Off(s)
 		}
 		p.subs = nil
-		select {
-		case <-p.closed:
-		default:
-			close(p.closed)
-		}
-	}()
-	return p.session.Call(ctx, "Page.close", map[string]any{"runBeforeUnload": false}, nil)
+		close(p.closed)
+	})
 }
