@@ -84,12 +84,12 @@ def one_launch(drv, tmp_path, name, prefs):
     return blank, rows
 
 
+# goapi applies prefs after the browser starts, and layers.gpu-process.enabled is read at startup.
+@pytest.mark.drivers("pkg", "pw")
 def test_bundled_fonts_draw_the_same_in_the_window_with_or_without_the_gpu_process(drv, check, tmp_path):
     """A Windows identity on a Mac draws the Segoe UI and Arial rows the same whether WebRender runs in the GPU process or in the parent (#356)."""
     if platform.system() != "Darwin":
         pytest.skip("WebRender gets a file path for a font on Windows and Linux hosts, so only a Mac can show this")
-    if drv.name == "go":
-        pytest.skip("goapi applies prefs after the browser starts, and layers.gpu-process.enabled is read at startup")
     blank, default = one_launch(drv, tmp_path, "default", None)
     _, parent = one_launch(drv, tmp_path, "gpu-off", {"layers.gpu-process.enabled": False})
     check(default != blank and parent != blank, "the rows are visible in the crop: it differs from the same window with no text (else VACUOUS)", ledger=False)
