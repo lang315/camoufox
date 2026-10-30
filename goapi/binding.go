@@ -25,6 +25,10 @@ import (
 // On the document that is current when ExposeBinding is called, the binding
 // exists only from that call on: earlier events on it are not delivered.
 //
+// fn runs on the connection's read loop, so it must return promptly and must not
+// call the browser (Evaluate, Call): the reply it would wait for can only be read
+// by the loop it is blocking. Hand the work to a goroutine; calls arrive in page order.
+//
 // An empty name, or a name already bound on this page, returns an error.
 // Juggler has no removeBinding, so cancel only stops delivery to fn: window[name]
 // stays in the isolated world, and its name stays taken on this page.

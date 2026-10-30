@@ -127,8 +127,11 @@ itself fails with `camoufox: main-world result contains a cycle`.
 cancel, err := p.ExposeBinding(ctx, "report", `
     document.addEventListener("step", function (e) { window.report(String(e.detail)); }, true);
 `, func(payload string) { fmt.Println("page said:", payload) })
+if err != nil { panic(err) }
 defer cancel()
 ```
+
+`fn` runs on the connection's read loop: it must return promptly and must not call the browser, so hand work to a goroutine (calls arrive in page order).
 
 The binding is not visible to the page: page script and a `mw:` init script read
 `typeof window.report` as `"undefined"`. A main-world script reaches it by dispatching
