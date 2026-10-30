@@ -57,7 +57,7 @@ func (p *Page) addBinding(ctx context.Context, name, script string, fn func(payl
 	// The handler is in place before addBinding, because script runs during it.
 	var cancelled atomic.Bool
 	conn := p.bc.b.conn
-	sub := conn.On("Page.bindingCalled", func(ev juggler.Event) {
+	sub := p.own(conn.On("Page.bindingCalled", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() || cancelled.Load() {
 			return
 		}
@@ -66,7 +66,7 @@ func (p *Page) addBinding(ctx context.Context, name, script string, fn func(payl
 			return
 		}
 		fn(bc.Payload)
-	})
+	}))
 	params := juggler.PageAddBindingParams{Name: name, Script: script}
 	if err := p.session.Call(ctx, "Page.addBinding", params, nil); err != nil {
 		conn.Off(sub)
