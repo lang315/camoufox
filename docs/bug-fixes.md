@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #354: a macOS build hung in mach's terminal-notifier and was cancelled at the 6 hour job limit
+
+**Fixed by:** the PR that closes #354. **Found by:** `build.yml` run 40983620975 (`build (macos, arm64)`, job 123829360348).
+
+**Symptom.** The `Build` step ran from 01:29Z, mach finished compiling at 03:34:50Z, and the step then produced no output until GitHub cancelled the job at 07:05:10Z. No artifact and no cache were saved.
+
+**Root cause.** After a successful build mach calls `BuildBase.notify` (`python/mozbuild/mozbuild/base.py`), which runs `terminal-notifier` on macOS and waits for it. The last log lines are `105:02.68 /opt/homebrew/lib/ruby/gems/3.4.0/bin/terminal-notifier -title 'Mozilla Build System' -group mozbuild -message 'Build complete'` and then nothing; in the passing run 40882163721 the next line, `To view a profile of the build`, follows 1.3 seconds later. The function returns first when `MOZ_NOSPAM` or `MOZ_AUTOMATION` is set, and `build.yml` set neither.
+
+**Fix.** The `Build` step sets `MOZ_NOSPAM=1` and has `timeout-minutes: 240`, 52 minutes over the slowest passing Build step (188 minutes, macOS arm64), so any other hang fails in four hours instead of six. `MOZ_AUTOMATION` was not used because it changes more than notifications.
+
+**Evidence.** `test_the_build_step_cannot_hang_on_mach_s_notifier_or_run_to_the_job_limit` in `ci/tests/test_fork_workflow.py` failed on main (`MOZ_NOSPAM` absent) and passes with the change. The effect is read from the Firefox 158.0.1 source, `python/mozbuild/mozbuild/base.py`, `BuildBase.notify`: line 652 is `if "MOZ_NOSPAM" in os.environ or "MOZ_AUTOMATION" in os.environ:`, line 653 is `return`, and `terminal-notifier` is looked up at line 657 and run at line 663, after that return. No macOS build has run with the change, so the fix is unexercised until the first macOS build from main after the merge; that build's log must show no `terminal-notifier` line after `Build complete`.
+
+**What misled the investigation.** The REST logs endpoint returned the job without any `Build` step output, which made the run look like it died in setup; `gh run view --log --job` has the step. The ccache miss rate (99.98%) looked like the cause of the long run, but the compile had finished in 105 minutes.
+
 ## #311, #314: the patch-guard runner and several guards failed on Windows and saw nothing on macOS
 
 **Fixed by:** the PR that closes both. **Found by:** a run of the spoofing group on real Windows 10 against the fork.1 build.
