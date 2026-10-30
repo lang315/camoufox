@@ -144,7 +144,7 @@ index 5ce0885c70..0e488dad2e 100644
  
  /**
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
-index 0d359b69d7..17060487e0 100644
+index 0d359b69d7..b5e2555065 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -5,6 +5,7 @@
@@ -428,7 +428,7 @@ index 0d359b69d7..17060487e0 100644
      }
    }
    *aHasCurrentFile = hasMore;
-@@ -2813,6 +2938,208 @@ BundledFontLoader::CreateEnumeratorFromKey(
+@@ -2813,6 +2938,224 @@ BundledFontLoader::CreateEnumeratorFromKey(
    return S_OK;
  }
  
@@ -539,20 +539,22 @@ index 0d359b69d7..17060487e0 100644
 +static bool FontIsSharedFace(IDWriteFont* aFont, const fontlist::Face* aFace,
 +                             const nsCString& aPSName,
 +                             const nsCString& aFilePath) {
++  if (aFont->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE) {
++    return false;
++  }
++  const SharedFaceStyle style = GetSharedFaceStyle(aFont);
++  if (aFace->mWeight != style.weight || aFace->mWidth != style.width ||
++      aFace->mStyle != style.slant) {
++    return false;
++  }
 +  RefPtr<IDWriteFontFace> dwFace;
-+  if (aFont->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE ||
-+      FAILED(aFont->CreateFontFace(getter_AddRefs(dwFace)))) {
++  if (FAILED(aFont->CreateFontFace(getter_AddRefs(dwFace)))) {
 +    return false;
 +  }
 +  nsCString path;
 +  uint16_t fileIndex;
 +  if (!GetFontFileInfo(dwFace, path, fileIndex) || fileIndex != aFace->mFileIndex ||
 +      path != aFilePath) {
-+    return false;
-+  }
-+  const SharedFaceStyle style = GetSharedFaceStyle(aFont);
-+  if (aFace->mWeight != style.weight || aFace->mWidth != style.width ||
-+      aFace->mStyle != style.slant) {
 +    return false;
 +  }
 +  nsAutoCString psName;
@@ -577,16 +579,20 @@ index 0d359b69d7..17060487e0 100644
 +  }
 +  nsCString psName(aFace->mDescriptor.AsString(list));
 +  uint32_t rank = 0;
++  bool uniqueKey = true;
 +  const fontlist::Pointer* facePtrs = aFamily->Faces(list);
 +  for (uint32_t i = 0; facePtrs && i < aFamily->NumFaces(); ++i) {
 +    auto* face = facePtrs[i].ToPtr<fontlist::Face>(list);
-+    if (face && !face->mFilePath.IsNull() && face->mIndex < aFace->mIndex &&
++    if (face && face != aFace && !face->mFilePath.IsNull() &&
 +        face->mFileIndex == aFace->mFileIndex &&
 +        face->mWeight == aFace->mWeight && face->mWidth == aFace->mWidth &&
 +        face->mStyle == aFace->mStyle &&
 +        face->mFilePath.AsString(list) == filePath &&
 +        face->mDescriptor.AsString(list) == psName) {
-+      ++rank;
++      uniqueKey = false;
++      if (face->mIndex < aFace->mIndex) {
++        ++rank;
++      }
 +    }
 +  }
 +  RefPtr<IDWriteFontCollection> collection;
@@ -598,6 +604,16 @@ index 0d359b69d7..17060487e0 100644
 +    RefPtr<IDWriteFontFamily> family;
 +    if (FAILED(collection->GetFontFamily(f, getter_AddRefs(family)))) {
 +      continue;
++    }
++    if (uniqueKey && count == 1) {
++      // Usually the face is still at its own index; checking that first keeps
++      // a lookup in a family of hundreds of faces (System Font) from scanning
++      // them all.
++      RefPtr<IDWriteFont> font;
++      if (SUCCEEDED(family->GetFont(aFace->mIndex, getter_AddRefs(font))) &&
++          font && FontIsSharedFace(font, aFace, psName, filePath)) {
++        return font.forget();
++      }
 +    }
 +    uint32_t seen = 0;
 +    for (UINT32 j = 0; j < family->GetFontCount(); ++j) {
