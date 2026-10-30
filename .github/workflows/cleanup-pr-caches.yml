@@ -1,0 +1,35 @@
+name: Delete a closed pull request's caches
+
+# A pull request's workflow runs save their caches under refs/pull/N/merge, which
+# no other ref can restore. Once the pull request is closed they only take space,
+# and at the repository's size limit GitHub evicts the oldest-accessed caches
+# first, which has been the build legs' ccache.
+# This is the recipe from GitHub's "Managing caches" documentation, "Force
+# deleting cache entries". It runs on pull_request_target so that a pull request
+# from a fork is cleaned up too (the pull_request token is read-only for forks).
+# It never checks out or runs the pull request's code; the only input it uses is
+# the pull request number.
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions: {}
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Delete the caches of refs/pull/N/merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+        run: |
+          ids=$(gh cache list --ref "$REF" --limit 100 --json id --jq '.[].id')
+          echo "caches under $REF: $(echo "$ids" | grep -c . || true)"
+          for id in $ids; do
+            gh cache delete "$id"
+          done
