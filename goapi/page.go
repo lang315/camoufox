@@ -30,7 +30,8 @@ type Page struct {
 	framesMu sync.Mutex
 	frames   map[string]*Frame
 
-	subs []juggler.Subscription // owned by this page, deregistered on Close
+	subs     []juggler.Subscription // owned by this page, deregistered when it finishes; guarded by mu
+	finished bool                   // set by finish, guarded by mu
 }
 
 // NewPage opens a fresh page in this context. It blocks until the
@@ -94,7 +95,7 @@ func (c *BrowserContext) attachPage(att *juggler.AttachedToTargetEvent) *Page {
 func (p *Page) subscribe() {
 	conn := p.bc.b.conn
 
-	p.subs = append(p.subs, conn.On("Page.frameAttached", func(ev juggler.Event) {
+	p.own(conn.On("Page.frameAttached", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -111,7 +112,7 @@ func (p *Page) subscribe() {
 		}
 	}))
 
-	p.subs = append(p.subs, conn.On("Runtime.executionContextCreated", func(ev juggler.Event) {
+	p.own(conn.On("Runtime.executionContextCreated", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -143,7 +144,7 @@ func (p *Page) subscribe() {
 		}
 	}))
 
-	p.subs = append(p.subs, conn.On("Runtime.executionContextDestroyed", func(ev juggler.Event) {
+	p.own(conn.On("Runtime.executionContextDestroyed", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -161,7 +162,7 @@ func (p *Page) subscribe() {
 		}
 	}))
 
-	p.subs = append(p.subs, conn.On("Runtime.executionContextsCleared", func(ev juggler.Event) {
+	p.own(conn.On("Runtime.executionContextsCleared", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -530,10 +531,29 @@ func (p *Page) Close(ctx context.Context) error {
 // channel. Close and the browser's detach event both end here, once.
 func (p *Page) finish() {
 	p.finishOnce.Do(func() {
-		for _, s := range p.subs {
+		p.mu.Lock()
+		p.finished = true
+		subs := p.subs
+		p.subs = nil
+		p.mu.Unlock()
+		for _, s := range subs {
 			p.bc.b.conn.Off(s)
 		}
-		p.subs = nil
 		close(p.closed)
 	})
+}
+
+// own ties sub to the page's life and returns it. finish deregisters what the
+// page owns; a page that has already finished deregisters sub here, so a handler
+// registered while the browser detaches the page is not left behind.
+func (p *Page) own(sub juggler.Subscription) juggler.Subscription {
+	p.mu.Lock()
+	if !p.finished {
+		p.subs = append(p.subs, sub)
+		p.mu.Unlock()
+		return sub
+	}
+	p.mu.Unlock()
+	p.bc.b.conn.Off(sub)
+	return sub
 }

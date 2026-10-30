@@ -43,7 +43,7 @@ type ResponseHandler func(*Response)
 // OnRequest subscribes to outbound requests for this page session.
 // Returns a Subscription that can be passed to Off to deregister.
 func (p *Page) OnRequest(h RequestHandler) juggler.Subscription {
-	return p.bc.b.conn.On("Network.requestWillBeSent", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Network.requestWillBeSent", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -63,12 +63,12 @@ func (p *Page) OnRequest(h RequestHandler) juggler.Subscription {
 			NavigationID:  ne.NavigationID,
 			Cause:         ne.Cause,
 		})
-	})
+	}))
 }
 
 // OnResponse subscribes to inbound responses for this page session.
 func (p *Page) OnResponse(h ResponseHandler) juggler.Subscription {
-	return p.bc.b.conn.On("Network.responseReceived", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Network.responseReceived", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -85,7 +85,7 @@ func (p *Page) OnResponse(h ResponseHandler) juggler.Subscription {
 			RemoteIP:   ne.RemoteIPAddress,
 			RemotePort: ne.RemotePort,
 		})
-	})
+	}))
 }
 
 // Off deregisters a Subscription previously returned by OnRequest /

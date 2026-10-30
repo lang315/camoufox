@@ -12,6 +12,18 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #348: goapi pages raced on their handler list, and closed pages kept their handlers
+
+**Symptom.** Under `go test -race`, a `BrowserContext.OnPage` handler that calls `Page.OnDialog` while the browser detaches the page is reported as a data race on `Page.subs`. Separately, a page that had been closed still received events for its session: handlers set with `OnDialog`, `OnConsole`, `OnPageError`, `OnCrash`, `OnRequest`, `OnResponse` and `OnFileChooser` stayed registered on the connection, and with them the `*Page` they captured, for the life of the browser.
+
+**Root cause.** `Page.subs` was appended to at ten internal sites (`page.go`, `frame.go`, `dialog.go`) with no lock, while `finish()` ranged over it and set it to nil with no lock, on the read loop. `BrowserContext.publish` calls the `OnPage` handlers outside `pagesMu`, so a handler can register handlers while a detach runs `finish()`; an append after `finish()` was never deregistered. The public `On*` methods returned their subscription to the caller and never recorded it in `p.subs`, so `finish()` could not remove it.
+
+**Fix.** One helper, `Page.own`, records a subscription under `p.mu`, and deregisters it at once when the page has already finished. Every internal registration and every public `On*` goes through it. `finish()` swaps the slice out under `p.mu` and deregisters outside the lock. The public methods still return the `Subscription`, and `p.Off` still works; deregistering a subscription twice does nothing.
+
+**Evidence.** Red, then green, in `goapi/page_subs_test.go`, which drives a scripted connection and needs no browser: `TestOnPageHandlerRegisteringHandlersRacesDetach` reported `WARNING: DATA RACE` between `Page.finish` and `Page.OnDialog` and failed with `500 dialog handlers registered during the detach still run after the page closed`; `TestPageClosingDeregistersItsPublicHandlers` failed for `OnDialog`, `OnConsole`, `OnPageError`, `OnCrash`, `OnRequest` and `OnResponse` with `ran 2 times; it ran again after the page closed`. Both pass with `-race` after the fix. The leak test delivers each event once while the page is open first, so a handler that was never called cannot pass for a deregistered one.
+
+**What misled.** The tests do not count handlers on the connection, which would have needed an accessor on `juggler.Connection` only for tests; they check what the leak does, which is call the handler of a closed page. `OnFileChooser` has the same fix but no test: its registration makes a blocking call that the scripted connection does not answer.
+
 ## #311, #314: the patch-guard runner and several guards failed on Windows and saw nothing on macOS
 
 **Fixed by:** the PR that closes both. **Found by:** a run of the spoofing group on real Windows 10 against the fork.1 build.
