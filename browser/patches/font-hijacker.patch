@@ -144,7 +144,7 @@ index 5ce0885c70..0e488dad2e 100644
  
  /**
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
-index 0d359b69d7..ee5b3de829 100644
+index 0d359b69d7..4ec9c827f8 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -5,6 +5,7 @@
@@ -155,7 +155,7 @@ index 0d359b69d7..ee5b3de829 100644
  #include "SharedFontList-impl.h"
  #include "gfxDWriteCommon.h"
  #include "gfxDWriteFonts.h"
-@@ -1192,8 +1193,85 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
+@@ -1192,8 +1193,89 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
    }
  }
  
@@ -169,14 +169,18 @@ index 0d359b69d7..ee5b3de829 100644
 +  SlantStyleRange slant;
 +};
 +
-+static SharedFaceStyle GetSharedFaceStyle(IDWriteFont* aFont) {
-+  DWRITE_FONT_STYLE style = aFont->GetStyle();
++static SharedFaceStyle SharedFaceStyleOf(int aWeight, int aStretch, int aStyle) {
 +  return SharedFaceStyle{
-+      WeightRange(FontWeight::FromInt(aFont->GetWeight())),
-+      WidthRange(FontWidthFromDWriteStretch(aFont->GetStretch())),
-+      SlantStyleRange(style == DWRITE_FONT_STYLE_NORMAL   ? FontSlantStyle::NORMAL
-+                      : style == DWRITE_FONT_STYLE_ITALIC ? FontSlantStyle::ITALIC
-+                                                          : FontSlantStyle::OBLIQUE)};
++      WeightRange(FontWeight::FromInt(aWeight)),
++      WidthRange(FontWidthFromDWriteStretch(DWRITE_FONT_STRETCH(aStretch))),
++      SlantStyleRange(aStyle == DWRITE_FONT_STYLE_NORMAL   ? FontSlantStyle::NORMAL
++                      : aStyle == DWRITE_FONT_STYLE_ITALIC ? FontSlantStyle::ITALIC
++                                                           : FontSlantStyle::OBLIQUE)};
++}
++
++static SharedFaceStyle GetSharedFaceStyle(IDWriteFont* aFont) {
++  return SharedFaceStyleOf(aFont->GetWeight(), aFont->GetStretch(),
++                           aFont->GetStyle());
 +}
 +
 +// The font file of a face and the face's index within it.
@@ -241,7 +245,7 @@ index 0d359b69d7..ee5b3de829 100644
    IDWriteFontCollection* collection =
  #ifdef MOZ_BUNDLED_FONTS
        aFamily->IsBundled() ? mBundledFonts : mSystemFonts;
-@@ -1285,12 +1363,7 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
+@@ -1285,12 +1367,7 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
        return nullptr;
      }
  
@@ -255,7 +259,7 @@ index 0d359b69d7..ee5b3de829 100644
    }
    MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
      gfxCriticalNote << "Exception occurred while creating font entry for "
-@@ -1487,19 +1560,22 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+@@ -1487,19 +1564,22 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
          aFamily->Key().AsString(SharedFontList()).EqualsLiteral("meiryo")) {
        continue;
      }
@@ -284,7 +288,7 @@ index 0d359b69d7..ee5b3de829 100644
              GetPostScriptNameFromNameTable(dwFontFace, name);
            }
            const auto kCMAP =
-@@ -1526,12 +1602,14 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+@@ -1526,12 +1606,14 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
                       << aFamily->Key().AsString(SharedFontList()).get();
          continue;
        }
@@ -304,7 +308,7 @@ index 0d359b69d7..ee5b3de829 100644
      }
      MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
        // Exception (e.g. disk i/o error) occurred when DirectWrite tried to use
-@@ -1546,22 +1624,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
+@@ -1546,22 +1628,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
                                        const fontlist::Face* aFace,
                                        nsCString& aPSName,
                                        nsCString& aFullName) {
@@ -350,7 +354,7 @@ index 0d359b69d7..ee5b3de829 100644
    }
    HRESULT ps = GetDirectWriteFaceName(dwFont, PSNAME_ID, aPSName);
    HRESULT full = GetDirectWriteFaceName(dwFont, FULLNAME_ID, aFullName);
-@@ -1751,10 +1839,22 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
+@@ -1751,10 +1843,23 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
      return;
    }
  #ifdef MOZ_BUNDLED_FONTS
@@ -358,6 +362,7 @@ index 0d359b69d7..ee5b3de829 100644
 +    // A regenerated list may number its bundled families differently.
 +    MutexAutoLock lock(mBundledFamiliesLock);
 +    mBundledFamilyCollections.Clear();
++    mBundledFamilyFontLists.Clear();
 +    mBundledFileOrder.Clear();
 +  }
    // We activate bundled fonts if the pref is > 0 (on) or < 0 (auto), only an
@@ -374,7 +379,7 @@ index 0d359b69d7..ee5b3de829 100644
      mBundledFonts = CreateBundledFontsCollection(factory);
    }
    TimeStamp end1 = TimeStamp::Now();
-@@ -2747,22 +2847,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
+@@ -2747,22 +2852,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
    nsCOMPtr<nsIFile> mFontDir;
    nsCOMPtr<nsIDirectoryEnumerator> mEntries;
    nsCOMPtr<nsISupports> mCurrent;
@@ -429,7 +434,7 @@ index 0d359b69d7..ee5b3de829 100644
      }
    }
    *aHasCurrentFile = hasMore;
-@@ -2813,6 +2939,268 @@ BundledFontLoader::CreateEnumeratorFromKey(
+@@ -2813,6 +2944,318 @@ BundledFontLoader::CreateEnumeratorFromKey(
    return S_OK;
  }
  
@@ -606,15 +611,61 @@ index 0d359b69d7..ee5b3de829 100644
 +  return psName == aPSName;
 +}
 +
++// The fonts of a one-family collection with the key of each, built once, the
++// first time a lookup cannot use a face's own index.
++already_AddRefed<BundledFamilyFonts> gfxDWriteFontList::BundledFamilyFontList(
++    const fontlist::Family* aFamily, IDWriteFontCollection* aCollection) {
++  MutexAutoLock lock(mBundledFamiliesLock);
++  RefPtr<BundledFamilyFonts> fonts;
++  if (auto cached = mBundledFamilyFontLists.Lookup(aFamily->Index())) {
++    fonts = cached.Data();
++  } else {
++    fonts = new BundledFamilyFonts();
++    mBundledFamilyFontLists.InsertOrUpdate(aFamily->Index(), fonts);
++  }
++  if (fonts->mIndexed) {
++    return fonts.forget();
++  }
++  for (UINT32 f = 0; f < aCollection->GetFontFamilyCount(); ++f) {
++    RefPtr<IDWriteFontFamily> family;
++    if (FAILED(aCollection->GetFontFamily(f, getter_AddRefs(family)))) {
++      continue;
++    }
++    for (UINT32 j = 0; j < family->GetFontCount(); ++j) {
++      RefPtr<IDWriteFont> font;
++      RefPtr<IDWriteFontFace> face;
++      if (FAILED(family->GetFont(j, getter_AddRefs(font))) || !font ||
++          font->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE ||
++          FAILED(font->CreateFontFace(getter_AddRefs(face)))) {
++        continue;
++      }
++      BundledFamilyFonts::Font entry;
++      entry.mFamily = f;
++      if (!GetFontFileInfo(face, entry.mPath, entry.mFileIndex)) {
++        continue;
++      }
++      if (FAILED(GetDirectWriteFaceName(font, PSNAME_ID, entry.mPSName))) {
++        GetPostScriptNameFromNameTable(face, entry.mPSName);
++      }
++      entry.mWeight = font->GetWeight();
++      entry.mStretch = font->GetStretch();
++      entry.mStyle = font->GetStyle();
++      entry.mFont = font;
++      fonts->mFonts.AppendElement(std::move(entry));
++    }
++  }
++  fonts->mIndexed = true;
++  return fonts.forget();
++}
++
 +// A face is at the index the shared list recorded in the one-family collection:
 +// it lists the family's files in the order of the parent's collection
 +// (BundledFamilyCollection). The face is accepted only if it has the shared
-+// face's key, and when it does not (another file system order, say), it is the
-+// n-th font with that key in the collection, n being the number of shared faces
-+// of the family with the same key and a lower index. That scan is slow on a
-+// family of hundreds of faces (System Font), so it is logged. A collection of
-+// several DirectWrite families (a few small families share files) is scanned
-+// without the log. Anything else is a miss, never a guess.
++// face's key. When it is not there (DirectWrite grouped or ordered the faces of
++// the smaller collection differently) or the collection holds several
++// DirectWrite families, it is the n-th font with that key in the collection
++// (BundledFamilyFontList), n being the number of shared faces of the family
++// with the same key and a lower index. Anything else is a miss, never a guess.
 +already_AddRefed<IDWriteFont> gfxDWriteFontList::FindBundledFont(
 +    const fontlist::Family* aFamily, const fontlist::Face* aFace) {
 +  fontlist::FontList* list = SharedFontList();
@@ -636,40 +687,44 @@ index 0d359b69d7..ee5b3de829 100644
 +        font && FontIsSharedFace(font, aFace, psName, filePath)) {
 +      return font.forget();
 +    }
-+  }
-+  if (count == 1) {
 +    LOG_FONTLIST(("CAMOU-FL bundled-face-scan family=%s face=%s index=%u",
 +                  aFamily->Key().AsString(list).get(), psName.get(),
 +                  unsigned(aFace->mIndex)));
 +  }
-+  uint32_t rank = 0;
-+  const fontlist::Pointer* facePtrs = aFamily->Faces(list);
-+  for (uint32_t i = 0; facePtrs && i < aFamily->NumFaces(); ++i) {
-+    auto* face = facePtrs[i].ToPtr<fontlist::Face>(list);
-+    if (face && face != aFace && !face->mFilePath.IsNull() &&
-+        face->mIndex < aFace->mIndex && face->mFileIndex == aFace->mFileIndex &&
-+        face->mWeight == aFace->mWeight && face->mWidth == aFace->mWidth &&
-+        face->mStyle == aFace->mStyle &&
-+        face->mFilePath.AsString(list) == filePath &&
-+        face->mDescriptor.AsString(list) == psName) {
-+      ++rank;
-+    }
-+  }
-+  for (UINT32 f = 0; f < count; ++f) {
-+    RefPtr<IDWriteFontFamily> family;
-+    if (FAILED(collection->GetFontFamily(f, getter_AddRefs(family)))) {
-+      continue;
-+    }
-+    uint32_t seen = 0;
-+    for (UINT32 j = 0; j < family->GetFontCount(); ++j) {
-+      RefPtr<IDWriteFont> font;
-+      if (SUCCEEDED(family->GetFont(j, getter_AddRefs(font))) && font &&
-+          FontIsSharedFace(font, aFace, psName, filePath) && seen++ == rank) {
-+        return font.forget();
++  if (count) {
++    uint32_t rank = 0;
++    const fontlist::Pointer* facePtrs = aFamily->Faces(list);
++    for (uint32_t i = 0; facePtrs && i < aFamily->NumFaces(); ++i) {
++      auto* face = facePtrs[i].ToPtr<fontlist::Face>(list);
++      if (face && face != aFace && !face->mFilePath.IsNull() &&
++          face->mIndex < aFace->mIndex &&
++          face->mFileIndex == aFace->mFileIndex &&
++          face->mWeight == aFace->mWeight && face->mWidth == aFace->mWidth &&
++          face->mStyle == aFace->mStyle &&
++          face->mFilePath.AsString(list) == filePath &&
++          face->mDescriptor.AsString(list) == psName) {
++        ++rank;
 +      }
 +    }
-+    if (seen) {
-+      break;
++    RefPtr<BundledFamilyFonts> fonts =
++        BundledFamilyFontList(aFamily, collection);
++    const BundledFamilyFonts::Font* holder = nullptr;
++    uint32_t seen = 0;
++    for (const auto& entry : fonts->mFonts) {
++      if (holder && entry.mFamily != holder->mFamily) {
++        continue;
++      }
++      const SharedFaceStyle style =
++          SharedFaceStyleOf(entry.mWeight, entry.mStretch, entry.mStyle);
++      if (entry.mFileIndex == aFace->mFileIndex && entry.mPath == filePath &&
++          aFace->mWeight == style.weight && aFace->mWidth == style.width &&
++          aFace->mStyle == style.slant && entry.mPSName == psName) {
++        holder = &entry;
++        if (seen++ == rank) {
++          RefPtr<IDWriteFont> font = entry.mFont;
++          return font.forget();
++        }
++      }
 +    }
 +  }
 +  LOG_FONTLIST(("CAMOU-FL bundled-face-miss family=%s face=%s index=%u",
@@ -699,7 +754,7 @@ index 0d359b69d7..ee5b3de829 100644
  gfxDWriteFontList::CreateBundledFontsCollection(IDWriteFactory* aFactory) {
    nsCOMPtr<nsIFile> localDir;
 diff --git a/gfx/thebes/gfxDWriteFontList.h b/gfx/thebes/gfxDWriteFontList.h
-index 5f36003dad..afc41cbe74 100644
+index 5f36003dad..0d96d2cec3 100644
 --- a/gfx/thebes/gfxDWriteFontList.h
 +++ b/gfx/thebes/gfxDWriteFontList.h
 @@ -14,8 +14,10 @@
@@ -713,7 +768,40 @@ index 5f36003dad..afc41cbe74 100644
  #include "mozilla/gfx/UnscaledFontDWrite.h"
  
  /**
-@@ -506,8 +508,30 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
+@@ -366,6 +368,32 @@ class DWriteFontFallbackRenderer final : public IDWriteTextRenderer {
+   nsCString mFamilyName;
+ };
+ 
++#ifdef MOZ_BUNDLED_FONTS
++// Camoufox: the fonts of a one-family collection of bundled files, each with
++// what the shared font list records about a face, so that a lookup that cannot
++// use a face's own index (FindBundledFont) compares keys in memory instead of
++// asking DirectWrite for every font again.
++struct BundledFamilyFonts {
++  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(BundledFamilyFonts)
++
++  struct Font {
++    uint32_t mFamily;  // the DirectWrite family of the collection
++    nsCString mPath;
++    nsCString mPSName;
++    uint16_t mFileIndex;
++    int mWeight;
++    int mStretch;
++    int mStyle;
++    RefPtr<IDWriteFont> mFont;
++  };
++  nsTArray<Font> mFonts;
++  bool mIndexed = false;
++
++ private:
++  ~BundledFamilyFonts() = default;
++};
++#endif
++
+ class gfxDWriteFontList final : public gfxPlatformFontList {
+  public:
+   gfxDWriteFontList();
+@@ -506,8 +534,35 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
    RefPtr<IDWriteTextFormat> mFallbackFormat;
  
    RefPtr<IDWriteFontCollection> mSystemFonts;
@@ -728,6 +816,9 @@ index 5f36003dad..afc41cbe74 100644
 +  // Camoufox: see FindBundledFont.
 +  already_AddRefed<IDWriteFontCollection> BundledFamilyCollection(
 +      const mozilla::fontlist::Family* aFamily);
++  already_AddRefed<BundledFamilyFonts> BundledFamilyFontList(
++      const mozilla::fontlist::Family* aFamily,
++      IDWriteFontCollection* aCollection);
 +  already_AddRefed<IDWriteFont> FindBundledFont(
 +      const mozilla::fontlist::Family* aFamily,
 +      const mozilla::fontlist::Face* aFace);
@@ -737,6 +828,8 @@ index 5f36003dad..afc41cbe74 100644
 +  mozilla::Mutex mBundledFamiliesLock{"gfxDWriteFontList::mBundledFamilies"};
 +  nsTHashMap<nsUint32HashKey, RefPtr<IDWriteFontCollection>>
 +      mBundledFamilyCollections MOZ_GUARDED_BY(mBundledFamiliesLock);
++  nsTHashMap<nsUint32HashKey, RefPtr<BundledFamilyFonts>>
++      mBundledFamilyFontLists MOZ_GUARDED_BY(mBundledFamiliesLock);
 +  // Position of each file of the fonts directory in the order the parent's
 +  // collection lists them, by lowercased leaf name.
 +  nsTHashMap<nsStringHashKey, uint32_t> mBundledFileOrder
