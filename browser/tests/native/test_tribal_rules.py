@@ -432,6 +432,22 @@ def test_the_macos_package_ships_no_macos_only_fonts():
     assert fonts.group(1).split() == ["windows", "linux"], explain("macos-package-ships-no-macos-only-fonts")
 
 
+def test_bundled_fonts_registered_in_the_macos_gpu_process():
+    """Rule: bundled-fonts-registered-in-the-macos-gpu-process."""
+    patch = BROWSER / "patches" / "font-hijacker.patch"
+    why = explain("bundled-fonts-registered-in-the-macos-gpu-process")
+    (gpu,) = [d for d in re.split(r"^diff --git ", patch.read_text(encoding="utf-8"), flags=re.M)
+              if d.startswith("a/gfx/ipc/GPUParent.cpp ")]
+    gate = gpu.find("CoreTextFontList::ShouldActivateBundledFonts()")
+    activate = gpu.find("CoreTextFontList::ActivateBundledFonts()")
+    start = gpu.find("wr::RenderThread::Start")
+    assert -1 < gate < activate < start, why
+    content = _added_lines(patch, "gfx/thebes/CoreTextFontList.cpp")
+    assert "if (ShouldActivateBundledFonts())" in content, why
+    assert "ActivateBundledFonts(&mBundledFamilies)" in content, why
+    assert "MaskConfig::GetSpoofedOS() != MaskConfig::SpoofedOS::MacOS" in content, why
+
+
 def test_fc_activates_only_firefox_own_bundled_fonts():
     """Rule: fc-activates-only-firefox-own-bundled-fonts."""
     patch = (BROWSER / "patches" / "linux-bundled-fonts-toplevel.patch").read_text(encoding="utf-8")

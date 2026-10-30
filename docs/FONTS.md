@@ -93,6 +93,14 @@ What differs is how the groups are gated:
   starting with `.`) is never activated.** WebRender loads those by name and gets
   the host's copy, so the UI drew wrong glyphs (#918). Check it on a Mac with
   `browser/scripts/check-macos-hidden-fonts.py`.
+- **On a macOS host the GPU process registers the bundle too.** WebRender
+  rasterizes there, and it looks a font up by PostScript name and file path in a
+  process that has no font list. A process that never registered the files gets
+  another font back, and the bundled font's glyph ids were drawn with its
+  outlines (#356). `GPUParent::RecvInit` calls the same gate and loop as the
+  font list (`CoreTextFontList::ShouldActivateBundledFonts` and
+  `ActivateBundledFonts`, `font-hijacker.patch`). Only the real window shows a
+  failure: `Page.screenshot` and the screencast bypass WebRender.
 
 This replaced the 455 `<glob>` duplicate-face rejects the Windows fontconfig used
 to carry. They were redundant under grouping and also unsound: 114 bundled
