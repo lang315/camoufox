@@ -297,7 +297,11 @@ func TestZZAB(t *testing.T) {
 		if round%2 == 1 {
 			arms = []string{"B", "A"}
 		}
-		for _, o := range []string{"windows", "linux", "macos"} {
+		oses := []string{"windows", "linux", "macos"}
+		if v := os.Getenv("ZZ_OS"); v != "" {
+			oses = strings.Split(v, ",")
+		}
+		for _, o := range oses {
 			for _, arm := range arms {
 				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 				t0 := time.Now()
