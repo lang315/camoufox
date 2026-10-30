@@ -6,25 +6,13 @@ Design: docs/superpowers/specs/2026-09-24-e2e-user-journeys-design.md
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import platform
-import subprocess
-import urllib.request
-import zipfile
 from pathlib import Path
 
 import pytest
 
-from util import build_id, find_binary
-
-E2E = Path(__file__).resolve().parent
-REPO = E2E.parent
-WORK = REPO / ".ci-work" / "e2e"
-RELEASE_REPO = "lang315/camoufox"
-PLATFORM_ASSET = {("Darwin", "arm64"): "mac.arm64", ("Darwin", "x86_64"): "mac.x86_64",
-                  ("Windows", "AMD64"): "win.x86_64", ("Linux", "x86_64"): "lin.x86_64",
-                  ("Linux", "aarch64"): "lin.arm64"}
+from util import RELEASE_REPO, build_id, fetch_release, unpack
 
 
 def pytest_addoption(parser):
@@ -41,57 +29,18 @@ def pytest_generate_tests(metafunc):
         metafunc.parametrize("drv", metafunc.config.getoption("--drivers").split(","), indirect=True)
 
 
-def _unpack(zp: Path) -> Path:
-    dest = WORK / "unpacked" / zp.stem
-    if not dest.exists():
-        dest.mkdir(parents=True)
-        if os.name == "nt":
-            zipfile.ZipFile(zp).extractall(dest)
-        else:  # keeps the executable bits zipfile would drop
-            subprocess.run(["unzip", "-q", "-o", str(zp), "-d", str(dest)], check=True)
-    return find_binary(dest)
-
-
-def _fetch_release(tag: str) -> Path:
-    plat = PLATFORM_ASSET[(platform.system(), platform.machine())]
-    req = urllib.request.Request(f"https://api.github.com/repos/{RELEASE_REPO}/releases/tags/{tag}")
-    token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-    if token:  # unauthenticated calls share a 60/hour limit per IP, which CI runners exhaust
-        req.add_header("Authorization", f"Bearer {token}")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            rel = json.load(r)
-    except OSError as e:
-        pytest.exit(f"cannot read release {tag} from {RELEASE_REPO}: {e}", 2)
-    asset = next((a for a in rel["assets"] if a["name"].endswith(f"-{plat}.zip")), None)
-    if asset is None:
-        pytest.exit(f"release {tag} has no {plat} build (it has: {[a['name'] for a in rel['assets']]}); "
-                    "test a build run's artifact with --zip instead", 2)
-    zp = WORK / "release" / tag / asset["name"]
-    zp.parent.mkdir(parents=True, exist_ok=True)
-    if not zp.exists():
-        for attempt in range(3):
-            try:
-                urllib.request.urlretrieve(asset["browser_download_url"], zp)
-                break
-            except OSError:
-                if attempt == 2:
-                    raise
-    digest = hashlib.sha256(zp.read_bytes()).hexdigest()
-    if asset.get("digest"):
-        assert asset["digest"] == f"sha256:{digest}", f"{asset['name']}: downloaded {digest}, release says {asset['digest']}"
-    return zp
-
-
 @pytest.fixture(scope="session")
 def binary(pytestconfig) -> Path:
     zp = None
     if pytestconfig.getoption("--release"):
-        zp = _fetch_release(pytestconfig.getoption("--release"))
+        try:
+            zp = fetch_release(pytestconfig.getoption("--release"))
+        except RuntimeError as e:
+            pytest.exit(str(e), 2)
     elif pytestconfig.getoption("--zip"):
         zp = Path(pytestconfig.getoption("--zip")).resolve()
     if zp:
-        path = _unpack(zp)
+        path = unpack(zp)
     else:
         given = pytestconfig.getoption("--binary") or os.environ.get("CAMOUFOX_EXECUTABLE_PATH")
         if not given:
