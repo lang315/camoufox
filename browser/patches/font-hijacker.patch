@@ -144,7 +144,7 @@ index 5ce0885c70..0e488dad2e 100644
  
  /**
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
-index 0d359b69d7..3cb93eeb8a 100644
+index 0d359b69d7..1f59129c94 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -5,6 +5,7 @@
@@ -155,7 +155,7 @@ index 0d359b69d7..3cb93eeb8a 100644
  #include "SharedFontList-impl.h"
  #include "gfxDWriteCommon.h"
  #include "gfxDWriteFonts.h"
-@@ -1192,8 +1193,94 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
+@@ -1192,8 +1193,83 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
    }
  }
  
@@ -177,17 +177,6 @@ index 0d359b69d7..3cb93eeb8a 100644
 +      SlantStyleRange(style == DWRITE_FONT_STYLE_NORMAL   ? FontSlantStyle::NORMAL
 +                      : style == DWRITE_FONT_STYLE_ITALIC ? FontSlantStyle::ITALIC
 +                                                          : FontSlantStyle::OBLIQUE)};
-+}
-+
-+// The PostScript name that identifies a face: DirectWrite's, else the 'name'
-+// table's (aFace may be null, then only DirectWrite's is tried).
-+static void GetFacePSName(IDWriteFont* aFont, IDWriteFontFace* aFace,
-+                          nsCString& aName) {
-+  if ((FAILED(GetDirectWriteFaceName(aFont, PSNAME_ID, aName)) ||
-+       aName.IsEmpty()) &&
-+      aFace) {
-+    GetPostScriptNameFromNameTable(aFace, aName);
-+  }
 +}
 +
 +// The font file of a face and the face's index within it.
@@ -250,7 +239,7 @@ index 0d359b69d7..3cb93eeb8a 100644
    IDWriteFontCollection* collection =
  #ifdef MOZ_BUNDLED_FONTS
        aFamily->IsBundled() ? mBundledFonts : mSystemFonts;
-@@ -1285,12 +1372,7 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
+@@ -1285,12 +1361,7 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
        return nullptr;
      }
  
@@ -264,7 +253,7 @@ index 0d359b69d7..3cb93eeb8a 100644
    }
    MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
      gfxCriticalNote << "Exception occurred while creating font entry for "
-@@ -1487,21 +1569,19 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+@@ -1487,19 +1558,22 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
          aFamily->Key().AsString(SharedFontList()).EqualsLiteral("meiryo")) {
        continue;
      }
@@ -282,17 +271,18 @@ index 0d359b69d7..3cb93eeb8a 100644
 -        RefPtr<IDWriteFontFace> dwFontFace;
 +      RefPtr<IDWriteFontFace> dwFontFace;
 +      const bool bundled = aFamily->IsBundled();
-+      GetFacePSName(dwFont, nullptr, name);
-+      if (name.IsEmpty() || aLoadCmaps || bundled) {
++      const bool readName =
++          FAILED(GetDirectWriteFaceName(dwFont, PSNAME_ID, name)) || aLoadCmaps;
++      if (readName || bundled) {
++        // A bundled face's file is read below; the name is only ever
++        // completed under stock's condition (readName).
          if (SUCCEEDED(dwFont->CreateFontFace(getter_AddRefs(dwFontFace)))) {
 -          if (name.IsEmpty()) {
--            GetPostScriptNameFromNameTable(dwFontFace, name);
--          }
-+          GetFacePSName(dwFont, dwFontFace, name);
++          if (readName && name.IsEmpty()) {
+             GetPostScriptNameFromNameTable(dwFontFace, name);
+           }
            const auto kCMAP =
-               NativeEndian::swapToBigEndian(TRUETYPE_TAG('c', 'm', 'a', 'p'));
-           const char* data;
-@@ -1526,12 +1606,14 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+@@ -1526,12 +1600,14 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
                       << aFamily->Key().AsString(SharedFontList()).get();
          continue;
        }
@@ -312,7 +302,7 @@ index 0d359b69d7..3cb93eeb8a 100644
      }
      MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
        // Exception (e.g. disk i/o error) occurred when DirectWrite tried to use
-@@ -1546,22 +1628,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
+@@ -1546,22 +1622,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
                                        const fontlist::Face* aFace,
                                        nsCString& aPSName,
                                        nsCString& aFullName) {
@@ -358,7 +348,7 @@ index 0d359b69d7..3cb93eeb8a 100644
    }
    HRESULT ps = GetDirectWriteFaceName(dwFont, PSNAME_ID, aPSName);
    HRESULT full = GetDirectWriteFaceName(dwFont, FULLNAME_ID, aFullName);
-@@ -1751,10 +1843,21 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
+@@ -1751,10 +1837,21 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
      return;
    }
  #ifdef MOZ_BUNDLED_FONTS
@@ -381,7 +371,7 @@ index 0d359b69d7..3cb93eeb8a 100644
      mBundledFonts = CreateBundledFontsCollection(factory);
    }
    TimeStamp end1 = TimeStamp::Now();
-@@ -2747,22 +2850,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
+@@ -2747,22 +2844,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
    nsCOMPtr<nsIFile> mFontDir;
    nsCOMPtr<nsIDirectoryEnumerator> mEntries;
    nsCOMPtr<nsISupports> mCurrent;
@@ -436,7 +426,7 @@ index 0d359b69d7..3cb93eeb8a 100644
      }
    }
    *aHasCurrentFile = hasMore;
-@@ -2813,6 +2942,194 @@ BundledFontLoader::CreateEnumeratorFromKey(
+@@ -2813,6 +2936,196 @@ BundledFontLoader::CreateEnumeratorFromKey(
    return S_OK;
  }
  
@@ -563,7 +553,9 @@ index 0d359b69d7..3cb93eeb8a 100644
 +    return false;
 +  }
 +  nsAutoCString psName;
-+  GetFacePSName(aFont, dwFace, psName);
++  if (FAILED(GetDirectWriteFaceName(aFont, PSNAME_ID, psName))) {
++    GetPostScriptNameFromNameTable(dwFace, psName);
++  }
 +  return psName == aPSName;
 +}
 +
