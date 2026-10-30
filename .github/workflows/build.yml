@@ -290,10 +290,16 @@ jobs:
 
       - name: Build
         working-directory: browser
+        # The slowest passing Build step took 188 min (macOS arm64); a hang then
+        # fails here instead of at the 6 h job limit.
+        timeout-minutes: 240
         env:
           # Cap Rust parallelism to lower peak memory (avoids OOM/SIGTERM).
           # Tune to taste: higher = faster but more RAM.
           CARGO_BUILD_JOBS: "1"
+          # mach waits for terminal-notifier after "Build complete", which hung a
+          # macOS runner for 3.5 h (#354); mach skips the notification when this is set.
+          MOZ_NOSPAM: "1"
         run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
 
       - name: ccache stats
