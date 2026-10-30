@@ -157,6 +157,8 @@ jobs:
         shell: bash
         env:
           PROBE: ${{ inputs.probe }}
+          GH_TOKEN: ${{ github.token }}
+          PROBE_BUILD_IDS: ${{ inputs.k }}
         run: |
           # A probe takes --zip, which a release input does not give it: that fails at argparse, loudly.
           python "e2e/probes/$PROBE" $E2E_BROWSER --runs 8
