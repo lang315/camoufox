@@ -3407,3 +3407,42 @@ def test_observer_harness_reads_surface_ids_from_the_cpp_enum(monkeypatch):
     with pytest.raises(ValueError):
         harness.parse_surface_names("enum class Other { A = 1 };")
     sys.modules.pop("harness", None)
+
+
+# ---------------------------------------------------------------------------
+# Actions caches: the build legs keep a warm ccache, closed pull requests free theirs
+# ---------------------------------------------------------------------------
+
+
+def _workflow(name):
+    import yaml
+
+    return yaml.safe_load((CI_ROOT.parent / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("prefix", ["mozbuild", "ccache"])
+def test_a_build_leg_saves_a_fresh_cache_every_run(prefix):
+    """actions/cache never overwrites an existing key, so a key fixed per upstream.sh kept the
+    first ccache saved for it and every later build restored that stale one."""
+    steps = _workflow("build.yml")["jobs"]["build"]["steps"]
+    cache = next(s["with"] for s in steps if str(s.get("with", {}).get("key", "")).startswith(prefix))
+    assert cache["key"].endswith("-${{ github.run_id }}"), cache["key"]
+    restore = [line.strip() for line in cache["restore-keys"].splitlines() if line.strip()]
+    assert restore and all(not r.endswith("run_id }}") and r.startswith(prefix + "-") for r in restore)
+    # The prefix a key is saved under must be the first restore key, or the newest one is never found.
+    assert cache["key"].startswith(restore[0])
+
+
+def test_closing_a_pull_request_deletes_the_caches_it_saved():
+    """A pull request's caches live under refs/pull/N/merge, where nothing else can restore them,
+    and at the size limit the eviction took the build legs' ccache instead."""
+    workflow = _workflow("cleanup-pr-caches.yml")
+    triggers = workflow.get("on") or workflow[True]
+    assert triggers == {"pull_request_target": {"types": ["closed"]}}
+    assert workflow["permissions"] == {}
+    (job,) = workflow["jobs"].values()
+    assert job["permissions"] == {"actions": "write"}
+    assert not any("uses" in step for step in job["steps"]), "must not check out or run pull request code"
+    (step,) = job["steps"]
+    assert step["env"]["REF"] == "refs/pull/${{ github.event.pull_request.number }}/merge"
+    assert "github.event" not in step["run"], "the pull request number is the only event input, passed through env"
