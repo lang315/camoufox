@@ -157,6 +157,13 @@ jobs:
         shell: bash
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; else python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; fi
+      - name: Observer and goapi gates are not run on Windows
+        if: ${{ runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: |
+          msg="observer and goapi gates not run on Windows: #345"
+          echo "$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
       - name: Run
         if: ${{ !cancelled() && inputs.probe == '' }}
         shell: bash
