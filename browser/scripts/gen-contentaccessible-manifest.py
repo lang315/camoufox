@@ -28,9 +28,8 @@ Re-run it on a Firefox uplift, once per OS; the guard refuses to compare across 
 import hashlib
 import json
 import re
-import subprocess
 import sys
-import tempfile
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -51,23 +50,16 @@ def stock_os(root: Path) -> str:
 
 
 def zip_entries(jar: Path) -> dict:
-    """Map member -> size. Uses unzip, not zipfile: Firefox's optimized jars
-    have the central directory at the front and zipfile cannot open them."""
-    out = subprocess.run(["unzip", "-l", str(jar)], capture_output=True, text=True).stdout
-    entries = {}
-    for line in out.splitlines():
-        parts = line.split(None, 3)
-        if len(parts) == 4 and parts[0].isdigit() and not parts[3].endswith("/"):
-            entries[parts[3]] = int(parts[0])
-    return entries
+    """Map member -> size of the files in a jar."""
+    with zipfile.ZipFile(jar) as z:
+        return {i.filename: i.file_size for i in z.infolist() if not i.is_dir()}
 
 
-def packaged_bytes(f: Path) -> bytes:
+def packaged_bytes(name: str, data: bytes) -> bytes:
     """A file's bytes as the packager writes them into omni.ja: it strips the
     `#` comment lines of .ftl and .properties files (mozpack's
     MinifiedCommentStripped), which an unpackaged tree still carries."""
-    data = f.read_bytes()
-    if f.suffix in (".ftl", ".properties"):
+    if name.endswith((".ftl", ".properties")):
         data = b"".join(l for l in data.splitlines(keepends=True) if not l.startswith(b"#"))
     return data
 
@@ -81,39 +73,22 @@ def tree_hashes(base: Path, prefixes: list) -> dict:
         if top.is_dir():
             for f in top.rglob("*"):
                 if f.is_file():
-                    out[f.relative_to(base).as_posix()] = hashlib.sha256(packaged_bytes(f)).hexdigest()
+                    out[f.relative_to(base).as_posix()] = hashlib.sha256(packaged_bytes(f.name, f.read_bytes())).hexdigest()
     return out
-
-
-_JAR_TREES: dict = {}
-
-
-def jar_tree(jar: Path) -> Path:
-    """The jar unpacked once per process. Selecting members with `unzip jar pattern*`
-    is not used: a Windows runner's unzip (Git's msys build) reported "filename not
-    matched" for patterns that match 119 members of a Windows omni.ja, #338."""
-    if jar not in _JAR_TREES:
-        tmp = tempfile.TemporaryDirectory()
-        # unzip warns, with a non-zero exit, about the front-loaded central
-        # directory of every optimized jar, so completeness is checked instead.
-        proc = subprocess.run(["unzip", "-qo", str(jar), "-d", tmp.name], capture_output=True, text=True)
-        _JAR_TREES[jar] = (tmp, proc.stderr.strip())
-    return Path(_JAR_TREES[jar][0].name)
 
 
 def jar_hashes(jar: Path, prefixes: list) -> dict:
     """Member -> SHA-256 for the files under `prefixes` in a jar."""
-    hashes = tree_hashes(jar_tree(jar), prefixes)
-    listed = {m for m in zip_entries(jar) if any(m.startswith(p) for p in prefixes)}
-    if set(hashes) != listed:
-        raise RuntimeError(f"unzip {jar} extracted {len(hashes)} of {len(listed)} files: {_JAR_TREES[jar][1]}")
-    return hashes
+    with zipfile.ZipFile(jar) as z:
+        return {
+            n: hashlib.sha256(packaged_bytes(n, z.read(n))).hexdigest()
+            for n in z.namelist() if not n.endswith("/") and any(n.startswith(p) for p in prefixes)
+        }
 
 
 def zip_read(jar: Path, member: str) -> str:
-    return subprocess.run(
-        ["unzip", "-p", str(jar), member], capture_output=True
-    ).stdout.decode("utf8", "replace")
+    with zipfile.ZipFile(jar) as z:
+        return z.read(member).decode("utf8", "replace")
 
 
 def resolve(target: str, base: str) -> tuple:
