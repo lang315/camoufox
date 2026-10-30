@@ -300,6 +300,72 @@ static void Dump(IDWriteFontCollection* full, const set<string>& want) {
     }
   }
 }
+
+// ---- fullcheck (#345): the match rule by key + duplicate rank, every family, live file order ----
+// Rule under test: the shared face is the n-th font (non-simulated) of the holder family whose
+// key (PS name, file, file index, weight, width, slant) equals the face's key, where n is the
+// number of earlier shared faces (lower DWrite index) with the same key. Index is not used.
+static void FullCheck(IDWriteFontCollection* full) {
+  int total = 0, ruleHit = 0, ruleAxisDiff = 0, ruleMiss = 0, indexRuleHit = 0, indexRuleMiss = 0, dupFaces = 0;
+  for (UINT32 i = 0; i < full->GetFontFamilyCount(); i++) {
+    Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
+    Ptr<IDWriteLocalizedStrings> ns; if (FAILED(fam->GetFamilyNames(&ns))) continue;
+    auto names = LocalizedNames(ns.p); if (names.empty()) names.push_back("(noname)");
+    set<wstring> files; (void)Faces(fam.p, &files);
+    if (files.empty()) continue;
+    vector<wstring> fv;
+    for (UINT32 j = 0; j < fam->GetFontCount(); j++) {  // BundledFamilyCollection: distinct first files, face order
+      Ptr<IDWriteFont> f; if (FAILED(fam->GetFont(j, &f)) || f->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE) continue;
+      Ptr<IDWriteFontFace> face; if (FAILED(f->CreateFontFace(&face))) continue;
+      UINT32 n = 0; face->GetFiles(&n, nullptr); vector<IDWriteFontFile*> ff(n);
+      if (!n || FAILED(face->GetFiles(&n, ff.data()))) continue;
+      Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll; const void* k = nullptr; UINT32 ks = 0;
+      if (SUCCEEDED(ff[0]->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) && SUCCEEDED(ff[0]->GetReferenceKey(&k, &ks))) {
+        UINT32 len = 0; ll->GetFilePathLengthFromKey(k, ks, &len); wstring pth(len + 1, 0); ll->GetFilePathFromKey(k, ks, pth.data(), len + 1); pth.resize(len);
+        if (std::find(fv.begin(), fv.end(), pth) == fv.end()) fv.push_back(pth);
+      }
+      for (UINT32 q = 0; q < n; q++) ff[q]->Release();
+    }
+    Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
+    if (!sm) continue;
+    vector<Live> fullFaces(fam->GetFontCount());
+    vector<bool> usable(fam->GetFontCount(), false);
+    for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
+      Ptr<IDWriteFont> f; if (FAILED(fam->GetFont(j, &f))) continue;
+      fullFaces[j] = ReadLive(f.p);
+      usable[j] = fullFaces[j].sim == 0 && fullFaces[j].ok && fullFaces[j].psEn != "(none)";
+    }
+    auto same = [&](const Live& a, const Live& b) { return a.idx == b.idx && a.path == b.path && a.w == b.w && a.st == b.st && a.sl == b.sl && a.psEn == b.psEn; };
+    // small collection fonts in order, all families
+    struct Cand { UINT32 fam, idx; Live l; };
+    vector<Cand> cands;
+    for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) {
+      Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(k, &sf);
+      for (UINT32 q = 0; q < sf->GetFontCount(); q++) { Ptr<IDWriteFont> g; if (SUCCEEDED(sf->GetFont(q, &g))) { Live l = ReadLive(g.p); if (l.sim == 0 && l.ok) cands.push_back({k, q, l}); } }
+    }
+    for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
+      if (!usable[j]) continue;
+      total++;
+      int rank = 0; for (UINT32 e = 0; e < j; e++) if (usable[e] && same(fullFaces[e], fullFaces[j])) rank++;
+      if (rank) dupFaces++;
+      // holder = the family of the first candidate with the key; the rank-th match inside it
+      int holder = -1; for (auto& c : cands) if (same(c.l, fullFaces[j])) { holder = (int)c.fam; break; }
+      if (holder < 0 || sm->GetFontFamilyCount() == 1) holder = sm->GetFontFamilyCount() == 1 ? 0 : holder;
+      int seen = 0; const Cand* pick = nullptr;
+      for (auto& c : cands) if ((int)c.fam == holder && same(c.l, fullFaces[j])) { if (seen++ == rank) { pick = &c; break; } }
+      if (!pick) ruleMiss++;
+      else if (pick->l.axes != fullFaces[j].axes) { ruleAxisDiff++; printf("FULLCHECK_AXIS_DIFF %s idx=%u rank=%d full=%s small=%s\n", names[0].c_str(), j, rank, fullFaces[j].axes.c_str(), pick->l.axes.c_str()); }
+      else ruleHit++;
+      // the old rule, for the red side: the font at the same index of the holder family, accepted when its key matches
+      bool old = false;
+      if (holder >= 0) { Ptr<IDWriteFontFamily> hf; sm->GetFontFamily((UINT32)holder, &hf); Ptr<IDWriteFont> g;
+        if (j < hf->GetFontCount() && SUCCEEDED(hf->GetFont(j, &g))) { Live l = ReadLive(g.p); old = l.sim == 0 && l.ok && same(l, fullFaces[j]); } }
+      (old ? indexRuleHit : indexRuleMiss)++;
+      if (!pick) printf("FULLCHECK_MISS %s idx=%u rank=%d ps=%s\n", names[0].c_str(), j, rank, fullFaces[j].psEn.c_str());
+    }
+  }
+  printf("FULLCHECK entries=%d key_rank_rule: hit=%d axis_diff=%d miss=%d | index_rule(old): hit=%d miss=%d | faces_with_an_equal_key_before_them=%d\n", total, ruleHit, ruleAxisDiff, ruleMiss, indexRuleHit, indexRuleMiss, dupFaces);
+}
 static const char* gStage = "start";
 int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
@@ -322,6 +388,7 @@ int run(int argc, wchar_t** argv) {
   Ptr<IDWriteFontCollection> full; full.p = Build(all);
   double tfull = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   if (!full) { printf("full collection failed\n"); return 2; }
+  if (argc > 2 && wstring(argv[2]) == L"--fullcheck") { FullCheck(full.p); return 0; }
   if (argc > 2) {  // dump mode: fam.exe <fonts dir> <family,family,...>
     set<string> want; string a = U8(argv[2]); size_t p0 = 0;
     for (;;) { size_t c = a.find(',', p0); want.insert(a.substr(p0, c == string::npos ? c : c - p0)); if (c == string::npos) break; p0 = c + 1; }

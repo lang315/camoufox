@@ -141,7 +141,7 @@ jobs:
         if: ${{ inputs.k == 'zz_family' && runner.os == 'Windows' }}
         shell: pwsh
         env:
-          FAM_DUMP: noto serif armenian,noto serif hebrew,noto serif lao,ubuntu,ubuntu sans mono
+          FAM_DUMP: --fullcheck
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           Write-Output "VS: $vs"
