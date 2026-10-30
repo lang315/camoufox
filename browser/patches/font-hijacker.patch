@@ -26,7 +26,7 @@ index 910cfe8483..e581765cf1 100644
    wr::RenderThread::Start(aWrNamespace);
    gfx::CanvasRenderThread::Start();
 diff --git a/gfx/thebes/CoreTextFontList.cpp b/gfx/thebes/CoreTextFontList.cpp
-index b6696c70c4..b780389440 100644
+index b6696c70c4..dd3772549d 100644
 --- a/gfx/thebes/CoreTextFontList.cpp
 +++ b/gfx/thebes/CoreTextFontList.cpp
 @@ -6,6 +6,7 @@
@@ -37,7 +37,23 @@ index b6696c70c4..b780389440 100644
  #include "SharedFontList-impl.h"
  #include "gfxFontConstants.h"
  #include "gfxMacFont.h"
-@@ -1075,11 +1076,9 @@ void CTFontFamily::FindStyleVariationsLocked(FontInfoData* aFontInfoData) {
+@@ -21,6 +22,7 @@
+ #include "mozilla/dom/ContentChild.h"
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/gfx/2D.h"
++#include "mozilla/gfx/gfxVars.h"
+ #include "mozilla/glean/GfxMetrics.h"
+ #include "nsAppDirectoryServiceDefs.h"
+ #include "nsCharTraits.h"
+@@ -28,6 +30,7 @@
+ #include "nsDirectoryServiceDefs.h"
+ #include "nsDirectoryServiceUtils.h"
+ #include "nsIDirectoryEnumerator.h"
++#include "nsLocalFile.h"
+ #include "nsServiceManagerUtils.h"
+ 
+ using namespace mozilla;
+@@ -1075,11 +1078,9 @@ void CTFontFamily::FindStyleVariationsLocked(FontInfoData* aFontInfoData) {
  CoreTextFontList::CoreTextFontList()
      : gfxPlatformFontList(false), mDefaultFont(nullptr) {
  #ifdef MOZ_BUNDLED_FONTS
@@ -51,7 +67,7 @@ index b6696c70c4..b780389440 100644
      glean::fontlist::bundledfonts_activate.StopAndAccumulate(
          std::move(timerId));
    }
-@@ -1136,6 +1135,26 @@ void CoreTextFontList::AddFamily(CFStringRef aFamily) {
+@@ -1136,6 +1137,26 @@ void CoreTextFontList::AddFamily(CFStringRef aFamily) {
    AddFamily(nameUtf8, GetVisibilityForFamily(nameUtf8));
  }
  
@@ -78,7 +94,7 @@ index b6696c70c4..b780389440 100644
  /* static */
  void CoreTextFontList::ActivateFontsFromDir(
      const nsACString& aDir, nsTHashSet<nsCStringHashKey>* aLoadedFamilies) {
-@@ -1165,14 +1184,14 @@ void CoreTextFontList::ActivateFontsFromDir(
+@@ -1165,14 +1186,14 @@ void CoreTextFontList::ActivateFontsFromDir(
      if (result != kCFURLEnumeratorSuccess) {
        continue;
      }
@@ -99,7 +115,7 @@ index b6696c70c4..b780389440 100644
        continue;
      }
      CTFontDescriptorRef desc =
-@@ -1545,6 +1564,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
+@@ -1545,6 +1566,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
    // Reset our string length to match the actual C string we got, which will
    // usually be much shorter than the maximal buffer we allocated.
    key.Truncate(strlen(key.get()));
@@ -111,7 +127,7 @@ index b6696c70c4..b780389440 100644
    ToLowerCase(key);
    // If the family can't be looked up, this font is not available for use.
    FontFamily family = FindFamily(aFontVisibilityProvider, key);
-@@ -1552,9 +1576,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
+@@ -1552,9 +1578,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
      return nullptr;
    }
  
@@ -126,7 +142,7 @@ index b6696c70c4..b780389440 100644
  }
  
  static void ReleaseFontData(void* aInfo, const void* aData, size_t aSize) {
-@@ -1989,18 +2015,34 @@ FontFamily CoreTextFontList::GetDefaultFontForPlatform(
+@@ -1989,18 +2017,37 @@ FontFamily CoreTextFontList::GetDefaultFontForPlatform(
  }
  
  #ifdef MOZ_BUNDLED_FONTS
@@ -150,6 +166,8 @@ index b6696c70c4..b780389440 100644
 +/* static */
 +void CoreTextFontList::ActivateBundledFonts(
 +    nsTHashSet<nsCStringHashKey>* aLoadedFamilies) {
++  // The GPU process has no directory service, so the GRE directory comes from
++  // gfxVars, which every process that draws has.
    nsCOMPtr<nsIFile> localDir;
 -  if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir)))) {
 -    return;
@@ -159,7 +177,8 @@ index b6696c70c4..b780389440 100644
 -  }
    nsAutoCString path;
 -  if (NS_FAILED(localDir->GetNativePath(path))) {
-+  if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir))) ||
++  if (NS_FAILED(NS_NewLocalFile(gfxVars::GREDirectory(),
++                                getter_AddRefs(localDir))) ||
 +      NS_FAILED(localDir->Append(u"fonts"_ns)) ||
 +      NS_FAILED(localDir->GetNativePath(path))) {
 +    LOG_FONTLIST(("CAMOU-FL bundled-fonts no fonts directory\n"));
