@@ -144,7 +144,7 @@ index 5ce0885c70..0e488dad2e 100644
  
  /**
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
-index 0d359b69d7..1f59129c94 100644
+index 0d359b69d7..3ed70c3110 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -5,6 +5,7 @@
@@ -155,7 +155,7 @@ index 0d359b69d7..1f59129c94 100644
  #include "SharedFontList-impl.h"
  #include "gfxDWriteCommon.h"
  #include "gfxDWriteFonts.h"
-@@ -1192,8 +1193,83 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
+@@ -1192,8 +1193,85 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
    }
  }
  
@@ -218,7 +218,9 @@ index 0d359b69d7..1f59129c94 100644
 +  return true;
 +}
 +
-+static already_AddRefed<gfxFontEntry> NewDWriteFontEntry(
++// A member, because the entry's GDI flags are protected and gfxDWriteFontList
++// is its friend.
++already_AddRefed<gfxFontEntry> gfxDWriteFontList::NewFontEntry(
 +    const nsCString& aFaceName, IDWriteFont* aFont, fontlist::Face* aFace,
 +    const fontlist::Family* aFamily) {
 +  RefPtr fe =
@@ -239,7 +241,7 @@ index 0d359b69d7..1f59129c94 100644
    IDWriteFontCollection* collection =
  #ifdef MOZ_BUNDLED_FONTS
        aFamily->IsBundled() ? mBundledFonts : mSystemFonts;
-@@ -1285,12 +1361,7 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
+@@ -1285,12 +1363,7 @@ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
        return nullptr;
      }
  
@@ -249,11 +251,11 @@ index 0d359b69d7..1f59129c94 100644
 -    fe->mForceGDIClassic = aFamily->IsForceClassic();
 -    fe->mMayUseGDIAccess = aFamily->IsSimple();
 -    return fe.forget();
-+    return NewDWriteFontEntry(faceName, font, aFace, aFamily);
++    return NewFontEntry(faceName, font, aFace, aFamily);
    }
    MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
      gfxCriticalNote << "Exception occurred while creating font entry for "
-@@ -1487,19 +1558,22 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+@@ -1487,19 +1560,22 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
          aFamily->Key().AsString(SharedFontList()).EqualsLiteral("meiryo")) {
        continue;
      }
@@ -282,7 +284,7 @@ index 0d359b69d7..1f59129c94 100644
              GetPostScriptNameFromNameTable(dwFontFace, name);
            }
            const auto kCMAP =
-@@ -1526,12 +1600,14 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+@@ -1526,12 +1602,14 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
                       << aFamily->Key().AsString(SharedFontList()).get();
          continue;
        }
@@ -302,7 +304,7 @@ index 0d359b69d7..1f59129c94 100644
      }
      MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
        // Exception (e.g. disk i/o error) occurred when DirectWrite tried to use
-@@ -1546,22 +1622,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
+@@ -1546,22 +1624,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
                                        const fontlist::Face* aFace,
                                        nsCString& aPSName,
                                        nsCString& aFullName) {
@@ -348,7 +350,7 @@ index 0d359b69d7..1f59129c94 100644
    }
    HRESULT ps = GetDirectWriteFaceName(dwFont, PSNAME_ID, aPSName);
    HRESULT full = GetDirectWriteFaceName(dwFont, FULLNAME_ID, aFullName);
-@@ -1751,10 +1837,21 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
+@@ -1751,10 +1839,21 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
      return;
    }
  #ifdef MOZ_BUNDLED_FONTS
@@ -371,7 +373,7 @@ index 0d359b69d7..1f59129c94 100644
      mBundledFonts = CreateBundledFontsCollection(factory);
    }
    TimeStamp end1 = TimeStamp::Now();
-@@ -2747,22 +2844,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
+@@ -2747,22 +2846,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
    nsCOMPtr<nsIFile> mFontDir;
    nsCOMPtr<nsIDirectoryEnumerator> mEntries;
    nsCOMPtr<nsISupports> mCurrent;
@@ -426,7 +428,7 @@ index 0d359b69d7..1f59129c94 100644
      }
    }
    *aHasCurrentFile = hasMore;
-@@ -2813,6 +2936,196 @@ BundledFontLoader::CreateEnumeratorFromKey(
+@@ -2813,6 +2938,199 @@ BundledFontLoader::CreateEnumeratorFromKey(
    return S_OK;
  }
  
@@ -495,7 +497,8 @@ index 0d359b69d7..1f59129c94 100644
 +    const fontlist::Family* aFamily) {
 +  MutexAutoLock lock(mBundledFamiliesLock);
 +  RefPtr<IDWriteFontCollection> collection;
-+  if (mBundledFamilyCollections.Get(aFamily->Index(), &collection)) {
++  if (auto cached = mBundledFamilyCollections.Lookup(aFamily->Index())) {
++    collection = cached.Data();
 +    return collection.forget();
 +  }
 +  fontlist::FontList* list = SharedFontList();
@@ -570,8 +573,10 @@ index 0d359b69d7..1f59129c94 100644
 +    filePath = aFace->mFilePath.AsString(list);
 +  }
 +  nsCString psName(aFace->mDescriptor.AsString(list));
-+  RefPtr<IDWriteFontCollection> collection =
-+      filePath.IsEmpty() ? nullptr : BundledFamilyCollection(aFamily);
++  RefPtr<IDWriteFontCollection> collection;
++  if (!filePath.IsEmpty()) {
++    collection = BundledFamilyCollection(aFamily);
++  }
 +  RefPtr<IDWriteFontFamily> holder;
 +  UINT32 count = collection ? collection->GetFontFamilyCount() : 0;
 +  for (UINT32 f = 0; f < count && !holder; ++f) {
@@ -610,8 +615,8 @@ index 0d359b69d7..1f59129c94 100644
 +    if (!font) {
 +      return nullptr;
 +    }
-+    return NewDWriteFontEntry(aFace->mDescriptor.AsString(SharedFontList()),
-+                              font, aFace, aFamily);
++    return NewFontEntry(aFace->mDescriptor.AsString(SharedFontList()), font,
++                        aFace, aFamily);
 +  }
 +  MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
 +    gfxCriticalNote << "Exception occurred while creating font entry for "
@@ -624,7 +629,7 @@ index 0d359b69d7..1f59129c94 100644
  gfxDWriteFontList::CreateBundledFontsCollection(IDWriteFactory* aFactory) {
    nsCOMPtr<nsIFile> localDir;
 diff --git a/gfx/thebes/gfxDWriteFontList.h b/gfx/thebes/gfxDWriteFontList.h
-index 5f36003dad..82c8f4b728 100644
+index 5f36003dad..a21485ec5e 100644
 --- a/gfx/thebes/gfxDWriteFontList.h
 +++ b/gfx/thebes/gfxDWriteFontList.h
 @@ -14,8 +14,10 @@
@@ -638,8 +643,15 @@ index 5f36003dad..82c8f4b728 100644
  #include "mozilla/gfx/UnscaledFontDWrite.h"
  
  /**
-@@ -508,6 +510,19 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
+@@ -506,8 +508,26 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
+   RefPtr<IDWriteTextFormat> mFallbackFormat;
+ 
    RefPtr<IDWriteFontCollection> mSystemFonts;
++
++  // Camoufox: the tail of CreateFontEntry, shared with CreateBundledFontEntry.
++  static already_AddRefed<gfxFontEntry> NewFontEntry(
++      const nsCString& aFaceName, IDWriteFont* aFont,
++      mozilla::fontlist::Face* aFace, const mozilla::fontlist::Family* aFamily);
  #ifdef MOZ_BUNDLED_FONTS
    RefPtr<IDWriteFontCollection> mBundledFonts;
 +
