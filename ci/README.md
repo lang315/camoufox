@@ -227,6 +227,7 @@ Each tier gates the next, so a lint failure never reaches the build:
 | **Compiled-input cache** | The build cache is keyed on a hash of the compiled inputs only (`ci/browser_inputs.py`). On a hit the browser is restored and this branch's Juggler JavaScript and other resources, the files Juggler's `moz.build` lists in `FINAL_TARGET_FILES`, are laid over it. Everything else, including any new file type, counts as native and forces a build. |
 | **No partial restore** | That cache has no `restore-keys`: a partial match would hand the tests a browser built from different sources. A self-test checks the key covers every browser-affecting path. |
 | **Warm ccache** | Pushes to `main` and a twice-weekly schedule keep the ccache from being evicted; pull requests restore it. |
+| **Closed-PR cache cleanup** | `cleanup-pr-caches.yml` deletes the caches a pull request saved under `refs/pull/N/merge` when it closes, so merged pull requests stop holding space the build legs' ccache needs. `build.yml` saves its ccache and mozbuild state under a key ending in the run id, so every build saves a fresh one and restores the newest. |
 | **Network retries only** | `ci.run_prepare` (`setup-minimal`, `dir`, `mozbootstrap`) retries only failures that read as transient network errors. A failed hunk or compile error fails at once. |
 
 Pushing to a branch cancels its running build (`cancel-in-progress`).
