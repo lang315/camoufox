@@ -141,7 +141,7 @@ jobs:
         if: ${{ inputs.k == 'zz_family' && runner.os == 'Windows' }}
         shell: pwsh
         env:
-          FAM_DUMP: --timing=1
+          FAM_DUMP: --indexcheck
         run: |
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           Write-Output "VS: $vs"
