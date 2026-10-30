@@ -244,6 +244,7 @@ static string Why(const Live& shared, const Live& f, bool english) {
   if ((english ? f.psEn : f.psFirst) != (english ? shared.psEn : shared.psFirst)) return "psname";
   return "";
 }
+static bool gLiveOrder = false;
 static void Dump(IDWriteFontCollection* full, const set<string>& want) {
   for (UINT32 i = 0; i < full->GetFontFamilyCount(); i++) {
     Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
@@ -253,6 +254,21 @@ static void Dump(IDWriteFontCollection* full, const set<string>& want) {
     if (!hit) continue;
     set<wstring> files; (void)Faces(fam.p, &files);
     vector<wstring> fv(files.begin(), files.end());
+    if (gLiveOrder) {  // what BundledFamilyCollection does: distinct first files in face order
+      fv.clear();
+      for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
+        Ptr<IDWriteFont> f; if (FAILED(fam->GetFont(j, &f)) || f->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE) continue;
+        Ptr<IDWriteFontFace> face; if (FAILED(f->CreateFontFace(&face))) continue;
+        UINT32 n = 0; face->GetFiles(&n, nullptr); vector<IDWriteFontFile*> ff(n);
+        if (!n || FAILED(face->GetFiles(&n, ff.data()))) continue;
+        Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll; const void* k = nullptr; UINT32 ks = 0;
+        if (SUCCEEDED(ff[0]->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) && SUCCEEDED(ff[0]->GetReferenceKey(&k, &ks))) {
+          UINT32 len = 0; ll->GetFilePathLengthFromKey(k, ks, &len); wstring pth(len + 1, 0); ll->GetFilePathFromKey(k, ks, pth.data(), len + 1); pth.resize(len);
+          if (std::find(fv.begin(), fv.end(), pth) == fv.end()) fv.push_back(pth);
+        }
+        for (UINT32 q = 0; q < n; q++) ff[q]->Release();
+      }
+    }
     Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
     printf("DUMPFAM full[%u] %s files=%zu small_families=%u\n", i, names[0].c_str(), fv.size(), sm ? sm->GetFontFamilyCount() : 0);
     for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
@@ -309,6 +325,8 @@ int run(int argc, wchar_t** argv) {
   if (argc > 2) {  // dump mode: fam.exe <fonts dir> <family,family,...>
     set<string> want; string a = U8(argv[2]); size_t p0 = 0;
     for (;;) { size_t c = a.find(',', p0); want.insert(a.substr(p0, c == string::npos ? c : c - p0)); if (c == string::npos) break; p0 = c + 1; }
+    Dump(full.p, want);
+    gLiveOrder = true; printf("LIVE_ORDER pass: small collection built from the distinct first files in face order\n");
     Dump(full.p, want);
     return 0;
   }
