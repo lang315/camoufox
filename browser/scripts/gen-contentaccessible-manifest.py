@@ -85,20 +85,29 @@ def tree_hashes(base: Path, prefixes: list) -> dict:
     return out
 
 
-def jar_hashes(jar: Path, prefixes: list) -> dict:
-    """Member -> SHA-256 for the files under `prefixes` in a jar."""
-    with tempfile.TemporaryDirectory() as tmp:
+_JAR_TREES: dict = {}
+
+
+def jar_tree(jar: Path) -> Path:
+    """The jar unpacked once per process. Selecting members with `unzip jar pattern*`
+    is not used: a Windows runner's unzip (Git's msys build) reported "filename not
+    matched" for patterns that match 119 members of a Windows omni.ja, #338."""
+    if jar not in _JAR_TREES:
+        tmp = tempfile.TemporaryDirectory()
         # unzip warns, with a non-zero exit, about the front-loaded central
         # directory of every optimized jar, so completeness is checked instead.
-        proc = subprocess.run(
-            ["unzip", "-qo", str(jar), *[p + "*" for p in prefixes], "-d", tmp],
-            capture_output=True, text=True,
-        )
-        hashes = tree_hashes(Path(tmp), prefixes)
-        listed = {m for m in zip_entries(jar) if any(m.startswith(p) for p in prefixes)}
-        if set(hashes) != listed:
-            raise RuntimeError(f"unzip {jar} extracted {len(hashes)} of {len(listed)} files: {proc.stderr.strip()}")
-        return hashes
+        proc = subprocess.run(["unzip", "-qo", str(jar), "-d", tmp.name], capture_output=True, text=True)
+        _JAR_TREES[jar] = (tmp, proc.stderr.strip())
+    return Path(_JAR_TREES[jar][0].name)
+
+
+def jar_hashes(jar: Path, prefixes: list) -> dict:
+    """Member -> SHA-256 for the files under `prefixes` in a jar."""
+    hashes = tree_hashes(jar_tree(jar), prefixes)
+    listed = {m for m in zip_entries(jar) if any(m.startswith(p) for p in prefixes)}
+    if set(hashes) != listed:
+        raise RuntimeError(f"unzip {jar} extracted {len(hashes)} of {len(listed)} files: {_JAR_TREES[jar][1]}")
+    return hashes
 
 
 def zip_read(jar: Path, member: str) -> str:

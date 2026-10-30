@@ -250,14 +250,16 @@ def signed_sums(base: str) -> str:
         for name in ("KEY", "SHA256SUMS", "SHA256SUMS.asc"):
             with urllib.request.urlopen(base + name, timeout=60) as resp:  # noqa: S310
                 Path(tmp, name).write_bytes(resp.read())
+        # Paths are relative to tmp: the gpg on a Windows runner is Git's msys build,
+        # which prefixes the working directory to an absolute Windows path and then
+        # cannot open the keyring (measured on a runner, #338).
         subprocess.run(
-            [gpg, "--homedir", home.as_posix(), "--batch", "--quiet", "--import", Path(tmp, "KEY").as_posix()],
-            check=True, capture_output=True,
+            [gpg, "--homedir", "gnupg", "--batch", "--quiet", "--import", "KEY"],
+            check=True, capture_output=True, cwd=tmp,
         )
         verify = subprocess.run(
-            [gpg, "--homedir", home.as_posix(), "--batch", "--status-fd", "1",
-             "--verify", Path(tmp, "SHA256SUMS.asc").as_posix(), Path(tmp, "SHA256SUMS").as_posix()],
-            capture_output=True, text=True,
+            [gpg, "--homedir", "gnupg", "--batch", "--status-fd", "1", "--verify", "SHA256SUMS.asc", "SHA256SUMS"],
+            capture_output=True, text=True, cwd=tmp,
         )
         # VALIDSIG ends with the primary key of whichever subkey signed.
         signers = [line.split()[-1] for line in verify.stdout.splitlines() if line.startswith("[GNUPG:] VALIDSIG ")]
