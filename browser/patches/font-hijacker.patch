@@ -144,7 +144,7 @@ index 5ce0885c70..0e488dad2e 100644
  
  /**
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
-index 0d359b69d7..4ec9c827f8 100644
+index 0d359b69d7..38948c7c19 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -5,6 +5,7 @@
@@ -434,7 +434,7 @@ index 0d359b69d7..4ec9c827f8 100644
      }
    }
    *aHasCurrentFile = hasMore;
-@@ -2813,6 +2944,318 @@ BundledFontLoader::CreateEnumeratorFromKey(
+@@ -2813,6 +2944,329 @@ BundledFontLoader::CreateEnumeratorFromKey(
    return S_OK;
  }
  
@@ -507,6 +507,7 @@ index 0d359b69d7..4ec9c827f8 100644
 +    collection = cached.Data();
 +    return collection.forget();
 +  }
++  const TimeStamp probeStart = TimeStamp::Now();
 +  fontlist::FontList* list = SharedFontList();
 +  const fontlist::Pointer* facePtrs = aFamily->Faces(list);
 +  nsTArray<nsString> paths;
@@ -527,6 +528,8 @@ index 0d359b69d7..4ec9c827f8 100644
 +  // it was given their files. The parent's collection was given the files in
 +  // the order of the fonts directory, so give this one its files in that
 +  // order and every face is at the index the shared list recorded.
++  const TimeStamp probeDir = TimeStamp::Now();
++  const bool probeRead = mBundledFileOrder.IsEmpty();
 +  if (mBundledFileOrder.IsEmpty()) {
 +    nsCOMPtr<nsIFile> dir;
 +    nsCOMPtr<nsIDirectoryEnumerator> entries;
@@ -547,6 +550,11 @@ index 0d359b69d7..4ec9c827f8 100644
 +        }
 +      }
 +    }
++  }
++  if (probeRead) {
++    LOG_FONTLIST(("CAMOU-FL probe dirread ms=%.1f entries=%u",
++                  (TimeStamp::Now() - probeDir).ToMilliseconds(),
++                  unsigned(mBundledFileOrder.Count())));
 +  }
 +  nsTArray<std::pair<uint32_t, nsString>> ordered;
 +  for (const nsString& path : paths) {
@@ -577,6 +585,9 @@ index 0d359b69d7..4ec9c827f8 100644
 +    return nullptr;
 +  }
 +  mBundledFamilyCollections.InsertOrUpdate(aFamily->Index(), collection);
++  LOG_FONTLIST(("CAMOU-FL probe build family=%s files=%u ms=%.1f",
++                aFamily->Key().AsString(list).get(), unsigned(paths.Length()),
++                (TimeStamp::Now() - probeStart).ToMilliseconds()));
 +  return collection.forget();
 +}
 +
