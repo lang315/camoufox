@@ -1,6 +1,8 @@
 """#345 probe: run system-font-alias-stall.py --runs times against a build zip and print each guard's exit code and time.
 
     python3 e2e/probes/alias_stall_repeat.py --zip ZIP [--runs 8]    (from the repo root)
+
+The guard runs directly, not through ci.run_patch_guards, so its own timing lines are printed.
 """
 
 import argparse
@@ -34,9 +36,14 @@ def main() -> int:
         binary = unpack(args.zip, Path(tmp))
         for i in range(args.runs):
             t0 = time.time()
-            rc = subprocess.run([sys.executable, "-m", "ci.run_patch_guards", "--binary", str(binary), "--only", "system-font-alias-stall",
-                                 "--evidence-dir", str(Path(os.environ.get("E2E_MOZ_LOG") or ".ci-work/mozlog") / f"alias-{i}")],
-                                env={**os.environ, "PYTHONUTF8": "1", **moz_log(i)}).returncode
+            repo = Path(__file__).resolve().parents[2]
+            proc = subprocess.run([sys.executable, str(repo / "browser/tests/playwright/patches/system-font-alias-stall.py")], cwd=repo,
+                                  env={**os.environ, "PYTHONUTF8": "1", "CAMOUFOX_EXECUTABLE_PATH": str(binary),
+                                       "PYTHONPATH": os.pathsep.join(filter(None, [str(repo / "python" / "src"), os.environ.get("PYTHONPATH", "")])),
+                                       **moz_log(i)}, capture_output=True, text=True, encoding="utf-8", errors="replace")
+            rc = proc.returncode
+            for line in (proc.stdout + proc.stderr).splitlines()[-12:]:
+                print(f"GUARD run {i}: {line.strip()}", flush=True)
             results.append(rc)
             print(f"ALIAS run {i}: exit={rc} secs={time.time() - t0:.0f}", flush=True)
     print(f"ALIAS exits: {results}", flush=True)
