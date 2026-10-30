@@ -584,6 +584,25 @@ rules:
       macOS-only group is never read there. A Windows or Linux identity reads
       only its own OS's groups, and the shared groups still ship.
 
+  - id: bundled-fonts-registered-in-the-macos-gpu-process
+    title: On macOS the GPU process registers the bundled fonts through the same gate as the content process
+    check: automated
+    evidence:
+      - "issue #356: on a macOS host a Windows identity drew wrong glyphs for Segoe UI and Arial in the real window ('CH%J' for 'CHƠI') while Page.screenshot of the same page was correct; with layers.gpu-process.enabled=false in the profile's user.js every row was clean and the GPU Helper child of the browser was absent"
+      - "issue #356, Swift test of WebRender's lookup (name descriptor plus kCTFontURLAttribute, CTFontCreateWithFontDescriptor) in a process that did not register the bundle: nine of nine names resolved to /System/Library/Fonts/Helvetica.ttc; in a process that registered the files, nine of nine resolved to the requested file"
+      - "gfx/2d/ScaledFontMac.cpp UnscaledFontMac::GetFontDescriptor sends the PostScript name and the file path; gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs add_native_font looks the name up in the GPU process and ignores a failed URL step; the bundle is registered only with kCTFontManagerScopeProcess from CoreTextFontList::CoreTextFontList"
+    rationale: >-
+      WebRender rasterizes glyphs in the GPU process, which has no font list and
+      so never ran the bundle's registration. CoreText there ignores the path
+      attribute for a file it does not know and returns another font, so the
+      glyph ids content shaped with are drawn with that font's outlines. The
+      gate (the gfx.bundled-fonts.activate pref and a native macOS identity) and
+      the loop are one function pair, CoreTextFontList::ShouldActivateBundledFonts
+      and ActivateBundledFonts, called by the content-side font list and by
+      GPUParent::RecvInit before the render thread starts, so the two file sets
+      cannot drift. Windows and Linux hosts hand WebRender a file path, which
+      needs no registration.
+
   - id: fc-activates-only-firefox-own-bundled-fonts
     title: On Linux the browser activates only the files directly in fonts/; the groups come from the launcher's conf
     check: automated
