@@ -166,6 +166,19 @@ jobs:
         run: |
           cd goapi
           for moz in 0 1; do ZZ_MOZLOG=$moz CAMOUFOX_BIN="$CAMOUFOX_BINARY" go test -run TestZZPhases -v -count=1 2>&1 | grep -E "PHASES|NET |FAIL" ; done; true
+      - name: A/B pinned arm (Windows)
+        if: ${{ !cancelled() && runner.os == 'Windows' && inputs.k == 'zz_ab' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # A = the fork.2 Windows build (main 3bfa7aa4), B = this run's browser (E2E_BROWSER).
+          gh run download 40983617645 --repo "${{ github.repository }}" -n CamoufoxBuilds-windows-x86_64 -D .ci-work/ab-a
+          python -m zipfile -e "$(ls .ci-work/ab-a/*.zip | head -1)" .ci-work/ab-a/x
+          A="$(find "$PWD/.ci-work/ab-a/x" -name camoufox.exe | head -1)"
+          B="$(python e2e/util.py $E2E_BROWSER)"
+          echo "A=$A"; echo "B=$B"
+          cd goapi && ZZ_BIN_A="$A" ZZ_BIN_B="$B" go test -run TestZZAB -v -count=1 -timeout 60m 2>&1 | grep -E "AB |FAIL|panic"; true
       - name: Pinned OS arm (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
         shell: bash

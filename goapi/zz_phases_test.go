@@ -267,3 +267,58 @@ func TestZZPinned(t *testing.T) {
 		}
 	}
 }
+
+// cpuSplit returns the CPU seconds of the parent (the camoufox process that started first) and of
+// every other camoufox process, and how many processes there are. Windows only.
+func cpuSplit() (parent, content float64, n int) {
+	out, _ := exec.Command("powershell", "-NoProfile", "-Command",
+		"Get-Process camoufox -ErrorAction SilentlyContinue | Sort-Object StartTime | ForEach-Object { $_.CPU }").Output()
+	for i, l := range strings.Fields(string(out)) {
+		v, _ := strconv.ParseFloat(l, 64)
+		if i == 0 {
+			parent = v
+		} else {
+			content += v
+		}
+		n++
+	}
+	return
+}
+
+// TestZZAB launches two browsers (ZZ_BIN_A, ZZ_BIN_B) in turn for each pinned OS on one host,
+// swapping which goes first every round, and prints the parent and content CPU of each launch.
+func TestZZAB(t *testing.T) {
+	bins := map[string]string{"A": os.Getenv("ZZ_BIN_A"), "B": os.Getenv("ZZ_BIN_B")}
+	if bins["A"] == "" || bins["B"] == "" {
+		t.Fatal("ZZ_BIN_A and ZZ_BIN_B must name the two browsers")
+	}
+	for round := 0; round < 8; round++ {
+		arms := []string{"A", "B"}
+		if round%2 == 1 {
+			arms = []string{"B", "A"}
+		}
+		for _, o := range []string{"windows", "linux", "macos"} {
+			for _, arm := range arms {
+				ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+				t0 := time.Now()
+				b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(bins[arm]), camoufox.WithHeadless(true), camoufox.WithOS(o))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t1 := time.Now()
+				bc, _ := b.NewContext(ctx)
+				p, err := bc.NewPage(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t2 := time.Now()
+				plat, _ := p.Evaluate(ctx, "navigator.platform")
+				parent, content, n := cpuSplit()
+				_ = p.Close(ctx)
+				b.Close()
+				t.Logf("AB os=%s round=%d arm=%s platform=%v launch=%.1fs newpage=%.1fs parent_cpu=%.1fs content_cpu=%.1fs procs=%d", o, round, arm, plat, t1.Sub(t0).Seconds(), t2.Sub(t1).Seconds(), parent, content, n)
+				cancel()
+			}
+		}
+	}
+}
