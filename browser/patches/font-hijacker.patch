@@ -1,5 +1,5 @@
 diff --git a/gfx/thebes/CoreTextFontList.cpp b/gfx/thebes/CoreTextFontList.cpp
-index b6696c70c4..57ce1586db 100644
+index b6696c7..57ce158 100644
 --- a/gfx/thebes/CoreTextFontList.cpp
 +++ b/gfx/thebes/CoreTextFontList.cpp
 @@ -6,6 +6,7 @@
@@ -99,8 +99,52 @@ index b6696c70c4..57ce1586db 100644
  }
  
  static void ReleaseFontData(void* aInfo, const void* aData, size_t aSize) {
+diff --git a/gfx/thebes/SharedFontList.h b/gfx/thebes/SharedFontList.h
+index 5ce0885..0e488da 100644
+--- a/gfx/thebes/SharedFontList.h
++++ b/gfx/thebes/SharedFontList.h
+@@ -179,6 +179,13 @@ struct Face {
+     mozilla::WidthRange mWidth;        // CSS font-width value
+     mozilla::SlantStyleRange mStyle;   // CSS font-style value
+     RefPtr<gfxCharacterMap> mCharMap;  // character map, or null if not loaded
++#ifdef XP_WIN
++    // Camoufox: a bundled face's font file and its face index in that file, so
++    // a content process can build a collection of one family instead of the
++    // whole bundle.
++    nsCString mFilePath;
++    uint16_t mFileIndex = 0;
++#endif
+   };
+ 
+   // Note that mCharacterMap is not set from the InitData by this constructor;
+@@ -193,7 +200,13 @@ struct Face {
+         mWeight(aData.mWeight),
+         mWidth(aData.mWidth),
+         mStyle(aData.mStyle),
+-        mCharacterMap(Pointer::Null()) {
++        mCharacterMap(Pointer::Null())
++#ifdef XP_WIN
++        ,
++        mFilePath(aList, aData.mFilePath),
++        mFileIndex(aData.mFileIndex)
++#endif
++  {
+   }
+ 
+   bool HasValidDescriptor() const {
+@@ -213,6 +226,10 @@ struct Face {
+   mozilla::WidthRange mWidth;
+   mozilla::SlantStyleRange mStyle;
+   Pointer mCharacterMap;
++#ifdef XP_WIN
++  String mFilePath;
++  uint16_t mFileIndex;
++#endif
+ };
+ 
+ /**
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
-index 0d359b69d7..70740aeefa 100644
+index 0d359b6..09afbb9 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -5,6 +5,7 @@
@@ -111,16 +155,140 @@ index 0d359b69d7..70740aeefa 100644
  #include "SharedFontList-impl.h"
  #include "gfxDWriteCommon.h"
  #include "gfxDWriteFonts.h"
-@@ -1754,6 +1755,8 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
+@@ -1192,8 +1193,52 @@ static void GetPostScriptNameFromNameTable(IDWriteFontFace* aFace,
+   }
+ }
+ 
++// Camoufox: the font file and the face index within it, as the bundled-face
++// lookup of a content process keys them (see FindBundledFont).
++static bool GetFontFileInfo(IDWriteFontFace* aFace, nsCString& aPath,
++                            uint16_t& aIndex) {
++  UINT32 count = 0;
++  if (FAILED(aFace->GetFiles(&count, nullptr)) || !count) {
++    return false;
++  }
++  AutoTArray<IDWriteFontFile*, 1> files;
++  files.SetLength(count);
++  if (FAILED(aFace->GetFiles(&count, files.Elements()))) {
++    return false;
++  }
++  bool ok = false;
++  for (UINT32 i = 0; i < count; ++i) {
++    RefPtr<IDWriteFontFile> file = dont_AddRef(files[i]);
++    RefPtr<IDWriteFontFileLoader> loader;
++    RefPtr<IDWriteLocalFontFileLoader> local;
++    const void* key;
++    UINT32 keySize;
++    UINT32 length;
++    if (i == 0 && SUCCEEDED(file->GetLoader(getter_AddRefs(loader))) &&
++        SUCCEEDED(loader->QueryInterface(__uuidof(IDWriteLocalFontFileLoader),
++                                         (void**)getter_AddRefs(local))) &&
++        SUCCEEDED(file->GetReferenceKey(&key, &keySize)) &&
++        SUCCEEDED(local->GetFilePathLengthFromKey(key, keySize, &length))) {
++      nsAutoString path;
++      path.SetLength(length);
++      if (SUCCEEDED(local->GetFilePathFromKey(
++              key, keySize, (WCHAR*)path.BeginWriting(), length + 1))) {
++        CopyUTF16toUTF8(path, aPath);
++        aIndex = uint16_t(aFace->GetIndex());
++        ok = true;
++      }
++    }
++  }
++  return ok;
++}
++
+ already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateFontEntry(
+     fontlist::Face* aFace, const fontlist::Family* aFamily) {
++#ifdef MOZ_BUNDLED_FONTS
++  if (aFamily->IsBundled() && !mBundledFonts) {
++    return CreateBundledFontEntry(aFace, aFamily);
++  }
++#endif
+   IDWriteFontCollection* collection =
+ #ifdef MOZ_BUNDLED_FONTS
+       aFamily->IsBundled() ? mBundledFonts : mSystemFonts;
+@@ -1530,8 +1575,17 @@ void gfxDWriteFontList::GetFacesInitDataForFamily(
+           dwstyle == DWRITE_FONT_STYLE_NORMAL   ? FontSlantStyle::NORMAL
+           : dwstyle == DWRITE_FONT_STYLE_ITALIC ? FontSlantStyle::ITALIC
+                                                 : FontSlantStyle::OBLIQUE);
++      nsCString filePath;
++      uint16_t fileIndex = 0;
++      if (aFamily->IsBundled()) {
++        RefPtr<IDWriteFontFace> dwFontFace;
++        if (SUCCEEDED(dwFont->CreateFontFace(getter_AddRefs(dwFontFace)))) {
++          GetFontFileInfo(dwFontFace, filePath, fileIndex);
++        }
++      }
+       aFaces.AppendElement(fontlist::Face::InitData{
+-          name, uint16_t(i), false, weight, width, slant, charmap});
++          name, uint16_t(i), false, weight, width, slant, charmap, filePath,
++          fileIndex});
+     }
+     MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
+       // Exception (e.g. disk i/o error) occurred when DirectWrite tried to use
+@@ -1546,22 +1600,32 @@ bool gfxDWriteFontList::ReadFaceNames(const fontlist::Family* aFamily,
+                                       const fontlist::Face* aFace,
+                                       nsCString& aPSName,
+                                       nsCString& aFullName) {
+-  IDWriteFontCollection* collection =
++  RefPtr<IDWriteFont> dwFont;
+ #ifdef MOZ_BUNDLED_FONTS
+-      aFamily->IsBundled() ? mBundledFonts : mSystemFonts;
++  if (aFamily->IsBundled() && !mBundledFonts) {
++    dwFont = FindBundledFont(aFamily, aFace);
++    if (!dwFont) {
++      return false;
++    }
++  } else
++#endif
++  {
++    IDWriteFontCollection* collection =
++#ifdef MOZ_BUNDLED_FONTS
++        aFamily->IsBundled() ? mBundledFonts : mSystemFonts;
+ #else
+-      mSystemFonts;
++        mSystemFonts;
+ #endif
+-  RefPtr<IDWriteFontFamily> family;
+-  if (FAILED(collection->GetFontFamily(aFamily->Index(),
+-                                       getter_AddRefs(family)))) {
+-    MOZ_ASSERT_UNREACHABLE("failed to get font-family");
+-    return false;
+-  }
+-  RefPtr<IDWriteFont> dwFont;
+-  if (FAILED(family->GetFont(aFace->mIndex, getter_AddRefs(dwFont)))) {
+-    MOZ_ASSERT_UNREACHABLE("failed to get font from family");
+-    return false;
++    RefPtr<IDWriteFontFamily> family;
++    if (FAILED(collection->GetFontFamily(aFamily->Index(),
++                                         getter_AddRefs(family)))) {
++      MOZ_ASSERT_UNREACHABLE("failed to get font-family");
++      return false;
++    }
++    if (FAILED(family->GetFont(aFace->mIndex, getter_AddRefs(dwFont)))) {
++      MOZ_ASSERT_UNREACHABLE("failed to get font from family");
++      return false;
++    }
+   }
+   HRESULT ps = GetDirectWriteFaceName(dwFont, PSNAME_ID, aPSName);
+   HRESULT full = GetDirectWriteFaceName(dwFont, FULLNAME_ID, aFullName);
+@@ -1754,7 +1818,13 @@ void gfxDWriteFontList::InitSharedFontListForPlatform() {
    // We activate bundled fonts if the pref is > 0 (on) or < 0 (auto), only an
    // explicit value of 0 (off) will disable them.
    TimeStamp start1 = TimeStamp::Now();
+-  if (StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0) {
 +  // Camoufox: a native Windows identity keeps only the fonts stock Firefox
 +  // bundles (BundledFontFileEnumerator filters the directory).
-   if (StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0) {
++  // A content process of another identity builds a collection of one family
++  // when it needs a face (FindBundledFont), not one of every bundled file.
++  if (StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0 &&
++      (XRE_IsParentProcess() ||
++       MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::Windows)) {
      mBundledFonts = CreateBundledFontsCollection(factory);
    }
-@@ -2747,22 +2750,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
+   TimeStamp end1 = TimeStamp::Now();
+@@ -2747,22 +2817,48 @@ class BundledFontFileEnumerator : public IDWriteFontFileEnumerator {
    nsCOMPtr<nsIFile> mFontDir;
    nsCOMPtr<nsIDirectoryEnumerator> mEntries;
    nsCOMPtr<nsISupports> mCurrent;
@@ -175,8 +343,249 @@ index 0d359b69d7..70740aeefa 100644
      }
    }
    *aHasCurrentFile = hasMore;
+@@ -2813,6 +2909,205 @@ BundledFontLoader::CreateEnumeratorFromKey(
+   return S_OK;
+ }
+ 
++// Camoufox: a content process does not build the collection of every bundled
++// file (DirectWrite indexes the names of all of them, about 6 CPU-seconds, in
++// each process). It builds one for the files of a family when a face of that
++// family is first needed.
++class FamilyFilesEnumerator : public IDWriteFontFileEnumerator {
++  IMPL_QI_FOR_DWRITE(IDWriteFontFileEnumerator)
++
++  NS_INLINE_DECL_REFCOUNTING(FamilyFilesEnumerator)
++
++ public:
++  FamilyFilesEnumerator(IDWriteFactory* aFactory, nsTArray<nsString>&& aPaths)
++      : mFactory(aFactory), mPaths(std::move(aPaths)) {}
++
++  IFACEMETHODIMP MoveNext(BOOL* aHasCurrentFile) {
++    *aHasCurrentFile = ++mNext < mPaths.Length();
++    return S_OK;
++  }
++
++  IFACEMETHODIMP GetCurrentFontFile(IDWriteFontFile** aFontFile) {
++    if (mNext >= mPaths.Length()) {
++      return E_FAIL;
++    }
++    return mFactory->CreateFontFileReference((const WCHAR*)mPaths[mNext].get(),
++                                             nullptr, aFontFile);
++  }
++
++ private:
++  FamilyFilesEnumerator() = delete;
++  FamilyFilesEnumerator(const FamilyFilesEnumerator&) = delete;
++  FamilyFilesEnumerator& operator=(const FamilyFilesEnumerator&) = delete;
++  virtual ~FamilyFilesEnumerator() = default;
++
++  RefPtr<IDWriteFactory> mFactory;
++  nsTArray<nsString> mPaths;
++  size_t mNext = size_t(-1);
++};
++
++class FamilyFilesLoader : public IDWriteFontCollectionLoader {
++  IMPL_QI_FOR_DWRITE(IDWriteFontCollectionLoader)
++
++  NS_INLINE_DECL_REFCOUNTING(FamilyFilesLoader)
++
++ public:
++  FamilyFilesLoader() = default;
++
++  IFACEMETHODIMP CreateEnumeratorFromKey(
++      IDWriteFactory* aFactory, const void* aCollectionKey,
++      UINT32 aCollectionKeySize,
++      IDWriteFontFileEnumerator** aFontFileEnumerator) {
++    const auto* paths = *(const nsTArray<nsString>* const*)aCollectionKey;
++    *aFontFileEnumerator = new FamilyFilesEnumerator(aFactory, paths->Clone());
++    NS_ADDREF(*aFontFileEnumerator);
++    return S_OK;
++  }
++
++ private:
++  FamilyFilesLoader(const FamilyFilesLoader&) = delete;
++  FamilyFilesLoader& operator=(const FamilyFilesLoader&) = delete;
++  virtual ~FamilyFilesLoader() = default;
++};
++
++already_AddRefed<IDWriteFontCollection> gfxDWriteFontList::BundledFamilyCollection(
++    const fontlist::Family* aFamily) {
++  MutexAutoLock lock(mBundledFamiliesLock);
++  RefPtr<IDWriteFontCollection> collection;
++  if (mBundledFamilyCollections.Get(aFamily->Index(), &collection)) {
++    return collection.forget();
++  }
++  fontlist::FontList* list = SharedFontList();
++  const fontlist::Pointer* facePtrs = aFamily->Faces(list);
++  nsTArray<nsString> paths;
++  for (uint32_t i = 0; facePtrs && i < aFamily->NumFaces(); ++i) {
++    auto* face = facePtrs[i].ToPtr<fontlist::Face>(list);
++    if (!face || face->mFilePath.IsNull()) {
++      continue;
++    }
++    NS_ConvertUTF8toUTF16 path(face->mFilePath.AsString(list));
++    if (!path.IsEmpty() && !paths.Contains(path)) {
++      paths.AppendElement(path);
++    }
++  }
++  if (paths.IsEmpty()) {
++    return nullptr;
++  }
++  RefPtr<IDWriteFactory> factory = Factory::EnsureDWriteFactory();
++  RefPtr<FamilyFilesLoader> loader = new FamilyFilesLoader();
++  if (!factory || FAILED(factory->RegisterFontCollectionLoader(loader))) {
++    return nullptr;
++  }
++  const void* key = &paths;
++  HRESULT hr = factory->CreateCustomFontCollection(loader, &key, sizeof(key),
++                                                   getter_AddRefs(collection));
++  factory->UnregisterFontCollectionLoader(loader);
++  if (FAILED(hr) || !collection) {
++    return nullptr;
++  }
++  mBundledFamilyCollections.InsertOrUpdate(aFamily->Index(), collection);
++  return collection.forget();
++}
++
++// A font is the shared-list face when it agrees with everything the parent
++// recorded for that face: PostScript name, file, index in the file, and
++// weight, width and style.
++static bool FontIsSharedFace(IDWriteFont* aFont, const fontlist::Face* aFace,
++                             const nsCString& aPSName,
++                             const nsCString& aFilePath) {
++  RefPtr<IDWriteFontFace> dwFace;
++  if (aFont->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE ||
++      FAILED(aFont->CreateFontFace(getter_AddRefs(dwFace)))) {
++    return false;
++  }
++  nsCString path;
++  uint16_t fileIndex;
++  if (!GetFontFileInfo(dwFace, path, fileIndex) || fileIndex != aFace->mFileIndex ||
++      path != aFilePath) {
++    return false;
++  }
++  DWRITE_FONT_STYLE style = aFont->GetStyle();
++  if (aFace->mWeight != WeightRange(FontWeight::FromInt(aFont->GetWeight())) ||
++      aFace->mWidth != WidthRange(FontWidthFromDWriteStretch(aFont->GetStretch())) ||
++      aFace->mStyle != SlantStyleRange(style == DWRITE_FONT_STYLE_NORMAL
++                                           ? FontSlantStyle::NORMAL
++                                       : style == DWRITE_FONT_STYLE_ITALIC
++                                           ? FontSlantStyle::ITALIC
++                                           : FontSlantStyle::OBLIQUE)) {
++    return false;
++  }
++  nsAutoCString psName;
++  if (FAILED(GetDirectWriteFaceName(aFont, PSNAME_ID, psName))) {
++    GetPostScriptNameFromNameTable(dwFace, psName);
++  }
++  return psName == aPSName;
++}
++
++// The family of the one-family collection is the one holding a face of the
++// shared face's key; the face is the one at the shared face's index in it,
++// accepted only if it has that key. Anything else is a miss, never a guess.
++already_AddRefed<IDWriteFont> gfxDWriteFontList::FindBundledFont(
++    const fontlist::Family* aFamily, const fontlist::Face* aFace) {
++  fontlist::FontList* list = SharedFontList();
++  nsCString filePath;
++  if (!aFace->mFilePath.IsNull()) {
++    filePath = aFace->mFilePath.AsString(list);
++  }
++  nsCString psName(aFace->mDescriptor.AsString(list));
++  RefPtr<IDWriteFontCollection> collection =
++      filePath.IsEmpty() ? nullptr : BundledFamilyCollection(aFamily);
++  RefPtr<IDWriteFontFamily> holder;
++  UINT32 count = collection ? collection->GetFontFamilyCount() : 0;
++  for (UINT32 f = 0; f < count && !holder; ++f) {
++    RefPtr<IDWriteFontFamily> family;
++    if (FAILED(collection->GetFontFamily(f, getter_AddRefs(family)))) {
++      continue;
++    }
++    if (count == 1) {
++      holder = family;
++      break;
++    }
++    for (UINT32 j = 0; j < family->GetFontCount(); ++j) {
++      RefPtr<IDWriteFont> font;
++      if (SUCCEEDED(family->GetFont(j, getter_AddRefs(font))) && font &&
++          FontIsSharedFace(font, aFace, psName, filePath)) {
++        holder = family;
++        break;
++      }
++    }
++  }
++  RefPtr<IDWriteFont> font;
++  if (holder && SUCCEEDED(holder->GetFont(aFace->mIndex, getter_AddRefs(font))) &&
++      font && FontIsSharedFace(font, aFace, psName, filePath)) {
++    return font.forget();
++  }
++  LOG_FONTLIST(("CAMOU-FL bundled-face-miss family=%s face=%s index=%u",
++                aFamily->Key().AsString(list).get(), psName.get(),
++                unsigned(aFace->mIndex)));
++  return nullptr;
++}
++
++already_AddRefed<gfxFontEntry> gfxDWriteFontList::CreateBundledFontEntry(
++    fontlist::Face* aFace, const fontlist::Family* aFamily) {
++  MOZ_SEH_TRY {
++    RefPtr<IDWriteFont> font = FindBundledFont(aFamily, aFace);
++    if (!font) {
++      return nullptr;
++    }
++    RefPtr fe = MakeRefPtr<gfxDWriteFontEntry>(
++        aFace->mDescriptor.AsString(SharedFontList()), font, false);
++    fe->InitializeFrom(aFace, aFamily);
++    fe->mForceGDIClassic = aFamily->IsForceClassic();
++    fe->mMayUseGDIAccess = aFamily->IsSimple();
++    return fe.forget();
++  }
++  MOZ_SEH_EXCEPT(EXCEPTION_EXECUTE_HANDLER) {
++    gfxCriticalNote << "Exception occurred while creating font entry for "
++                    << aFamily->DisplayName().AsString(SharedFontList()).get();
++  }
++  return nullptr;
++}
++
+ already_AddRefed<IDWriteFontCollection>
+ gfxDWriteFontList::CreateBundledFontsCollection(IDWriteFactory* aFactory) {
+   nsCOMPtr<nsIFile> localDir;
+diff --git a/gfx/thebes/gfxDWriteFontList.h b/gfx/thebes/gfxDWriteFontList.h
+index 5f36003..82c8f4b 100644
+--- a/gfx/thebes/gfxDWriteFontList.h
++++ b/gfx/thebes/gfxDWriteFontList.h
+@@ -14,8 +14,10 @@
+ #include "gfxPlatform.h"
+ #include "gfxPlatformFontList.h"
+ #include "gfxUserFontSet.h"
++#include "nsTHashMap.h"
+ #include "mozilla/FontPropertyTypes.h"
+ #include "mozilla/MemoryReporting.h"
++#include "mozilla/Mutex.h"
+ #include "mozilla/gfx/UnscaledFontDWrite.h"
+ 
+ /**
+@@ -508,6 +510,19 @@ class gfxDWriteFontList final : public gfxPlatformFontList {
+   RefPtr<IDWriteFontCollection> mSystemFonts;
+ #ifdef MOZ_BUNDLED_FONTS
+   RefPtr<IDWriteFontCollection> mBundledFonts;
++
++  // Camoufox: see FindBundledFont.
++  already_AddRefed<IDWriteFontCollection> BundledFamilyCollection(
++      const mozilla::fontlist::Family* aFamily);
++  already_AddRefed<IDWriteFont> FindBundledFont(
++      const mozilla::fontlist::Family* aFamily,
++      const mozilla::fontlist::Face* aFace);
++  already_AddRefed<gfxFontEntry> CreateBundledFontEntry(
++      mozilla::fontlist::Face* aFace, const mozilla::fontlist::Family* aFamily);
++
++  mozilla::Mutex mBundledFamiliesLock{"gfxDWriteFontList::mBundledFamilies"};
++  nsTHashMap<nsUint32HashKey, RefPtr<IDWriteFontCollection>>
++      mBundledFamilyCollections MOZ_GUARDED_BY(mBundledFamiliesLock);
+ #endif
+ };
+ 
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index 849b3af462..164c33448d 100644
+index 849b3af..164c334 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -6,6 +6,7 @@
@@ -298,7 +707,7 @@ index 849b3af462..164c33448d 100644
    // font-family request by the page), and RFP settings allow generics to be
    // unrestricted, bump the effective visibility level applied here so as to
 diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
-index 66290cd704..bdd4b52666 100644
+index 66290cd..bdd4b52 100644
 --- a/gfx/thebes/gfxPlatformFontList.h
 +++ b/gfx/thebes/gfxPlatformFontList.h
 @@ -649,6 +649,19 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
@@ -322,7 +731,7 @@ index 66290cd704..bdd4b52666 100644
  
    bool AddWithLegacyFamilyName(const nsACString& aLegacyName,
 diff --git a/gfx/thebes/gfxUserFontSet.cpp b/gfx/thebes/gfxUserFontSet.cpp
-index 54433dc950..ef04e92585 100644
+index 54433dc..ef04e92 100644
 --- a/gfx/thebes/gfxUserFontSet.cpp
 +++ b/gfx/thebes/gfxUserFontSet.cpp
 @@ -473,6 +473,24 @@ void gfxUserFontEntry::DoLoadNextSrc(bool aIsContinue) {
@@ -351,7 +760,7 @@ index 54433dc950..ef04e92585 100644
          // as this means we are dependent on any updates to the font list.
          mSeenLocalSource = true;
 diff --git a/gfx/thebes/moz.build b/gfx/thebes/moz.build
-index bb3da184dc..5afed86888 100644
+index bb3da18..5afed86 100644
 --- a/gfx/thebes/moz.build
 +++ b/gfx/thebes/moz.build
 @@ -310,3 +310,6 @@ LICENSED_UNDER["gfx-font-list"].paths = [
@@ -362,7 +771,7 @@ index bb3da184dc..5afed86888 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ["/camoucfg"]
 diff --git a/layout/style/FontFace.cpp b/layout/style/FontFace.cpp
-index bc4d586b41..730c37a290 100644
+index bc4d586..730c37a 100644
 --- a/layout/style/FontFace.cpp
 +++ b/layout/style/FontFace.cpp
 @@ -17,9 +17,12 @@
@@ -392,7 +801,7 @@ index bc4d586b41..730c37a290 100644
    mImpl->UpdateOwnerKeepAlive();
    return mLoaded;
 diff --git a/layout/style/moz.build b/layout/style/moz.build
-index f00e44a912..7822c39e04 100644
+index f00e44a..7822c39 100644
 --- a/layout/style/moz.build
 +++ b/layout/style/moz.build
 @@ -371,3 +371,6 @@ if CONFIG["COMPILE_ENVIRONMENT"]:
