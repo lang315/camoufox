@@ -445,7 +445,7 @@ def test_bundled_fonts_registered_in_the_macos_gpu_process():
     content = _added_lines(patch, "gfx/thebes/CoreTextFontList.cpp")
     assert "if (ShouldActivateBundledFonts())" in content, why
     assert "ActivateBundledFonts(&mBundledFamilies)" in content, why
-    assert "MaskConfig::GetSpoofedOS() != MaskConfig::SpoofedOS::MacOS" in content, why
+    assert "MaskConfig::GetSpoofedOS() ==" in content and "return pref != 0 && !nativeIdentity;" in content, why
 
 
 def test_fc_activates_only_firefox_own_bundled_fonts():

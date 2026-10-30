@@ -26,7 +26,7 @@ index 910cfe8483..e581765cf1 100644
    wr::RenderThread::Start(aWrNamespace);
    gfx::CanvasRenderThread::Start();
 diff --git a/gfx/thebes/CoreTextFontList.cpp b/gfx/thebes/CoreTextFontList.cpp
-index b6696c70c4..f004094968 100644
+index b6696c70c4..b780389440 100644
 --- a/gfx/thebes/CoreTextFontList.cpp
 +++ b/gfx/thebes/CoreTextFontList.cpp
 @@ -6,6 +6,7 @@
@@ -126,7 +126,7 @@ index b6696c70c4..f004094968 100644
  }
  
  static void ReleaseFontData(void* aInfo, const void* aData, size_t aSize) {
-@@ -1989,7 +2015,19 @@ FontFamily CoreTextFontList::GetDefaultFontForPlatform(
+@@ -1989,18 +2015,34 @@ FontFamily CoreTextFontList::GetDefaultFontForPlatform(
  }
  
  #ifdef MOZ_BUNDLED_FONTS
@@ -137,21 +137,36 @@ index b6696c70c4..f004094968 100644
 +  // explicit value of 0 (off) will disable them.
 +  // Camoufox: a native macOS identity uses the real system fonts only; the
 +  // bundle is for identities of other OSes (see font-hijacker.patch).
-+  return StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0 &&
-+         MaskConfig::GetSpoofedOS() != MaskConfig::SpoofedOS::MacOS;
++  const int32_t pref = StaticPrefs::gfx_bundled_fonts_activate_AtStartup();
++  const bool nativeIdentity =
++      MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS;
++  LOG_FONTLIST(
++      ("CAMOU-FL bundled-fonts gate gfx.bundled-fonts.activate=%d "
++       "native-identity=%d\n",
++       pref, nativeIdentity));
++  return pref != 0 && !nativeIdentity;
 +}
 +
 +/* static */
 +void CoreTextFontList::ActivateBundledFonts(
 +    nsTHashSet<nsCStringHashKey>* aLoadedFamilies) {
    nsCOMPtr<nsIFile> localDir;
-   if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir)))) {
-     return;
-@@ -2001,6 +2039,6 @@ void CoreTextFontList::ActivateBundledFonts() {
-   if (NS_FAILED(localDir->GetNativePath(path))) {
+-  if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir)))) {
+-    return;
+-  }
+-  if (NS_FAILED(localDir->Append(u"fonts"_ns))) {
+-    return;
+-  }
+   nsAutoCString path;
+-  if (NS_FAILED(localDir->GetNativePath(path))) {
++  if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir))) ||
++      NS_FAILED(localDir->Append(u"fonts"_ns)) ||
++      NS_FAILED(localDir->GetNativePath(path))) {
++    LOG_FONTLIST(("CAMOU-FL bundled-fonts no fonts directory\n"));
      return;
    }
 -  ActivateFontsFromDir(path, &mBundledFamilies);
++  LOG_FONTLIST(("CAMOU-FL bundled-fonts activating %s\n", path.get()));
 +  ActivateFontsFromDir(path, aLoadedFamilies);
  }
  #endif
