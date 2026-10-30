@@ -37,8 +37,8 @@ resolve ── static ─────────────── lint, tribal
 | `patch-guards` | `ci.run_patch_guards --group spoofing\|automation\|parity`, `ci.run_skiplist_audit` | One guard per shipped behaviour ([`browser/tests/playwright/`](../browser/tests/playwright/README.md)); every skiplist entry still fails |
 | `build-tester` | `ci.run_build_tester` | The raw binary against the anti-detect checks ([README](../browser/tests/build-tester/README.md)) |
 | `typescript-browser` | `ci.run_typescript --browser` | The npm launcher against a real browser |
-| `goapi` | `ci.run_goapi` | The Go launcher against a real browser. `goapi.yml` runs the package without one, where those tests skip; here `CAMOUFOX_BIN` is set and a test that finds no browser fails |
-| `observer` | `ci.run_observer` | The tracking observer's scripts (`browser/tests/build-tester/observer/test_*.py`), one process each; a missing browser or `marionette_driver` fails the gate |
+| `goapi` | `ci.run_goapi` | The Go launcher against a real browser. `goapi.yml` runs the package without one, where those tests skip; here `CAMOUFOX_BIN` is set and a test that finds no browser fails. `e2e.yml` runs it on the macOS leg too (#310; Windows waits for #345) |
+| `observer` | `ci.run_observer` | The tracking observer's scripts (`browser/tests/build-tester/observer/test_*.py`), one process each; a missing browser or `marionette_driver` fails the gate. `e2e.yml` runs it on the macOS leg too (#310; Windows waits for #345) |
 | `playwright` | `ci.run_playwright --shard i/6` | Upstream playwright-python's suite, plus [`browser/tests/playwright/camoufox/`](../browser/tests/playwright/camoufox/README.md) |
 | `native` | `ci.run_native --subset browser` | Leaks, context isolation, crash recovery ([below](#camoufoxs-own-suite)) |
 | `growth` | `ci.run_native --subset growth --shard i/7` | Memory growth, one test per runner |

@@ -129,7 +129,14 @@ jobs:
           fi
           if [ "${{ inputs.live }}" = "true" ]; then echo "E2E_LIVE=1" >> "$GITHUB_ENV"; fi
           if [ "${{ inputs.mozlog }}" = "true" ]; then echo "E2E_MOZ_LOG=${{ github.workspace }}/.ci-work/mozlog" >> "$GITHUB_ENV"; fi
-      - name: Unpack the browser for the voices guard
+      # The observer (#303) and goapi (#301) gates, here because a pull request
+      # never builds macOS or Windows. A dispatch that narrows the run to one
+      # probe or one -k expression leaves them out. They run before the journeys, which
+      # then run whatever they conclude, so a red gate does not hide the journeys.
+      # Not on Windows yet: a launch whose identity is not Windows spends ~6 CPU-seconds per
+      # process indexing the bundled fonts and goapi's 30 s main-context wait expires on a loaded
+      # runner (#345). The Windows gate follows that fix.
+      - name: Unpack the browser for the guards
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
         env:
@@ -138,8 +145,27 @@ jobs:
           # Assigned first: inside echo "$(...)" a failed unpack would not fail the step.
           binary="$(python e2e/util.py $E2E_BROWSER)"
           echo "CAMOUFOX_BINARY=$binary" >> "$GITHUB_ENV"
+      - name: Observer tests
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' && runner.os != 'Windows' }}
+        shell: bash
+        run: |
+          (cd browser/tests/build-tester && pip install -r requirements.txt)
+          python python/scripts/pin-fpgen-model.py
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_observer --binary "$CAMOUFOX_BINARY"; else python -m ci.run_observer --binary "$CAMOUFOX_BINARY"; fi
+      - name: goapi browser tests
+        if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' && runner.os != 'Windows' }}
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; else python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; fi
+      - name: Observer and goapi gates are not run on Windows
+        if: ${{ !cancelled() && runner.os == 'Windows' && inputs.probe == '' && inputs.k == '' }}
+        shell: bash
+        run: |
+          msg="observer and goapi gates not run on Windows: #345"
+          echo "$msg"
+          echo "$msg" >> "$GITHUB_STEP_SUMMARY"
       - name: Run
-        if: inputs.probe == ''
+        if: ${{ !cancelled() && inputs.probe == '' }}
         shell: bash
         working-directory: e2e
         env:
