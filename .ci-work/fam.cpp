@@ -467,6 +467,64 @@ static void IndexCheck(IDWriteFontCollection* full, const vector<wstring>& all) 
   }
   printf("INDEXCHECK entries=%d index_hit=%d (with a duplicate key: %d) miss=%d axis_diff=%d small_build_total_ms=%.0f\n", total, hit, dupHit, miss, axisDiff, buildMs);
 }
+
+// ---- multitiming (#345): the scan path at 6a23b18e for every small collection that holds several DirectWrite families ----
+static void MultiTiming(IDWriteFontCollection* full, const vector<wstring>& all) {
+  using clk = std::chrono::steady_clock;
+  std::map<wstring, size_t> pos;
+  for (size_t i = 0; i < all.size(); i++) { wstring l = all[i]; for (auto& c : l) c = towlower(c); pos[l] = i; }
+  struct Row { double ms; string name; UINT32 fams, fonts; size_t lookups, getfonts, expensive; };
+  vector<Row> rows; int multi = 0; double sumMs = 0;
+  for (UINT32 i = 0; i < full->GetFontFamilyCount(); i++) {
+    Ptr<IDWriteFontFamily> fam; if (FAILED(full->GetFontFamily(i, &fam))) continue;
+    Ptr<IDWriteLocalizedStrings> ns; if (FAILED(fam->GetFamilyNames(&ns))) continue;
+    auto names = LocalizedNames(ns.p); if (names.empty()) names.push_back("(noname)");
+    vector<std::pair<size_t, wstring>> ordered;
+    for (UINT32 j = 0; j < fam->GetFontCount(); j++) {
+      Ptr<IDWriteFont> f; if (FAILED(fam->GetFont(j, &f)) || f->GetSimulations() != DWRITE_FONT_SIMULATIONS_NONE) continue;
+      Ptr<IDWriteFontFace> face; if (FAILED(f->CreateFontFace(&face))) continue;
+      UINT32 n = 0; face->GetFiles(&n, nullptr); vector<IDWriteFontFile*> ff(n);
+      if (!n || FAILED(face->GetFiles(&n, ff.data()))) continue;
+      Ptr<IDWriteFontFileLoader> ld; Ptr<IDWriteLocalFontFileLoader> ll; const void* k = nullptr; UINT32 ks = 0;
+      if (SUCCEEDED(ff[0]->GetLoader(&ld)) && SUCCEEDED(ld->QueryInterface(__uuidof(IDWriteLocalFontFileLoader), (void**)&ll)) && SUCCEEDED(ff[0]->GetReferenceKey(&k, &ks))) {
+        UINT32 len = 0; ll->GetFilePathLengthFromKey(k, ks, &len); wstring pth(len + 1, 0); ll->GetFilePathFromKey(k, ks, pth.data(), len + 1); pth.resize(len);
+        wstring l = pth; for (auto& c : l) c = towlower(c);
+        bool dup = false; for (auto& e : ordered) if (e.second == pth) dup = true;
+        if (!dup) ordered.push_back({pos.count(l) ? pos[l] : (size_t)-1, pth});
+      }
+      for (UINT32 q = 0; q < n; q++) ff[q]->Release();
+    }
+    std::stable_sort(ordered.begin(), ordered.end(), [](auto& a, auto& b) { return a.first < b.first; });
+    vector<wstring> fv; for (auto& e : ordered) fv.push_back(e.second);
+    Ptr<IDWriteFontCollection> sm; sm.p = Build(fv);
+    if (!sm || sm->GetFontFamilyCount() < 2) continue;
+    multi++;
+    vector<Live> fl(fam->GetFontCount());
+    for (UINT32 j = 0; j < fam->GetFontCount(); j++) { Ptr<IDWriteFont> f; if (SUCCEEDED(fam->GetFont(j, &f))) fl[j] = ReadLive(f.p); }
+    auto same = [&](const Live& a, const Live& b) { return a.idx == b.idx && a.path == b.path && a.w == b.w && a.st == b.st && a.sl == b.sl && a.psEn == b.psEn; };
+    UINT32 nfonts = 0; for (UINT32 k = 0; k < sm->GetFontFamilyCount(); k++) { Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(k, &sf); nfonts += sf->GetFontCount(); }
+    size_t lookups = 0, getfonts = 0, expensive = 0;
+    auto t0 = clk::now();
+    for (UINT32 j = 0; j < fl.size(); j++) {
+      if (fl[j].sim != 0 || !fl[j].ok || fl[j].psEn == "(none)") continue;
+      lookups++;
+      int rank = 0; for (UINT32 e = 0; e < j; e++) if (fl[e].sim == 0 && fl[e].ok && same(fl[e], fl[j])) rank++;
+      auto cheapTie = [&](IDWriteFont* g) { return g->GetSimulations() == DWRITE_FONT_SIMULATIONS_NONE && (int)g->GetWeight() == fl[j].w && (int)g->GetStretch() == fl[j].st && (int)g->GetStyle() == fl[j].sl; };
+      bool stop = false;
+      for (UINT32 k = 0; k < sm->GetFontFamilyCount() && !stop; k++) {
+        Ptr<IDWriteFontFamily> sf; sm->GetFontFamily(k, &sf); int seen = 0;
+        for (UINT32 q = 0; q < sf->GetFontCount(); q++) { Ptr<IDWriteFont> g; getfonts++; if (FAILED(sf->GetFont(q, &g))) continue;
+          if (cheapTie(g.p)) { expensive++; Live l = ReadLive(g.p); if (l.sim == 0 && l.ok && same(l, fl[j]) && seen++ == rank) { stop = true; break; } } }
+        if (seen) break;
+      }
+    }
+    double ms = std::chrono::duration<double, std::milli>(clk::now() - t0).count(); sumMs += ms;
+    rows.push_back({ms, names[0], sm->GetFontFamilyCount(), nfonts, lookups, getfonts, expensive});
+  }
+  std::sort(rows.begin(), rows.end(), [](auto& a, auto& b) { return a.ms > b.ms; });
+  printf("MULTITIMING collections=%d total_scan_ms=%.0f\n", multi, sumMs);
+  for (size_t k = 0; k < rows.size() && k < 8; k++) printf("MULTITIMING worst#%zu %.0f ms family=%s small_families=%u small_fonts=%u lookups=%zu getfont_calls=%zu expensive_checks=%zu\n", k + 1, rows[k].ms, rows[k].name.c_str(), rows[k].fams, rows[k].fonts, rows[k].lookups, rows[k].getfonts, rows[k].expensive);
+}
 static const char* gStage = "start";
 int run(int argc, wchar_t** argv);
 int wmain(int argc, wchar_t** argv) {
@@ -491,6 +549,7 @@ int run(int argc, wchar_t** argv) {
   if (!full) { printf("full collection failed\n"); return 2; }
   if (argc > 2 && wstring(argv[2]) == L"--fullcheck") { FullCheck(full.p); return 0; }
   if (argc > 2 && wstring(argv[2]) == L"--indexcheck") { IndexCheck(full.p, all); return 0; }
+  if (argc > 2 && wstring(argv[2]) == L"--multitiming") { MultiTiming(full.p, all); return 0; }
   if (argc > 2 && wstring(argv[2]).rfind(L"--timing=", 0) == 0) { for (const char* f : {"system font", "ubuntu", ".new york", ".sf compact"}) Timing(full.p, f); return 0; }
   if (argc > 2) {  // dump mode: fam.exe <fonts dir> <family,family,...>
     set<string> want; string a = U8(argv[2]); size_t p0 = 0;
