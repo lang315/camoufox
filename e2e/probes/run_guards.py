@@ -42,7 +42,7 @@ def main() -> int:
                              "--evidence-dir", str(out / "build-tester-evidence")],
         }.items():
             print(f"== {name}", flush=True)
-            rcs[name] = subprocess.run(cmd).returncode
+            rcs[name] = subprocess.run(cmd, env={**os.environ, "PYTHONUTF8": "1"}).returncode  # build-tester prints box-drawing characters
     print("exit codes:", rcs, flush=True)
     return int(any(rcs.values()))
 
