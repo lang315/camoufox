@@ -56,7 +56,7 @@ func (p *Page) OnFileChooser(handler func(*FileChooser)) juggler.Subscription {
 		log.Printf("camoufox: OnFileChooser: setInterceptFileChooserDialog: %v", err)
 	}
 
-	return p.bc.b.conn.On("Page.fileChooserOpened", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Page.fileChooserOpened", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -103,5 +103,5 @@ func (p *Page) OnFileChooser(handler func(*FileChooser)) juggler.Subscription {
 			}
 			handler(&FileChooser{Element: el, IsMultiple: isMultiple})
 		}()
-	})
+	}))
 }

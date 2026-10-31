@@ -99,7 +99,7 @@ func (p *Page) EnableRequestInterception(ctx context.Context, h RouteHandler) (j
 		map[string]any{"enabled": true}, nil); err != nil {
 		return juggler.Subscription{}, err
 	}
-	sub := p.bc.b.conn.On("Network.requestWillBeSent", func(ev juggler.Event) {
+	sub := p.own(p.bc.b.conn.On("Network.requestWillBeSent", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -125,7 +125,7 @@ func (p *Page) EnableRequestInterception(ctx context.Context, h RouteHandler) (j
 		req.NavigationID = ne.NavigationID
 		req.Cause = ne.Cause
 		h(&Route{page: p, request: req})
-	})
+	}))
 	return sub, nil
 }
 

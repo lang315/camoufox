@@ -26,7 +26,7 @@ type PageError struct {
 // OnConsole registers a handler for Runtime.console events on this page.
 // Returns a Subscription that can be passed to p.Off to deregister.
 func (p *Page) OnConsole(handler func(*ConsoleMessage)) juggler.Subscription {
-	return p.bc.b.conn.On("Runtime.console", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Runtime.console", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -49,13 +49,13 @@ func (p *Page) OnConsole(handler func(*ConsoleMessage)) juggler.Subscription {
 			}
 		}
 		go handler(msg)
-	})
+	}))
 }
 
 // OnPageError registers a handler for Page.uncaughtError events.
 // Returns a Subscription that can be passed to p.Off to deregister.
 func (p *Page) OnPageError(handler func(*PageError)) juggler.Subscription {
-	return p.bc.b.conn.On("Page.uncaughtError", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Page.uncaughtError", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -68,16 +68,16 @@ func (p *Page) OnPageError(handler func(*PageError)) juggler.Subscription {
 			Message: ue.Message,
 			Stack:   ue.Stack,
 		})
-	})
+	}))
 }
 
 // OnCrash registers a handler for Page.crashed events.
 // Returns a Subscription that can be passed to p.Off to deregister.
 func (p *Page) OnCrash(handler func()) juggler.Subscription {
-	return p.bc.b.conn.On("Page.crashed", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Page.crashed", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
 		go handler()
-	})
+	}))
 }
