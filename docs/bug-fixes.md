@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #338: eleven patch guards could not run, or measured nothing, on Windows and macOS
+
+**Fixed by:** the PR that closes #338. **Found by:** runs of the guards on the fork.1 macOS app and on e2e probe branches against the fork.2 Windows and macOS builds.
+
+**Symptom.** On Windows, `input-ack-backstop` died on `signal.SIGKILL`, `contentaccessible-parity` and `stock-gpu-parity` called `unzip` and `gpg` in ways Git's msys builds mishandle, `worker-config-reads` ran 1-5 contexts in 60 s, and the guards that needed Xvfb or `/proc` failed before measuring. On macOS the guards that need Linux tools started a virtual display that does not exist, and `windows-keyboard` and `system-font-alias-stall` read the host and compared nothing.
+
+**Root cause.** Each guard assumed Linux. `os.kill(pid, signal.SIGKILL)` has no Windows spelling. Git's msys `gpg` prefixes the working directory to an absolute Windows path. Git's msys `unzip` reported "filename not matched" for patterns that match, for a cause not found. Four spinning workers on a 4-vCPU Windows runner starve the start of a new content process (61 s). `contentaccessible-parity` had one manifest, recorded from Linux Firefox, so it could not be compared with any other OS.
+
+**Fix.** `ci/run_patch_guards.py` keeps `LINUX_ONLY` (five guards whose subject is Linux) and adds `NOT_ON` for the two guards that do not apply on one platform for that platform's reason; the runner counts them apart from the passes and prints the reason. Guards that only needed a display use the host's. `input-ack-backstop` kills with psutil, `worker-config-reads` uses two workers on Windows, `stock-gpu-parity` and `contentaccessible-parity` unpack with 7-Zip, `hdiutil` or `zipfile` and run `gpg` from a relative path, and the manifest generator reads jars with `zipfile` and has one manifest per OS (`contentaccessible-manifest-macos.json`, `-windows.json`). `windows-keyboard` gains a macOS arm that measures the editor caret with a control (`input:windowsKeyboard` off). `windows-crt-math` skips its control on a Windows host, where the host libm is the CRT. `stock-gpu-parity` now applies the launcher's own rule (`utils.plan_rendering`: a software renderer matches any GPU, a hardware GPU must be recorded) and says why it fails.
+
+**Not fixed, filed.** Windows `contentaccessible-parity` finds a real difference, the missing `defaultagent` resource (#358). `getter-cost-parity` fails on the hosted macOS runner (#359). `stock-gpu-parity` failed on both hosted runners: its gate demanded a recorded GPU even from a software renderer, which the launcher does not (Windows runner: Microsoft Basic Render Driver); on the macOS runner stock says `Apple Inc.` where fpgen has `Apple`, so the launcher too treats that GPU as unrecorded. `windows-crt-math` on macOS is #317.
+
+**Evidence.** See the PR for run and job ids.
+
+**What misled the investigation.** A Linux green said nothing about the other two OSes (lesson 3). `webdriver-bidi-tabs` hung on one developer Mac for the fork.1 and the fork.2 apps and passed on the CI macOS runner; it was a condition of that Mac, not of the browser. A log is only about the binary the run unpacked, so every probe prints the BuildID it ran against.
+
 ## #356: Vietnamese text drew with the wrong glyphs in the window of a Camoufox on a Mac
 
 **Fixed by:** the PR that closes #356. **Found by:** a goapi session on a macOS host with a Windows identity, whose window showed garbled Vietnamese while its screenshots were correct.
