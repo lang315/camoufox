@@ -43,23 +43,9 @@ func (p *Page) addBinding(ctx context.Context, name, script string, fn func(payl
 	if name == "" {
 		return nil, errors.New("camoufox: binding name is empty")
 	}
-	// The context's lock comes first, as in BrowserContext.ExposeBinding.
-	p.bc.bindMu.Lock()
-	_, onContext := p.bc.bound[name]
-	p.bc.bindMu.Unlock()
-	if onContext {
-		return nil, fmt.Errorf("camoufox: binding %q is already bound on this page's context", name)
+	if err := p.claimBinding(name); err != nil {
+		return nil, err
 	}
-	p.bindMu.Lock()
-	if _, taken := p.bound[name]; taken {
-		p.bindMu.Unlock()
-		return nil, fmt.Errorf("camoufox: binding %q is already bound on this page", name)
-	}
-	if p.bound == nil {
-		p.bound = map[string]struct{}{}
-	}
-	p.bound[name] = struct{}{}
-	p.bindMu.Unlock()
 
 	// The handler is in place before addBinding, because script runs during it.
 	var cancelled atomic.Bool
@@ -86,6 +72,28 @@ func (p *Page) addBinding(ctx context.Context, name, script string, fn func(payl
 		cancelled.Store(true)
 		conn.Off(sub)
 	}, nil
+}
+
+// claimBinding takes name for the page, or says who holds it. The context's lock
+// is held from its check to the page's claim, so a concurrent
+// BrowserContext.ExposeBinding cannot claim name in between. The lock order is
+// context, then page, as in BrowserContext.claimBinding.
+func (p *Page) claimBinding(name string) error {
+	p.bc.bindMu.Lock()
+	defer p.bc.bindMu.Unlock()
+	if _, onContext := p.bc.bound[name]; onContext {
+		return fmt.Errorf("camoufox: binding %q is already bound on this page's context", name)
+	}
+	p.bindMu.Lock()
+	defer p.bindMu.Unlock()
+	if _, taken := p.bound[name]; taken {
+		return fmt.Errorf("camoufox: binding %q is already bound on this page", name)
+	}
+	if p.bound == nil {
+		p.bound = map[string]struct{}{}
+	}
+	p.bound[name] = struct{}{}
+	return nil
 }
 
 // ExposeBinding is Page.ExposeBinding for every page of the context: the pages
