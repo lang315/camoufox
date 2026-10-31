@@ -427,6 +427,18 @@ func (b *Browser) subscribeAttach() {
 	})
 }
 
+// pageBySession returns the page attached under this session, or nil.
+func (b *Browser) pageBySession(id string) *Page {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, p := range b.pages {
+		if p.session.ID() == id {
+			return p
+		}
+	}
+	return nil
+}
+
 // contextByID returns the context with this browserContextId, the default
 // context for "", and nil for an id this Browser never created.
 func (b *Browser) contextByID(id string) *BrowserContext {

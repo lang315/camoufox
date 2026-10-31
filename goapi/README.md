@@ -141,6 +141,12 @@ init script, so a `mw:` init script may dispatch at once. On the document curren
 `ExposeBinding` is called, earlier events are not delivered. A name is bound once per
 page, and `cancel` stops delivery only: Juggler cannot remove `window.report`.
 
+`BrowserContext.ExposeBinding(ctx, name, script, fn)` does the same for every page of a
+context: the pages open now, pages `NewPage` opens later and popups, whose first document
+runs `script` before `OnPage` reports the page. `fn` is `func(p *Page, payload string)`, so
+it can tell a popup from its opener. A name is bound once per context, and a page of the
+context cannot bind a name the context holds, nor the context a name an open page holds.
+
 `BrowserContext.SetBypassCSP(ctx, true)` turns off Content-Security-Policy enforcement for
 the context's next navigations, so a page served with `connect-src 'none'` can still
 reach a local server such as a devtools backend.
