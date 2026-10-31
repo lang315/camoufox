@@ -17,7 +17,11 @@ Compared: WebGL1 and WebGL2 supported extensions and getParameter values, where
 the two releases differ; the order of the extensions; whether navigator.gpu
 and an adapter exist, and the adapter's features and limits. Camoufox claims
 the GPU stock reports, with the recorded device of that GPU nearest to stock,
-so a machine whose GPU fpgen never recorded fails.
+so a machine whose GPU fpgen never recorded fails, by an exact match of vendor and
+renderer strings: Linux CI passes because llvmpipe is recorded as ('Mesa', 'llvmpipe, or
+similar'); the hosted Windows and macOS runners fail because stock reports a string the
+recordings spell differently (Windows adds the device id '(0x0000008C)', macOS says
+'Apple Inc.' where fpgen has 'Apple'). Run it on hardware whose GPU is recorded.
 
 Stock Firefox is downloaded from archive.mozilla.org, checked against the
 release's SHA256SUMS, whose signature gpg checks against Mozilla's release
@@ -309,7 +313,8 @@ def main() -> int:
     recorded_out = probe(recorded, dict(os.environ))
     gpu = (stock_out["webgl"] or {}).get("gpu")
     if not gpu or tuple(gpu) not in webgl.firefox_gpus(target_os):
-        print(f"FAIL: stock Firefox reports the GPU {gpu}, which fpgen never recorded on {host_os}")
+        print(f"FAIL: host GPU {gpu} was never recorded by fpgen for {host_os}: this guard needs a recorded GPU.")
+        print(f"      Recorded for {host_os}: {sorted(map(tuple, webgl.firefox_gpus(target_os)))}")
         return 1
     stock_flat = flatten(stock_out)
     # Without webGl:vendor/renderer the launcher claims a hardware GPU of the
