@@ -17,11 +17,11 @@ Compared: WebGL1 and WebGL2 supported extensions and getParameter values, where
 the two releases differ; the order of the extensions; whether navigator.gpu
 and an adapter exist, and the adapter's features and limits. Camoufox claims
 the GPU stock reports, with the recorded device of that GPU nearest to stock,
-so a machine whose GPU fpgen never recorded fails, by an exact match of vendor and
-renderer strings: Linux CI passes because llvmpipe is recorded as ('Mesa', 'llvmpipe, or
-similar'); the hosted Windows and macOS runners fail because stock reports a string the
-recordings spell differently (Windows adds the device id '(0x0000008C)', macOS says
-'Apple Inc.' where fpgen has 'Apple'). Run it on hardware whose GPU is recorded.
+so a machine with a hardware GPU fpgen never recorded fails, by the same exact match of
+vendor and renderer strings as the launcher's (utils.plan_rendering, which would turn canvas
+noise on there). A software renderer (llvmpipe, Microsoft Basic Render Driver) matches any
+GPU in the launcher and is not gated here. The hosted macOS runner fails: stock reports
+'Apple Inc.' where fpgen has 'Apple'.
 
 Stock Firefox is downloaded from archive.mozilla.org, checked against the
 release's SHA256SUMS, whose signature gpg checks against Mozilla's release
@@ -312,7 +312,9 @@ def main() -> int:
     stock_out = probe(stock, dict(os.environ))
     recorded_out = probe(recorded, dict(os.environ))
     gpu = (stock_out["webgl"] or {}).get("gpu")
-    if not gpu or tuple(gpu) not in webgl.firefox_gpus(target_os):
+    # The launcher's own test (utils.plan_rendering): a software renderer matches any GPU, a
+    # hardware one must be a recorded GPU or the launch turns canvas noise on.
+    if not gpu or (renders_on_hardware(tuple(gpu)) and tuple(gpu) not in webgl.firefox_gpus(target_os)):
         print(f"FAIL: host GPU {gpu} was never recorded by fpgen for {host_os}: this guard needs a recorded GPU.")
         print(f"      Recorded for {host_os}: {sorted(map(tuple, webgl.firefox_gpus(target_os)))}")
         return 1

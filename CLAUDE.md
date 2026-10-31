@@ -100,8 +100,8 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `occluded-window-active`, `pointer-lock-offscreen`); `system-font-alias-stall`
   does not run on macOS and `windows-keyboard` not on Windows. On those platforms
   they are reported as "not applicable" with the reason, never as passes. On Linux a
-  missing prerequisite fails. `stock-gpu-parity` fails on a host whose GPU fpgen
-  did not record (the hosted Windows and macOS runners), with that reason.
+  missing prerequisite fails. `stock-gpu-parity` fails on a host whose hardware GPU
+  fpgen did not record, with that reason (the launcher's `plan_rendering` rule).
 - **Playwright** — upstream playwright-python, fetched fresh at the tag
   `ci/versions.py` resolves for the browser, with `ci/skiplist.yml` applied and
   `browser/tests/playwright/camoufox/` overlaid. This is the automation-contract check, not the
