@@ -20,8 +20,9 @@ the GPU stock reports, with the recorded device of that GPU nearest to stock,
 so a machine with a hardware GPU fpgen never recorded fails, by the same exact match of
 vendor and renderer strings as the launcher's (utils.plan_rendering, which would turn canvas
 noise on there). A software renderer (llvmpipe, Microsoft Basic Render Driver) matches any
-GPU in the launcher and is not gated here. The hosted macOS runner fails: stock reports
-'Apple Inc.' where fpgen has 'Apple'.
+GPU in the launcher and is not gated here. The hosted macOS runner fails this guard: its
+virtual GPU is spelled 'Apple Inc.' where fpgen has 'Apple', a runner spelling and not a
+product bug (a real Apple M1 passes).
 
 Stock Firefox is downloaded from archive.mozilla.org, checked against the
 release's SHA256SUMS, whose signature gpg checks against Mozilla's release
