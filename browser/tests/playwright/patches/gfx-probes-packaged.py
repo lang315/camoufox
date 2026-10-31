@@ -19,7 +19,7 @@ camoufox returned `null` from `canvas.getContext('webgl')`.
 
 Three checks, because each alone can pass while the others are broken: the
 packaging list must not name them, the build under test must have them beside
-the binary, and a bare launch -- no pythonlib, so no `webgl.force-enabled` --
+the binary (Linux only: gfxtest is built for the GTK toolkit alone), and a bare launch -- no pythonlib, so no `webgl.force-enabled` --
 must still get a context.
 
     python browser/tests/playwright/patches/gfx-probes-packaged.py
@@ -140,9 +140,13 @@ def main() -> int:
 
     binary = resolve_binary()
     install = binary.parent
-    missing = [name for name in PROBES if not (install / name).exists()]
-    if missing:
-        failures.append(f"{install} has no {', '.join(missing)}")
+    # toolkit/xre/moz.build builds gfxtest only for the GTK toolkit, so a
+    # Windows or macOS package has none to ship.
+    missing = []
+    if sys.platform.startswith("linux"):
+        missing = [name for name in PROBES if not (install / name).exists()]
+        if missing:
+            failures.append(f"{install} has no {', '.join(missing)}")
 
     # Only the blocklist refusal is this guard's business. A machine with no
     # usable GL at all (a bare CI container) fails for its own reasons and would
@@ -172,7 +176,7 @@ def main() -> int:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print("PASS: gfxtest ships, and WebGL works without a pref forcing it")
+    print("PASS: " + ("gfxtest ships, and " if sys.platform.startswith("linux") else "") + "WebGL works without a pref forcing it")
     return 0
 
 

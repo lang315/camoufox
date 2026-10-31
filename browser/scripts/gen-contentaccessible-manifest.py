@@ -16,42 +16,50 @@ second. hCaptcha probes chrome://juggler this way.
 
     python3 scripts/gen-contentaccessible-manifest.py /path/to/firefox
 
-Writes scripts/data/contentaccessible-manifest.json, which
-tests/playwright/patches/contentaccessible-parity.py diffs a build against. Re-run it on a
-Firefox uplift; the guard refuses to compare across versions.
+The directory holding application.ini and omni.ja: the Firefox directory on Linux,
+Contents/Resources of Firefox.app on macOS, the unpacked installer's core/ on Windows.
+Each OS ships its own files (hiddenWindowMac.xhtml, preprocessed markup), so it writes
+scripts/data/contentaccessible-manifest.json for Linux and
+contentaccessible-manifest-macos.json or -windows.json for the others, which
+tests/playwright/patches/contentaccessible-parity.py diffs a build of that OS against.
+Re-run it on a Firefox uplift, once per OS; the guard refuses to compare across versions.
 """
 
 import hashlib
 import json
 import re
-import subprocess
 import sys
-import tempfile
+import zipfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-OUT = REPO_ROOT / "scripts" / "data" / "contentaccessible-manifest.json"
+DATA = REPO_ROOT / "scripts" / "data"
 JARS = ("browser/omni.ja", "omni.ja")
 
 
+def manifest_path(os_name: str) -> Path:
+    """The manifest of one OS's stock release; Linux's keeps the original name."""
+    return DATA / ("contentaccessible-manifest.json" if os_name == "linux" else f"contentaccessible-manifest-{os_name}.json")
+
+
+def stock_os(root: Path) -> str:
+    """Which OS's release a Firefox directory is, from its layout."""
+    if (root / "firefox.exe").exists():
+        return "windows"
+    return "macos" if root.name == "Resources" else "linux"
+
+
 def zip_entries(jar: Path) -> dict:
-    """Map member -> size. Uses unzip, not zipfile: Firefox's optimized jars
-    have the central directory at the front and zipfile cannot open them."""
-    out = subprocess.run(["unzip", "-l", str(jar)], capture_output=True, text=True).stdout
-    entries = {}
-    for line in out.splitlines():
-        parts = line.split(None, 3)
-        if len(parts) == 4 and parts[0].isdigit() and not parts[3].endswith("/"):
-            entries[parts[3]] = int(parts[0])
-    return entries
+    """Map member -> size of the files in a jar."""
+    with zipfile.ZipFile(jar) as z:
+        return {i.filename: i.file_size for i in z.infolist() if not i.is_dir()}
 
 
-def packaged_bytes(f: Path) -> bytes:
+def packaged_bytes(name: str, data: bytes) -> bytes:
     """A file's bytes as the packager writes them into omni.ja: it strips the
     `#` comment lines of .ftl and .properties files (mozpack's
     MinifiedCommentStripped), which an unpackaged tree still carries."""
-    data = f.read_bytes()
-    if f.suffix in (".ftl", ".properties"):
+    if name.endswith((".ftl", ".properties")):
         data = b"".join(l for l in data.splitlines(keepends=True) if not l.startswith(b"#"))
     return data
 
@@ -65,30 +73,22 @@ def tree_hashes(base: Path, prefixes: list) -> dict:
         if top.is_dir():
             for f in top.rglob("*"):
                 if f.is_file():
-                    out[f.relative_to(base).as_posix()] = hashlib.sha256(packaged_bytes(f)).hexdigest()
+                    out[f.relative_to(base).as_posix()] = hashlib.sha256(packaged_bytes(f.name, f.read_bytes())).hexdigest()
     return out
 
 
 def jar_hashes(jar: Path, prefixes: list) -> dict:
     """Member -> SHA-256 for the files under `prefixes` in a jar."""
-    with tempfile.TemporaryDirectory() as tmp:
-        # unzip warns, with a non-zero exit, about the front-loaded central
-        # directory of every optimized jar, so completeness is checked instead.
-        proc = subprocess.run(
-            ["unzip", "-qo", str(jar), *[p + "*" for p in prefixes], "-d", tmp],
-            capture_output=True, text=True,
-        )
-        hashes = tree_hashes(Path(tmp), prefixes)
-        listed = {m for m in zip_entries(jar) if any(m.startswith(p) for p in prefixes)}
-        if set(hashes) != listed:
-            raise RuntimeError(f"unzip {jar} extracted {len(hashes)} of {len(listed)} files: {proc.stderr.strip()}")
-        return hashes
+    with zipfile.ZipFile(jar) as z:
+        return {
+            n: hashlib.sha256(packaged_bytes(n, z.read(n))).hexdigest()
+            for n in z.namelist() if not n.endswith("/") and any(n.startswith(p) for p in prefixes)
+        }
 
 
 def zip_read(jar: Path, member: str) -> str:
-    return subprocess.run(
-        ["unzip", "-p", str(jar), member], capture_output=True
-    ).stdout.decode("utf8", "replace")
+    with zipfile.ZipFile(jar) as z:
+        return z.read(member).decode("utf8", "replace")
 
 
 def resolve(target: str, base: str) -> tuple:
@@ -169,10 +169,11 @@ def main() -> int:
         manifest["packages"][key] = {"prefixes": prefixes, "files": files}
         total += len(files)
 
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
+    out = manifest_path(stock_os(root))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(manifest, indent=1, sort_keys=True) + "\n")
     print(f"Firefox {manifest['firefox_version']}: {len(pkgs)} packages, {total} files")
-    print(f"wrote {OUT.relative_to(REPO_ROOT)}")
+    print(f"wrote {out.relative_to(REPO_ROOT)}")
     return 0
 
 

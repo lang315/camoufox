@@ -1008,3 +1008,6 @@ rules:
       platform before starting the script, prints the guard under its own count,
       and records it as not_applicable. The set sits beside GROUPS rather than in
       each guard because the runner must decide without running the script.
+      A guard that does not apply on one platform for that platform's reason
+      (system-font-alias-stall on macOS, windows-keyboard on Windows) sits in NOT_ON
+      with the reason, counted the same way.
