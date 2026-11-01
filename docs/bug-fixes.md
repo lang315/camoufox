@@ -25,6 +25,7 @@ later change should read first.
 **Evidence.** Red: e2e run 41051584695, job 124048727857, on a probe branch that ran the guard. Green: see the PR for run and job ids.
 
 **What misled the investigation.** Nothing was misleading, but the guard could not run on Windows before #338, so the difference sat unmeasured since the mozconfig line was written. A Linux or macOS green says nothing about it (lesson 3).
+
 ## #353: the build-tester crashed on Windows printing box-drawing characters
 
 **Fixed by:** the PR that closes #353. **Found by:** a probe run of the build-tester against a Windows build zip on a GitHub Windows runner.
