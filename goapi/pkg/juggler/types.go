@@ -598,6 +598,15 @@ type PageAddBindingParams struct {
 	Script    string `json:"script"`
 }
 
+// BrowserAddBindingParams — Browser.addBinding (BrowserHandler.js). The binding
+// is installed in every page of the context, open or opened later.
+type BrowserAddBindingParams struct {
+	BrowserContextID string `json:"browserContextId,omitempty"`
+	WorldName        string `json:"worldName,omitempty"`
+	Name             string `json:"name"`
+	Script           string `json:"script"`
+}
+
 // PageBindingCalledEvent — Page.bindingCalled (Protocol.js L714).
 type PageBindingCalledEvent struct {
 	ExecutionContextID string `json:"executionContextId"`
