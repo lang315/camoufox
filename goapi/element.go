@@ -1,12 +1,14 @@
 package camoufox
 
 import (
+	"cmp"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/lang315/camoufox/goapi/pkg/juggler"
@@ -70,6 +72,51 @@ func (p *Page) QuerySelector(ctx context.Context, selector string) (*ElementHand
 		return nil, nil
 	}
 	return p.wrapObject(p.MainFrameID(), ctxID, res.Result.ObjectID), nil
+}
+
+// EvaluateElement runs expression in the page's isolated world, like Evaluate,
+// and returns the node it yields as a handle. null and undefined give nil, nil,
+// as QuerySelector does for no match; any other value is an error. An "mw:"
+// expression is an error: a main-world value cannot become a handle. So is a
+// node of an iframe's document.
+func (p *Page) EvaluateElement(ctx context.Context, expression string) (*ElementHandle, error) {
+	if strings.HasPrefix(expression, mainWorldPrefix) {
+		return nil, errors.New("camoufox: EvaluateElement: a main world value cannot become a handle")
+	}
+	ctxID, err := p.awaitMainContext(ctx, 5*time.Second)
+	if err != nil {
+		return nil, err
+	}
+	var res juggler.EvaluateResult
+	if err := p.session.Call(ctx, "Runtime.evaluate", juggler.EvaluateParams{
+		ExecutionContextID: ctxID,
+		Expression:         expression,
+	}, &res); err != nil {
+		return nil, err
+	}
+	if res.ExceptionDetails != nil {
+		return nil, fmt.Errorf("camoufox: page exception: %s", res.ExceptionDetails.Text)
+	}
+	r := res.Result
+	// Juggler sends a primitive as {value}, and undefined as an empty object.
+	if r == nil || (r.ObjectID == "" && r.UnserializableValue == "" && (len(r.Value) == 0 || string(r.Value) == "null")) {
+		return nil, nil
+	}
+	if r.Subtype != "node" {
+		return nil, fmt.Errorf("camoufox: EvaluateElement: expression yielded a %s, not a node", cmp.Or(r.Subtype, r.Type))
+	}
+	// A node of another document (an iframe's) would carry the main frame's
+	// id, and Click would aim its frame-relative coordinates at the main page.
+	own, err := p.callFunction(ctx, ctxID,
+		`function(n) { return (n.ownerDocument || n) === document; }`,
+		[]juggler.CallFunctionArgument{{ObjectID: r.ObjectID}}, true)
+	if err != nil {
+		return nil, err
+	}
+	if string(own.Result.Value) != "true" {
+		return nil, errors.New("camoufox: EvaluateElement: the node belongs to a document other than the page's main document")
+	}
+	return p.wrapObject(p.MainFrameID(), ctxID, r.ObjectID), nil
 }
 
 // QuerySelectorAll returns every matching element as a slice of handles.
@@ -202,6 +249,39 @@ func (e *ElementHandle) GetAttribute(ctx context.Context, name string) (string, 
 		return "", nil
 	}
 	return *s, nil
+}
+
+// Evaluate calls fn, a JS function expression, with the element as its first
+// argument and returns the value, decoded as Page.Evaluate does.
+func (e *ElementHandle) Evaluate(ctx context.Context, fn string) (any, error) {
+	res, err := e.page.callFunction(ctx, e.ctxID, fn,
+		[]juggler.CallFunctionArgument{{ObjectID: e.objectID}}, true)
+	if err != nil {
+		return nil, err
+	}
+	if res.Result == nil || len(res.Result.Value) == 0 {
+		return nil, nil
+	}
+	var v any
+	if err := json.Unmarshal(res.Result.Value, &v); err != nil {
+		return nil, fmt.Errorf("camoufox: decode evaluate result: %w", err)
+	}
+	return v, nil
+}
+
+// QuerySelector returns the first descendant matching selector, or nil if none
+// does (no error).
+func (e *ElementHandle) QuerySelector(ctx context.Context, selector string) (*ElementHandle, error) {
+	res, err := e.page.callFunction(ctx, e.ctxID,
+		`function(el, sel) { return el.querySelector(sel); }`,
+		[]juggler.CallFunctionArgument{{ObjectID: e.objectID}, argString(selector)}, false)
+	if err != nil {
+		return nil, err
+	}
+	if res.Result == nil || res.Result.ObjectID == "" {
+		return nil, nil
+	}
+	return e.page.wrapObject(e.frameID, e.ctxID, res.Result.ObjectID), nil
 }
 
 // Dispose releases the browser-side reference.
