@@ -87,6 +87,19 @@ func TestElementPrimitives(t *testing.T) {
 		}
 	})
 
+	for name, expr := range map[string]string{
+		"a text node":  `document.getElementById("inner").firstChild`,
+		"a comment":    `document.body.appendChild(document.createComment("c"))`,
+		"the document": `document`,
+	} {
+		t.Run("EvaluateElement rejects "+name, func(t *testing.T) {
+			el, err := p.EvaluateElement(ctx, expr)
+			if err == nil || el != nil || !strings.Contains(err.Error(), "not an element") {
+				t.Errorf("EvaluateElement(%s) = %v, %v; want an error saying not an element", expr, el, err)
+			}
+		})
+	}
+
 	t.Run("EvaluateElement rejects a node of an iframe's document", func(t *testing.T) {
 		if _, err := p.Evaluate(ctx, `new Promise(r => { const f = document.getElementById("frame"); f.contentDocument.readyState === "complete" ? r(1) : f.addEventListener("load", () => r(1)); })`); err != nil {
 			t.Fatalf("wait for iframe: %v", err)

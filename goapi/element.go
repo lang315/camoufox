@@ -78,7 +78,8 @@ func (p *Page) QuerySelector(ctx context.Context, selector string) (*ElementHand
 // and returns the node it yields as a handle. null and undefined give nil, nil,
 // as QuerySelector does for no match; any other value is an error. An "mw:"
 // expression is an error: a main-world value cannot become a handle. So is a
-// node of an iframe's document.
+// node that is not an element (text, comment, document) and an element of an
+// iframe's document.
 func (p *Page) EvaluateElement(ctx context.Context, expression string) (*ElementHandle, error) {
 	if strings.HasPrefix(expression, mainWorldPrefix) {
 		return nil, errors.New("camoufox: EvaluateElement: a main world value cannot become a handle")
@@ -107,14 +108,23 @@ func (p *Page) EvaluateElement(ctx context.Context, expression string) (*Element
 	}
 	// A node of another document (an iframe's) would carry the main frame's
 	// id, and Click would aim its frame-relative coordinates at the main page.
-	own, err := p.callFunction(ctx, ctxID,
-		`function(n) { return (n.ownerDocument || n) === document; }`,
+	// nodeType, not instanceof Element: the isolated world has its own Element.
+	check, err := p.callFunction(ctx, ctxID,
+		`function(n) {
+			if (n.nodeType !== 1) return "not an element (nodeType " + n.nodeType + ")";
+			if (n.ownerDocument !== document) return "the element belongs to a document other than the page's main document";
+			return "";
+		}`,
 		[]juggler.CallFunctionArgument{{ObjectID: r.ObjectID}}, true)
 	if err != nil {
 		return nil, err
 	}
-	if string(own.Result.Value) != "true" {
-		return nil, errors.New("camoufox: EvaluateElement: the node belongs to a document other than the page's main document")
+	var why string
+	if err := json.Unmarshal(check.Result.Value, &why); err != nil {
+		return nil, fmt.Errorf("camoufox: EvaluateElement: decode node check: %w", err)
+	}
+	if why != "" {
+		return nil, fmt.Errorf("camoufox: EvaluateElement: %s", why)
 	}
 	return p.wrapObject(p.MainFrameID(), ctxID, r.ObjectID), nil
 }

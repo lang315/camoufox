@@ -135,7 +135,8 @@ field, err := form.QuerySelector(ctx, "[name=email]")
 
 `EvaluateElement` fails loudly instead of returning a handle that is not an element: a
 number, string or plain object is an error, an `mw:` expression is an error (a main-world
-value cannot become a handle), and so is a node of an iframe's document, because a handle
+value cannot become a handle), a node that is not an element (a text node, a comment, the
+document) is an error, and so is an element of an iframe's document, because a handle
 carries the main frame and `Click` would aim its frame-relative coordinates at the main
 page. `ElementHandle.Evaluate` decodes the value as `Page.Evaluate` does.
 
