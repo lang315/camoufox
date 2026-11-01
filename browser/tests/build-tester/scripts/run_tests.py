@@ -25,6 +25,10 @@ from runner import run_tests
 
 
 def main():
+    # The certificate and progress output are box-drawing and check-mark text. A
+    # piped stdout on Windows is cp1252, which cannot encode them (#353).
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(
         description="Camoufox Build Tester — runs antibot-detection checks via Playwright",
         formatter_class=argparse.RawDescriptionHelpFormatter,

@@ -20,6 +20,8 @@ import json
 import os
 import pathlib
 import re
+import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -749,6 +751,31 @@ def test_build_tester_does_not_grade_a_previous_runs_result(tmp_path, monkeypatc
     code = _build_tester_run(tmp_path, monkeypatch,
                              lambda cmd, **kw: Result(1, "", "ERROR: Binary not found"))
     assert code == 1
+
+
+def test_build_tester_prints_box_drawing_under_a_cp1252_stdout(tmp_path):
+    """The suite's own output must encode on a Windows pipe (#353).
+
+    Windows pipes a child's stdout as cp1252, which has no box-drawing
+    characters, and the first line of the report crashed the run before grading.
+    The child runs run_tests.main with a stand-in suite that prints one.
+    """
+    scripts = pathlib.Path(__file__).resolve().parents[2] / "browser" / "tests" / "build-tester" / "scripts"
+    binary = tmp_path / "camoufox-bin"
+    binary.touch()
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import run_tests\n"
+        "async def suite(**kw):\n    print('\\u2500' * 3)\n    return 0\n"
+        "run_tests.run_tests = suite\n"
+        "sys.argv = ['run_tests.py', sys.argv[2]]\n"
+        "run_tests.main()\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code, str(scripts), str(binary)],
+        capture_output=True, env={**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"},
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "\u2500\u2500\u2500" in proc.stdout.decode("utf-8")
 
 
 def test_run_pytest_clears_a_previous_runs_junit(tmp_path, monkeypatch):
