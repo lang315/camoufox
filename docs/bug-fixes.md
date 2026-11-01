@@ -25,6 +25,19 @@ later change should read first.
 **Evidence.** Red: e2e run 41051584695, job 124048727857, on a probe branch that ran the guard. Green: see the PR for run and job ids.
 
 **What misled the investigation.** Nothing was misleading, but the guard could not run on Windows before #338, so the difference sat unmeasured since the mozconfig line was written. A Linux or macOS green says nothing about it (lesson 3).
+## #353: the build-tester crashed on Windows printing box-drawing characters
+
+**Fixed by:** the PR that closes #353. **Found by:** a probe run of the build-tester against a Windows build zip on a GitHub Windows runner.
+
+**Symptom.** `python -m ci.run_build_tester` exited 1 on Windows before grading, and the gate reported `build-tester exited 1 without writing build-tester-result.json`. The child's traceback ended in `UnicodeEncodeError: 'charmap' codec can't encode characters in position 2-61` at `print(f"\n{'─' * 60}")` in `scripts/runner.py`.
+
+**Root cause.** The suite's report is written with box-drawing characters, check marks and em dashes (`runner.py`, `certificate.py`). Python takes the encoding of a piped stdout from the Windows locale, which is cp1252 and has none of them. On Linux and macOS it is UTF-8, so the suite never failed there.
+
+**Fix.** `scripts/run_tests.py`, the one entry point of the suite, reconfigures stdout and stderr to UTF-8 before it prints anything, so every print in the suite is covered. The alternative, dropping the non-ASCII characters, would have changed the certificate and every message that uses them for one platform's locale. Setting `PYTHONUTF8=1` in the caller would hide the crash for that caller only, and the next one to run the suite would hit it again.
+
+**Evidence.** `test_build_tester_prints_box_drawing_under_a_cp1252_stdout` runs `run_tests.main` in a child with `PYTHONIOENCODING=cp1252` and a stand-in suite that prints a box-drawing line. Without the fix it fails with the `UnicodeEncodeError` above; with it, it passes and the bytes on stdout decode as UTF-8.
+
+**What misled the investigation.** Nothing; the cause was in the traceback. The class is the same as #311 and #314: a script that assumed Linux and macOS defaults.
 
 ## #338: eleven patch guards could not run, or measured nothing, on Windows and macOS
 
