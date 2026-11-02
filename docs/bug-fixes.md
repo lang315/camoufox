@@ -12,6 +12,42 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #359: getter-cost-parity was red on the hosted macOS runner
+
+**Fixed by:** the PR that closes #359. **Found by:** the macOS leg of the guard, red on and off with no code change.
+
+**Symptom.** `getter-cost-parity.py` failed intermittently on the hosted macOS runner, on getters that differed from run to run, and passed on Linux.
+
+**Root cause.** Two causes, one in the browser and one in the measurement.
+- The browser. `navigator.hardwareConcurrency` did a per-context store read and a config lookup on every call, in `Navigator::HardwareConcurrency` and `WorkerNavigator::HardwareConcurrency`. Stock does neither. On the Linux runner the worker getter cost 20-26 ns more than its untouched control, and the main-thread one 16-20 ns more. A launch-level identity (store miss, then config lookup) cost 4-12 ns more than a context identity (store hit, early return), which is the gap the guard compares two columns across. The config lookup itself measured 3-6 ns natively (2.7 ns on a miss, 5.7 ns on a hit, M1 Pro, standalone benchmark), so the rest was the store read and the thread-local memo behind it, on every call.
+- The measurement. The guard's docstring said: "Each figure is the fastest of several rounds over two launches, so a busy runner inflates both browsers rather than one." That does not hold on a hosted macOS VM. Two launches of the same browser differ there by 15-30 ns per getter (Linux: 1-3 ns), and the quietest launch of one browser against the quietest of the other is a comparison of two noise draws, with 30 ns as the gap being decided. A minimum over two cannot be stable at that spread.
+
+**Fix.**
+- `zz-stock-cost-parity.patch` now resolves the spoofed hardwareConcurrency once per `RoverfoxStorageManager` generation per navigator, in the `nsScreen::CamouSpoofed` pattern: `Navigator` and `WorkerNavigator` keep `{generation, user context id, value}` and refill only when the generation or the context id changes. A launch identity and a context identity take the same single comparison, so the two paths cost the same and there is no skip branch. Stock's work still runs first. The generation is an atomic: `BumpGeneration` is `fetch_add(release)` and `Generation()` is `load(acquire)`.
+- The guard compares medians of `LAUNCHES = 6` launches, and scales Camoufox's cost by stock's control cost over Camoufox's control cost before the slower test (`verdict()`). `SLOWER_FACTOR` 2.0, `FASTER_FACTOR` 2.0 and `MIN_GAP_NS` 30 are unchanged. The same N runs on every OS. The cold first read keeps the fastest launch, because a lookup that blocks on the parent does so every time. A control that differs from stock by the slower test fails the run as not comparable, unscaled.
+- A new guard arm launches with an explicit `navigator.hardwareConcurrency` that is not the host's core count (the launcher snaps an unset value to the host's, which would make the arm vacuous) and requires the main thread and a worker to report it on the first read.
+
+What the guard compares across: separate processes (stock Firefox against Camoufox, and launch against context), on one page and one machine. Two things make them comparable: an untouched control getter in each scope (`screen.orientation.type` in a window, `navigator.onLine` in a worker) whose ratio between the browsers scales the rest, and the control failing the run when it differs. The first establishes that the probe and the machine's speed moved together, not that the binaries differ only by the patch.
+
+How N was chosen. Simulation over every pair of N-subsets of 8 launches per browser, on fresh data from the fixed build (Linux run 41408378219, macOS e2e run 41434368730 on build 41408406642), six getters, both arms: 0.0% false failures at N = 4, 6 and 8 on both OSes. The 3x negative control (Camoufox values times 3) was caught in 100% of cells except mac `wkHW` N=4 launch (99.5%). N=4 reaches 2.01x on mac `innerHeight` (a gap of +24 saves it), N=6 peaks at 1.79x / +20 ns (mac) and 1.55x / +34 ns (Linux, a worker getter whose ratio stays under 2), N=8 at 1.53x / +13 ns. N=6 is the smallest where each limit holds on its own. The subsets are drawn from the same 8 launches, so they are not independent draws. About +5 minutes on macOS over two launches.
+
+**Evidence** (Linux run 41408378219, median of 8 launches, Camoufox minus stock, launch / context):
+- main `hardwareConcurrency` +29 / +32, against controls `screen.orientation.type` +19 / +22 and `navigator.onLine` +18 / +18, and untouched `innerWidth` +28 / +28;
+- worker `hardwareConcurrency` +12 / +14, against its control `navigator.onLine` -1 / -1;
+- launch minus context: 0 ns on every getter and control but one (worker `onLine`, -1 ns).
+- macOS (e2e 41434368730) worker `hardwareConcurrency` +10 / +9 against a control +3 / +2, where the build before the fix had +47 / +24.
+- Red to green: `ci/tests/test_getter_cost_verdict.py` holds `verdict()` against a getter at three times its control against stock's one times (fails), a uniformly 2.2x slower build (passes), equal costs (pass), a ratio over 2 under 30 ns (passes), and an early-return getter (still fails FASTER). Replacing the scaled cost by the raw one turns the uniform-build test red; removing the gap clause of the faster test turns the early-return test red. The real-browser negative control, a slow getter added on a probe branch and run through Linux CI, was never in this PR.
+
+**What the guard can see.** A regression of about 3x its control (99.5-100% of simulated cells on the fixed build's data; 88-100% on the pre-fix mac data at N=4). Not an excess of 20-30 ns: run on the build before the fix, the same rule fails mac `wkHW` 4.5% of the time at N=4 (2.27x, +60 ns), 0.5% at N=6 (2.04x, +51 ns) and 0% at N=8. The evidence that the fix removed that excess is the probe tables above, not the guard going green.
+
+**Residual, stated as measured.** The worker `hardwareConcurrency` still costs about 12-15 ns over its control on Linux (+12 / +14 against -1 / -1), main-thread about 10-14 ns over its controls: under `MIN_GAP_NS` (30), not zero. The normalised cost of Camoufox's getters against stock's is still about 1.5-1.86x on the runner. The config lookup measured 3-6 ns; the rest of the per-getter excess also sits on getters the fork does not touch: `innerWidth`, `innerHeight` and `screen.orientation.type` read +17 to +33 ns over stock on Linux. That it comes from the build having no PGO or LTO is inferred from the mozconfig, not isolated by a build with them. No PGO issue is filed: one machine pair is not cross-machine evidence.
+
+**What misled the investigation.**
+- A control-normalised ratio per launch does not tighten the spread (its CV was equal or looser), which is why the fix is a median and not a better ratio. It was tried first.
+- Mac local runs showed a FASTER failure (39 ns against 71) that was a loop artefact: `colorDepth` and `pixelDepth` share `nsScreen::PixelDepth`, and `pixelDepth` read 85 ns in the same launch.
+- The new guard arm failed once (`first page read=8 first worker read=8` for a requested 3, probe run 41438746894, job 125272343860) while the same browser passed in the PR's run. Not the browser: with no `os`, the launcher draws a random identity, and on an Apple Silicon draw `coherence.py` snaps the user's core count up to 8 (`appleSiliconCores`, `_repair_apple_silicon_cores`). The arm now launches as `windows`.
+- The first fix read is not a fail-open: a navigator that has not resolved a value returns stock's, so the guard's new arm needs an explicit value to be non-vacuous.
+
 ## #371: TestWatchMutations raced the page's own timer
 
 **Fixed by:** the PR that closes #371. **Found by:** `goapi (browser)` in Tests run 41405543370 on PR #364, whose diff did not touch the test. It failed again on main at 4ab01128 (Tests run 41425224297, job 125231861359, 8.71 s), so it was not rare.
