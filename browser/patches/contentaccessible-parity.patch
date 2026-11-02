@@ -9,6 +9,14 @@ chrome://global/content/crashes.{html,js,css} were absent, because
 JAR_MANIFESTS entry is outside that moz.build guard, so shipping the three
 content files does not build or enable the crash reporter.
 
+chrome://global/content/defaultagent/default-browser-notification-privacy-image.svg
+is absent on Windows, because --disable-default-browser-agent keeps
+toolkit/mozapps/defaultagent out of the build (toolkit/moz.build adds that
+directory only when MOZ_DEFAULT_BROWSER_AGENT is set) and with it the jar.mn that
+registers the file. toolkit/content/jar.mn, which builds the same global
+package, lists it again for Windows, from the same source file. The agent itself
+stays off.
+
 The other tell this patch used to cover, browser-development-helpers.js, is
 gone at the source: Camoufox builds with MOZILLA_OFFICIAL (assets/base.mozconfig),
 which drops it exactly as stock does.
@@ -28,3 +36,17 @@ index 641fcaa2fe..0d9f215fd2 100644
    content/global/crashes.js               (content/crashes.js)
    content/global/crashes.css              (content/crashes.css)
 -#endif
+diff --git a/toolkit/content/jar.mn b/toolkit/content/jar.mn
+index 1f8fe0c94d..659c3314a2 100644
+--- a/toolkit/content/jar.mn
++++ b/toolkit/content/jar.mn
+@@ -229,6 +229,9 @@
+    content/global/gmp-sources/openh264.json    (gmp-sources/openh264.json)
+    content/global/gmp-sources/widevinecdm.json (gmp-sources/widevinecdm.json)
+    content/global/gmp-sources/widevinecdm_l1.json (gmp-sources/widevinecdm_l1.json)
++#ifdef XP_WIN
++   content/global/defaultagent/default-browser-notification-privacy-image.svg (/toolkit/mozapps/defaultagent/assets/default-browser-notification-privacy-image.svg)
++#endif
+ 
+ # Third party files
+    content/global/third_party/d3/d3.js                (/third_party/js/d3/d3.js)
