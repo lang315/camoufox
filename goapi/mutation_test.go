@@ -17,14 +17,6 @@ func TestWatchMutations(t *testing.T) {
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte(`<html><body>
 <div id="container"></div>
-<script>
-  setTimeout(function() {
-    var d = document.createElement('div');
-    d.id = 'added';
-    d.textContent = 'hello';
-    document.getElementById('container').appendChild(d);
-  }, 100);
-</script>
 </body></html>`))
 	}))
 	defer srv.Close()
@@ -62,6 +54,12 @@ func TestWatchMutations(t *testing.T) {
 		t.Fatalf("WatchMutations: %v", err)
 	}
 	defer cancelWatch()
+
+	// The append runs only now, after the observer exists: a timer in the page
+	// would race the arming of the observer on a slow runner (#371).
+	if _, err := p.Evaluate(ctx, `(() => { const d = document.createElement("div"); d.id = "added"; d.textContent = "hello"; document.getElementById("container").appendChild(d); })()`); err != nil {
+		t.Fatalf("append: %v", err)
+	}
 
 	select {
 	case m := <-ch:
