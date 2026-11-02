@@ -339,3 +339,11 @@ the healthy count** and a non-zero one is a finding.
   The browser cache is keyed on compiled inputs only (`ci/browser_inputs.py`), so a
   change that misses them, Juggler JS included, restores main's browser in ~1 min.
 - NEVER poll a backgrounded job (`sleep`/`ps`/`pgrep`/`top`) — do other work or end your reply and you will be woken with its output.
+- Clean up after every PR, feature or CI run you finish: delete what you created and
+  no longer use — build outputs and browser profiles in your scratchpad, git worktrees
+  and `.ci-work` copies, downloaded or built zips and binaries — and stop the test
+  browsers you started. Keep only what a live process, an open PR or another
+  session's run still needs, never delete another session's files, and say in the
+  PR body or report what you removed. This covers the local machine; files on a
+  shared remote build host need its owner's approval. Stale build outputs once left
+  the development machine with 12G of disk free.
