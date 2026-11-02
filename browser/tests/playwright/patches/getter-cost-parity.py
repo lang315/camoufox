@@ -20,9 +20,22 @@ SLOWER_FACTOR times stock and at least MIN_GAP_NS more. It also fails when a
 getter is at least MIN_GAP_NS cheaper than stock's and, measured against an
 untouched control getter in the same browser, under 1/FASTER_FACTOR of stock's
 cost: one that skips stock's work shows as plainly (screen.width took 18-24 ns
-against stock's 107 ns when it did). Each figure is the fastest of several
-rounds over two launches, so a busy runner inflates both browsers rather than
-one.
+against stock's 107 ns when it did).
+
+What it compares across: separate processes. Each of LAUNCHES rounds starts
+stock Firefox and then Camoufox, once with a launch-level and once with a
+per-context identity, on one page and one machine. A figure is the median over
+the launches of the fastest of several in-page rounds. The Camoufox figure is
+then scaled by stock's control cost over Camoufox's, both read from the same
+medians (screen.orientation.type in a window, navigator.onLine in a worker):
+the two builds differ by a uniform per-getter cost (no PGO or LTO, ~+13 ns on
+every getter, spoofed or not), and the control is what makes the two sides
+comparable. A control that is itself more than SLOWER_FACTOR over stock fails
+the run, because the browsers are then not comparable. The minimum over two
+launches was used before and failed on the hosted macOS runner (#359): one
+launch's quietest round differs from the next by 15-30 ns there, more than the
+gap being measured. verdict() is the rule and ci/tests/test_getter_cost_verdict.py
+holds its negative controls.
 
     python browser/tests/playwright/patches/getter-cost-parity.py
     python browser/tests/playwright/patches/getter-cost-parity.py --stock FIREFOX
@@ -33,6 +46,7 @@ import importlib.util
 import json
 import os
 import shutil
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -49,7 +63,7 @@ REPO_ROOT = HERE.parents[3]
 sys.path.insert(0, str(REPO_ROOT))
 from ci._util import read_upstream_sh  # noqa: E402
 
-LAUNCHES = 2
+LAUNCHES = 6
 SLOWER_FACTOR = 2.0
 FASTER_FACTOR = 2.0
 MIN_GAP_NS = 30.0
@@ -224,14 +238,26 @@ def cpu_model():
     return ""
 
 
-def fastest(runs):
+def summarise(runs):
+    """Median over launches per getter; the cold first read stays the fastest,
+    since a lookup that blocks on the parent process does so every launch."""
     out = {"first": {e: min(r["first"][e] for r in runs) for e in runs[0]["first"]}}
     for where in ("window", "worker"):
         out[where] = {}
         for expr in runs[0][where]:
             values = [r[where][expr] for r in runs if r[where].get(expr) is not None]
-            out[where][expr] = min(values) if values else None
+            out[where][expr] = statistics.median(values) if values else None
     return out
+
+
+def verdict(s, c, stock_base, camou_base):
+    """(slower, faster) for one getter: s and c are stock's and Camoufox's cost,
+    stock_base and camou_base their cost for the same browser's control getter.
+    Camoufox's cost is scaled by stock_base / camou_base before the slower test."""
+    scaled = c * stock_base / camou_base
+    slower = scaled > SLOWER_FACTOR * s and scaled - s >= MIN_GAP_NS
+    faster = FASTER_FACTOR * c / camou_base < s / stock_base and s - c >= MIN_GAP_NS
+    return slower, faster
 
 
 def main() -> int:
@@ -263,10 +289,10 @@ def main() -> int:
     finally:
         server.shutdown()
 
-    stock = fastest(stock_runs)
+    stock = summarise(stock_runs)
     failures = []
     for identity, runs in camou_runs.items():
-        camou = fastest(runs)
+        camou = summarise(runs)
         print(f"\n== Camoufox, {identity} identity")
         print(f"{'':6s} {'expression':44s} {'stock':>8s} {'camoufox':>9s}  ns/op")
         for where in ("window", "worker"):
@@ -284,9 +310,9 @@ def main() -> int:
                     print(f"{where:6s} {expr[:44]:44s} {'-':>8s} {'-':>9s}  not measurable")
                     continue
                 control = expr in CONTROLS
-                slow = c > SLOWER_FACTOR * s and c - s >= MIN_GAP_NS
-                fast = (FASTER_FACTOR * c / camou_base < s / stock_base
-                        and s - c >= MIN_GAP_NS)
+                slow, fast = verdict(s, c, stock_base, camou_base)
+                if control:
+                    slow = c > SLOWER_FACTOR * s and c - s >= MIN_GAP_NS
                 mark = ("  <- control" if control else "  <- SLOWER" if slow
                         else "  <- FASTER" if fast else "")
                 print(f"{where:6s} {expr[:44]:44s} {s:8.0f} {c:9.0f}{mark}")
