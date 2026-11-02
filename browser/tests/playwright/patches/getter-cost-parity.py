@@ -28,9 +28,9 @@ per-context identity, on one page and one machine. A figure is the median over
 the launches of the fastest of several in-page rounds. The Camoufox figure is
 then scaled by stock's control cost over Camoufox's, both read from the same
 medians (screen.orientation.type in a window, navigator.onLine in a worker):
-the two builds differ by a uniform per-getter cost (no PGO or LTO, ~+13 ns on
-every getter, spoofed or not), and the control is what makes the two sides
-comparable. A control that is itself more than SLOWER_FACTOR over stock fails
+getters the fork does not touch also cost more in Camoufox than in stock, by an
+amount that varies with the getter and the machine, so a control in the same
+scope is what scales the Camoufox side to stock's. A control that is itself more than SLOWER_FACTOR over stock fails
 the run, because the browsers are then not comparable. The minimum over two
 launches was used before and failed on the hosted macOS runner (#359): one
 launch's quietest round differs from the next by 15-30 ns there, more than the
