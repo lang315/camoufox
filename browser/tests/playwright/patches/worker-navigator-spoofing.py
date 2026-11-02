@@ -15,10 +15,17 @@ launch-level MaskConfig and the worker would say Win32 while its page says
 MacIntel. A worker that merely agrees with its page is not enough, since both
 could have fallen to the launch value.
 
+A third arm launches with only a launch-level hardwareConcurrency, one that is not
+the host's core count, and reads it first thing in a fresh page and in a fresh
+worker. Each navigator resolves its value on its first read and then answers from
+that; a first read that fell through to stock would report the host's count and
+fail here, where an arm that only compares page with worker would pass.
+
 Exit 0 on pass, 1 on fail.
 """
 
 import asyncio
+import os
 import sys
 
 WORKER_PROBE_JS = """() => new Promise((resolve, reject) => {
@@ -57,6 +64,27 @@ def check(label: str, page: dict, worker: dict, expected_platform: str) -> bool:
     return ok
 
 
+async def launch_value_arm() -> bool:
+    """A launch-level hardwareConcurrency, read first in a fresh page and worker."""
+    from camoufox.async_api import AsyncCamoufox
+
+    # Never the host's count: stock would answer it too, and the arm would pass
+    # on a spoof that was lost.
+    host = os.cpu_count() or 1
+    want = next(n for n in (3, 6, 12) if n != host)
+    print(f"\n=== launch-level hardwareConcurrency {want} (host has {host}) ===")
+    async with AsyncCamoufox(config={"navigator.hardwareConcurrency": want},
+                             headless=True, i_know_what_im_doing=True) as browser:
+        page = await browser.new_page()
+        await page.goto("about:blank")
+        first = await page.evaluate("navigator.hardwareConcurrency")
+        worker = (await page.evaluate(WORKER_PROBE_JS))["hardwareConcurrency"]
+    ok = first == want and worker == want
+    print(f"  first page read={first} first worker read={worker}  "
+          f"{'PASS' if ok else 'FAIL: the launch value was lost'}")
+    return ok
+
+
 async def main(max_attempts: int = 15) -> int:
     from camoufox.async_api import AsyncCamoufox
     from camoufox.fingerprints import generate_context_fingerprint, get_random_preset
@@ -91,6 +119,7 @@ async def main(max_attempts: int = 15) -> int:
 
     passed = check("windows launch, launch-level context", *win, "Win32")
     passed &= check("macos context in a windows launch", *mac, "MacIntel")
+    passed &= await launch_value_arm()
     print()
     return 0 if passed else 1
 
