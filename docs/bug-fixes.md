@@ -45,6 +45,7 @@ How N was chosen. Simulation over every pair of N-subsets of 8 launches per brow
 **What misled the investigation.**
 - A control-normalised ratio per launch does not tighten the spread (its CV was equal or looser), which is why the fix is a median and not a better ratio. It was tried first.
 - Mac local runs showed a FASTER failure (39 ns against 71) that was a loop artefact: `colorDepth` and `pixelDepth` share `nsScreen::PixelDepth`, and `pixelDepth` read 85 ns in the same launch.
+- The new guard arm failed once (`first page read=8 first worker read=8` for a requested 3, probe run 41438746894, job 125272343860) while the same browser passed in the PR's run. Not the browser: with no `os`, the launcher draws a random identity, and on an Apple Silicon draw `coherence.py` snaps the user's core count up to 8 (`appleSiliconCores`, `_repair_apple_silicon_cores`). The arm now launches as `windows`.
 - The first fix read is not a fail-open: a navigator that has not resolved a value returns stock's, so the guard's new arm needs an explicit value to be non-vacuous.
 
 ## #371: TestWatchMutations raced the page's own timer

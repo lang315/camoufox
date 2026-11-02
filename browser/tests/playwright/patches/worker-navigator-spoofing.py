@@ -73,7 +73,9 @@ async def launch_value_arm() -> bool:
     host = os.cpu_count() or 1
     want = next(n for n in (3, 6, 12) if n != host)
     print(f"\n=== launch-level hardwareConcurrency {want} (host has {host}) ===")
-    async with AsyncCamoufox(config={"navigator.hardwareConcurrency": want},
+    # os="windows": an unpinned launch may draw an Apple Silicon identity, and
+    # coherence.py then snaps a user's core count up to 8 (coherence.apply).
+    async with AsyncCamoufox(config={"navigator.hardwareConcurrency": want}, os="windows",
                              headless=True, i_know_what_im_doing=True) as browser:
         page = await browser.new_page()
         await page.goto("about:blank")
