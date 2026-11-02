@@ -12,6 +12,36 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #371: TestWatchMutations raced the page's own timer
+
+**Fixed by:** the PR that closes #371. **Found by:** `goapi (browser)` in Tests run 41405543370 on PR #364, whose diff did not touch the test. It failed again on main at 4ab01128 (Tests run 41425224297, job 125231861359, 8.71 s), so it was not rare.
+
+**Symptom.** `mutation_test.go:72: timed out waiting for mutation`, `--- FAIL: TestWatchMutations (9.60s)`. The same test passed on the previous head of that PR and on two other PRs running at the same time.
+
+**Root cause.** The test page appended its `<div>` from `setTimeout(..., 100)`, which starts at load. The test armed `WatchMutations` only after `Goto(DOMContentLoaded)` returned. When arming took longer than 100 ms, the append had already happened, nothing mutated afterwards, and the test waited out its 5 s.
+
+**Fix.** The timer is out of the page. The test appends with `p.Evaluate` after `WatchMutations` returns, so the mutation is ordered strictly after the observer exists. The DOM is shared across worlds, so an isolated-world append still mutates. Raising the timer's delay would only have moved the threshold.
+
+**Evidence.** Old test with a 300 ms `time.Sleep` between `Goto` and `WatchMutations`: timed out 3 of 3 runs. Fixed test, no sleep: passed 3 of 3. Fixed test with the same 300 ms sleep: passed.
+
+**Checked and left alone.** `wait_test.go` (200 ms timer) uses `WaitFor`, which polls state, so a timer that fires before the call is armed leaves the element already visible. `binding_test.go` (1500 ms timer) is a negative control: a slower runner only makes the late listener later.
+
+**What misled the investigation.** Nothing; the log line named the wait. The red run was not available from CI, so the gap was injected to make the race deterministic.
+
+## #358: the Windows build lacked chrome://global/content/defaultagent/, a page could tell it from Firefox
+
+**Fixed by:** the PR that closes #358. **Found by:** `contentaccessible-parity` on the fork.2 Windows build, the first run of that guard on Windows after #338.
+
+**Symptom.** The guard reported one difference from stock Firefox 158.0.1 on Windows: `omni.ja|content|global: MISSING vs stock -- chrome/toolkit/content/global/defaultagent/default-browser-notification-privacy-image.svg`. A page can load that file from stock Firefox (`<img src="chrome://global/content/defaultagent/default-browser-notification-privacy-image.svg">`) and not from Camoufox.
+
+**Root cause.** `browser/assets/base.mozconfig` sets `--disable-default-browser-agent`. `toolkit/moz.build` then skips the directory that holds the file: `if CONFIG["MOZ_DEFAULT_BROWSER_AGENT"]: DIRS += ["mozapps/defaultagent"]`. That directory's `jar.mn` is what registers `content/global/defaultagent/...svg` in `toolkit.jar`, so the file never reaches `omni.ja`. The `global` package is `contentaccessible=yes`. The agent's gate is `CC_TYPE == "clang-cl"`, which the Windows cross build satisfies (target `x86_64-pc-windows-msvc`), so the stock Windows build has the file and no other OS does.
+
+**Fix.** `contentaccessible-parity.patch` lists the same file again in `toolkit/content/jar.mn` under `#ifdef XP_WIN`, from the same source path (`/toolkit/mozapps/defaultagent/assets/`). The agent stays disabled. This is the same shape as the crash reporter pages in that patch. The bytes match the recorded Windows manifest: SHA-256 `049284011a35af8bfead24032f90d214f13db34d371abcf66ad37c9451421c47`. The alternative, building the agent's directory without the agent, was not tried: that directory's `moz.build` also compiles the agent.
+
+**Evidence.** Red: e2e run 41051584695, job 124048727857, on a probe branch that ran the guard. Green: see the PR for run and job ids.
+
+**What misled the investigation.** Nothing was misleading, but the guard could not run on Windows before #338, so the difference sat unmeasured since the mozconfig line was written. A Linux or macOS green says nothing about it (lesson 3).
+
 ## #353: the build-tester crashed on Windows printing box-drawing characters
 
 **Fixed by:** the PR that closes #353. **Found by:** a probe run of the build-tester against a Windows build zip on a GitHub Windows runner.
