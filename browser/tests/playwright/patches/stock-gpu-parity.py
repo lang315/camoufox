@@ -331,12 +331,11 @@ def main() -> int:
     # device's tables. A software renderer it leaves to the draw, so that one
     # is named.
     device = nearest_device(target_os, gpu, stock_flat)
+    named = () if renders_on_hardware(tuple(gpu)) else ("webGl:vendor", "webGl:renderer")
     pinned = {
         k: v for k, v in device.items()
-        if k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
+        if k in named or k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
     }
-    if not renders_on_hardware(tuple(gpu)):
-        pinned.update({"webGl:vendor": gpu[0], "webGl:renderer": gpu[1]})
     options = launch_options(
         os=host_os, headless=True, executable_path=str(camoufox), config=pinned, i_know_what_im_doing=True
     )
@@ -344,13 +343,17 @@ def main() -> int:
 
     failures: List[str] = []
     camoufox_gpu = (camoufox_out["webgl"] or {}).get("gpu")
-    if camoufox_gpu != gpu:
-        print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not the host's {gpu}")
+    # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
+    # identity is the chosen device's GPU and its renderer string is not stock's to compare.
+    claims_host = tuple(gpu) in webgl.firefox_gpus(target_os) or renders_on_hardware(tuple(gpu))
+    expected = gpu if claims_host else [device["webGl:vendor"], device["webGl:renderer"]]
+    if camoufox_gpu != expected:
+        print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {expected}")
         failures.append("claimed GPU")
     recorded_flat, camoufox_flat = flatten(recorded_out), flatten(camoufox_out)
     for key in sorted(set(stock_flat) | set(recorded_flat)):
         new, old, got = stock_flat.get(key), recorded_flat.get(key), camoufox_flat.get(key)
-        if new != old:
+        if new != old and not (not claims_host and key.endswith(" 7937")):
             print(f"    [{'ok  ' if got == new else 'FAIL'}] {key}: stock {new}, recorded release {old}, Camoufox {got}")
             if got != new:
                 failures.append(key)
