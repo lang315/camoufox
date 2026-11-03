@@ -5,24 +5,26 @@
 <button id="clip">Copy</button><div id="out"></div>
 <script>
 const $ = id => document.getElementById(id);
-const r = {}, errors = {};
+const r = {}, errors = {}, timings = {};
 const within = (ms, p) => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error("timeout")), ms))]);
-// The compared result keeps only the error's name; the message, and the step a probe had
-// reached, go out of band so a failure names its cause without changing what is compared.
+// The compared result keeps only the error's name; the message, the step a probe had
+// reached and how long it took, pass or fail, go out of band so a failure names its cause
+// without changing what is compared.
 // The budget only tells a hang from an answer. A first service worker registration took 0.2 to 4.6 s over 40
 // fresh launches of both browsers on a Windows runner (#265), so it gets 20 s, not 8.
 async function t(name, fn, ms = 8000) {
-  const at = {};
+  const at = {}, t0 = performance.now();
   try { r[name] = await within(ms, fn(at)); } catch (e) {
     r[name] = "error: " + ((e && e.name) || e);
     errors[name] = `${e && e.message}${at.step ? " at " + at.step : ""}`;
   }
+  timings[name] = {ms: Math.round(performance.now() - t0), step: at.step};
 }
 const sum = cv => cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data.reduce((a, b) => a + b, 0);
 let autoDone = false, clipDone = false;
 function finish() {
   if (autoDone && clipDone) {
-    $("out").dataset.errors = JSON.stringify(errors); $("out").textContent = JSON.stringify(r); $("out").dataset.done = "1";
+    $("out").dataset.errors = JSON.stringify(errors); $("out").dataset.timings = JSON.stringify(timings); $("out").textContent = JSON.stringify(r); $("out").dataset.done = "1";
   }
 }
 async function run() {
@@ -65,8 +67,12 @@ async function run() {
     const px = new Uint8Array(4); gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     return px[1] > 100 && px[3] === 255;
   });
-  await t("audio", () => new Promise((ok, no) => {
-    const a = $("a"); a.onloadedmetadata = () => ok(a.duration > 0.4); a.onerror = () => no(a.error); a.src = "/tone.wav";
+  await t("audio", at => new Promise((ok, no) => {
+    const a = $("a");
+    a.onloadstart = () => { at.step = "loadstart"; };
+    a.onloadedmetadata = () => { at.step = "loadedmetadata"; ok(a.duration > 0.4); };
+    a.onerror = () => { at.step = "error"; no(a.error); };
+    a.src = "/tone.wav"; at.step = "src set";
   }));
   await t("video", async () => {
     const cv = $("c"), x = cv.getContext("2d");
