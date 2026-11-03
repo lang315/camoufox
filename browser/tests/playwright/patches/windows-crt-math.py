@@ -55,8 +55,10 @@ def mismatches(got):
             out[f"{phase} {name}"] = differing(got[phase][name], values)
     out["constant-folded"] = differing(got["constants"], want["constants"])
     # Only the pairs whose exponent is a literal 0.5 or -0.5 are probed.
-    pairs = [(a, b) for a, b in zip(got["half"], want["results"]["pow"]) if a is not None]
-    out["literal exponent +-0.5, hot"] = differing(*map(list, zip(*pairs)))
+    # A pair passes only if every one of its many calls gave the one right value.
+    pairs = [(a[0] if len(a) == 1 else a, b)
+             for a, b in zip(got["half"], want["results"]["pow"]) if a is not None]
+    out["literal exponent +-0.5, every call"] = differing(*map(list, zip(*pairs)))
     return out
 
 

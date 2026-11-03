@@ -31,12 +31,20 @@
   }
   // A literal exponent of 0.5 or -0.5 is compiled by Ion as a square root, not a
   // call to pow, so it takes a path the arrays above never do. Only the pairs
-  // whose exponent is that literal have a Windows result to compare with.
+  // whose exponent is that literal have a Windows result to compare with. Each
+  // literal function is called far above Ion's warm-up (javascript.options.ion.threshold,
+  // 1500, StaticPrefList.yaml:9604 at 158.0.1), and every result of every call is
+  // kept, so a value the interpreter, Baseline or Ion gets wrong is not missed.
   const powHalf = (x) => Math.pow(x, 0.5);
   const powNegHalf = (x) => Math.pow(x, -0.5);
-  let half;
-  for (let i = 0; i < 30; i++) {
-    half = ps.map(([a, b]) => (b === 0.5 ? hex(powHalf(a)) : b === -0.5 ? hex(powNegHalf(a)) : null));
-  }
+  const half = ps.map(([a, b]) => {
+    const f = b === 0.5 ? powHalf : b === -0.5 ? powNegHalf : null;
+    if (!f) return null;
+    const seen = new Set();
+    for (let i = 0; i < 100000; i++) {
+      seen.add(hex(f(a)));
+    }
+    return [...seen];
+  });
   return { cold, hot, constants: constants.map(hex), half };
 }
