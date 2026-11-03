@@ -75,8 +75,16 @@ def substituted(conf, name):
 def generic_chain(conf, generic, shipped):
     """The shipped families FcFontSort ranks for `generic` on a Latin page, as Firefox reads them."""
     pattern = f"{verify_fonts.fc_pattern(generic)}:scalable=true:lang=en"
-    sorted_families = families(conf, "fc-match", "-s", "-f", "%{family[0]}\n", pattern)
-    return list(dict.fromkeys(f for f in sorted_families if f in shipped))[:GENERIC_LIMIT]
+    out = verify_fonts.fc(["fc-match", "-s", "-f", "%{family[0]}\t%{lang}\n", pattern], conf)
+    ranked = {}
+    for line in out.splitlines():
+        family, _, langs = line.partition("\t")
+        ranked.setdefault(family.strip().lower(), langs.split("|"))
+    chain = [f for f in ranked if f in shipped][:GENERIC_LIMIT]
+    # FindGenericFamilies cuts the list to its first entry when no face in it carries the lang.
+    if not any("en" in ranked[f] for f in chain):
+        raise SystemExit(f"no {generic} face in {chain} covers en: Firefox would keep only the first")
+    return chain
 
 
 def build(bin_dir):
