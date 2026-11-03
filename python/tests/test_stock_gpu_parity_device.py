@@ -42,3 +42,20 @@ def test_a_recorded_gpu_keeps_to_its_own_devices(guard):
     gpu = sorted(webgl.firefox_gpus("win"))[0]
     own = webgl.recorded_devices("win", *gpu)
     assert guard.nearest_device("win", list(gpu), {}) in own
+
+
+def test_a_device_without_webgl2_is_not_preferred_to_one_with_it_when_stock_has_webgl2(guard):
+    # A device with no WebGL2 records fewer values, so counting only its own keys made it
+    # look closest, and the page then had no WebGL2RenderingContext to read.
+    devices = [d for g in sorted(webgl.firefox_gpus("win")) for d in webgl.recorded_devices("win", *g)]
+    assert any("webGl2:parameters" not in d for d in devices), "no WebGL2-less device recorded: premise gone"
+    with_webgl2 = next(d for d in devices if "webGl2:parameters" in d)
+    stock = guard.flatten({
+        context: {"extensions": with_webgl2[f"{prefix}:supportedExtensions"], "params": with_webgl2[f"{prefix}:parameters"]}
+        for context, prefix in guard.CONTEXTS.items()
+    })
+    # Stock differs from the recorded device in half its WebGL2 values, as a newer release does.
+    webgl2_keys = sorted(k for k in stock if k.startswith("webgl2 "))
+    for key in webgl2_keys[::2]:
+        stock[key] = "newer"
+    assert "webGl2:parameters" in guard.nearest_device("win", BASIC_RENDER, stock)

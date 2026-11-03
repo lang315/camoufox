@@ -298,7 +298,9 @@ def nearest_device(target_os: str, gpu: List[str], stock: Dict[str, Any]) -> Dic
             for context, prefix in CONTEXTS.items()
             if f"{prefix}:parameters" in device
         })
-        return sum(stock.get(key) != value for key, value in recorded.items())
+        # A value stock reports and the device lacks counts too: a device without WebGL2
+        # records fewer values and would otherwise look closest to a stock that has it.
+        return sum(stock.get(key) != recorded.get(key) for key in stock.keys() | recorded.keys())
 
     return min(devices, key=disagreements)
 
