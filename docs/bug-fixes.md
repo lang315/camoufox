@@ -28,6 +28,25 @@ later change should read first.
 
 **What misled the investigation.** The three prefs copies looked like the fix already shipped, and then like dead code. They are read only on the Linux pref path, but that path is what drew the symptom on a Linux host: with the prefs present, `AddGenericFonts` takes the base pref path, whose table step resolves the row key `times` through the virtual lookup and draws Nimbus Roman; without them it takes `FindGenericFamilies`, whose table step resolves the key through the scope-qualified base lookup, finds no family called `times` on a GTK host, and falls into fontconfig's own loop, which gives the conf. So deleting the prefs alone moves a Linux host to the conf, and the browser change is what fixes Windows and macOS hosts, where the alias rewrite makes the row key resolve. `fc-match -s` also lists host-order fallbacks past the third family (Cascadia Code, FreeSerif), which Gecko never reads: it stops at `max_generic_substitutions`.
 
+## #390: a Playwright shard errored at setup when the upstream test server could not bind its port
+
+**Fixed by:** the PR that makes `ci/pw_camoufox_plugin.py` bind the upstream test servers on kernel-chosen ports. **Found by:** Tests run 41633372099, job `Playwright 2/6` (job 125920147366), on #382.
+
+**Symptom.** The first pytest invocation of the shard ended `278 errors in 13.93s`, every one at setup of the session fixture `start_server`: `twisted.internet.error.CannotListenError: Couldn't listen on 127.0.0.1:41247: [Errno 98] Address already in use.` The three later invocations of the job, each with its own server, passed. No test body ran, so the browser and the PR were not involved.
+
+**Root cause.** playwright-python v1.62.0 `tests/server.py` draws a server's port in `Server.__init__` (`find_free_port`: bind 0, read the number, close; `:56-60`, `:166`) and listens only in `start()` (`:293`, `:326`). Nothing holds the number in between, and `tests/server.py` builds `TestServer()` (an HTTP and an HTTPS server) at import, so the gap runs from collection to the first test. Two things can take the number in it:
+
+- the other server: the HTTP server draws, closes, the HTTPS server draws and can get the same number, and the second `listen` fails exactly as in the log (HTTP listens first, `:369`). Measured on Linux (kernel 7.2, Python 3.12, port range 32768-60999): 400000 consecutive `find_free_port()` calls returned 38 equal neighbours, about 1 in 10000, and every port was odd (14115 candidates);
+- another process opening a socket in the gap. Measured on the same host: every outgoing connection's source port out of 20000 was even, so a source port cannot be the odd 41247. Only another `bind(0)` or an explicit bind of that number could.
+
+The log does not name the holder. 41247 is odd, which fits a `bind(0)` draw (the same one twice) and does not fit a connection's source port.
+
+**Fix.** `install_kernel_chosen_ports` (called from `pytest_configure`) wraps `Server.start`: it sets the server's port to 0 for that call, so the first `listenTCP` or `listenSSL` asks the kernel for it, then reads the bound number back and rewrites `PORT`, `EMPTY_PAGE`, `PREFIX` and `CROSS_PROCESS_PREFIX` before anything uses them. The `::1` listen then reuses that number. No port is held or drawn ahead, so neither candidate has a window. Upstream's files are untouched; the plugin asserts the shape it relies on (`start` not overridden, both reactor calls present, the URLs carrying the drawn port, a port read back) and fails the run if a Playwright bump changes it. Not done: retrying, or catching `CannotListenError`, which would hide the same clash in the next server.
+
+**Evidence.** `ci/tests/test_pw_server_ports.py` runs a stand-in of upstream's server shape on real sockets. With the fix switched off, the same-port case fails with `CannotListenError: Couldn't listen on 127.0.0.1:41247` and the taken-port case with `Address already in use`. Against the real upstream `tests/server.py` v1.62.0 with twisted 25.5.0 on Linux, both servers drawn 41247: unfixed `CannotListenError Couldn't listen on 127.0.0.1:41247: [Errno 98] Address already in use.`; fixed, the two servers listen on 43795 and 34769. See the PR for the Tests run.
+
+**What misled the investigation.** The issue offered "another process took it as a source port" as one of two equal readings. On Linux, `bind(0)` and `connect()` take opposite port parities, so the odd number settles which kind of draw produced it.
+
 ## #310: the observer and goapi browser tests never ran on macOS or Windows
 
 **Fixed by:** the PR that adds both gates to the macOS and Linux legs of `e2e.yml` (Windows follows #345). **Found by:** the observer harness failing on its first Windows run.
@@ -41,6 +60,20 @@ later change should read first.
 **Evidence.** See the PR.
 
 **What misled the investigation.** The Windows log showed PASS lines before the traceback, which reads as a passing test with noisy teardown; the exit code and the `PermissionError` frame are what failed the run.
+
+## #317: Math.pow of a negative number to the power 0.5 or -0.5 had the wrong NaN sign on Apple silicon
+
+**Fixed by:** the PR that closes #317. **Found by:** the `windows-crt-math` guard in the macOS parity run (41565897021), `FAIL: cold pow: 3 of 1396`.
+
+**Symptom.** `windows-crt-math.py` on macOS arm64, for a Windows identity: 3 of 1396 `Math.pow` results and the same 3 of `**`, cold and hot, differ from stock Firefox on Windows. `sin`, `cos` and `tan` match 1677 of 1677.
+
+**Root cause.** Not rounding, and not FMA contraction. The three pairs are `x < 0` with `y` of 0.5 or -0.5, and the result is NaN with the other sign bit: Windows `fff8000000000000`, the macOS app `7ff8000000000000`. `js::ecmaPow` (`js/src/builtin/Math.cpp`) answers a finite non-zero `x` with `y == 0.5` as `std::sqrt(x)` and `y == -0.5` as `1.0 / std::sqrt(x)` before it reaches `pow_libm_or_fdlibm`, so before the hook that calls `ucrt_pow`. Its comment calls the square root bit-deterministic across platforms, which holds for every result except a NaN: the sign of the NaN a square root of a negative number returns is the CPU's, `SQRTSD` on x86-64 gives `fff8…` and `FSQRT` on arm64 gives `7ff8…`. A standalone C program on the M1 prints `7ff8000000000000` for `sqrt(-2.5)` and for `1.0 / sqrt(-2.5)`. Linux x86-64 was green only because it has the same instruction as Windows. The JIT has the same shortcut: `MPow::foldsConstantPower` (`js/src/jit/MIR.cpp`) turns a constant exponent of 0.5 into `MPowHalf`, which emits `sqrtsd` or `fsqrt` inline.
+
+**Fix.** In `windows-crt-math.patch`, with `javascript.options.use_ucrt_math` on, `ecmaPow` leaves a negative `x` to `pow`, and `MPow::foldsConstantPower` keeps a call to `ecmaPow` for both exponents, since the sign of `x` is not known at compile time. `ucrt_pow(-2.5, 0.5)` and the three failing pairs return `fff8000000000000` (compiled with `-ffp-contract=off` on the M1), the value Windows gives. A positive `x` keeps the square root, as stock Firefox on Windows does. Not tried: a fixed NaN constant at the call site, which would be a special case for one pair of inputs. The probe now also runs the literal exponents `Math.pow(x, 0.5)` and `Math.pow(x, -0.5)` hot, so the `MPowHalf` path is compared with the Windows results; before this the probe passed its exponents from an array and Ion never compiled a square root.
+
+**Evidence.** On the fork.2 macOS arm64 app the guard prints `cold pow: 1393/1396`, `hot pow: 1393/1396`, `literal exponent +-0.5, every call: 3/6` and exits 1. On a macOS arm64 build of this branch (build run 41600986722) it prints `cold pow: 1396/1396`, `hot pow: 1396/1396`, `literal exponent +-0.5, every call: 6/6`, `constant-folded: 6/6`, sin, cos and tan 1677/1677 cold and hot, the `use_ucrt_math` off control still differing, and exits 0. On a build of this branch with the `MIR.cpp` hunk removed and the `ecmaPow` hunk kept (probe branch, build run 41643031690) cold and hot pow are 1396/1396 but the literal arm is `3/6` and the guard exits 1, so the arm reaches the `MPowHalf` path and the hunk is needed. The arm calls each literal function 100000 times per pair, far above `javascript.options.ion.threshold` (1500), and keeps every result.
+
+**What misled the investigation.** The issue called it a last-bit difference in `Math.pow` and `Math.exp`. The probe's `exp` is `a ** b` on the same inputs, not `Math.exp`, so there is one failure, and the printed hex shows it is a sign bit; the likely causes for a last-bit difference (FMA contraction, a libm fall-through) were all ruled out by reading the bits first. The patch comment saying SpiderMonkey's square-root shortcuts are the same on every platform was true for numbers only.
 
 ## #378: the Python and TypeScript launchers handed a symlinked or ".." executable path to the macOS app
 

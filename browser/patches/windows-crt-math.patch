@@ -9,7 +9,7 @@ diff --git a/js/src/builtin/Math.cpp b/js/src/builtin/Math.cpp
  #include "jit/InlinableNatives.h"
  #include "js/Class.h"
  #include "js/ForOfIterator.h"
-@@ -54,8 +55,22 @@
+@@ -54,10 +55,26 @@ using mozilla::NumberEqualsInt64;
  using mozilla::PositiveInfinity;
  using mozilla::WrappingMultiply;
  
@@ -32,20 +32,24 @@ diff --git a/js/src/builtin/Math.cpp b/js/src/builtin/Math.cpp
 +  return JS::Prefs::use_fdlibm_for_sin_cos_tan() && !UseUcrtMath();
  }
  
++bool js::math_use_ucrt_math() { return UseUcrtMath(); }
++
  static inline bool UseFdlibmForSinCosTan(const CallArgs& args) {
-@@ -78,6 +93,11 @@
+   return math_use_fdlibm_for_sin_cos_tan() ||
+          args.callee().nonCCWRealm()->creationOptions().alwaysUseFdlibm();
+@@ -77,6 +94,11 @@ static MOZ_ALWAYS_INLINE double pow_libm_or_fdlibm(double x, double y) {
+   if (sApiLevel <= 28) {
      return fdlibm_pow(x, y);
    }
- #endif
++#endif
 +#ifdef JS_UCRT_MATH
 +  if (UseUcrtMath()) {
 +    return ucrt_pow(x, y);
 +  }
-+#endif
+ #endif
    // Every other platform's libm pow already produces the consensus value
    // for the inputs the math fingerprint samples, so we keep the faster
-   // platform path.
-@@ -237,6 +257,11 @@
+@@ -237,6 +259,11 @@ double js::math_cos_fdlibm_impl(double x) {
  double js::math_cos_native_impl(double x) {
    MOZ_ASSERT(!math_use_fdlibm_for_sin_cos_tan());
    AutoUnsafeCallWithABI unsafe;
@@ -57,7 +61,21 @@ diff --git a/js/src/builtin/Math.cpp b/js/src/builtin/Math.cpp
    return std::cos(x);
  }
  
-@@ -632,6 +657,11 @@
+@@ -529,9 +556,11 @@ double js::ecmaPow(double x, double y) {
+    * Special case for square roots. Note that pow(x, 0.5) != sqrt(x)
+    * when x = -0.0, so we have to guard for this. std::sqrt is IEEE-mandated
+    * correctly-rounded and is bit-deterministic across platforms (FSQRT /
+-   * SQRTSD), so we use it here.
++   * SQRTSD), so we use it here. A negative x is left to pow for ucrt math:
++   * the sign of sqrt's NaN is the CPU's (FSQRT gives 0x7ff8..., SQRTSD
++   * 0xfff8...), and the CRT's pow gives the x64 one.
+    */
+-  if (std::isfinite(x) && x != 0.0) {
++  if (std::isfinite(x) && x != 0.0 && !(x < 0 && UseUcrtMath())) {
+     if (y == 0.5) {
+       return std::sqrt(x);
+     }
+@@ -632,6 +661,11 @@ double js::math_sin_fdlibm_impl(double x) {
  double js::math_sin_native_impl(double x) {
    MOZ_ASSERT(!math_use_fdlibm_for_sin_cos_tan());
    AutoUnsafeCallWithABI unsafe;
@@ -69,7 +87,7 @@ diff --git a/js/src/builtin/Math.cpp b/js/src/builtin/Math.cpp
    return std::sin(x);
  }
  
-@@ -661,6 +691,11 @@
+@@ -661,6 +695,11 @@ double js::math_tan_fdlibm_impl(double x) {
  double js::math_tan_native_impl(double x) {
    MOZ_ASSERT(!math_use_fdlibm_for_sin_cos_tan());
    AutoUnsafeCallWithABI unsafe;
@@ -81,10 +99,22 @@ diff --git a/js/src/builtin/Math.cpp b/js/src/builtin/Math.cpp
    return std::tan(x);
  }
  
+diff --git a/js/src/builtin/Math.h b/js/src/builtin/Math.h
+--- a/js/src/builtin/Math.h
++++ b/js/src/builtin/Math.h
+@@ -81,6 +81,8 @@ extern double math_log_impl(double x);
+ 
+ extern bool math_use_fdlibm_for_sin_cos_tan();
+ 
++extern bool math_use_ucrt_math();
++
+ extern double math_sin_fdlibm_impl(double x);
+ extern double math_sin_native_impl(double x);
+ 
 diff --git a/js/src/builtin/moz.build b/js/src/builtin/moz.build
 --- a/js/src/builtin/moz.build
 +++ b/js/src/builtin/moz.build
-@@ -50,6 +50,19 @@
+@@ -50,6 +50,19 @@ SOURCES += [
      "RegExp.cpp",
  ]
  
@@ -104,10 +134,34 @@ diff --git a/js/src/builtin/moz.build b/js/src/builtin/moz.build
  selfhosted_inputs = [
      "../../public/friend/ErrorNumbers.msg",
      # ProfilingCategoryList.h is being indirectly included, and it must be passed
+diff --git a/js/src/jit/MIR.cpp b/js/src/jit/MIR.cpp
+--- a/js/src/jit/MIR.cpp
++++ b/js/src/jit/MIR.cpp
+@@ -3517,14 +3517,18 @@ MDefinition* MPow::foldsConstantPower(TempAllocator& alloc) {
+ 
+   double pow = power()->toConstant()->numberToDouble();
+ 
++  // With ucrt math a negative x is not a sqrt (see js::ecmaPow), and the sign
++  // of x is not known here, so both cases stay a call to ecmaPow.
++  bool sqrtOk = !js::math_use_ucrt_math();
++
+   // Math.pow(x, 0.5) is a sqrt with edge-case detection.
+-  if (pow == 0.5) {
++  if (pow == 0.5 && sqrtOk) {
+     MOZ_ASSERT(type() == MIRType::Double);
+     return MPowHalf::New(alloc, input());
+   }
+ 
+   // Math.pow(x, -0.5) == 1 / Math.pow(x, 0.5), even for edge cases.
+-  if (pow == -0.5) {
++  if (pow == -0.5 && sqrtOk) {
+     MOZ_ASSERT(type() == MIRType::Double);
+     MPowHalf* half = MPowHalf::New(alloc, input());
+     block()->insertBefore(this, half);
 diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
 --- a/modules/libpref/init/StaticPrefList.yaml
 +++ b/modules/libpref/init/StaticPrefList.yaml
-@@ -10251,6 +10251,16 @@
+@@ -10385,6 +10385,16 @@
    mirror: always
    set_spidermonkey_pref: always
  

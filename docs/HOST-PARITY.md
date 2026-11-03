@@ -45,7 +45,8 @@ interpreted and after a 30,000-iteration loop; high 16 bits of each result):
   `fff8`: `Math.sqrt` of a negative, `0 / 0`, `Infinity - Infinity`, `Infinity * 0`,
   `Math.log`, `log2`, `log10`, `log1p`, `acos`, `asin`, `acosh`, `atanh`, and
   `Math.pow(-2, ±0.5)`. The `%` rows and the controls are canonical NaNs by
-  construction, so they agree on every host.
+  construction, so they agree on every host. `Math.pow(-2, ±0.5)` was fixed after this
+  build by #317 (#382): the square-root shortcut now leaves a negative base to `ucrt_pow`.
 - Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
   `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
 
