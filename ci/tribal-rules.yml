@@ -643,6 +643,7 @@ rules:
     evidence:
       - "issue #333: a Linux claim drew serif as Nimbus Roman, sans-serif as Nimbus Sans and monospace as Cousine (`generic-map step=row`, e2e run 41630002280) where fontconfig under the same bundle ranks Noto Serif, Noto Sans and DejaVu Sans Mono (e2e run 41633068315)"
       - "gfxFcPlatformFontList.cpp:2791-2896 at FIREFOX_158_0_1_RELEASE: FindGenericFamilies runs FcFontSort on [generic, scalable, lang], takes each family through the gates, and stops at gfx.font_rendering.fontconfig.max_generic_substitutions (3, StaticPrefList.yaml:7992)"
+      - "issue #389: the same FcFontSort ranks different faces per language under the bundle conf (ar serif starts at Cascadia Code, ja at Noto Serif CJK JP; e2e run 41729645836), because fcmatch.c orders PRI_LANG before PRI_FAMILY_WEAK and the conf's families are weak; Firefox caches a generic by the exact lang for Hans, Hant, Jpan, Kore and Arab (UseCustomFontconfigLookupsForLocale, gfxFcPlatformFontList.cpp:2458)"
     rationale: >-
       fpgen records no generics, so the shipped fonts.conf is the only source for
       what a Linux page draws for serif, sans-serif, monospace and cursive.
@@ -650,7 +651,10 @@ rules:
       chains from FontAliasesLinux.hpp, which gen-font-aliases.py writes with the
       aliases and test_font_aliases_table.py checks. Hand-written rows and the
       launchers' font.name-list prefs are a second and third copy that drift.
-      Only a Latin page is covered (#389).
+      The chain is picked by the page's lang group (ja, ko, zh-CN, zh-TW, zh-HK,
+      ar); every other group keeps the Latin chain (#395). The browser takes the
+      first face of the list that the identity's own list admits, so the header
+      carries the faces in FcFontSort order and no copy of the Linux font pool.
 
   - id: native-system-ui-family-never-masked
     title: A native identity's system UI family is never refused by the launch font mask
