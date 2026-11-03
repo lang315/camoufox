@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #317: Math.pow of a negative number to the power 0.5 or -0.5 had the wrong NaN sign on Apple silicon
+
+**Fixed by:** the PR that closes #317. **Found by:** the `windows-crt-math` guard in the macOS parity run (41565897021), `FAIL: cold pow: 3 of 1396`.
+
+**Symptom.** `windows-crt-math.py` on macOS arm64, for a Windows identity: 3 of 1396 `Math.pow` results and the same 3 of `**`, cold and hot, differ from stock Firefox on Windows. `sin`, `cos` and `tan` match 1677 of 1677.
+
+**Root cause.** Not rounding, and not FMA contraction. The three pairs are `x < 0` with `y` of 0.5 or -0.5, and the result is NaN with the other sign bit: Windows `fff8000000000000`, the macOS app `7ff8000000000000`. `js::ecmaPow` (`js/src/builtin/Math.cpp`) answers a finite non-zero `x` with `y == 0.5` as `std::sqrt(x)` and `y == -0.5` as `1.0 / std::sqrt(x)` before it reaches `pow_libm_or_fdlibm`, so before the hook that calls `ucrt_pow`. Its comment calls the square root bit-deterministic across platforms, which holds for every result except a NaN: the sign of the NaN a square root of a negative number returns is the CPU's, `SQRTSD` on x86-64 gives `fff8…` and `FSQRT` on arm64 gives `7ff8…`. A standalone C program on the M1 prints `7ff8000000000000` for `sqrt(-2.5)` and for `1.0 / sqrt(-2.5)`. Linux x86-64 was green only because it has the same instruction as Windows. The JIT has the same shortcut: `MPow::foldsConstantPower` (`js/src/jit/MIR.cpp`) turns a constant exponent of 0.5 into `MPowHalf`, which emits `sqrtsd` or `fsqrt` inline.
+
+**Fix.** In `windows-crt-math.patch`, with `javascript.options.use_ucrt_math` on, `ecmaPow` leaves a negative `x` to `pow`, and `MPow::foldsConstantPower` keeps a call to `ecmaPow` for both exponents, since the sign of `x` is not known at compile time. `ucrt_pow(-2.5, 0.5)` and the three failing pairs return `fff8000000000000` (compiled with `-ffp-contract=off` on the M1), the value Windows gives. A positive `x` keeps the square root, as stock Firefox on Windows does. Not tried: a fixed NaN constant at the call site, which would be a special case for one pair of inputs. The probe now also runs the literal exponents `Math.pow(x, 0.5)` and `Math.pow(x, -0.5)` hot, so the `MPowHalf` path is compared with the Windows results; before this the probe passed its exponents from an array and Ion never compiled a square root.
+
+**Evidence.** On the fork.2 macOS arm64 app the guard prints `cold pow: 1393/1396`, `hot pow: 1393/1396`, `literal exponent +-0.5, hot: 3/6` and exits 1. The green run on a macOS arm64 build of this branch is in the PR.
+
+**What misled the investigation.** The issue called it a last-bit difference in `Math.pow` and `Math.exp`. The probe's `exp` is `a ** b` on the same inputs, not `Math.exp`, so there is one failure, and the printed hex shows it is a sign bit; the likely causes for a last-bit difference (FMA contraction, a libm fall-through) were all ruled out by reading the bits first. The patch comment saying SpiderMonkey's square-root shortcuts are the same on every platform was true for numbers only.
+
 ## #378: the Python and TypeScript launchers handed a symlinked or ".." executable path to the macOS app
 
 **Fixed by:** the PR that closes #378. **Found by:** reading both launchers for the shape of #362, then launching the fork.2 macOS arm64 app through bare Playwright 1.58.

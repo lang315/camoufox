@@ -29,5 +29,14 @@
   for (let i = 0; i < 20000; i++) {
     constants = folded();
   }
-  return { cold, hot, constants: constants.map(hex) };
+  // A literal exponent of 0.5 or -0.5 is compiled by Ion as a square root, not a
+  // call to pow, so it takes a path the arrays above never do. Only the pairs
+  // whose exponent is that literal have a Windows result to compare with.
+  const powHalf = (x) => Math.pow(x, 0.5);
+  const powNegHalf = (x) => Math.pow(x, -0.5);
+  let half;
+  for (let i = 0; i < 30; i++) {
+    half = ps.map(([a, b]) => (b === 0.5 ? hex(powHalf(a)) : b === -0.5 ? hex(powNegHalf(a)) : null));
+  }
+  return { cold, hot, constants: constants.map(hex), half };
 }
