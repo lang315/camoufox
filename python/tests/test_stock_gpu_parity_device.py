@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from camoufox import webgl
+from camoufox import pkgman, webgl
 
 SCRIPT = Path(__file__).resolve().parents[2] / "browser/tests/playwright/patches/stock-gpu-parity.py"
 BASIC_RENDER = [
@@ -24,7 +24,12 @@ BASIC_RENDER = [
 def guard():
     spec = importlib.util.spec_from_file_location("stock_gpu_parity", SCRIPT)
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    # The guards' helpers module makes pkgman.camoufox_path raise, for the rest of the process.
+    camoufox_path = pkgman.camoufox_path
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        pkgman.camoufox_path = camoufox_path
     return mod
 
 
