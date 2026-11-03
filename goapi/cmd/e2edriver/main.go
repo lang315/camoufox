@@ -18,6 +18,7 @@ import (
 
 	camoufox "github.com/lang315/camoufox/goapi"
 	"github.com/lang315/camoufox/goapi/pkg/config"
+	"github.com/lang315/camoufox/goapi/pkg/juggler"
 	"github.com/lang315/camoufox/goapi/pkg/proxy"
 )
 
@@ -48,6 +49,10 @@ type args struct {
 	Path     string         `json:"path"`
 	Ctx      string         `json:"ctx"`
 	Prompt   string         `json:"prompt"`
+
+	Origin      string               `json:"origin"`
+	Permissions []string             `json:"permissions"`
+	Geolocation *juggler.Geolocation `json:"geolocation"`
 }
 
 type state struct {
@@ -155,6 +160,22 @@ func (s *state) do(ctx context.Context, r request) (any, error) {
 		c, err := b.NewContext(ctx)
 		if err != nil {
 			return nil, err
+		}
+		var a args
+		if len(r.Args) > 0 {
+			if err := json.Unmarshal(r.Args, &a); err != nil {
+				return nil, err
+			}
+		}
+		if len(a.Permissions) > 0 {
+			if err := c.GrantPermissions(ctx, a.Origin, a.Permissions); err != nil {
+				return nil, err
+			}
+		}
+		if a.Geolocation != nil {
+			if err := c.SetGeolocation(ctx, a.Geolocation); err != nil {
+				return nil, err
+			}
 		}
 		return s.put("c", c), nil
 	case "ctx.new_page":

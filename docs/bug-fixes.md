@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #385: the e2e geolocation arm compared a timeout with a timeout
+
+**Fixed by:** the PR that moves the probe to its own page and test (`e2e/journeys/test_06_web_apis.py::test_geolocation_answers_like_the_reference`). **Found by:** reading the `pkg`, `pw` and `go` probe timings of `test_web_apis_behave_like_the_reference` (8001 ms on every launch).
+
+**Symptom.** The `geolocation` probe of `test_06_web_apis` read `error: Error` (`timeout`) on Camoufox and on the reference Firefox, on all three operating systems, and scored `same`. It spent the page's whole 8 s budget on every launch.
+
+**Root cause.** `apps.html` asked for a position at load in a context with no geolocation permission. The browser raises its permission prompt, nothing answers it, and neither callback runs; the `timeout: 3000` option does not start until the permission is settled, so only the page's own 8 s race ended the wait. A reference that cannot differ from the value under test (the same non-answer on both sides) scores `same` whatever Camoufox does. Measured on macOS arm64 with the page's script: no callback within 9 s at load, 500 ms after load and on a click, on Camoufox and on Playwright's Firefox 153; with `permissions=["geolocation"]` and a `geolocation`, the position comes back in 13 to 520 ms on both. Playwright's `evaluate` is not the page's own call: it got `User denied geolocation prompt` in about 1 s, which is why a quick check from `evaluate` looked fine.
+
+**Fix.** The probe left `apps.html` for `web/pages/geo.html` and its own test. Every driver's context is granted `geolocation` and given the same position, so each side answers at once with a position (kind and coordinates are compared). A second Camoufox launch with another position must differ from the reference, and the reference must answer with a position, so a run that falls back to the old non-answer fails instead of passing. `goapi/cmd/e2edriver` took `permissions`, `geolocation` and `origin` for `browser.new_context` so the `go` driver runs the same arm; goapi sends Juggler's permission names, where Playwright's `geolocation` is `geo` (`TargetRegistry.js` `ALL_PERMISSIONS`), and a grant under the wrong name leaves the permission denied.
+
+**Evidence.** The old arm: `ok geolocation: camoufox='error: Error' reference='error: Error' (camoufox {'ms': 8001}...)`. The new test with the grant removed fails on both controls (`the reference Firefox answers with a position`, `a different position is told from the reference (else VACUOUS)`). With the grant, `test_06_web_apis.py` passes for `pkg`, `pw` and `go` on macOS arm64 (6 passed, 71 s) and the browser cache stays empty. See the PR for CI.
+
+**What misled the investigation.** A grant under the wrong name (`geolocation` for goapi) reads as "geolocation is broken in goapi": the permission query said `denied`. And `permissions=[]` is not "no grant": Juggler records a denial, both browsers answer error 1 at once, and the comparison still matches.
+
 ## #333: a Linux claim's generics ignored the shipped fonts.conf
 
 **Fixed by:** the PR that refs #333 (the Latin page; other language groups are #389). **Found by:** the realism review of #325.
