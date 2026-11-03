@@ -117,6 +117,29 @@ Only values come back: a DOM node is returned as the string `"ref: <Node>"`.
 An object reached twice comes back as the same value in both places; one that contains
 itself fails with `camoufox: main-world result contains a cycle`.
 
+## Element handles from an expression
+
+`Page.QuerySelector` is not the only way to get an `ElementHandle`:
+
+```go
+// Any expression that yields a node, run in the same isolated world as Evaluate.
+form, err := p.EvaluateElement(ctx, `document.querySelector("input").form`)
+if err != nil || form == nil { /* nil, nil: the expression gave null or undefined */ }
+
+// A JS function expression, called with the element as its first argument.
+id, err := form.Evaluate(ctx, `el => el.id`)
+
+// element.querySelector; nil, nil when nothing inside the element matches.
+field, err := form.QuerySelector(ctx, "[name=email]")
+```
+
+`EvaluateElement` fails loudly instead of returning a handle that is not an element: a
+number, string or plain object is an error, an `mw:` expression is an error (a main-world
+value cannot become a handle), a node that is not an element (a text node, a comment, the
+document) is an error, and so is an element of an iframe's document, because a handle
+carries the main frame and `Click` would aim its frame-relative coordinates at the main
+page. `ElementHandle.Evaluate` decodes the value as `Page.Evaluate` does.
+
 ## Calling back into Go from the page
 
 `Page.ExposeBinding` installs `window[name]` in the same isolated world as `Evaluate` and
@@ -140,6 +163,12 @@ trace the caller accepts. On a new document the binding and its script run befor
 init script, so a `mw:` init script may dispatch at once. On the document current when
 `ExposeBinding` is called, earlier events are not delivered. A name is bound once per
 page, and `cancel` stops delivery only: Juggler cannot remove `window.report`.
+
+`BrowserContext.ExposeBinding(ctx, name, script, fn)` does the same for every page of a
+context: the pages open now, pages `NewPage` opens later and popups, whose first document
+runs `script` before `OnPage` reports the page. `fn` is `func(p *Page, payload string)`, so
+it can tell a popup from its opener. A name is bound once per context, and a page of the
+context cannot bind a name the context holds, nor the context a name an open page holds.
 
 `BrowserContext.SetBypassCSP(ctx, true)` turns off Content-Security-Policy enforcement for
 the context's next navigations, so a page served with `connect-src 'none'` can still

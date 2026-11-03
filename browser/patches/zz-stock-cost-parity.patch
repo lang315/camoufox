@@ -1,11 +1,18 @@
 diff --git a/dom/base/Navigator.cpp b/dom/base/Navigator.cpp
-index 1906e7e6ee..1920451d03 100644
+index 1906e7e6ee..7e316d143e 100644
 --- a/dom/base/Navigator.cpp
 +++ b/dom/base/Navigator.cpp
-@@ -768,6 +768,21 @@ bool Navigator::GlobalPrivacyControl() {
+@@ -768,30 +768,42 @@ bool Navigator::GlobalPrivacyControl() {
  
  uint64_t Navigator::HardwareConcurrency() {
    RecordNavigatorRead(mWindow);
+-  // Camoufox: per-context hardware concurrency
+-  if (mWindow) {
+-    const uint32_t userContextId =
+-        RoverfoxStorageManager::UserContextId(mWindow);
+-    uint32_t stored = NavigatorManager::GetHardwareConcurrency(userContextId);
+-    if (stored > 0) {
+-      return static_cast<uint64_t>(stored);
 +  // Camoufox: stock's work first, then the spoof (timing parity; see
 +  // nsScreen::PixelDepth).
 +  const uint64_t stock = [&]() -> uint64_t {
@@ -13,37 +20,54 @@ index 1906e7e6ee..1920451d03 100644
 +        workerinternals::RuntimeService::GetOrCreateService();
 +    if (!rts) {
 +      return 1;
-+    }
-+
+     }
+-  }
+-  // Camoufox: global config fallback
+-  if (auto value = MaskConfig::GetUint64("navigator.hardwareConcurrency")) {
+-    return value.value();
+-  }
+-  workerinternals::RuntimeService* rts =
+-      workerinternals::RuntimeService::GetOrCreateService();
+-  if (!rts) {
+-    return 1;
+-  }
+ 
+-  return rts->ClampedHardwareConcurrency(
+-      nsGlobalWindowInner::Cast(mWindow)->ShouldResistFingerprinting(
+-          RFPTarget::NavigatorHWConcurrency),
+-      nsGlobalWindowInner::Cast(mWindow)->ShouldResistFingerprinting(
+-          RFPTarget::NavigatorHWConcurrencyTiered));
 +    return rts->ClampedHardwareConcurrency(
 +        nsGlobalWindowInner::Cast(mWindow)->ShouldResistFingerprinting(
 +            RFPTarget::NavigatorHWConcurrency),
 +        nsGlobalWindowInner::Cast(mWindow)->ShouldResistFingerprinting(
 +            RFPTarget::NavigatorHWConcurrencyTiered));
 +  }();
-   // Camoufox: per-context hardware concurrency
-   if (mWindow) {
-     const uint32_t userContextId =
-@@ -781,17 +796,7 @@ uint64_t Navigator::HardwareConcurrency() {
-   if (auto value = MaskConfig::GetUint64("navigator.hardwareConcurrency")) {
-     return value.value();
-   }
--  workerinternals::RuntimeService* rts =
--      workerinternals::RuntimeService::GetOrCreateService();
--  if (!rts) {
--    return 1;
--  }
--
--  return rts->ClampedHardwareConcurrency(
--      nsGlobalWindowInner::Cast(mWindow)->ShouldResistFingerprinting(
--          RFPTarget::NavigatorHWConcurrency),
--      nsGlobalWindowInner::Cast(mWindow)->ShouldResistFingerprinting(
--          RFPTarget::NavigatorHWConcurrencyTiered));
-+  return stock;
++  // Camoufox: the context's own value, else the global config's. The
++  // generation is read before the values, as RoverfoxStorageManager's own memo
++  // does: a write racing the reads leaves this stale by one generation, so the
++  // next call reads again.
++  const uint64_t generation = RoverfoxStorageManager::Generation();
++  const uint32_t userContextId =
++      RoverfoxStorageManager::UserContextId(mWindow);
++  if (mCamouHwc.mGeneration != generation ||
++      mCamouHwc.mUserContextId != userContextId) {
++    mCamouHwc.mValue.reset();
++    if (uint32_t stored =
++            NavigatorManager::GetHardwareConcurrency(userContextId)) {
++      mCamouHwc.mValue = Some(static_cast<uint64_t>(stored));
++    } else if (auto value =
++                   MaskConfig::GetUint64("navigator.hardwareConcurrency")) {
++      mCamouHwc.mValue = Some(value.value());
++    }
++    mCamouHwc.mUserContextId = userContextId;
++    mCamouHwc.mGeneration = generation;
++  }
++  return mCamouHwc.mValue.valueOr(stock);
  }
  
  namespace {
-@@ -988,6 +993,39 @@ uint32_t Navigator::MaxTouchPoints(CallerType aCallerType) {
+@@ -988,6 +1000,39 @@ uint32_t Navigator::MaxTouchPoints(CallerType aCallerType) {
    // primary pointer. See force-default-pointer.patch for the matching
    // `any-pointer: coarse` half. Stock Firefox's baseline fingerprinting
    // protection collapses the spoofed count as it would the real one.
@@ -83,7 +107,7 @@ index 1906e7e6ee..1920451d03 100644
    if (auto value = MaskConfig::GetUint32("navigator.maxTouchPoints")) {
      if (aCallerType != CallerType::System &&
          nsContentUtils::ShouldResistFingerprinting(
-@@ -996,35 +1034,7 @@ uint32_t Navigator::MaxTouchPoints(CallerType aCallerType) {
+@@ -996,35 +1041,7 @@ uint32_t Navigator::MaxTouchPoints(CallerType aCallerType) {
      }
      return value.value();
    }
@@ -120,6 +144,27 @@ index 1906e7e6ee..1920451d03 100644
  }
  
  //*****************************************************************************
+diff --git a/dom/base/Navigator.h b/dom/base/Navigator.h
+index 3ff67f4b54..a0fd8b0445 100644
+--- a/dom/base/Navigator.h
++++ b/dom/base/Navigator.h
+@@ -307,6 +307,16 @@ class Navigator final : public nsISupports, public nsWrapperCache {
+   RefPtr<MediaDevices> mMediaDevices;
+   RefPtr<ServiceWorkerContainer> mServiceWorkerContainer;
+   nsCOMPtr<nsPIDOMWindowInner> mWindow;
++  // Camoufox: the spoofed hardwareConcurrency, resolved once per
++  // RoverfoxStorageManager generation instead of on every getter call (timing
++  // parity; see nsScreen::CamouSpoofed). The same single comparison answers a
++  // launch identity and a context identity.
++  struct CamouHwc {
++    uint64_t mGeneration = 0;
++    uint32_t mUserContextId = 0;
++    mozilla::Maybe<uint64_t> mValue;
++  };
++  CamouHwc mCamouHwc;
+   RefPtr<GamepadServiceTest> mGamepadServiceTest;
+   nsTArray<RefPtr<Promise>> mVRGetDisplaysPromises;
+   RefPtr<VRServiceTest> mVRServiceTest;
 diff --git a/dom/base/NavigatorManager.cpp b/dom/base/NavigatorManager.cpp
 index b9f1dab9fa..879a3baf89 100644
 --- a/dom/base/NavigatorManager.cpp
@@ -569,13 +614,15 @@ index 4614516ff0..173d604436 100644
  
  namespace mozilla::dom {
 diff --git a/dom/workers/WorkerNavigator.cpp b/dom/workers/WorkerNavigator.cpp
-index 1262c4a6b4..110a33446b 100644
+index 1262c4a6b4..f71ee652ca 100644
 --- a/dom/workers/WorkerNavigator.cpp
 +++ b/dom/workers/WorkerNavigator.cpp
-@@ -275,6 +275,20 @@ void WorkerNavigator::GetUserAgent(nsCString& aUserAgent,
+@@ -275,29 +275,39 @@ void WorkerNavigator::GetUserAgent(nsCString& aUserAgent,
  }
  
  uint64_t WorkerNavigator::HardwareConcurrency() const {
+-  // Camoufox: per-context hardware concurrency for workers
+-  {
 +  // Camoufox: stock's work first, then the spoof (timing parity; see
 +  // nsScreen::PixelDepth).
 +  const uint64_t stock = [&]() -> uint64_t {
@@ -590,13 +637,32 @@ index 1262c4a6b4..110a33446b 100644
 +        aWorkerPrivate->ShouldResistFingerprinting(
 +            RFPTarget::NavigatorHWConcurrencyTiered));
 +  }();
-   // Camoufox: per-context hardware concurrency for workers
-   {
++  // Camoufox: the worker's context's own value, else the global config's, read
++  // once per generation (see Navigator::HardwareConcurrency).
++  const uint64_t generation = RoverfoxStorageManager::Generation();
++  if (mCamouHwc.mGeneration != generation) {
++    mCamouHwc.mValue.reset();
      WorkerPrivate* wp = GetCurrentThreadWorkerPrivate();
-@@ -288,16 +302,7 @@ uint64_t WorkerNavigator::HardwareConcurrency() const {
+-    if (wp) {
+-      uint32_t ucid = wp->GetOriginAttributes().mUserContextId;
+-      uint32_t stored = mozilla::dom::NavigatorManager::GetHardwareConcurrency(ucid);
+-      if (stored > 0) {
+-        return static_cast<uint64_t>(stored);
+-      }
++    uint32_t stored =
++        wp ? mozilla::dom::NavigatorManager::GetHardwareConcurrency(
++                 wp->GetOriginAttributes().mUserContextId)
++           : 0;
++    if (stored > 0) {
++      mCamouHwc.mValue = Some(static_cast<uint64_t>(stored));
++    } else if (auto value =
++                   MaskConfig::GetUint64("navigator.hardwareConcurrency")) {
++      mCamouHwc.mValue = Some(value.value());
+     }
++    mCamouHwc.mGeneration = generation;
    }
-   if (auto value = MaskConfig::GetUint64("navigator.hardwareConcurrency"))
-     return value.value();
+-  if (auto value = MaskConfig::GetUint64("navigator.hardwareConcurrency"))
+-    return value.value();
 -  RuntimeService* rts = RuntimeService::GetService();
 -  MOZ_ASSERT(rts);
 -
@@ -607,10 +673,40 @@ index 1262c4a6b4..110a33446b 100644
 -          RFPTarget::NavigatorHWConcurrency),
 -      aWorkerPrivate->ShouldResistFingerprinting(
 -          RFPTarget::NavigatorHWConcurrencyTiered));
-+  return stock;
++  return mCamouHwc.mValue.valueOr(stock);
  }
  
  StorageManager* WorkerNavigator::Storage() {
+diff --git a/dom/workers/WorkerNavigator.h b/dom/workers/WorkerNavigator.h
+index a96a6bb290..d3022f9873 100644
+--- a/dom/workers/WorkerNavigator.h
++++ b/dom/workers/WorkerNavigator.h
+@@ -9,6 +9,7 @@
+ 
+ #include "js/RootingAPI.h"
+ #include "mozilla/AlreadyAddRefed.h"
++#include "mozilla/Maybe.h"
+ #include "mozilla/Assertions.h"
+ #include "mozilla/RefPtr.h"
+ #include "mozilla/StaticPrefs_privacy.h"
+@@ -52,6 +53,17 @@ class WorkerNavigator final : public nsWrapperCache {
+   RefPtr<ServiceWorkerContainer> mServiceWorkerContainer;
+   RefPtr<dom::Serial> mSerial;
+   bool mOnline;
++  // Camoufox: the spoofed hardwareConcurrency, resolved once per
++  // RoverfoxStorageManager generation instead of on every getter call (timing
++  // parity; see nsScreen::CamouSpoofed). The same single comparison answers a
++  // launch identity and a context identity. The worker's context id never
++  // changes, so the generation alone keys it.
++  struct CamouHwc {
++    uint64_t mGeneration = 0;
++    uint32_t mUserContextId = 0;
++    mozilla::Maybe<uint64_t> mValue;
++  };
++  mutable CamouHwc mCamouHwc;
+ 
+   WorkerNavigator(const NavigatorProperties& aProperties, bool aOnline);
+   ~WorkerNavigator();
 diff --git a/toolkit/components/resistfingerprinting/moz.build b/toolkit/components/resistfingerprinting/moz.build
 index a4bb89bd34..e4e3e161de 100644
 --- a/toolkit/components/resistfingerprinting/moz.build

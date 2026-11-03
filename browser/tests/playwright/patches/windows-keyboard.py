@@ -20,6 +20,12 @@ X11 with xdotool on a private Xvfb display, with a German layout so Right Alt
 is AltGr. Each check runs for a Windows and a Linux identity, and the Linux one
 must keep stock Linux behaviour.
 
+On a macOS host only the caret style is Windows' to give (the tables, text bindings and
+AltGr are GTK code), and only that is checked there: Option+Backspace on a selection of
+a rich-text editor deletes back to the previous word for a Windows identity, and just
+the selection with input:windowsKeyboard off. On a Windows host the keyboard is native
+and the runner does not run the guard.
+
     python browser/tests/playwright/patches/windows-keyboard.py
 """
 
@@ -127,7 +133,46 @@ def measure(os_name: str, binary: Path) -> dict:
     return got
 
 
+CARET_PAGE = '<!doctype html><div id="rich" contenteditable>one two three</div>'
+
+
+def caret_after_option_backspace(binary: Path, config: dict) -> str:
+    from camoufox.sync_api import Camoufox
+
+    with Camoufox(os="windows", headless=False, executable_path=str(binary), config=config,
+                  i_know_what_im_doing=True) as browser:
+        page = browser.new_page()
+        page.set_content(CARET_PAGE)
+        page.focus("#rich")
+        page.evaluate("""() => {
+            const text = document.getElementById("rich").firstChild;
+            getSelection().setBaseAndExtent(text, 8, text, 13);
+        }""")
+        page.keyboard.press("Alt+Backspace")
+        return page.eval_on_selector("#rich", "e => e.textContent.replace(/\\u00a0/g, ' ')")
+
+
+def main_macos() -> int:
+    """The caret arm, with the Windows keyboard pref off as the control that must differ."""
+    binary = resolve_binary()
+    got = caret_after_option_backspace(binary, {})
+    control = caret_after_option_backspace(binary, {"input:windowsKeyboard": False})
+    print(f"  windows identity: {got!r} (Windows' caret style: 'one three')")
+    print(f"  input:windowsKeyboard off: {control!r} (control, must differ: 'one two ')")
+    failures = [f"windows identity gives {got!r}, Windows' caret style gives 'one three'"] if got != "one three" else []
+    if control != "one two ":
+        failures.append(f"the control gives {control!r}, not 'one two ', so the check cannot tell the pref from the host")
+    for f in failures:
+        print(f"FAIL: {f}")
+    if failures:
+        return 1
+    print("PASS: a Windows identity gets Windows' caret style on a macOS host.")
+    return 0
+
+
 def main() -> int:
+    if sys.platform == "darwin":
+        return main_macos()
     for tool in ("xdotool", "setxkbmap"):
         if not shutil.which(tool):
             raise SystemExit(f"{tool} is required for this guard")

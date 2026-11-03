@@ -59,9 +59,12 @@ PAGE = r"""<!doctype html><script>
   const gradient = ctx.createLinearGradient(0, 0, 200, 0);
   gradient.addColorStop(0, '#c33'); gradient.addColorStop(1, '#33c');
   ctx.fillStyle = gradient; ctx.fillRect(0, 0, 200, 60);
-  ctx.fillStyle = '#fff'; ctx.font = '20px sans-serif'; ctx.fillText('Camoufox 1.2.3', 10, 38);
   const hash = async () => Array.from(new Uint8Array(await crypto.subtle.digest(
       'SHA-256', ctx.getImageData(0, 0, 200, 60).data))).map(b => b.toString(16).padStart(2, '0')).join('');
+  // Before any text: text is drawn with the claimed OS's fonts, which a host of
+  // that OS takes from itself and another host from the bundle.
+  const plain = await hash();
+  ctx.fillStyle = '#fff'; ctx.font = '20px sans-serif'; ctx.fillText('Camoufox 1.2.3', 10, 38);
   const worker = new Worker(URL.createObjectURL(new Blob(
       ['postMessage(navigator.hardwareConcurrency)'], {type: 'text/javascript'})));
   const workerCores = await new Promise(resolve => { worker.onmessage = e => resolve(e.data); });
@@ -70,6 +73,7 @@ PAGE = r"""<!doctype html><script>
     workerCores,
     touchPoints: navigator.maxTouchPoints,
     avail: [screen.availLeft, screen.availTop, screen.availWidth, screen.availHeight],
+    plain,
     canvas: [await hash(), await hash()],
     webgpu: navigator.gpu ? [true, (await navigator.gpu.requestAdapter()) !== null] : [false, false],
   });
@@ -110,31 +114,46 @@ async def main() -> int:
     failures: List[str] = []
 
     # Taskbar or menu bar per claimed platform, from nsRFPService::GetSpoofedScreenAvailSize.
-    avail = {
-        "Win32": [0, 0, 1920, 1080 - 48],
-        "MacIntel": [0, 25, 1920, 1080 - 76],
-        "Linux x86_64": [0, 0, 1920, 1080],
-    }
+    # WebGPU follows the claimed device (set_webgpu): Windows and an Apple GPU have
+    # navigator.gpu, an Intel Mac and Linux do not. A claim's prefs carry that, so
+    # the host's own dom.webgpu.enabled default (true on Windows and Apple Silicon)
+    # does not decide it.
+    nvidia = ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0), or similar")
+    # As Firefox reports them on a Mac: no ANGLE wrapper, and Apple Silicon names the M1 for every chip.
+    intel_mac = ("Intel Inc.", "Intel(R) Iris(TM) Plus Graphics")
+    apple_mac = ("Apple", "Apple M1, or similar")
+    intel_linux = ("Google Inc. (Intel)", "ANGLE (Intel, Mesa Intel(R) UHD Graphics 620 (KBL GT2), OpenGL 4.6), or similar")
+    claims = [
+        # label, navigator.platform, target OS, GPU, avail rect, navigator.gpu
+        ("Win32", "Win32", "win", nvidia, [0, 0, 1920, 1080 - 48], [True, False]),
+        ("MacIntel, Intel GPU", "MacIntel", "mac", intel_mac, [0, 25, 1920, 1080 - 76], [False, False]),
+        ("MacIntel, Apple GPU", "MacIntel", "mac", apple_mac, [0, 25, 1920, 1080 - 76], [True, False]),
+        ("Linux x86_64", "Linux x86_64", "linux", intel_linux, [0, 0, 1920, 1080], [False, False]),
+    ]
     renders = {}
-    for platform, want in avail.items():
-        print(f"\n=== {platform} ===")
-        got = await probe(binary, platform, {})
-        check(failures, f"{platform} cores", got["cores"], 12)
-        check(failures, f"{platform} worker cores", got["workerCores"], 12)
-        check(failures, f"{platform} touch points", got["touchPoints"], 5)
-        check(failures, f"{platform} avail", got["avail"], want)
-        check(failures, f"{platform} canvas reads the same twice", got["canvas"][0], got["canvas"][1])
-        renders[platform] = got["canvas"][0]
+    for label, platform, target_os, gpu, want, want_gpu in claims:
+        print(f"\n=== {label} ===")
+        claim_prefs: Dict[str, Any] = {}
+        set_webgpu(claim_prefs, target_os, gpu, None)
+        got = await probe(binary, platform, claim_prefs)
+        check(failures, f"{label} cores", got["cores"], 12)
+        check(failures, f"{label} worker cores", got["workerCores"], 12)
+        check(failures, f"{label} touch points", got["touchPoints"], 5)
+        check(failures, f"{label} avail", got["avail"], want)
+        check(failures, f"{label} canvas reads the same twice", got["canvas"][0], got["canvas"][1])
+        check(failures, f"{label} navigator.gpu", got["webgpu"], want_gpu)
+        renders[label] = got["plain"]
+    # The gradient, not the text: a Windows host draws a Win32 claim's text with its
+    # own fonts and the bundle draws the others', so text hashes differ by design.
     check(failures, "the canvas is what the machine renders, whatever the claim", len(set(renders.values())), 1)
-
-    check(failures, "this build has no navigator.gpu by default", got["webgpu"], [False, False])
 
     print("\n=== Win32, canvas placeholder, another GPU ===")
     prefs: Dict[str, Any] = {}
     add_canvas_placeholder(prefs)
-    set_webgpu(prefs, "win", ("Google Inc. (NVIDIA)", "ANGLE (NVIDIA, NVIDIA GeForce GTX 980 Direct3D11 vs_5_0 ps_5_0), or similar"), None)
+    set_webgpu(prefs, "win", nvidia, None)
     covered = await probe(binary, "Win32", prefs)
-    random_reads = covered["canvas"][0] != covered["canvas"][1] and renders["Win32"] not in covered["canvas"]
+    random_reads = covered["canvas"][0] != covered["canvas"][1] and covered["plain"] not in renders.values()
+    print(f"    gradient hash: bare {next(iter(renders.values()))[:8]}, with the placeholder {covered['plain'][:8]}")
     check(failures, "readback is random", random_reads, True)
     check(failures, "nothing else changes", (covered["cores"], covered["touchPoints"]), (12, 5))
     check(failures, "navigator.gpu without an adapter", covered["webgpu"], [True, False])

@@ -19,6 +19,9 @@ type BrowserContext struct {
 	onPage     map[uint64]func(*Page)
 	onPageNext uint64
 
+	bindMu sync.Mutex
+	bound  map[string]struct{} // names passed to ExposeBinding; Juggler cannot unbind them
+
 	dlMu         sync.Mutex
 	downloadsDir string // from SetDownloadOptions; the browser saves downloads here as <uuid>
 }

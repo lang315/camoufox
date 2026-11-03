@@ -1,5 +1,32 @@
+diff --git a/gfx/ipc/GPUParent.cpp b/gfx/ipc/GPUParent.cpp
+index 910cfe8483..e581765cf1 100644
+--- a/gfx/ipc/GPUParent.cpp
++++ b/gfx/ipc/GPUParent.cpp
+@@ -69,6 +69,9 @@
+ #if defined(XP_MACOSX) && defined(MOZ_SANDBOX)
+ #  include "mozilla/SandboxSettings.h"
+ #endif
++#if defined(XP_MACOSX) && defined(MOZ_BUNDLED_FONTS)
++#  include "CoreTextFontList.h"
++#endif
+ #if defined(XP_WIN)
+ #  include <dwrite.h>
+ #  include <process.h>
+@@ -402,6 +405,12 @@ mozilla::ipc::IPCResult GPUParent::RecvInit(
+ 
+ #endif
+ 
++#if defined(XP_MACOSX) && defined(MOZ_BUNDLED_FONTS)
++  if (CoreTextFontList::ShouldActivateBundledFonts()) {
++    CoreTextFontList::ActivateBundledFonts();
++  }
++#endif
++
+   // Make sure to do this *after* we update gfxVars above.
+   wr::RenderThread::Start(aWrNamespace);
+   gfx::CanvasRenderThread::Start();
 diff --git a/gfx/thebes/CoreTextFontList.cpp b/gfx/thebes/CoreTextFontList.cpp
-index b6696c70c4..57ce1586db 100644
+index b6696c70c4..dd3772549d 100644
 --- a/gfx/thebes/CoreTextFontList.cpp
 +++ b/gfx/thebes/CoreTextFontList.cpp
 @@ -6,6 +6,7 @@
@@ -10,21 +37,37 @@ index b6696c70c4..57ce1586db 100644
  #include "SharedFontList-impl.h"
  #include "gfxFontConstants.h"
  #include "gfxMacFont.h"
-@@ -1077,7 +1078,12 @@ CoreTextFontList::CoreTextFontList()
+@@ -21,6 +22,7 @@
+ #include "mozilla/dom/ContentChild.h"
+ #include "mozilla/dom/ContentParent.h"
+ #include "mozilla/gfx/2D.h"
++#include "mozilla/gfx/gfxVars.h"
+ #include "mozilla/glean/GfxMetrics.h"
+ #include "nsAppDirectoryServiceDefs.h"
+ #include "nsCharTraits.h"
+@@ -28,6 +30,7 @@
+ #include "nsDirectoryServiceDefs.h"
+ #include "nsDirectoryServiceUtils.h"
+ #include "nsIDirectoryEnumerator.h"
++#include "nsLocalFile.h"
+ #include "nsServiceManagerUtils.h"
+ 
+ using namespace mozilla;
+@@ -1075,11 +1078,9 @@ void CTFontFamily::FindStyleVariationsLocked(FontInfoData* aFontInfoData) {
+ CoreTextFontList::CoreTextFontList()
+     : gfxPlatformFontList(false), mDefaultFont(nullptr) {
  #ifdef MOZ_BUNDLED_FONTS
-   // We activate bundled fonts if the pref is > 0 (on) or < 0 (auto), only an
-   // explicit value of 0 (off) will disable them.
+-  // We activate bundled fonts if the pref is > 0 (on) or < 0 (auto), only an
+-  // explicit value of 0 (off) will disable them.
 -  if (StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0) {
-+  // Camoufox: a native macOS identity uses the real system fonts only; the
-+  // bundle is for identities of other OSes (see font-hijacker.patch).
-+  const bool camouNativeIdentity =
-+      MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS;
-+  if (StaticPrefs::gfx_bundled_fonts_activate_AtStartup() != 0 &&
-+      !camouNativeIdentity) {
++  if (ShouldActivateBundledFonts()) {
      auto timerId = glean::fontlist::bundledfonts_activate.Start();
-     ActivateBundledFonts();
+-    ActivateBundledFonts();
++    ActivateBundledFonts(&mBundledFamilies);
      glean::fontlist::bundledfonts_activate.StopAndAccumulate(
-@@ -1136,6 +1142,26 @@ void CoreTextFontList::AddFamily(CFStringRef aFamily) {
+         std::move(timerId));
+   }
+@@ -1136,6 +1137,26 @@ void CoreTextFontList::AddFamily(CFStringRef aFamily) {
    AddFamily(nameUtf8, GetVisibilityForFamily(nameUtf8));
  }
  
@@ -51,7 +94,7 @@ index b6696c70c4..57ce1586db 100644
  /* static */
  void CoreTextFontList::ActivateFontsFromDir(
      const nsACString& aDir, nsTHashSet<nsCStringHashKey>* aLoadedFamilies) {
-@@ -1165,14 +1191,14 @@ void CoreTextFontList::ActivateFontsFromDir(
+@@ -1165,14 +1186,14 @@ void CoreTextFontList::ActivateFontsFromDir(
      if (result != kCFURLEnumeratorSuccess) {
        continue;
      }
@@ -72,7 +115,7 @@ index b6696c70c4..57ce1586db 100644
        continue;
      }
      CTFontDescriptorRef desc =
-@@ -1545,6 +1571,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
+@@ -1545,6 +1566,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
    // Reset our string length to match the actual C string we got, which will
    // usually be much shorter than the maximal buffer we allocated.
    key.Truncate(strlen(key.get()));
@@ -84,7 +127,7 @@ index b6696c70c4..57ce1586db 100644
    ToLowerCase(key);
    // If the family can't be looked up, this font is not available for use.
    FontFamily family = FindFamily(aFontVisibilityProvider, key);
-@@ -1552,9 +1583,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
+@@ -1552,9 +1578,11 @@ already_AddRefed<gfxFontEntry> CoreTextFontList::LookupLocalFont(
      return nullptr;
    }
  
@@ -99,6 +142,84 @@ index b6696c70c4..57ce1586db 100644
  }
  
  static void ReleaseFontData(void* aInfo, const void* aData, size_t aSize) {
+@@ -1989,18 +2017,37 @@ FontFamily CoreTextFontList::GetDefaultFontForPlatform(
+ }
+ 
+ #ifdef MOZ_BUNDLED_FONTS
+-void CoreTextFontList::ActivateBundledFonts() {
++/* static */
++bool CoreTextFontList::ShouldActivateBundledFonts() {
++  // We activate bundled fonts if the pref is > 0 (on) or < 0 (auto), only an
++  // explicit value of 0 (off) will disable them.
++  // Camoufox: a native macOS identity uses the real system fonts only; the
++  // bundle is for identities of other OSes (see font-hijacker.patch).
++  const int32_t pref = StaticPrefs::gfx_bundled_fonts_activate_AtStartup();
++  const bool nativeIdentity =
++      MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS;
++  LOG_FONTLIST(
++      ("CAMOU-FL bundled-fonts gate gfx.bundled-fonts.activate=%d "
++       "native-identity=%d\n",
++       pref, nativeIdentity));
++  return pref != 0 && !nativeIdentity;
++}
++
++/* static */
++void CoreTextFontList::ActivateBundledFonts(
++    nsTHashSet<nsCStringHashKey>* aLoadedFamilies) {
++  // The GPU process has no directory service, so the GRE directory comes from
++  // gfxVars, which every process that draws has.
+   nsCOMPtr<nsIFile> localDir;
+-  if (NS_FAILED(NS_GetSpecialDirectory(NS_GRE_DIR, getter_AddRefs(localDir)))) {
+-    return;
+-  }
+-  if (NS_FAILED(localDir->Append(u"fonts"_ns))) {
+-    return;
+-  }
+   nsAutoCString path;
+-  if (NS_FAILED(localDir->GetNativePath(path))) {
++  if (NS_FAILED(NS_NewLocalFile(gfxVars::GREDirectory(),
++                                getter_AddRefs(localDir))) ||
++      NS_FAILED(localDir->Append(u"fonts"_ns)) ||
++      NS_FAILED(localDir->GetNativePath(path))) {
++    LOG_FONTLIST(("CAMOU-FL bundled-fonts no fonts directory\n"));
+     return;
+   }
+-  ActivateFontsFromDir(path, &mBundledFamilies);
++  LOG_FONTLIST(("CAMOU-FL bundled-fonts activating %s\n", path.get()));
++  ActivateFontsFromDir(path, aLoadedFamilies);
+ }
+ #endif
+diff --git a/gfx/thebes/CoreTextFontList.h b/gfx/thebes/CoreTextFontList.h
+index 780964a875..4d356f5203 100644
+--- a/gfx/thebes/CoreTextFontList.h
++++ b/gfx/thebes/CoreTextFontList.h
+@@ -191,6 +191,15 @@ class CoreTextFontList : public gfxPlatformFontList {
+   };
+   void ReadSystemFontList(mozilla::dom::SystemFontList*);
+ 
++#ifdef MOZ_BUNDLED_FONTS
++  // Camoufox: WebRender looks fonts up by name in the GPU process, so that
++  // process registers the bundle with the same gate as the parent and content
++  // processes (see font-hijacker.patch).
++  static bool ShouldActivateBundledFonts();
++  static void ActivateBundledFonts(
++      nsTHashSet<nsCStringHashKey>* aLoadedFamilies = nullptr);
++#endif
++
+  protected:
+   CoreTextFontList();
+   virtual ~CoreTextFontList();
+@@ -270,10 +279,6 @@ class CoreTextFontList : public gfxPlatformFontList {
+                               bool aNeedFullnamePostscriptNames)
+       MOZ_REQUIRES(mLock) override;
+ 
+-#ifdef MOZ_BUNDLED_FONTS
+-  void ActivateBundledFonts();
+-#endif
+-
+   // default font for use with system-wide font fallback
+   CTFontRef mDefaultFont;
+ 
 diff --git a/gfx/thebes/gfxDWriteFontList.cpp b/gfx/thebes/gfxDWriteFontList.cpp
 index 0d359b69d7..70740aeefa 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
@@ -351,10 +472,18 @@ index 54433dc950..ef04e92585 100644
          // as this means we are dependent on any updates to the font list.
          mSeenLocalSource = true;
 diff --git a/gfx/thebes/moz.build b/gfx/thebes/moz.build
-index bb3da184dc..5afed86888 100644
+index bb3da184dc..5ac4af51cd 100644
 --- a/gfx/thebes/moz.build
 +++ b/gfx/thebes/moz.build
-@@ -310,3 +310,6 @@ LICENSED_UNDER["gfx-font-list"].paths = [
+@@ -101,6 +101,7 @@ if CONFIG["MOZ_WIDGET_TOOLKIT"] == "android":
+     ]
+ elif CONFIG["MOZ_WIDGET_TOOLKIT"] in ("cocoa", "uikit"):
+     EXPORTS += [
++        "CoreTextFontList.h",
+         "gfxMacUtils.h",
+         "gfxPlatformMac.h",
+         "gfxQuartzNativeDrawing.h",
+@@ -310,3 +311,6 @@ LICENSED_UNDER["gfx-font-list"].paths = [
      "gfxMacPlatformFontList.mm",
      "gfxPlatformFontList.cpp",
  ]

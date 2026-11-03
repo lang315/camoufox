@@ -146,7 +146,7 @@ func (p *Page) findFrame(id string) *Frame {
 // the subscription handles so Close can remove them.
 func (p *Page) registerFrameEvents() {
 	conn := p.bc.b.conn
-	p.subs = append(p.subs, conn.On("Page.frameAttached", func(ev juggler.Event) {
+	p.own(conn.On("Page.frameAttached", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -166,7 +166,7 @@ func (p *Page) registerFrameEvents() {
 		p.framesMu.Unlock()
 	}))
 
-	p.subs = append(p.subs, conn.On("Page.frameDetached", func(ev juggler.Event) {
+	p.own(conn.On("Page.frameDetached", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -181,7 +181,7 @@ func (p *Page) registerFrameEvents() {
 		p.framesMu.Unlock()
 	}))
 
-	p.subs = append(p.subs, conn.On("Runtime.executionContextCreated", func(ev juggler.Event) {
+	p.own(conn.On("Runtime.executionContextCreated", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -213,7 +213,7 @@ func (p *Page) registerFrameEvents() {
 		fr.mu.Unlock()
 	}))
 
-	p.subs = append(p.subs, conn.On("Page.navigationCommitted", func(ev juggler.Event) {
+	p.own(conn.On("Page.navigationCommitted", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -238,7 +238,7 @@ func (p *Page) registerFrameEvents() {
 		fr.mu.Unlock()
 	}))
 
-	p.subs = append(p.subs, conn.On("Runtime.executionContextDestroyed", func(ev juggler.Event) {
+	p.own(conn.On("Runtime.executionContextDestroyed", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}

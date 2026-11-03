@@ -28,8 +28,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import resolve_binary  # noqa: E402
 
 # Four workers for 60 s: two for 30 s crashed beta.30 in only 7 of 11 runs.
+# Windows gets two: four spinning workers keep all four cores of its runner busy, a
+# new content process then took 61 s to start and the loop ran 1-5 contexts in 60 s
+# (two workers: 139 contexts, one: 152).
 RACE_SECONDS = 60
-WORKERS = 4
+WORKERS = 2 if sys.platform == "win32" else 4
 # One content process, so every context's prefs land in the workers' process.
 ONE_PROCESS = {"dom.ipc.processCount": 1, "dom.ipc.processCount.webIsolated": 1}
 

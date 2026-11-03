@@ -26,6 +26,178 @@ later change should read first.
 
 **What misled the investigation.** The Windows log showed PASS lines before the traceback, which reads as a passing test with noisy teardown; the exit code and the `PermissionError` frame are what failed the run.
 
+## #375: the Skiplist audit failed on every run once pip 26.3 came out
+
+**Fixed by:** the PR that closes #375. **Found by:** Tests run 41553986984 on PR #374, `Skiplist audit`, with no code in the PR that could reach it.
+
+**Symptom.** `ci.run_skiplist_audit` died while installing the upstream suite's requirements: `ERROR: Distributions from PyPI cannot declare direct URL dependencies. autobahn depends on web3[ipfs] @ git+https://github.com/ethereum/web3.py.git#v6.0.0-beta.9#egg=web3 ; extra == "all"`. The same job had passed on main about nine hours earlier (run 41475235918).
+
+**Root cause.** `make_venv` in `ci/suite.py` ran `pip install --upgrade pip` in the fresh venv, so the suite's install ran under whichever pip PyPI had that day. playwright-python v1.62.0 pins `autobahn==23.1.2` in `local-requirements.txt`, and that release lists a `git+https` dependency in its `all` extra, which nothing in the suite selects. pip 26.3 (published 2026-11-02 20:34Z, between the two runs) applies PyPI's direct-URL rule to extras as well: "Apply PyPI's direct URL dependency restriction to extras and cached wheels" (pypa/pip#14341). Earlier pip checked only the dependencies it installed.
+
+**Fix.** `make_venv` installs `pip==PIP_VERSION` (26.2.2) instead of upgrading. The constant carries the reason, and says to raise it once a venv for the current tag installs under the newer pip. Alternatives rejected: skipping the audit or letting the install fail quietly (the audit is the check), `--no-deps` (drops the suite's real dependencies), and a constraint on autobahn (the pin is upstream's, and a different autobahn is not the suite the tag shipped with).
+
+**Evidence.**
+- Same `local-requirements.txt` (v1.62.0), fresh venvs, this host: `pip install --upgrade pip` gave pip 26.3 and the install exited 1 with the error above; `pip==26.2.2` exited 0 with autobahn 23.1.2, pytest 9.0.3 and Twisted 25.5.0 installed.
+- Red to green: `test_the_suite_venv_pins_pip` records the commands `make_venv` runs. On the old `ci/suite.py` the pip install is a bare `pip` (`assert ['pip'] == ['pip==26.2.2']`); with the fix it passes.
+
+**What misled the investigation.** The failing step is the audit, so the audit's skiplist looked like the suspect, but the error came from `pip` before any test ran. Nothing in the PR under test could have caused it: a red check with no related diff is a change in the environment, and an unpinned tool is where one comes in.
+
+## #316: the stalled-apt tests failed on a loaded macOS host
+
+**Fixed by:** the PR that closes #316. **Found by:** `python -m pytest ci/tests/test_apt_install.py` on a macOS host that was also running a patch-guard run.
+
+**Symptom.** `test_a_stalled_update_fails_the_step_and_names_the_command` failed with `assert [] == ['update']` and `test_a_stalled_install_fails_the_step_and_names_the_command` with `assert 'apt-get install' in '::error::apt-get update did not finish in 1s\n'`. Linux CI never failed them.
+
+**Root cause.** Both tests ran the real script with `APT_TIMEOUT=1` and a stand-in `apt-get` shell script, and expected the 1 s budget to expire on a command that was already running. `ci/apt_install.py` hands the budget to `subprocess.run(["sudo", "apt-get", *args], timeout=LIMIT)`, and that timer starts when `sudo` is spawned, not when the stand-in has written its first line. The stand-in has to start two shells and append to the call log inside the budget. When that takes longer than 1 s, the process is killed before it records anything (`calls == []`), and in the install test the healthy `update` step is the one that runs out of time, so the message names `update`. The script was right in both cases. The test measured its host's process start-up time against a fixed second. A chain of `sudo` and `apt-get` stand-ins took up to 0.49 s to start on an idle machine.
+
+**Fix.** The two stall tests no longer wait for a timer. They replace `subprocess.run` with one that raises `TimeoutExpired` for the command under test, and assert what the script does with it: it passes `LIMIT` as the timeout, exits 124, prints `::error::apt-get <command> did not finish in <LIMIT>s`, and does not run the install after a stalled update. The other three tests, which run the real script with a 900 s budget, are unchanged. Alternatives that were rejected: a longer budget in the test (still a race against start-up time, and a loosened timeout), and a retry (hides the fault). What the new tests do not check is that Python kills a real child at the deadline. That is `subprocess.run`'s documented behaviour, not this script's.
+
+**Evidence.**
+- Red, deterministic: the old tests with a `sleep 1.5` before the stand-in's first line fail both, with the issue's exact output (`assert [] == ['update']` and `apt-get update did not finish in 1s`).
+- Red, under load: 60 busy loops and 4 pytest processes at a time, 20 runs of the old file gave 19 runs with a failure (5 with one failing test, 14 with two).
+- Green: the same load, 20 runs of the new file, 20 passes.
+- The new tests can fail: without `timeout=LIMIT` in `apt()` two of them fail, and with the exit check removed so the install runs after a stalled update three do.
+
+**What misled the investigation.** The message `apt-get update did not finish in 1s` in the install test reads like a stall in the script's own update step, but the update there is `exit 0`. Nothing stalled; the budget was simply shorter than the time to start the stand-in.
+
+## #359: getter-cost-parity was red on the hosted macOS runner
+
+**Fixed by:** the PR that closes #359. **Found by:** the macOS leg of the guard, red on and off with no code change.
+
+**Symptom.** `getter-cost-parity.py` failed intermittently on the hosted macOS runner, on getters that differed from run to run, and passed on Linux.
+
+**Root cause.** Two causes, one in the browser and one in the measurement.
+- The browser. `navigator.hardwareConcurrency` did a per-context store read and a config lookup on every call, in `Navigator::HardwareConcurrency` and `WorkerNavigator::HardwareConcurrency`. Stock does neither. On the Linux runner the worker getter cost 20-26 ns more than its untouched control, and the main-thread one 16-20 ns more. A launch-level identity (store miss, then config lookup) cost 4-12 ns more than a context identity (store hit, early return), which is the gap the guard compares two columns across. The config lookup itself measured 3-6 ns natively (2.7 ns on a miss, 5.7 ns on a hit, M1 Pro, standalone benchmark), so the rest was the store read and the thread-local memo behind it, on every call.
+- The measurement. The guard's docstring said: "Each figure is the fastest of several rounds over two launches, so a busy runner inflates both browsers rather than one." That does not hold on a hosted macOS VM. Two launches of the same browser differ there by 15-30 ns per getter (Linux: 1-3 ns), and the quietest launch of one browser against the quietest of the other is a comparison of two noise draws, with 30 ns as the gap being decided. A minimum over two cannot be stable at that spread.
+
+**Fix.**
+- `zz-stock-cost-parity.patch` now resolves the spoofed hardwareConcurrency once per `RoverfoxStorageManager` generation per navigator, in the `nsScreen::CamouSpoofed` pattern: `Navigator` and `WorkerNavigator` keep `{generation, user context id, value}` and refill only when the generation or the context id changes. A launch identity and a context identity take the same single comparison, so the two paths cost the same and there is no skip branch. Stock's work still runs first. The generation is an atomic: `BumpGeneration` is `fetch_add(release)` and `Generation()` is `load(acquire)`.
+- The guard compares medians of `LAUNCHES = 6` launches, and scales Camoufox's cost by stock's control cost over Camoufox's control cost before the slower test (`verdict()`). `SLOWER_FACTOR` 2.0, `FASTER_FACTOR` 2.0 and `MIN_GAP_NS` 30 are unchanged. The same N runs on every OS. The cold first read keeps the fastest launch, because a lookup that blocks on the parent does so every time. A control that differs from stock by the slower test fails the run as not comparable, unscaled.
+- A new guard arm launches with an explicit `navigator.hardwareConcurrency` that is not the host's core count (the launcher snaps an unset value to the host's, which would make the arm vacuous) and requires the main thread and a worker to report it on the first read.
+
+What the guard compares across: separate processes (stock Firefox against Camoufox, and launch against context), on one page and one machine. Two things make them comparable: an untouched control getter in each scope (`screen.orientation.type` in a window, `navigator.onLine` in a worker) whose ratio between the browsers scales the rest, and the control failing the run when it differs. The first establishes that the probe and the machine's speed moved together, not that the binaries differ only by the patch.
+
+How N was chosen. Simulation over every pair of N-subsets of 8 launches per browser, on fresh data from the fixed build (Linux run 41408378219, macOS e2e run 41434368730 on build 41408406642), six getters, both arms: 0.0% false failures at N = 4, 6 and 8 on both OSes. The 3x negative control (Camoufox values times 3) was caught in 100% of cells except mac `wkHW` N=4 launch (99.5%). N=4 reaches 2.01x on mac `innerHeight` (a gap of +24 saves it), N=6 peaks at 1.79x / +20 ns (mac) and 1.55x / +34 ns (Linux, a worker getter whose ratio stays under 2), N=8 at 1.53x / +13 ns. N=6 is the smallest where each limit holds on its own. The subsets are drawn from the same 8 launches, so they are not independent draws. About +5 minutes on macOS over two launches.
+
+**Evidence** (Linux run 41408378219, median of 8 launches, Camoufox minus stock, launch / context):
+- main `hardwareConcurrency` +29 / +32, against controls `screen.orientation.type` +19 / +22 and `navigator.onLine` +18 / +18, and untouched `innerWidth` +28 / +28;
+- worker `hardwareConcurrency` +12 / +14, against its control `navigator.onLine` -1 / -1;
+- launch minus context: 0 ns on every getter and control but one (worker `onLine`, -1 ns).
+- macOS (e2e 41434368730) worker `hardwareConcurrency` +10 / +9 against a control +3 / +2, where the build before the fix had +47 / +24.
+- Red to green: `ci/tests/test_getter_cost_verdict.py` holds `verdict()` against a getter at three times its control against stock's one times (fails), a uniformly 2.2x slower build (passes), equal costs (pass), a ratio over 2 under 30 ns (passes), and an early-return getter (still fails FASTER). Replacing the scaled cost by the raw one turns the uniform-build test red; removing the gap clause of the faster test turns the early-return test red. The real-browser negative control, a slow getter added on a probe branch and run through Linux CI, was never in this PR.
+
+**What the guard can see.** A regression of about 3x its control (99.5-100% of simulated cells on the fixed build's data; 88-100% on the pre-fix mac data at N=4). Not an excess of 20-30 ns: run on the build before the fix, the same rule fails mac `wkHW` 4.5% of the time at N=4 (2.27x, +60 ns), 0.5% at N=6 (2.04x, +51 ns) and 0% at N=8. The evidence that the fix removed that excess is the probe tables above, not the guard going green.
+
+**Residual, stated as measured.** The worker `hardwareConcurrency` still costs about 12-15 ns over its control on Linux (+12 / +14 against -1 / -1), main-thread about 10-14 ns over its controls: under `MIN_GAP_NS` (30), not zero. The normalised cost of Camoufox's getters against stock's is still about 1.5-1.86x on the runner. The config lookup measured 3-6 ns; the rest of the per-getter excess also sits on getters the fork does not touch: `innerWidth`, `innerHeight` and `screen.orientation.type` read +17 to +33 ns over stock on Linux. That it comes from the build having no PGO or LTO is inferred from the mozconfig, not isolated by a build with them. No PGO issue is filed: one machine pair is not cross-machine evidence.
+
+**What misled the investigation.**
+- A control-normalised ratio per launch does not tighten the spread (its CV was equal or looser), which is why the fix is a median and not a better ratio. It was tried first.
+- Mac local runs showed a FASTER failure (39 ns against 71) that was a loop artefact: `colorDepth` and `pixelDepth` share `nsScreen::PixelDepth`, and `pixelDepth` read 85 ns in the same launch.
+- The new guard arm failed once (`first page read=8 first worker read=8` for a requested 3, probe run 41438746894, job 125272343860) while the same browser passed in the PR's run. Not the browser: with no `os`, the launcher draws a random identity, and on an Apple Silicon draw `coherence.py` snaps the user's core count up to 8 (`appleSiliconCores`, `_repair_apple_silicon_cores`). The arm now launches as `windows`.
+- The first fix read is not a fail-open: a navigator that has not resolved a value returns stock's, so the guard's new arm needs an explicit value to be non-vacuous.
+
+## #371: TestWatchMutations raced the page's own timer
+
+**Fixed by:** the PR that closes #371. **Found by:** `goapi (browser)` in Tests run 41405543370 on PR #364, whose diff did not touch the test. It failed again on main at 4ab01128 (Tests run 41425224297, job 125231861359, 8.71 s), so it was not rare.
+
+**Symptom.** `mutation_test.go:72: timed out waiting for mutation`, `--- FAIL: TestWatchMutations (9.60s)`. The same test passed on the previous head of that PR and on two other PRs running at the same time.
+
+**Root cause.** The test page appended its `<div>` from `setTimeout(..., 100)`, which starts at load. The test armed `WatchMutations` only after `Goto(DOMContentLoaded)` returned. When arming took longer than 100 ms, the append had already happened, nothing mutated afterwards, and the test waited out its 5 s.
+
+**Fix.** The timer is out of the page. The test appends with `p.Evaluate` after `WatchMutations` returns, so the mutation is ordered strictly after the observer exists. The DOM is shared across worlds, so an isolated-world append still mutates. Raising the timer's delay would only have moved the threshold.
+
+**Evidence.** Old test with a 300 ms `time.Sleep` between `Goto` and `WatchMutations`: timed out 3 of 3 runs. Fixed test, no sleep: passed 3 of 3. Fixed test with the same 300 ms sleep: passed.
+
+**Checked and left alone.** `wait_test.go` (200 ms timer) uses `WaitFor`, which polls state, so a timer that fires before the call is armed leaves the element already visible. `binding_test.go` (1500 ms timer) is a negative control: a slower runner only makes the late listener later.
+
+**What misled the investigation.** Nothing; the log line named the wait. The red run was not available from CI, so the gap was injected to make the race deterministic.
+
+## #358: the Windows build lacked chrome://global/content/defaultagent/, a page could tell it from Firefox
+
+**Fixed by:** the PR that closes #358. **Found by:** `contentaccessible-parity` on the fork.2 Windows build, the first run of that guard on Windows after #338.
+
+**Symptom.** The guard reported one difference from stock Firefox 158.0.1 on Windows: `omni.ja|content|global: MISSING vs stock -- chrome/toolkit/content/global/defaultagent/default-browser-notification-privacy-image.svg`. A page can load that file from stock Firefox (`<img src="chrome://global/content/defaultagent/default-browser-notification-privacy-image.svg">`) and not from Camoufox.
+
+**Root cause.** `browser/assets/base.mozconfig` sets `--disable-default-browser-agent`. `toolkit/moz.build` then skips the directory that holds the file: `if CONFIG["MOZ_DEFAULT_BROWSER_AGENT"]: DIRS += ["mozapps/defaultagent"]`. That directory's `jar.mn` is what registers `content/global/defaultagent/...svg` in `toolkit.jar`, so the file never reaches `omni.ja`. The `global` package is `contentaccessible=yes`. The agent's gate is `CC_TYPE == "clang-cl"`, which the Windows cross build satisfies (target `x86_64-pc-windows-msvc`), so the stock Windows build has the file and no other OS does.
+
+**Fix.** `contentaccessible-parity.patch` lists the same file again in `toolkit/content/jar.mn` under `#ifdef XP_WIN`, from the same source path (`/toolkit/mozapps/defaultagent/assets/`). The agent stays disabled. This is the same shape as the crash reporter pages in that patch. The bytes match the recorded Windows manifest: SHA-256 `049284011a35af8bfead24032f90d214f13db34d371abcf66ad37c9451421c47`. The alternative, building the agent's directory without the agent, was not tried: that directory's `moz.build` also compiles the agent.
+
+**Evidence.** Red: e2e run 41051584695, job 124048727857, on a probe branch that ran the guard. Green: see the PR for run and job ids.
+
+**What misled the investigation.** Nothing was misleading, but the guard could not run on Windows before #338, so the difference sat unmeasured since the mozconfig line was written. A Linux or macOS green says nothing about it (lesson 3).
+
+## #353: the build-tester crashed on Windows printing box-drawing characters
+
+**Fixed by:** the PR that closes #353. **Found by:** a probe run of the build-tester against a Windows build zip on a GitHub Windows runner.
+
+**Symptom.** `python -m ci.run_build_tester` exited 1 on Windows before grading, and the gate reported `build-tester exited 1 without writing build-tester-result.json`. The child's traceback ended in `UnicodeEncodeError: 'charmap' codec can't encode characters in position 2-61` at `print(f"\n{'─' * 60}")` in `scripts/runner.py`.
+
+**Root cause.** The suite's report is written with box-drawing characters, check marks and em dashes (`runner.py`, `certificate.py`). Python takes the encoding of a piped stdout from the Windows locale, which is cp1252 and has none of them. On Linux and macOS it is UTF-8, so the suite never failed there.
+
+**Fix.** `scripts/run_tests.py`, the one entry point of the suite, reconfigures stdout and stderr to UTF-8 before it prints anything, so every print in the suite is covered. The alternative, dropping the non-ASCII characters, would have changed the certificate and every message that uses them for one platform's locale. Setting `PYTHONUTF8=1` in the caller would hide the crash for that caller only, and the next one to run the suite would hit it again.
+
+**Evidence.** `test_build_tester_prints_box_drawing_under_a_cp1252_stdout` runs `run_tests.main` in a child with `PYTHONIOENCODING=cp1252` and a stand-in suite that prints a box-drawing line. Without the fix it fails with the `UnicodeEncodeError` above; with it, it passes and the bytes on stdout decode as UTF-8.
+
+**What misled the investigation.** Nothing; the cause was in the traceback. The class is the same as #311 and #314: a script that assumed Linux and macOS defaults.
+
+## #338: eleven patch guards could not run, or measured nothing, on Windows and macOS
+
+**Fixed by:** the PR that closes #338. **Found by:** runs of the guards on the fork.1 macOS app and on e2e probe branches against the fork.2 Windows and macOS builds.
+
+**Symptom.** On Windows, `input-ack-backstop` died on `signal.SIGKILL`, `contentaccessible-parity` and `stock-gpu-parity` called `unzip` and `gpg` in ways Git's msys builds mishandle, `worker-config-reads` ran 1-5 contexts in 60 s, and the guards that needed Xvfb or `/proc` failed before measuring. On macOS the guards that need Linux tools started a virtual display that does not exist, and `windows-keyboard` and `system-font-alias-stall` read the host and compared nothing.
+
+**Root cause.** Each guard assumed Linux. `os.kill(pid, signal.SIGKILL)` has no Windows spelling. Git's msys `gpg` prefixes the working directory to an absolute Windows path. Git's msys `unzip` reported "filename not matched" for patterns that match, for a cause not found. Four spinning workers on a 4-vCPU Windows runner starve the start of a new content process (61 s). `contentaccessible-parity` had one manifest, recorded from Linux Firefox, so it could not be compared with any other OS.
+
+**Fix.** `ci/run_patch_guards.py` keeps `LINUX_ONLY` (five guards whose subject is Linux) and adds `NOT_ON` for the two guards that do not apply on one platform for that platform's reason; the runner counts them apart from the passes and prints the reason. Guards that only needed a display use the host's. `input-ack-backstop` kills with psutil, `worker-config-reads` uses two workers on Windows, `stock-gpu-parity` and `contentaccessible-parity` unpack with 7-Zip, `hdiutil` or `zipfile` and run `gpg` from a relative path, and the manifest generator reads jars with `zipfile` and has one manifest per OS (`contentaccessible-manifest-macos.json`, `-windows.json`). `windows-keyboard` gains a macOS arm that measures the editor caret with a control (`input:windowsKeyboard` off). `windows-crt-math` skips its control on a Windows host, where the host libm is the CRT. `stock-gpu-parity` now applies the launcher's own rule (`utils.plan_rendering`: a software renderer matches any GPU, a hardware GPU must be recorded) and says why it fails.
+
+**Not fixed, filed.** Windows `contentaccessible-parity` finds a real difference, the missing `defaultagent` resource (#358). `getter-cost-parity` fails on the hosted macOS runner (#359). `stock-gpu-parity` failed on both hosted runners: its gate demanded a recorded GPU even from a software renderer, which the launcher does not (Windows runner: Microsoft Basic Render Driver); on the macOS runner stock says `Apple Inc.` where fpgen has `Apple`, so the launcher too treats that GPU as unrecorded. `windows-crt-math` on macOS is #317.
+
+**Evidence.** See the PR for run and job ids.
+
+**What misled the investigation.** A Linux green said nothing about the other two OSes (lesson 3). `webdriver-bidi-tabs` hung on one developer Mac for the fork.1 and the fork.2 apps and passed on the CI macOS runner; it was a condition of that Mac, not of the browser. A log is only about the binary the run unpacked, so every probe prints the BuildID it ran against.
+
+## #356: Vietnamese text drew with the wrong glyphs in the window of a Camoufox on a Mac
+
+**Fixed by:** the PR that closes #356. **Found by:** a goapi session on a macOS host with a Windows identity, whose window showed garbled Vietnamese while its screenshots were correct.
+
+**Symptom.** On a macOS host with a Windows or Linux identity, Vietnamese text (and any text drawn from a bundled face such as Segoe UI or Arial) appeared in the window with wrong glyphs: the right letters in the DOM, other outlines on screen. `Page.screenshot`, the screencast and Marionette captures of the same page were correct, so nothing the automation could read showed it.
+
+**Root cause.** On macOS, WebRender rasterizes glyphs in the GPU process. Content does not send it a font: it sends a descriptor made of a PostScript name and a file path (`UnscaledFontMac::GetFontDescriptor`, `ScaledFontMac.cpp:373-412`), and `add_native_font` (`gfx/wr/wr_glyph_rasterizer/src/platform/macos/font.rs:272-325`) looks the font up by that name and then adds the path as `kCTFontURLAttribute`, ignoring a failure (`if let Ok`). CoreText ignores the URL for a file that is not registered in the calling process, and falls back to another font (`Helvetica.ttc` here), whose outlines are then drawn with the bundled font's glyph ids. The bundle is registered only with `kCTFontManagerScopeProcess`, by `CoreTextFontList::ActivateFontsFromDir`, which only the `CoreTextFontList` constructor called. The GPU process never creates a `gfxPlatform` (`gfxPlatform.cpp:788` asserts it), so it never had a font list and never registered the bundle. A Windows or Linux host is not affected by reading: WebRender gets a file path there (`bindings.rs:2996-3011`, `UnscaledFontFreeType.cpp:69-78`).
+
+**Fix.** `font-hijacker.patch` splits the gate and the activation out of the constructor into `CoreTextFontList::ShouldActivateBundledFonts` (pref `gfx.bundled-fonts.activate` not 0 and spoofed OS not macOS) and `ActivateBundledFonts` (nullable family set), and `GPUParent::RecvInit` calls them right before `wr::RenderThread::Start`. The directory comes from `gfxVars::GREDirectory()`, because `NS_GetSpecialDirectory(NS_GRE_DIR)` fails in the GPU process: the first version of the fix used it, built green, and registered nothing. Alternatives that were not taken: resolving the font by name in WebRender (refuted below), and leaving it to the user to turn the GPU process off (`layers.gpu-process.enabled=false` draws correctly, and is the reference of the test).
+
+**Evidence.** `e2e/journeys/test_10_bundled_fonts_in_the_window.py` captures the real window (by window id, never the screen) in three launches: default, GPU process off, GPU process off again. It requires the rows to differ from a blank window's crop (else VACUOUS), the two GPU-off launches to be equal (else NOT COMPARABLE), and default equal to GPU-off. Red before the fix, locally and on CI (runs 41023853587 and 41025002946, job 123960947661, BuildID 20261027060636): the first two checks ok, the third failing. Green after: run 41098518733 on build 41064214560 (head 364090f2), both drivers, all three checks ok, 316138 bytes against 316138. `MOZ_LOG=fontlist:4` on that build reads `bundled-fonts gate gfx.bundled-fonts.activate=1 native-identity=0` and `bundled-fonts activating .../Contents/Resources/fonts` in the parent, the GPU process and every content process, for Windows, Linux and macOS-platform identities, and no `no fonts directory` line. On build 41026066613 (the NS_GRE_DIR version) the GPU process read `no fonts directory`. With `gfx.bundled-fonts.activate=0` in the profile the gate line reads 0 in every process, no activation follows, and the window draws legible system-font Vietnamese. The guard is `bundled-fonts-registered-in-the-macos-gpu-process` in `ci/tribal-rules.yml`.
+
+**What this does not cover.** Canvas text under accelerated or remote canvas may reach the same lookup (`RecordedEventImpl.h:1511-1525`), but a non-host identity reads canvas back randomized, so it could not be measured. The `go` driver is excluded from the journey, because goapi applies prefs after the browser starts and `layers.gpu-process.enabled` is read at startup.
+
+**What misled the investigation.** Every capture path that avoids WebRender (`Page.screenshot`, `drawSnapshot`, `CrossProcessPaint`, the screencast) paints the page correctly, so a clean screenshot said nothing; only a capture of the window shows it, and `remote.screenshot.use_readback` is not supported on macOS. The first hypothesis, that WebRender resolves the PostScript name to another copy of a duplicated name, was refuted: with the files registered, 9 of 9 name-plus-URL lookups returned the requested file, and unregistered ones all returned `Helvetica.ttc`. goapi's `WithFirefoxUserPref("layers.gpu-process.enabled", false)` had no effect, which made the first GPU-off reference invalid until the pref went into the profile's `user.js`. A stale window position (read before the window settled) shifted the crop by 50 px and was caught by the off-against-off control. And a green build said nothing about the GPU process: only its own log line showed the directory lookup failing.
+
+## #354: a macOS build hung in mach's terminal-notifier and was cancelled at the 6 hour job limit
+
+**Fixed by:** the PR that closes #354. **Found by:** `build.yml` run 40983620975 (`build (macos, arm64)`, job 123829360348).
+
+**Symptom.** The `Build` step ran from 01:29Z, mach finished compiling at 03:34:50Z, and the step then produced no output until GitHub cancelled the job at 07:05:10Z. No artifact and no cache were saved.
+
+**Root cause.** After a successful build mach calls `BuildBase.notify` (`python/mozbuild/mozbuild/base.py`), which runs `terminal-notifier` on macOS and waits for it. The last log lines are `105:02.68 /opt/homebrew/lib/ruby/gems/3.4.0/bin/terminal-notifier -title 'Mozilla Build System' -group mozbuild -message 'Build complete'` and then nothing; in the passing run 40882163721 the next line, `To view a profile of the build`, follows 1.3 seconds later. The function returns first when `MOZ_NOSPAM` or `MOZ_AUTOMATION` is set, and `build.yml` set neither.
+
+**Fix.** The `Build` step sets `MOZ_NOSPAM=1` and has `timeout-minutes: 240`, 52 minutes over the slowest passing Build step (188 minutes, macOS arm64), so any other hang fails in four hours instead of six. `MOZ_AUTOMATION` was not used because it changes more than notifications.
+
+**Evidence.** `test_the_build_step_cannot_hang_on_mach_s_notifier_or_run_to_the_job_limit` in `ci/tests/test_fork_workflow.py` failed on main (`MOZ_NOSPAM` absent) and passes with the change. The effect is read from the Firefox 158.0.1 source, `python/mozbuild/mozbuild/base.py`, `BuildBase.notify`: line 652 is `if "MOZ_NOSPAM" in os.environ or "MOZ_AUTOMATION" in os.environ:`, line 653 is `return`, and `terminal-notifier` is looked up at line 657 and run at line 663, after that return. No macOS build has run with the change, so the fix is unexercised until the first macOS build from main after the merge; that build's log must show no `terminal-notifier` line after `Build complete`.
+
+**What misled the investigation.** The REST logs endpoint returned the job without any `Build` step output, which made the run look like it died in setup; `gh run view --log --job` has the step. The ccache miss rate (99.98%) looked like the cause of the long run, but the compile had finished in 105 minutes.
+
+## #348: goapi pages raced on their handler list, and closed pages kept their handlers
+
+**Symptom.** Under `go test -race`, a `BrowserContext.OnPage` handler that calls `Page.OnDialog` while the browser detaches the page is reported as a data race on `Page.subs`. Separately, a page that had been closed still received events for its session: handlers set with `OnDialog`, `OnConsole`, `OnPageError`, `OnCrash`, `OnRequest`, `OnResponse` and `OnFileChooser` stayed registered on the connection, and with them the `*Page` they captured, for the life of the browser.
+
+**Root cause.** `Page.subs` was appended to at ten internal sites (`page.go`, `frame.go`, `dialog.go`) with no lock, while `finish()` ranged over it and set it to nil with no lock, on the read loop. `BrowserContext.publish` calls the `OnPage` handlers outside `pagesMu`, so a handler can register handlers while a detach runs `finish()`; an append after `finish()` was never deregistered. The public `On*` methods returned their subscription to the caller and never recorded it in `p.subs`, so `finish()` could not remove it.
+
+**Fix.** One helper, `Page.own`, records a subscription under `p.mu`, and deregisters it at once when the page has already finished. Every internal registration and every public `On*` goes through it. `finish()` swaps the slice out under `p.mu` and deregisters outside the lock. The public methods still return the `Subscription`, and `p.Off` still works; deregistering a subscription twice does nothing.
+
+**Evidence.** Red, then green, in `goapi/page_subs_test.go`, which drives a scripted connection and needs no browser: `TestOnPageHandlerRegisteringHandlersRacesDetach` reported `WARNING: DATA RACE` between `Page.finish` and `Page.OnDialog` and failed with `500 dialog handlers registered during the detach still run after the page closed`; `TestPageClosingDeregistersItsPublicHandlers` failed for `OnDialog`, `OnConsole`, `OnPageError`, `OnCrash`, `OnRequest` and `OnResponse` with `ran 2 times; it ran again after the page closed`. Both pass with `-race` after the fix. The leak test delivers each event once while the page is open first, so a handler that was never called cannot pass for a deregistered one.
+
+**What misled.** The tests do not count handlers on the connection, which would have needed an accessor on `juggler.Connection` only for tests; they check what the leak does, which is call the handler of a closed page. `OnFileChooser` has the same fix but no test: its registration makes a blocking call that the scripted connection does not answer.
+
 ## #311, #314: the patch-guard runner and several guards failed on Windows and saw nothing on macOS
 
 **Fixed by:** the PR that closes both. **Found by:** a run of the spoofing group on real Windows 10 against the fork.1 build.

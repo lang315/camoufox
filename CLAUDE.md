@@ -95,10 +95,13 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   ```bash
   python3 -m ci.run_patch_guards --binary /path/to/camoufox-bin
   ```
-  The runner works on Linux, macOS and Windows. Three guards need Linux tooling
-  (`ipv4-only-network`, `webgl-live-state`, `webgl-renderer-pair`); on another
-  platform they are reported as "not applicable", never as passes. On Linux a
-  missing prerequisite fails.
+  The runner works on Linux, macOS and Windows. Five guards are Linux-only by
+  subject (`ipv4-only-network`, `webgl-live-state`, `webgl-renderer-pair`,
+  `occluded-window-active`, `pointer-lock-offscreen`); `system-font-alias-stall`
+  does not run on macOS and `windows-keyboard` not on Windows. On those platforms
+  they are reported as "not applicable" with the reason, never as passes. On Linux a
+  missing prerequisite fails. `stock-gpu-parity` fails on a host whose hardware GPU
+  fpgen did not record, with that reason (the launcher's `plan_rendering` rule).
 - **Playwright** — upstream playwright-python, fetched fresh at the tag
   `ci/versions.py` resolves for the browser, with `ci/skiplist.yml` applied and
   `browser/tests/playwright/camoufox/` overlaid. This is the automation-contract check, not the
@@ -338,3 +341,11 @@ the healthy count** and a non-zero one is a finding.
   The browser cache is keyed on compiled inputs only (`ci/browser_inputs.py`), so a
   change that misses them, Juggler JS included, restores main's browser in ~1 min.
 - NEVER poll a backgrounded job (`sleep`/`ps`/`pgrep`/`top`) — do other work or end your reply and you will be woken with its output.
+- Clean up after every PR, feature or CI run you finish: delete what you created and
+  no longer use — build outputs and browser profiles in your scratchpad, git worktrees
+  and `.ci-work` copies, downloaded or built zips and binaries — and stop the test
+  browsers you started. Keep only what a live process, an open PR or another
+  session's run still needs, never delete another session's files, and say in the
+  PR body or report what you removed. This covers the local machine; files on a
+  shared remote build host need its owner's approval. Stale build outputs once left
+  the development machine with 12G of disk free.

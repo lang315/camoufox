@@ -48,12 +48,12 @@ func (d *Dialog) Dismiss(ctx context.Context) error {
 // An internal subscription to Page.dialogClosed is added to p.subs for
 // lifecycle cleanup; it fires automatically and cannot be disabled separately.
 func (p *Page) OnDialog(handler func(*Dialog)) juggler.Subscription {
-	p.subs = append(p.subs, p.bc.b.conn.On("Page.dialogClosed", func(ev juggler.Event) {
+	p.own(p.bc.b.conn.On("Page.dialogClosed", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
 	}))
-	return p.bc.b.conn.On("Page.dialogOpened", func(ev juggler.Event) {
+	return p.own(p.bc.b.conn.On("Page.dialogOpened", func(ev juggler.Event) {
 		if ev.SessionID != p.session.ID() {
 			return
 		}
@@ -69,5 +69,5 @@ func (p *Page) OnDialog(handler func(*Dialog)) juggler.Subscription {
 				dialogID:     de.DialogID,
 			}
 			go handler(d)
-	})
+	}))
 }

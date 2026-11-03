@@ -35,6 +35,11 @@ CAMOUFOX_TESTS = REPO_ROOT / "browser" / "tests" / "playwright" / "camoufox"
 # Names overlaid last time, so a reused checkout can tell our files from
 # upstream's without guessing from the name.
 OVERLAY_MANIFEST = ".camoufox-overlay.json"
+# The suite's own pins must install, and an unpinned pip decides that on the day.
+# pip 26.3 (2026-11-02) applies PyPI's direct-URL rule to extras too (pypa/pip
+# #14341), which fails autobahn 23.1.2 that playwright-python pins (#375).
+# Raise it only after a venv for the current tag installs under the new one.
+PIP_VERSION = "26.2.2"
 
 
 def fetch(tag: str, dest: Path) -> Path:
@@ -87,7 +92,7 @@ def make_venv(checkout: Path, tag: str, *, reuse: bool = True) -> Path:
         return python
 
     run([sys.executable, "-m", "venv", str(venv)], check=True)
-    run([str(python), "-m", "pip", "install", "--quiet", "--upgrade", "pip"], check=True)
+    run([str(python), "-m", "pip", "install", "--quiet", f"pip=={PIP_VERSION}"], check=True)
 
     # Install the suite's own pins. Hand-picked ones once paired pytest-asyncio
     # 0.21 with a suite needing 1.4, and every test errored at setup with

@@ -102,11 +102,16 @@ _forbid_installed_release()
 
 @contextlib.contextmanager
 def hidden_display(screen: str = "1400x900") -> Iterator[str]:
-    """A private Xvfb display for the duration of the block.
+    """A display for a headful browser for the duration of the block.
 
-    The process environment points at it too. On a Wayland desktop an inherited
-    WAYLAND_DISPLAY makes GTK skip the X display, so the browser never opens it.
+    On Linux, a private Xvfb display; the process environment points at it too.
+    On a Wayland desktop an inherited WAYLAND_DISPLAY makes GTK skip the X
+    display, so the browser never opens it. On macOS and Windows the host has a
+    display, so the block yields "" and changes nothing.
     """
+    if not sys.platform.startswith("linux"):
+        yield ""
+        return
     if not shutil.which("Xvfb"):
         raise SystemExit("Xvfb is required for this guard")
     for n in range(140, 160):

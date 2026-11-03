@@ -20,6 +20,8 @@ import json
 import os
 import pathlib
 import re
+import subprocess
+import sys
 import tempfile
 import urllib.error
 import urllib.parse
@@ -749,6 +751,31 @@ def test_build_tester_does_not_grade_a_previous_runs_result(tmp_path, monkeypatc
     code = _build_tester_run(tmp_path, monkeypatch,
                              lambda cmd, **kw: Result(1, "", "ERROR: Binary not found"))
     assert code == 1
+
+
+def test_build_tester_prints_box_drawing_under_a_cp1252_stdout(tmp_path):
+    """The suite's own output must encode on a Windows pipe (#353).
+
+    Windows pipes a child's stdout as cp1252, which has no box-drawing
+    characters, and the first line of the report crashed the run before grading.
+    The child runs run_tests.main with a stand-in suite that prints one.
+    """
+    scripts = pathlib.Path(__file__).resolve().parents[2] / "browser" / "tests" / "build-tester" / "scripts"
+    binary = tmp_path / "camoufox-bin"
+    binary.touch()
+    code = (
+        "import sys; sys.path.insert(0, sys.argv[1]); import run_tests\n"
+        "async def suite(**kw):\n    print('\\u2500' * 3)\n    return 0\n"
+        "run_tests.run_tests = suite\n"
+        "sys.argv = ['run_tests.py', sys.argv[2]]\n"
+        "run_tests.main()\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", code, str(scripts), str(binary)],
+        capture_output=True, env={**os.environ, "PYTHONIOENCODING": "cp1252", "PYTHONUTF8": "0"},
+    )
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+    assert "\u2500\u2500\u2500" in proc.stdout.decode("utf-8")
 
 
 def test_run_pytest_clears_a_previous_runs_junit(tmp_path, monkeypatch):
@@ -1628,6 +1655,22 @@ def test_the_overlay_is_idempotent_and_clears_stale_files(tmp_path, monkeypatch)
     assert (checkout / "tests" / "async" / "test_renamed.py").exists()
     # Upstream's own module is untouched throughout.
     assert (checkout / "tests" / "async" / "test_page.py").read_text() == "# upstream\n"
+
+
+def test_the_suite_venv_pins_pip(tmp_path, monkeypatch):
+    """pip is not upgraded to whatever PyPI has that day (#375).
+
+    pip 26.3 started rejecting the `web3 @ git+...` extra in autobahn 23.1.2,
+    which the upstream suite pins, and the suite's install died in every run.
+    """
+    from ci import suite
+
+    commands = []
+    monkeypatch.setattr(suite, "run", lambda cmd, **kw: commands.append([str(c) for c in cmd]))
+    suite.make_venv(tmp_path, "v1.62.0", reuse=False)
+
+    pip_installs = [c[-1] for c in commands if c[-1].split("==")[0] == "pip"]
+    assert pip_installs == [f"pip=={suite.PIP_VERSION}"], commands
 
 
 def test_every_camoufox_test_module_is_named_unlike_upstreams():
@@ -3186,6 +3229,39 @@ def test_every_linux_only_guard_is_a_guard():
     assert LINUX_ONLY <= {g.stem for g in guards()}
 
 
+def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_only(tmp_path, monkeypatch):
+    from ci.run_patch_guards import NOT_ON, not_applicable_reason
+
+    for platform, guards_ in NOT_ON.items():
+        for stem, why in guards_.items():
+            assert not_applicable_reason(stem, platform) == why
+            others = {"darwin", "win32", "linux"} - {platform}
+            assert all(not_applicable_reason(stem, other) is None for other in others)
+    code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["system-font-alias-stall"])
+    assert ran == []
+    assert record["tests"] == {"patches/system-font-alias-stall.py": results.NOT_APPLICABLE}
+
+
+def test_a_display_guard_runs_on_the_hosts_display_off_linux(monkeypatch):
+    """hidden_display starts Xvfb on Linux and fails without it; elsewhere the host has a display."""
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "browser/tests/playwright/patches"))
+    try:
+        import helpers
+    finally:
+        sys.path.pop(0)
+    monkeypatch.setattr(helpers.shutil, "which", lambda name: None)
+    monkeypatch.setattr(helpers.sys, "platform", "darwin")
+    with helpers.hidden_display() as display:
+        assert display == ""
+    monkeypatch.setattr(helpers.sys, "platform", "linux")
+    with pytest.raises(SystemExit, match="Xvfb is required"):
+        with helpers.hidden_display():
+            pass
+
+
 # ---------------------------------------------------------------------------
 # memory growth: sharded onto pull requests, and gated
 # ---------------------------------------------------------------------------
@@ -3407,3 +3483,42 @@ def test_observer_harness_reads_surface_ids_from_the_cpp_enum(monkeypatch):
     with pytest.raises(ValueError):
         harness.parse_surface_names("enum class Other { A = 1 };")
     sys.modules.pop("harness", None)
+
+
+# ---------------------------------------------------------------------------
+# Actions caches: the build legs keep a warm ccache, closed pull requests free theirs
+# ---------------------------------------------------------------------------
+
+
+def _workflow(name):
+    import yaml
+
+    return yaml.safe_load((CI_ROOT.parent / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("prefix", ["mozbuild", "ccache"])
+def test_a_build_leg_saves_a_fresh_cache_every_run(prefix):
+    """actions/cache never overwrites an existing key, so a key fixed per upstream.sh kept the
+    first ccache saved for it and every later build restored that stale one."""
+    steps = _workflow("build.yml")["jobs"]["build"]["steps"]
+    cache = next(s["with"] for s in steps if str(s.get("with", {}).get("key", "")).startswith(prefix))
+    assert cache["key"].endswith("-${{ github.run_id }}"), cache["key"]
+    restore = [line.strip() for line in cache["restore-keys"].splitlines() if line.strip()]
+    assert restore and all(not r.endswith("run_id }}") and r.startswith(prefix + "-") for r in restore)
+    # The prefix a key is saved under must be the first restore key, or the newest one is never found.
+    assert cache["key"].startswith(restore[0])
+
+
+def test_closing_a_pull_request_deletes_the_caches_it_saved():
+    """A pull request's caches live under refs/pull/N/merge, where nothing else can restore them,
+    and at the size limit the eviction took the build legs' ccache instead."""
+    workflow = _workflow("cleanup-pr-caches.yml")
+    triggers = workflow.get("on") or workflow[True]
+    assert triggers == {"pull_request_target": {"types": ["closed"]}}
+    assert workflow["permissions"] == {}
+    (job,) = workflow["jobs"].values()
+    assert job["permissions"] == {"actions": "write"}
+    assert not any("uses" in step for step in job["steps"]), "must not check out or run pull request code"
+    (step,) = job["steps"]
+    assert step["env"]["REF"] == "refs/pull/${{ github.event.pull_request.number }}/merge"
+    assert "github.event" not in step["run"], "the pull request number is the only event input, passed through env"

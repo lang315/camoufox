@@ -26,7 +26,11 @@ def pytest_addoption(parser):
 
 def pytest_generate_tests(metafunc):
     if "drv" in metafunc.fixturenames:
-        metafunc.parametrize("drv", metafunc.config.getoption("--drivers").split(","), indirect=True)
+        drivers = metafunc.config.getoption("--drivers").split(",")
+        only = metafunc.definition.get_closest_marker("drivers")
+        if only:
+            drivers = [d for d in drivers if d in only.args]
+        metafunc.parametrize("drv", drivers, indirect=True)
 
 
 @pytest.fixture(scope="session")
