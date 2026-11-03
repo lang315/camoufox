@@ -154,7 +154,7 @@ def test_a_list_with_no_chain_face_falls_to_the_rows(binary):
     steps = {}
     for path in glob.glob(str(logdir / "cfx*")):
         for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
-            m = re.search(r"CAMOU-FL generic-map ctx=(\d+) generic=(\d+) step=(\S+) key=(\S*)", line)
+            m = re.search(r"CAMOU-FL generic-map ctx=(\d+) generic=(\d+) step=(\S+) key=(.*)$", line)
             if m and m.group(1) != "0":
                 steps.setdefault(int(m.group(2)), set()).add((m.group(3), m.group(4)))
     print(f"CAMOU-FL generic-map steps {steps}")
