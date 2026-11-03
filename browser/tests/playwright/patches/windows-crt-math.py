@@ -11,8 +11,9 @@ The reference, assets/windows-crt-math.json, is what stock Firefox on Windows
 returned for the same inputs (browser/tests/ucrt-math/record_firefox.py), so
 this checks the whole path a page sees: the interpreter, the JITs (the probe
 runs hot), constant folding, and SpiderMonkey's own exponent fast paths around
-pow. browser/tests/ucrt-math/check.py covers the C alone, against ucrtbase.dll,
-on a much larger set.
+pow (the square roots for an exponent of 0.5 and -0.5, in the interpreter and as
+Ion compiles a literal one). browser/tests/ucrt-math/check.py covers the C alone,
+against ucrtbase.dll, on a much larger set.
 
 A control run with the pref off must differ, or the reference would not be
 telling the two apart. A Windows host has no such control (its libm is the CRT),
@@ -53,6 +54,11 @@ def mismatches(got):
         for name, values in want["results"].items():
             out[f"{phase} {name}"] = differing(got[phase][name], values)
     out["constant-folded"] = differing(got["constants"], want["constants"])
+    # Only the pairs whose exponent is a literal 0.5 or -0.5 are probed.
+    # A pair passes only if every one of its many calls gave the one right value.
+    pairs = [(a[0] if len(a) == 1 else a, b)
+             for a, b in zip(got["half"], want["results"]["pow"]) if a is not None]
+    out["literal exponent +-0.5, every call"] = differing(*map(list, zip(*pairs)))
     return out
 
 
