@@ -290,6 +290,7 @@ Before this change a Linux claim drew Nimbus Roman, Nimbus Sans, Cousine and Nim
 
 What this does not close:
 - Only a Latin page. `fc-match -s` gives other chains for `ja`, `zh-cn`, `ko` and `ar`; that is #389.
+- A list that refuses every face of a chain gets the old hand-written rows (`step=rows`), which is a hand-written answer for a Linux claim. No drawn list does this (300 of 300 draws of `generate_context_fingerprint(os="linux")` admit every chain face), so only a custom `fonts=` list reaches it; `test_a_list_with_no_chain_face_falls_to_the_rows` pins it.
 - `GetDefaultFontLocked` and the `step=none` corner (no list and no mask) are unchanged.
 - A goapi launch with `WithNoFingerprint()` and a `Config` without `Fonts` has no launch mask, so the page sees the host's fonts.
 

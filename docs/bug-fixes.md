@@ -26,7 +26,7 @@ later change should read first.
 
 **Evidence.** See the PR.
 
-**What misled the investigation.** The three prefs copies looked like the fix already shipped. They are read only on the Linux pref path, and the probe's `generic-map` lines showed `step=row` for every generic, so they never drew anything. `fc-match -s` also lists host-order fallbacks past the third family (Cascadia Code, FreeSerif), which Gecko never reads: it stops at `max_generic_substitutions`.
+**What misled the investigation.** The three prefs copies looked like the fix already shipped, and then like dead code. They are read only on the Linux pref path, but that path is what drew the symptom on a Linux host: with the prefs present, `AddGenericFonts` takes the base pref path, whose table step resolves the row key `times` through the virtual lookup and draws Nimbus Roman; without them it takes `FindGenericFamilies`, whose table step resolves the key through the scope-qualified base lookup, finds no family called `times` on a GTK host, and falls into fontconfig's own loop, which gives the conf. So deleting the prefs alone moves a Linux host to the conf, and the browser change is what fixes Windows and macOS hosts, where the alias rewrite makes the row key resolve. `fc-match -s` also lists host-order fallbacks past the third family (Cascadia Code, FreeSerif), which Gecko never reads: it stops at `max_generic_substitutions`.
 
 ## #310: the observer and goapi browser tests never ran on macOS or Windows
 

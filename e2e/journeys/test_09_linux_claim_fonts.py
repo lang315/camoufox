@@ -93,8 +93,8 @@ def faces(logdir):
     return out
 
 
-@pytest.mark.parametrize("fonts", [FONTS, FULL_FONTS], ids=["short-list", "full-list"])
-def test_a_linux_claim_draws_the_linux_faces(binary, fonts):
+def launch_and_log(binary, fonts, requests):
+    """Launch a Linux claim with `fonts`, measure each request, and return the directory of its MOZ_LOG files."""
     from camoufox.fingerprints import get_random_preset
     from camoufox.sync_api import NewBrowser
     from drivers.playwright_drivers import playwright
@@ -115,12 +115,16 @@ def test_a_linux_claim_draws_the_linux_faces(binary, fonts):
             page = browser.new_context().new_page()
             page.goto("about:blank")
             assert page.evaluate("navigator.platform").startswith("Linux")
-            page.evaluate(MEASURE, [f'"{n}"' for n in NAMES + NO_TARGET + [NEVER]] + GENERICS)
+            page.evaluate(MEASURE, requests)
         finally:
             browser.close()
-        break
-    else:
-        raise RuntimeError("no Linux preset launched")
+        return logdir
+    raise RuntimeError("no Linux preset launched")
+
+
+@pytest.mark.parametrize("fonts", [FONTS, FULL_FONTS], ids=["short-list", "full-list"])
+def test_a_linux_claim_draws_the_linux_faces(binary, fonts):
+    logdir = launch_and_log(binary, fonts, [f'"{n}"' for n in NAMES + NO_TARGET + [NEVER]] + GENERICS)
 
     drawn = faces(logdir)
     failures = []
@@ -136,3 +140,26 @@ def test_a_linux_claim_draws_the_linux_faces(binary, fonts):
             failures.append(f"{request}: admitted with no admitted target drew {drawn.get(request)!r}, "
                             f"want the list's default {default!r}")
     assert not failures, "\n".join(failures)
+
+
+def test_a_list_with_no_chain_face_falls_to_the_rows(binary):
+    """The known limit of the chains (#333): a list that refuses every face of a chain gets the old rows.
+
+    No drawn Linux list does (300 of 300 admit every chain face), so this pins the behaviour for a
+    custom `fonts=` list instead of leaving it accidental. Liberation Sans is on no chain, only on
+    the sans-serif row, so serif and monospace answer from the second row (`step=rows`) and no
+    generic answers from a chain.
+    """
+    logdir = launch_and_log(binary, ["Liberation Sans"], GENERICS)
+    steps = {}
+    for path in glob.glob(str(logdir / "cfx*")):
+        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
+            m = re.search(r"CAMOU-FL generic-map ctx=(\d+) generic=(\d+) step=(\S+) key=(\S*)", line)
+            if m and m.group(1) != "0":
+                steps.setdefault(int(m.group(2)), set()).add((m.group(3), m.group(4)))
+    print(f"CAMOU-FL generic-map steps {steps}")
+    drawn = faces(logdir)
+    assert all(step != "chain" for pairs in steps.values() for step, _ in pairs), steps
+    assert steps.get(1) == {("rows", "liberation sans")}, f"serif: {steps.get(1)}"
+    assert steps.get(3) == {("rows", "liberation sans")}, f"monospace: {steps.get(3)}"
+    assert {drawn.get(g) for g in GENERICS} == {"Liberation Sans"}, drawn
