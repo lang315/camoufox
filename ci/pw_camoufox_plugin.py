@@ -1,7 +1,7 @@
 """pytest plugin that lets upstream's own Playwright suite drive a Camoufox build.
 
 Loaded with `-p` against an *unmodified* checkout of playwright-python's tests,
-so upstream can refactor its conftest freely without breaking us. Four jobs:
+so upstream can refactor its conftest freely without breaking us. Five jobs:
 
 1. **Point every launch at the build under test.** Upstream's `launch_arguments`
    fixture has no way to select a binary, so launches are intercepted at the
@@ -38,11 +38,15 @@ so upstream can refactor its conftest freely without breaking us. Four jobs:
    spreads across parallel runners. Sharding by a hash of the node id rather
    than by position means a shard's contents do not shift when upstream adds a
    test in the middle of a file.
+
+5. **Bind the test servers on kernel-chosen ports** (`install_kernel_chosen_ports`),
+   so the suite's own HTTP and HTTPS servers cannot fail to listen (#390).
 """
 
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 from pathlib import Path
@@ -212,6 +216,80 @@ def _install_executable_path(path: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# test server ports
+# ---------------------------------------------------------------------------
+
+
+class _ReadsBoundPort:
+    """Stands in for upstream's `reactor` while one server starts.
+
+    Upstream draws a server's port in `Server.__init__` (bind 0, read, close) and
+    listens much later, so the number can be taken in between, and the HTTP and
+    HTTPS servers can be drawn the same number. This asks the kernel for the port
+    at the listen itself (port 0) and copies the number it bound onto the server.
+    """
+
+    def __init__(self, real: Any, server: Any, drawn: int) -> None:  # noqa: ANN401
+        self._real, self._server, self._drawn = real, server, drawn
+
+    def __getattr__(self, name: str) -> Any:  # noqa: ANN401
+        return getattr(self._real, name)
+
+    def listenTCP(self, port: int, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401, N802
+        return self._adopt(port, self._real.listenTCP(port, *args, **kwargs))
+
+    def listenSSL(self, port: int, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401, N802
+        return self._adopt(port, self._real.listenSSL(port, *args, **kwargs))
+
+    def _adopt(self, asked: int, listener: Any) -> Any:  # noqa: ANN401
+        if asked != 0:
+            return listener
+        bound = listener.getHost().port
+        for name in ("EMPTY_PAGE", "PREFIX", "CROSS_PROCESS_PREFIX"):
+            old = getattr(self._server, name)
+            assert f":{self._drawn}" in old, f"{name}={old!r} no longer carries the drawn port"
+            setattr(self._server, name, old.replace(f":{self._drawn}", f":{bound}"))
+        self._server.PORT = bound
+        return listener
+
+
+def install_kernel_chosen_ports(server_module: Any) -> None:  # noqa: ANN401
+    """Make upstream's test servers listen on a port the kernel hands them at listen.
+
+    Without this, run 41633372099 had 278 setup errors: `CannotListenError` on
+    127.0.0.1:41247 (#390). Wraps `Server.start` of playwright-python's
+    tests/server.py (`start` at :184, port drawn at :166, `reactor.listenTCP` at
+    :293 and `listenSSL` at :326). No retry: the number is read back from the
+    socket that holds it.
+    """
+    base = server_module.Server
+    for cls in (server_module.HTTPServer, server_module.HTTPSServer):
+        assert issubclass(cls, base) and "start" not in vars(cls), (
+            f"{cls.__name__} overrides start(); the kernel-chosen port fix wraps Server.start"
+        )
+    for name in ("listenTCP", "listenSSL"):
+        assert callable(getattr(server_module.reactor, name)), f"upstream reactor has no {name}"
+    original = base.start
+    if getattr(original, "_camoufox_wrapped", False):
+        return
+
+    def start(self: Any, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+        real = server_module.reactor
+        drawn, self.PORT = self.PORT, 0
+        server_module.reactor = _ReadsBoundPort(real, self, drawn)
+        try:
+            result = original(self, *args, **kwargs)
+        finally:
+            server_module.reactor = real
+        assert self.PORT != 0, "no listen call read the kernel-chosen port back"
+        return result
+
+    start._camoufox_wrapped = True  # type: ignore[attr-defined]
+    base.start = start
+
+
+
+# ---------------------------------------------------------------------------
 # hooks
 # ---------------------------------------------------------------------------
 
@@ -227,6 +305,7 @@ def pytest_configure(config) -> None:  # noqa: ANN001
             "downloaded stock Firefox and report a meaningless pass."
         )
     _install_executable_path(os.path.abspath(executable))
+    install_kernel_chosen_ports(importlib.import_module("tests.server"))
     config._camoufox_skiplist = load_skiplist()
     # Report the file we actually read, not where this plugin happens to sit.
     # ci/suite.py copies the plugin into the fetched checkout, so those two are

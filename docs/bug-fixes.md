@@ -12,6 +12,25 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #390: a Playwright shard errored at setup when the upstream test server could not bind its port
+
+**Fixed by:** the PR that makes `ci/pw_camoufox_plugin.py` bind the upstream test servers on kernel-chosen ports. **Found by:** Tests run 41633372099, job `Playwright 2/6` (job 125920147366), on #382.
+
+**Symptom.** The first pytest invocation of the shard ended `278 errors in 13.93s`, every one at setup of the session fixture `start_server`: `twisted.internet.error.CannotListenError: Couldn't listen on 127.0.0.1:41247: [Errno 98] Address already in use.` The three later invocations of the job, each with its own server, passed. No test body ran, so the browser and the PR were not involved.
+
+**Root cause.** playwright-python v1.62.0 `tests/server.py` draws a server's port in `Server.__init__` (`find_free_port`: bind 0, read the number, close; `:56-60`, `:166`) and listens only in `start()` (`:293`, `:326`). Nothing holds the number in between, and `tests/server.py` builds `TestServer()` (an HTTP and an HTTPS server) at import, so the gap runs from collection to the first test. Two things can take the number in it:
+
+- the other server: the HTTP server draws, closes, the HTTPS server draws and can get the same number, and the second `listen` fails exactly as in the log (HTTP listens first, `:369`). Measured on Linux (kernel 7.2, Python 3.12, port range 32768-60999): 400000 consecutive `find_free_port()` calls returned 38 equal neighbours, about 1 in 10000, and every port was odd (14115 candidates);
+- another process opening a socket in the gap. Measured on the same host: every outgoing connection's source port out of 20000 was even, so a source port cannot be the odd 41247. Only another `bind(0)` or an explicit bind of that number could.
+
+The log does not name the holder. 41247 is odd, which fits a `bind(0)` draw (the same one twice) and does not fit a connection's source port.
+
+**Fix.** `install_kernel_chosen_ports` (called from `pytest_configure`) wraps `Server.start`: it sets the server's port to 0 for that call, so the first `listenTCP` or `listenSSL` asks the kernel for it, then reads the bound number back and rewrites `PORT`, `EMPTY_PAGE`, `PREFIX` and `CROSS_PROCESS_PREFIX` before anything uses them. The `::1` listen then reuses that number. No port is held or drawn ahead, so neither candidate has a window. Upstream's files are untouched; the plugin asserts the shape it relies on (`start` not overridden, both reactor calls present, the URLs carrying the drawn port, a port read back) and fails the run if a Playwright bump changes it. Not done: retrying, or catching `CannotListenError`, which would hide the same clash in the next server.
+
+**Evidence.** `ci/tests/test_pw_server_ports.py` runs a stand-in of upstream's server shape on real sockets. With the fix switched off, the same-port case fails with `CannotListenError: Couldn't listen on 127.0.0.1:41247` and the taken-port case with `Address already in use`. Against the real upstream `tests/server.py` v1.62.0 with twisted 25.5.0 on Linux, both servers drawn 41247: unfixed `CannotListenError Couldn't listen on 127.0.0.1:41247: [Errno 98] Address already in use.`; fixed, the two servers listen on 43795 and 34769. See the PR for the Tests run.
+
+**What misled the investigation.** The issue offered "another process took it as a source port" as one of two equal readings. On Linux, `bind(0)` and `connect()` take opposite port parities, so the odd number settles which kind of draw produced it.
+
 ## #310: the observer and goapi browser tests never ran on macOS or Windows
 
 **Fixed by:** the PR that adds both gates to the macOS and Linux legs of `e2e.yml` (Windows follows #345). **Found by:** the observer harness failing on its first Windows run.
