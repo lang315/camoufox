@@ -56,6 +56,25 @@ later change should read first.
 
 **What misled the investigation.** The goapi fix for #362 was written from a test that used `..` and called it a relative path, so the same shape looked like it applied to a plain relative path in the other launchers too. It does not: only `..` and symlinks fail, and each launcher already normalized one of them.
 
+## #338: stock-gpu-parity crashed on a hosted Windows runner
+
+**Fixed by:** the PR that refs #338; #338 stays open for `windows-crt-math` on macOS (#317) and the macOS runner's GPU spelling. **Found by:** e2e run 41584656260, `stock-gpu-parity.py` on the Windows x86_64 build of main.
+
+**Symptom.** The guard died with a traceback, not a verdict: `KeyError: '{"vendor":"Google Inc. (Microsoft)","renderer":"ANGLE (Microsoft, Microsoft Basic Render Driver (0x0000008C) Direct3D11 vs_5_0 ps_5_0), or similar"}'` from `webgl._pin`.
+
+**Root cause.** Three layers, each hidden by the one above.
+1. `nearest_device` looked up the host GPU's own recorded devices. The earlier gate (`utils.plan_rendering`: a software renderer matches any GPU) let Microsoft Basic Render Driver through, but fpgen never recorded it on Windows, so the lookup raised. Linux's llvmpipe is recorded, which is why no Linux run ever reached this.
+2. Once a device came from the whole OS, its disagreement count was `sum(stock.get(k) != v for k, v in recorded.items())`: it counted only the device's own keys. A device with no WebGL2 records fewer values, so it looked closest to a stock that has WebGL2, and the probe page threw `ReferenceError: WebGL2RenderingContext is not defined` and never reported (`did not report within 120s`).
+3. The guard then expected Camoufox to claim the host's GPU. `webgl_for_gpu` refuses a GPU fpgen never recorded (`ValueError: No recorded WebGL data for vendor 'Google Inc. (Microsoft)'`), so the identity is the chosen device's GPU, and its `7937` renderer string differs from stock's by construction.
+
+**Fix.** `nearest_device` takes the OS's recorded devices when the host GPU is not recorded, and counts a value stock reports and the device lacks as a disagreement (`stock.keys() | recorded.keys()`). For an unrecorded host GPU the guard expects the chosen device's GPU and does not compare the renderer string `7937`. A recorded GPU, including llvmpipe, takes the same path as before. Tried and rejected: pinning the host's own vendor and renderer (`launch_options` raises, layer 3).
+
+**Evidence.**
+- Red to green, `python/tests/test_stock_gpu_parity_device.py`: the unrecorded Basic Render Driver raised `KeyError` on the first commit's parent; a stock with half its WebGL2 values changed picked a device without WebGL2 until the count included missing keys.
+- Windows, same build (41570521384), guard alone: `KeyError` (run 41584656260), then `WebGL2RenderingContext is not defined` (41595395212), then a wrong claimed GPU (41595985110), then `ValueError` from the host-GPU pin (41596630988), then `1/1 guards passed` (41598036743).
+
+**What misled the investigation.** Each failure looked like the last one's cause fixed: the lookup crash hid the missing-key count, which hid the claim. The guard's own docstring said a software renderer "is not gated here", which made the first crash read as an oversight in one line rather than a path never run on a host whose software GPU is unrecorded. This guard passes on Windows only because the identity differs from the host, so green here says the browser-owned values follow stock, not that the host's GPU is claimed.
+
 ## #375: the Skiplist audit failed on every run once pip 26.3 came out
 
 **Fixed by:** the PR that closes #375. **Found by:** Tests run 41553986984 on PR #374, `Skiplist audit`, with no code in the PR that could reach it.
