@@ -188,17 +188,12 @@ def test_a_list_with_no_chain_face_falls_to_the_rows(binary):
     generic answers from a chain.
     """
     logdir = launch_and_log(binary, ["Liberation Sans"], GENERICS)
-    steps = {}
-    for path in glob.glob(str(logdir / "cfx*")):
-        for line in Path(path).read_text(encoding="utf-8", errors="replace").splitlines():
-            m = re.search(r"CAMOU-FL generic-map ctx=(\d+) generic=(\d+) step=(\S+) key=(.*)$", line)
-            if m and m.group(1) != "0":
-                steps.setdefault(int(m.group(2)), set()).add((m.group(3), m.group(4)))
+    steps = generic_steps(logdir)
     print(f"CAMOU-FL generic-map steps {steps}")
     drawn = faces(logdir)
-    assert all(step != "chain" for pairs in steps.values() for step, _ in pairs), steps
-    assert steps.get(1) == {("rows", "liberation sans")}, f"serif: {steps.get(1)}"
-    assert steps.get(3) == {("rows", "liberation sans")}, f"monospace: {steps.get(3)}"
+    assert not any(step.startswith("chain") for _, step in steps), steps
+    assert steps.get(("serif", "rows")) == {"liberation sans"}, f"serif: {steps}"
+    assert steps.get(("monospace", "rows")) == {"liberation sans"}, f"monospace: {steps}"
     assert {drawn.get(g) for g in GENERICS} == {"Liberation Sans"}, drawn
 
 
