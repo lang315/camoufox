@@ -11,22 +11,25 @@ import (
 )
 
 // Firefox finds libxul from the path it was started with, and on macOS it
-// prints "Couldn't load XPCOM." and exits for a path it cannot resolve that
-// way. Launch must hand it an absolute path to the real binary whatever
-// spelling the caller used (#362).
+// prints "Couldn't load XPCOM." and exits for a path with a ".." component or
+// a symlink to the binary. A plain relative path works. Launch must hand the
+// browser an absolute path to the real binary whatever spelling the caller
+// used (#362, #378).
 func TestLaunchResolvesTheExecutablePath(t *testing.T) {
 	bin, err := filepath.Abs(browserBinary(t))
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Go 1.22 in go.mod has no t.Chdir; no test in this package is parallel.
 	cwd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	rel, err := filepath.Rel(cwd, bin)
-	if err != nil {
+	t.Cleanup(func() { _ = os.Chdir(cwd) })
+	if err := os.Chdir(filepath.Dir(filepath.Dir(bin))); err != nil {
 		t.Fatal(err)
 	}
+	rel := filepath.Join(filepath.Base(filepath.Dir(bin)), filepath.Base(bin))
 	link := filepath.Join(t.TempDir(), "camoufox-link")
 	if err := os.Symlink(bin, link); err != nil {
 		t.Fatal(err)
@@ -38,7 +41,7 @@ func TestLaunchResolvesTheExecutablePath(t *testing.T) {
 	t.Setenv("PATH", pathDir)
 	dir := filepath.Dir(bin)
 	for name, path := range map[string]string{
-		"relative": rel,
+		"relative": rel, // no "..": it works unresolved, and must keep working
 		"dotdot":   dir + "/../" + filepath.Base(dir) + "/" + filepath.Base(bin),
 		"symlink":  link,
 		"path":     "camoufox", // a bare name is searched on PATH, as exec does
