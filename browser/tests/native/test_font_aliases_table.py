@@ -8,6 +8,7 @@ browser's directory (fonts/, fontconfig/linux/) and fontconfig's command-line
 tools; it fails, never skips, when either is missing.
 """
 
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -22,3 +23,13 @@ def test_the_alias_table_matches_the_bundle(binary):
         capture_output=True, text=True, timeout=600,
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
+
+
+def test_the_header_carries_the_four_generic_chains():
+    """The chains are what --check compares; this names them so a dropped one is a plain failure (#333)."""
+    header = (REPO_ROOT / "browser" / "additions" / "camoucfg" / "FontAliasesLinux.hpp").read_text(encoding="utf-8")
+    for name in ("Serif", "SansSerif", "Monospace", "Cursive"):
+        match = re.search(rf"kCamouLinux{name}Chain\[\] = \{{(.*?)\}};", header)
+        assert match, f"no {name} chain"
+        families = re.findall(r'"([^"]+)"', match.group(1))
+        assert 1 <= len(families) <= 3 and len(set(families)) == len(families), f"{name}: {families}"

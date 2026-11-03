@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #333: a Linux claim's generics ignored the shipped fonts.conf
+
+**Fixed by:** the PR that refs #333 (the Latin page; other language groups are #389). **Found by:** the realism review of #325.
+
+**Symptom.** A Linux identity drew `serif` as Nimbus Roman, `sans-serif` as Nimbus Sans, `monospace` as Cousine and `cursive` as Nimbus Sans. A Linux host with the same bundle and conf draws Noto Serif, Noto Sans, DejaVu Sans Mono and Z003 (`fc-match -s`, e2e run 41633068315).
+
+**Root cause.** `gfxPlatformFontList::CamouGenericCandidate` (`font-list-spoofing.patch`) answers a generic from OS-agnostic rows (`kCamouSerifRow`, `kCamouSansSerifRow`, `kCamouMonospaceRow`) whenever a launch mask or a per-context list applies. The rows start with `Times`, `Helvetica` and `Courier New`, which the #325 alias rewrite turns into Nimbus Roman, Nimbus Sans and Cousine. The launcher also wrote `font.name-list.*` for Linux from three hand-synced copies (Cousine, Tinos, Arimo); the browser never read them, because the table answers first.
+
+**Fix.** `gen-font-aliases.py` writes the conf's chain for each generic into `FontAliasesLinux.hpp`, read as `FindGenericFamilies` reads it. For a Linux claim `CamouGenericCandidate` takes the first chain family the list admits, on every host. The Linux entry is removed from the three launcher copies and their tests.
+
+**Alternatives.** Removing the rows for Linux and letting fontconfig answer would have left a Linux claim on Windows or macOS with no fontconfig at all (the host pref path), so the same claim would have drawn different faces on different hosts.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The three prefs copies looked like the fix already shipped. They are read only on the Linux pref path, and the probe's `generic-map` lines showed `step=row` for every generic, so they never drew anything. `fc-match -s` also lists host-order fallbacks past the third family (Cascadia Code, FreeSerif), which Gecko never reads: it stops at `max_generic_substitutions`.
+
 ## #310: the observer and goapi browser tests never ran on macOS or Windows
 
 **Fixed by:** the PR that adds both gates to the macOS and Linux legs of `e2e.yml` (Windows follows #345). **Found by:** the observer harness failing on its first Windows run.
