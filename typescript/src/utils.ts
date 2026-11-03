@@ -1557,7 +1557,13 @@ export async function launchOptions({
 		executable_path = envExecutable;
 	}
 	if (typeof executable_path === "string") {
-		executable_path = path.resolve(executable_path);
+		// The macOS app finds libxul from the path it is started with and exits
+		// with "Couldn't load XPCOM." for a symlink (#378). A missing binary is
+		// left to the read of its files below, which names the file.
+		const resolved = path.resolve(executable_path);
+		executable_path = fs.existsSync(resolved)
+			? fs.realpathSync(resolved)
+			: resolved;
 	}
 
 	// Handle virtual display

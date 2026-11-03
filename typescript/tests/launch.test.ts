@@ -846,6 +846,50 @@ describe("test_executable_path_bundle", () => {
 	});
 });
 
+// The macOS app finds libxul from the path it is started with and exits with
+// "Couldn't load XPCOM." for a ".." or a symlink to the binary (#378).
+describe("executable_path resolution", () => {
+	beforeEach(() => isolateLaunch());
+
+	const real = fs.realpathSync(BUNDLE_EXE);
+	const spellings: Record<string, () => string> = {
+		symlink: () => {
+			const link = path.join(SCRATCH, "exe-link", "camoufox-bin");
+			fs.mkdirSync(path.dirname(link), { recursive: true });
+			fs.rmSync(link, { force: true });
+			fs.symlinkSync(BUNDLE_EXE, link);
+			return link;
+		},
+		dotdot: () =>
+			`${path.dirname(BUNDLE_EXE)}/../${path.basename(path.dirname(BUNDLE_EXE))}/${path.basename(BUNDLE_EXE)}`,
+	};
+
+	it.each(
+		Object.keys(spellings),
+	)("hands Playwright the real path of a %s", async (name) => {
+		const options = await launch({
+			executable_path: spellings[name](),
+			os: "linux",
+			canvas_noise: false,
+			block_webgl: true,
+			headless: true,
+			i_know_what_im_doing: true,
+		});
+		expect(options.executablePath).toBe(real);
+	});
+
+	it("leaves a missing binary to the read of its files", async () => {
+		await expect(
+			launch({
+				executable_path: path.join(SCRATCH, "missing", "camoufox-bin"),
+				os: "linux",
+				headless: true,
+				i_know_what_im_doing: true,
+			}),
+		).rejects.toThrow("application.ini");
+	});
+});
+
 describe("the browser option", () => {
 	beforeEach(() => vi.stubEnv("CAMOUFOX_EXECUTABLE_PATH", ""));
 	afterEach(() => vi.unstubAllEnvs());
@@ -901,8 +945,10 @@ describe("the browser option", () => {
 			headless: true,
 			i_know_what_im_doing: true,
 		});
-		expect(options.executablePath).toBe(exe);
-		expect(read).toEqual([exe, exe]);
+		// The launcher hands Playwright the real path (#378); a temp dir on macOS is a symlink.
+		const real = fs.realpathSync(exe);
+		expect(options.executablePath).toBe(real);
+		expect(read).toEqual([real, real]);
 		expect(ffVersion).toBe("152");
 	});
 
