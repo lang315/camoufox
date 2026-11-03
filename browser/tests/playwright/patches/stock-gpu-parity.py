@@ -20,7 +20,9 @@ the GPU stock reports, with the recorded device of that GPU nearest to stock,
 so a machine with a hardware GPU fpgen never recorded fails, by the same exact match of
 vendor and renderer strings as the launcher's (utils.plan_rendering, which would turn canvas
 noise on there). A software renderer (llvmpipe, Microsoft Basic Render Driver) matches any
-GPU in the launcher and is not gated here. The hosted macOS runner fails this guard: its
+GPU in the launcher and is not gated here. One fpgen never recorded on the OS (Microsoft
+Basic Render Driver on Windows) cannot be claimed, so the identity is the nearest recorded
+device and its renderer string is not compared. The hosted macOS runner fails this guard: its
 virtual GPU is spelled 'Apple Inc.' where fpgen has 'Apple', a runner spelling and not a
 product bug (a real Apple M1 passes).
 
@@ -285,8 +287,12 @@ def flatten(output: Dict[str, Any]) -> Dict[str, Any]:
 
 def nearest_device(target_os: str, gpu: List[str], stock: Dict[str, Any]) -> Dict[str, Any]:
     """The device fpgen recorded behind this GPU that stock agrees with most,
-    as the launchers configure it: a fixed choice where a draw would vary."""
-    devices = webgl.recorded_devices(target_os, *gpu)
+    as the launchers configure it: a fixed choice where a draw would vary.
+
+    A software renderer fpgen never recorded on this OS (Microsoft Basic Render
+    Driver on Windows) has no devices of its own; the launcher draws one from the OS."""
+    gpus = [tuple(gpu)] if tuple(gpu) in webgl.firefox_gpus(target_os) else sorted(webgl.firefox_gpus(target_os))
+    devices = [device for recorded in gpus for device in webgl.recorded_devices(target_os, *recorded)]
 
     def disagreements(device: Dict[str, Any]) -> int:
         recorded = flatten({
@@ -294,7 +300,9 @@ def nearest_device(target_os: str, gpu: List[str], stock: Dict[str, Any]) -> Dic
             for context, prefix in CONTEXTS.items()
             if f"{prefix}:parameters" in device
         })
-        return sum(stock.get(key) != value for key, value in recorded.items())
+        # A value stock reports and the device lacks counts too: a device without WebGL2
+        # records fewer values and would otherwise look closest to a stock that has it.
+        return sum(stock.get(key) != recorded.get(key) for key in stock.keys() | recorded.keys())
 
     return min(devices, key=disagreements)
 
@@ -337,13 +345,17 @@ def main() -> int:
 
     failures: List[str] = []
     camoufox_gpu = (camoufox_out["webgl"] or {}).get("gpu")
-    if camoufox_gpu != gpu:
-        print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not the host's {gpu}")
+    # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
+    # identity is the chosen device's GPU and its renderer string is not stock's to compare.
+    claims_host = tuple(gpu) in webgl.firefox_gpus(target_os) or renders_on_hardware(tuple(gpu))
+    expected = gpu if claims_host else [device["webGl:vendor"], device["webGl:renderer"]]
+    if camoufox_gpu != expected:
+        print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {expected}")
         failures.append("claimed GPU")
     recorded_flat, camoufox_flat = flatten(recorded_out), flatten(camoufox_out)
     for key in sorted(set(stock_flat) | set(recorded_flat)):
         new, old, got = stock_flat.get(key), recorded_flat.get(key), camoufox_flat.get(key)
-        if new != old:
+        if new != old and not (not claims_host and key.endswith(" 7937")):
             print(f"    [{'ok  ' if got == new else 'FAIL'}] {key}: stock {new}, recorded release {old}, Camoufox {got}")
             if got != new:
                 failures.append(key)
