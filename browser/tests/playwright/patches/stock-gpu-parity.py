@@ -285,8 +285,12 @@ def flatten(output: Dict[str, Any]) -> Dict[str, Any]:
 
 def nearest_device(target_os: str, gpu: List[str], stock: Dict[str, Any]) -> Dict[str, Any]:
     """The device fpgen recorded behind this GPU that stock agrees with most,
-    as the launchers configure it: a fixed choice where a draw would vary."""
-    devices = webgl.recorded_devices(target_os, *gpu)
+    as the launchers configure it: a fixed choice where a draw would vary.
+
+    A software renderer fpgen never recorded on this OS (Microsoft Basic Render
+    Driver on Windows) has no devices of its own; the launcher draws one from the OS."""
+    gpus = [tuple(gpu)] if tuple(gpu) in webgl.firefox_gpus(target_os) else sorted(webgl.firefox_gpus(target_os))
+    devices = [device for recorded in gpus for device in webgl.recorded_devices(target_os, *recorded)]
 
     def disagreements(device: Dict[str, Any]) -> int:
         recorded = flatten({
