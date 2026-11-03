@@ -71,6 +71,8 @@ func WithConfig(cfg *config.Config) Option { return func(c *launchConfig) { c.cf
 
 // WithNoFingerprint disables automatic preset injection. Use when the
 // caller has populated the Config manually.
+// The Config must set Fonts: without it the launch has no font spoofing and
+// the page sees the host's fonts.
 func WithNoFingerprint() Option { return func(c *launchConfig) { c.skipFingerprint = true } }
 
 // WithProxy routes browser traffic through the given proxy.

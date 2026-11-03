@@ -2,6 +2,7 @@
 // and the Linux font groups; do not edit. Keys and targets are font-list keys (lowercase).
 // Each key is a name a Linux identity can report that no Linux face carries; its targets
 // are the Linux faces fontconfig substitutes for it, in preference order.
+// The chains are the faces fontconfig ranks for each CSS generic on a Latin page.
 #pragma once
 
 namespace mozilla {
@@ -48,5 +49,10 @@ static const CamouFontAlias kCamouLinuxAliases[] = {
     {"times new roman", kCamouAliasTargets15},
     {"zapf chancery", kCamouAliasTargets16},
     {nullptr, nullptr}};
+
+static const char* const kCamouLinuxSerifChain[] = {"noto serif", "dejavu serif", "nimbus roman", nullptr};
+static const char* const kCamouLinuxSansSerifChain[] = {"noto sans", "dejavu sans", "nimbus sans", nullptr};
+static const char* const kCamouLinuxMonospaceChain[] = {"dejavu sans mono", "noto mono", "noto sans mono", nullptr};
+static const char* const kCamouLinuxCursiveChain[] = {"z003", "noto sans", "dejavu sans", nullptr};
 
 }  // namespace mozilla

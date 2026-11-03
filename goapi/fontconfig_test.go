@@ -386,14 +386,14 @@ func TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims(t *testing.T) {
 	// A generic named outside the drawn subset is refused by the launch mask, so
 	// it falls to the same family as the others (e2e Linux go-macos: monospace
 	// and serif floors both 342 when the draw left out Times).
-	for _, osName := range []string{"windows", "macos", "linux"} {
+	for _, osName := range []string{"windows", "macos"} {
 		prefs := genericFontPrefs(osName)
 		if len(prefs) == 0 {
 			t.Fatalf("%s: no generic prefs", osName)
 		}
 		for seed := range uint64(200) {
 			// Even seeds draw a native identity (the host's own macOS or Windows).
-			native := seed%2 == 0 && osName != "linux"
+			native := seed%2 == 0
 			fonts, err := fingerprint.RandomFontSubset(osName, native, rand.New(rand.NewPCG(seed, 0)))
 			if err != nil {
 				t.Fatal(err)
@@ -406,6 +406,12 @@ func TestGenericFontPrefsNameOnlyFamiliesEveryIdentityClaims(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestLinuxNamesNoGenericPrefs(t *testing.T) {
+	if prefs := genericFontPrefs("linux"); len(prefs) != 0 {
+		t.Fatalf("linux generics come from the browser's chains, got prefs %v", prefs)
 	}
 }
 

@@ -637,6 +637,21 @@ rules:
       test_font_aliases_table.py fails when it differs. No fontconfig is needed
       at build time, and the file is never edited.
 
+  - id: linux-claim-generics-come-from-fonts-conf
+    title: A Linux claim's generics walk the chains generated from the shipped fonts.conf on every host, never hand-written rows or prefs
+    check: automated
+    evidence:
+      - "issue #333: a Linux claim drew serif as Nimbus Roman, sans-serif as Nimbus Sans and monospace as Cousine (`generic-map step=row`, e2e run 41630002280) where fontconfig under the same bundle ranks Noto Serif, Noto Sans and DejaVu Sans Mono (e2e run 41633068315)"
+      - "gfxFcPlatformFontList.cpp:2791-2896 at FIREFOX_158_0_1_RELEASE: FindGenericFamilies runs FcFontSort on [generic, scalable, lang], takes each family through the gates, and stops at gfx.font_rendering.fontconfig.max_generic_substitutions (3, StaticPrefList.yaml:7992)"
+    rationale: >-
+      fpgen records no generics, so the shipped fonts.conf is the only source for
+      what a Linux page draws for serif, sans-serif, monospace and cursive.
+      Windows and macOS have no fontconfig, so a Linux claim there reads the same
+      chains from FontAliasesLinux.hpp, which gen-font-aliases.py writes with the
+      aliases and test_font_aliases_table.py checks. Hand-written rows and the
+      launchers' font.name-list prefs are a second and third copy that drift.
+      Only a Latin page is covered (#389).
+
   - id: native-system-ui-family-never-masked
     title: A native identity's system UI family is never refused by the launch font mask
     check: automated

@@ -468,6 +468,17 @@ def test_linux_claim_aliases_come_from_fonts_conf():
     assert (BROWSER / "tests" / "native" / "test_font_aliases_table.py").is_file(), why
 
 
+def test_linux_claim_generics_come_from_fonts_conf():
+    """Rule: linux-claim-generics-come-from-fonts-conf."""
+    header = (BROWSER / "additions" / "camoucfg" / "FontAliasesLinux.hpp").read_text(encoding="utf-8")
+    patch = (BROWSER / "patches" / "zzz-linux-font-aliases.patch").read_text(encoding="utf-8")
+    why = explain("linux-claim-generics-come-from-fonts-conf")
+    for chain in ("Serif", "SansSerif", "Monospace", "Cursive"):
+        assert f"kCamouLinux{chain}Chain" in header, why
+        assert f"kCamouLinux{chain}Chain" in patch, why
+    assert "+  if (SystemUISpoofedOS(aFontVisibilityProvider) ==" in patch, why
+
+
 def test_a_native_identitys_system_ui_family_is_never_masked():
     """Rule: native-system-ui-family-never-masked."""
     patch = (BROWSER / "patches" / "system-ui-font-spoofing.patch").read_text(encoding="utf-8")

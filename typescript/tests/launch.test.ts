@@ -500,12 +500,14 @@ describe("test_launch_environment: prefs", () => {
 				expected("Consolas, Courier New", "Times New Roman", "Arial"),
 			],
 			["macos", MAC_UA, expected("Menlo, Courier New", "Times", "Helvetica")],
-			["linux", LINUX_UA, expected("Cousine", "Tinos", "Arimo")],
 		])("%s", async (_os, u, want) => {
 			const got = generics(await prefsFor(ua(u)));
 			expect(got).toEqual(want);
 			// CAMOU_PREFS is compared byte for byte with Python's: same key order.
 			expect(Object.keys(got)).toEqual(Object.keys(want));
+		});
+		it("linux names none: the browser has its own chains", async () => {
+			expect(generics(await prefsFor(ua(LINUX_UA)))).toEqual({});
 		});
 		it("the test hook turns them off", async () => {
 			process.env.CAMOUFOX_NO_GENERIC_PREFS = "1";

@@ -275,8 +275,25 @@ On a Linux host, fontconfig answers a named lookup through `browser/bundle/fontc
 What this does not close:
 - A custom `fonts=` list that admits a foreign name with no alias in `fonts.conf` still draws the flat package's face for it, as before.
 - Codepoint fallback to host fonts is still ungated (lesson 3).
-- Realism of the generics (Nimbus where the conf prefers Noto and DejaVu) is #333, and so is a corner it shows: when no sans row key resolves, `step=none` falls to fontconfig's own loop on Linux (Noto Sans) but to the prefs or the platform on Windows and macOS (run 40807149231). The guard's fixed list admits a target of every row key to keep that out of the measurement.
+- The generics are not aliases of the rows: see "The generics of a Linux claim" below (#333).
 - Counted on 150 draws of `generate_context_fingerprint(os="linux")`: every list admitted all 17 table names; `Calibri` and `Cambria` had no admitted target in 136 of 150 (Carlito and Caladea come with the LibreOffice addition, p = 0.112), and `Avant Garde` and `Zapf Chancery` have no target in the conf at all. Each of those draws the list's default font on a Linux host and, now, on Windows and macOS.
+
+## The generics of a Linux claim (#333)
+
+A Linux host does not draw `serif` as Times: Gecko asks fontconfig. `gfxFcPlatformFontList::FindGenericFamilies` (`gfxFcPlatformFontList.cpp:2791-2896` at `FIREFOX_158_0_1_RELEASE`) runs `FcFontSort` on the pattern `[generic, scalable=true, lang]`, takes each ranked family through `FindAndAddFamiliesLocked` (so every gate runs per family), stops after `gfx.font_rendering.fontconfig.max_generic_substitutions` families (3, `modules/libpref/init/StaticPrefList.yaml:7992`), and keeps only the first when none of them carries the lang. Under the shipped conf that is Noto Serif, DejaVu Serif, Nimbus Roman for `serif`; Noto Sans, DejaVu Sans, Nimbus Sans for `sans-serif`; DejaVu Sans Mono, Noto Mono, Noto Sans Mono for `monospace`; and Z003, Noto Sans, DejaVu Sans for `cursive` (e2e run 41633068315, `lang=en`).
+
+Before this change a Linux claim drew Nimbus Roman, Nimbus Sans, Cousine and Nimbus Sans: `CamouGenericCandidate` answered from its OS-agnostic rows (`kCamouSerifRow` and the others) whenever a launch mask or a per-context list applied, which is every launcher launch, so fontconfig's order was never consulted (`generic-map step=row`, run 41630002280). Windows and macOS have no fontconfig, so the answer cannot be left to it: a Linux claim must draw the same faces on every host (#325).
+
+`FontAliasesLinux.hpp` therefore also carries the four chains, written by `gen-font-aliases.py` in the same pass: `fc-match -s` on `[generic, scalable=true, lang=en]` under the launcher's conf, unique families the bundle ships, capped at the pref's default. The generator fails if none of the capped faces covers `en`, which is the case where Gecko would cut the list to its first entry. `zzz-linux-font-aliases.patch` makes `CamouGenericCandidate` ask `SystemUISpoofedOS` (the one "this is a Linux claim" test, shared with the alias rewrite) and walk the chain for the generic, `step=chain`: the first family the context's list admits. Only when none is admitted do the old rows answer. The launchers no longer write `font.name-list.*` for Linux (Cousine, Tinos, Arimo): they were read only on the Linux pref path, which the table answers before, and for Linux they named faces a Linux host does not draw. Windows and macOS keep theirs.
+
+`e2e/journeys/test_09_linux_claim_fonts.py` reads the drawn face of each generic from `CAMOU-FL face` and compares it with the first face of the header's chain that the list admits, on a short list (no Noto face: every generic must fall to the conf's next face, not to a row) and a full one.
+
+What this does not close:
+- Only a Latin page. `fc-match -s` gives other chains for `ja`, `zh-cn`, `ko` and `ar`; that is #389.
+- `fantasy` is not generated: a Linux claim draws the sans-serif chain for it (and for `system-ui`'s fallback, `math` and `-moz-emoji` requests), where a Linux host asks fontconfig for `fantasy`. Before this change it took the sans-serif row (Nimbus Sans); now it draws Noto Sans. The chain under the bundled Linux fonts.conf was not measured.
+- A list that refuses every face of a chain gets the old hand-written rows (`step=rows`), which is a hand-written answer for a Linux claim. No drawn list does this (300 of 300 draws of `generate_context_fingerprint(os="linux")` admit every chain face), so only a custom `fonts=` list reaches it; `test_a_list_with_no_chain_face_falls_to_the_rows` pins it.
+- `GetDefaultFontLocked` and the `step=none` corner (no list and no mask) are unchanged.
+- A goapi launch with `WithNoFingerprint()` and a `Config` without `Fonts` has no launch mask, so the page sees the host's fonts.
 
 ## Legacy family names: first lookup (#247, #319, #321, #322)
 

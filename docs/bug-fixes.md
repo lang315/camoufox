@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #333: a Linux claim's generics ignored the shipped fonts.conf
+
+**Fixed by:** the PR that refs #333 (the Latin page; other language groups are #389). **Found by:** the realism review of #325.
+
+**Symptom.** A Linux identity drew `serif` as Nimbus Roman, `sans-serif` as Nimbus Sans, `monospace` as Cousine and `cursive` as Nimbus Sans. A Linux host with the same bundle and conf draws Noto Serif, Noto Sans, DejaVu Sans Mono and Z003 (`fc-match -s`, e2e run 41633068315).
+
+**Root cause.** `gfxPlatformFontList::CamouGenericCandidate` (`font-list-spoofing.patch`) answers a generic from OS-agnostic rows (`kCamouSerifRow`, `kCamouSansSerifRow`, `kCamouMonospaceRow`) whenever a launch mask or a per-context list applies. The rows start with `Times`, `Helvetica` and `Courier New`, which the #325 alias rewrite turns into Nimbus Roman, Nimbus Sans and Cousine. The launcher also wrote `font.name-list.*` for Linux from three hand-synced copies (Cousine, Tinos, Arimo); the browser never read them, because the table answers first.
+
+**Fix.** `gen-font-aliases.py` writes the conf's chain for each generic into `FontAliasesLinux.hpp`, read as `FindGenericFamilies` reads it. For a Linux claim `CamouGenericCandidate` takes the first chain family the list admits, on every host. The Linux entry is removed from the three launcher copies and their tests.
+
+**Alternatives.** Removing the rows for Linux and letting fontconfig answer would have left a Linux claim on Windows or macOS with no fontconfig at all (the host pref path), so the same claim would have drawn different faces on different hosts.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The three prefs copies looked like the fix already shipped, and then like dead code. They are read only on the Linux pref path, but that path is what drew the symptom on a Linux host: with the prefs present, `AddGenericFonts` takes the base pref path, whose table step resolves the row key `times` through the virtual lookup and draws Nimbus Roman; without them it takes `FindGenericFamilies`, whose table step resolves the key through the scope-qualified base lookup, finds no family called `times` on a GTK host, and falls into fontconfig's own loop, which gives the conf. So deleting the prefs alone moves a Linux host to the conf, and the browser change is what fixes Windows and macOS hosts, where the alias rewrite makes the row key resolve. `fc-match -s` also lists host-order fallbacks past the third family (Cascadia Code, FreeSerif), which Gecko never reads: it stops at `max_generic_substitutions`.
+
 ## #390: a Playwright shard errored at setup when the upstream test server could not bind its port
 
 **Fixed by:** the PR that makes `ci/pw_camoufox_plugin.py` bind the upstream test servers on kernel-chosen ports. **Found by:** Tests run 41633372099, job `Playwright 2/6` (job 125920147366), on #382.

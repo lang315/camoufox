@@ -689,13 +689,13 @@ def warn_manual_config(config: Dict[str, Any]) -> None:
 # mac host, Consolas on a Windows host), which the launch font mask refuses, so
 # monospace fell to the first allowed family: Arial or Arimo. Every family is
 # in that OS's fonts.json (tests/test_generic_font_prefs.py). Kept identical to
-# goapi's genericFamilies (goapi/fontconfig.go).
+# goapi's genericFamilies (goapi/fontconfig.go). Linux has no entry: its generics
+# are the chains in browser/additions/camoucfg/FontAliasesLinux.hpp (#333).
 # ponytail: x-western and x-unicode only; other lang groups keep the host
 # default until the browser-side fix (W1) lands.
 GENERIC_FONT_FAMILIES = {
     'win': ('Consolas, Courier New', 'Times New Roman', 'Arial'),
     'mac': ('Menlo, Courier New', 'Times', 'Helvetica'),
-    'lin': ('Cousine', 'Tinos', 'Arimo'),
 }
 
 
