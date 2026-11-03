@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
@@ -148,6 +149,20 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	}
 	args = append(args, lc.args...)
 
+	// Firefox locates libxul from the path it is started with: a relative path,
+	// a ".." or a symlink to the binary makes the macOS app exit with
+	// "Couldn't load XPCOM." (#362).
+	exe, err := exec.LookPath(lc.executablePath) // a bare name searches PATH, as exec does
+	if err == nil {
+		exe, err = filepath.Abs(exe)
+	}
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("camoufox: resolve executable path: %w", err)
+	}
+	lc.executablePath = exe
 	cmd := exec.CommandContext(ctx, lc.executablePath, args...)
 
 	env, err := launchEnv(lc, cfg, envVars, config.HostOS())
