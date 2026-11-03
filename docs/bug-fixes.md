@@ -12,6 +12,24 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #316: the stalled-apt tests failed on a loaded macOS host
+
+**Fixed by:** the PR that closes #316. **Found by:** `python -m pytest ci/tests/test_apt_install.py` on a macOS host that was also running a patch-guard run.
+
+**Symptom.** `test_a_stalled_update_fails_the_step_and_names_the_command` failed with `assert [] == ['update']` and `test_a_stalled_install_fails_the_step_and_names_the_command` with `assert 'apt-get install' in '::error::apt-get update did not finish in 1s\n'`. Linux CI never failed them.
+
+**Root cause.** Both tests ran the real script with `APT_TIMEOUT=1` and a stand-in `apt-get` shell script, and expected the 1 s budget to expire on a command that was already running. `ci/apt_install.py` hands the budget to `subprocess.run(["sudo", "apt-get", *args], timeout=LIMIT)`, and that timer starts when `sudo` is spawned, not when the stand-in has written its first line. The stand-in has to start two shells and append to the call log inside the budget. When that takes longer than 1 s, the process is killed before it records anything (`calls == []`), and in the install test the healthy `update` step is the one that runs out of time, so the message names `update`. The script was right in both cases. The test measured its host's process start-up time against a fixed second. A chain of `sudo` and `apt-get` stand-ins took up to 0.49 s to start on an idle machine.
+
+**Fix.** The two stall tests no longer wait for a timer. They replace `subprocess.run` with one that raises `TimeoutExpired` for the command under test, and assert what the script does with it: it passes `LIMIT` as the timeout, exits 124, prints `::error::apt-get <command> did not finish in <LIMIT>s`, and does not run the install after a stalled update. The other three tests, which run the real script with a 900 s budget, are unchanged. Alternatives that were rejected: a longer budget in the test (still a race against start-up time, and a loosened timeout), and a retry (hides the fault). What the new tests do not check is that Python kills a real child at the deadline. That is `subprocess.run`'s documented behaviour, not this script's.
+
+**Evidence.**
+- Red, deterministic: the old tests with a `sleep 1.5` before the stand-in's first line fail both, with the issue's exact output (`assert [] == ['update']` and `apt-get update did not finish in 1s`).
+- Red, under load: 60 busy loops and 4 pytest processes at a time, 20 runs of the old file gave 19 runs with a failure (5 with one failing test, 14 with two).
+- Green: the same load, 20 runs of the new file, 20 passes.
+- The new tests can fail: without `timeout=LIMIT` in `apt()` two of them fail, and with the exit check removed so the install runs after a stalled update three do.
+
+**What misled the investigation.** The message `apt-get update did not finish in 1s` in the install test reads like a stall in the script's own update step, but the update there is `exit 0`. Nothing stalled; the budget was simply shorter than the time to start the stand-in.
+
 ## #359: getter-cost-parity was red on the hosted macOS runner
 
 **Fixed by:** the PR that closes #359. **Found by:** the macOS leg of the guard, red on and off with no code change.
