@@ -110,9 +110,7 @@ class GoBrowser:
     def new_context(self, permissions=None, geolocation=None, origin=None, **kw) -> "GoCtx":
         if kw:
             pytest.skip(f"go: no per-context {', '.join(kw)}")
-        # goapi sends Juggler's own permission names, where Playwright's "geolocation" is "geo".
-        return GoCtx(self.d, self.d.rpc("browser.new_context", self.h,
-                                        permissions=["geo" if p == "geolocation" else p for p in permissions or []],
+        return GoCtx(self.d, self.d.rpc("browser.new_context", self.h, permissions=permissions or [],
                                         geolocation=geolocation, origin=origin or ""))
 
     def new_identity_context(self, **kw):

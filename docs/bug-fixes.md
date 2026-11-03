@@ -20,11 +20,25 @@ later change should read first.
 
 **Root cause.** `apps.html` asked for a position at load in a context with no geolocation permission. The browser raises its permission prompt, nothing answers it, and neither callback runs; the `timeout: 3000` option does not start until the permission is settled, so only the page's own 8 s race ended the wait. A reference that cannot differ from the value under test (the same non-answer on both sides) scores `same` whatever Camoufox does. Measured on macOS arm64 with the page's script: no callback within 9 s at load, 500 ms after load and on a click, on Camoufox and on Playwright's Firefox 153; with `permissions=["geolocation"]` and a `geolocation`, the position comes back in 13 to 520 ms on both. Playwright's `evaluate` is not the page's own call: it got `User denied geolocation prompt` in about 1 s, which is why a quick check from `evaluate` looked fine.
 
-**Fix.** The probe left `apps.html` for `web/pages/geo.html` and its own test. Every driver's context is granted `geolocation` and given the same position, so each side answers at once with a position (kind and coordinates are compared). A second Camoufox launch with another position must differ from the reference, and the reference must answer with a position, so a run that falls back to the old non-answer fails instead of passing. `goapi/cmd/e2edriver` took `permissions`, `geolocation` and `origin` for `browser.new_context` so the `go` driver runs the same arm; goapi sends Juggler's permission names, where Playwright's `geolocation` is `geo` (`TargetRegistry.js` `ALL_PERMISSIONS`), and a grant under the wrong name leaves the permission denied.
+**Fix.** The probe left `apps.html` for `web/pages/geo.html` and its own test. Every driver's context is granted `geolocation` and given the same position, so each side answers at once with a position (kind and coordinates are compared). A second Camoufox launch with another position must differ from the reference, and the reference must answer with a position, so a run that falls back to the old non-answer fails instead of passing. `goapi/cmd/e2edriver` took `permissions`, `geolocation` and `origin` for `browser.new_context` so the `go` driver runs the same arm; The grant under the wrong name (`geolocation` for goapi) was #397: it leaves the permission denied without an error.
 
 **Evidence.** The old arm: `ok geolocation: camoufox='error: Error' reference='error: Error' (camoufox {'ms': 8001}...)`. The new test with the grant removed fails on both controls (`the reference Firefox answers with a position`, `a different position is told from the reference (else VACUOUS)`). With the grant, `test_06_web_apis.py` passes for `pkg`, `pw` and `go` on macOS arm64 (6 passed, 71 s) and the browser cache stays empty. See the PR for CI.
 
 **What misled the investigation.** A grant under the wrong name (`geolocation` for goapi) reads as "geolocation is broken in goapi": the permission query said `denied`. And `permissions=[]` is not "no grant": Juggler records a denial, both browsers answer error 1 at once, and the comparison still matches.
+
+## #397: goapi GrantPermissions forwarded Playwright's names to Juggler, which denied them silently
+
+**Fixed by:** the PR that translates the names in `goapi/permissions.go`. **Found by:** the e2e geolocation arm (#385), whose `go` driver read `denied` after a grant.
+
+**Symptom.** `GrantPermissions(ctx, origin, []string{"geolocation"})` returned nil, then `navigator.permissions.query({name: "geolocation"})` read `denied` and `getCurrentPosition` failed with code 1.
+
+**Root cause.** The names went to `Browser.grantPermissions` unchanged. Juggler uses its own (`ALL_PERMISSIONS` in `TargetRegistry.js`: `geo`, `desktop-notification`, `local-network`, `loopback-network`), and `grantPermissionsToOrigin` allows the listed ones and denies every other name of that list, with no error for a name it does not know. Playwright's Firefox client translates and throws on an unknown name (playwright v1.62.0 `ffBrowser.ts`, `doGrantPermissions`); goapi, which mirrors the Playwright API, did neither.
+
+**Fix.** `jugglerPermissions` maps `geolocation`, `notifications` and `local-network-access` once, and any other name is an error (Juggler's own `geo` included, so a caller sees the API's names only). Playwright's `persistent-storage`, `push` and `screen-wake-lock` are refused too: Juggler has no permission to grant for them.
+
+**Evidence.** `goapi/permissions_test.go` captures the `Browser.grantPermissions` request on a scripted connection. Before the fix: `GrantPermissions([geolocation]) sent [geolocation], want [geo]`, and `GrantPermissions("camera") sent [camera] and returned no error`. After: both tests pass, `go test ./...` in `goapi` passes. Against the macOS arm64 build, granting `geolocation` through the e2e `go` driver reads `granted` and the page gets the position set with `SetGeolocation`.
+
+**What misled the investigation.** A grant that returns nil and then reads `denied` looked like geolocation being broken in goapi, not a name that never reached a permission.
 
 ## #333: a Linux claim's generics ignored the shipped fonts.conf
 
