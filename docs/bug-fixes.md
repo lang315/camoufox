@@ -24,7 +24,7 @@ later change should read first.
 
 **Evidence.** One test per launcher (`python/tests/test_font_distribution.py`, `typescript/tests/fingerprints.test.ts`, `goapi/pkg/fingerprint/font_draw_test.go`) draws 1500 Linux identities and requires that `Calibri` implies `Carlito` and `Cambria` implies `Caladea`, and that each name is claimed at all. Before: Python `Calibri claimed without Carlito`, TypeScript `Calibri without Carlito: expected 1341 to be +0`, Go `draw 0 claims Cambria without Caladea`. After: all three pass.
 
-**What misled the investigation.** Regenerating on the pinned bundle also changes the macOS part of `fonts.json` (29 localized "System Font" names, 567 to 538) and one macOS essential name (`Noto Sans Canadian Aboriginal Regular`), independent of this change; those files were not regenerated here, so the diff stays the issue's.
+**What misled the investigation.** Regenerating on the pinned bundle also changes the macOS part of `fonts.json` (29 families, 567 to 538) and one macOS essential name (`Noto Sans Canadian Aboriginal Regular`), independent of this change (#400); those files were not regenerated here, so the diff stays the issue's.
 
 ## #397: goapi GrantPermissions forwarded Playwright's names to Juggler, which denied them silently
 
