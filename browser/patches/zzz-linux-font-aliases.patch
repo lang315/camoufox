@@ -22,19 +22,67 @@ index ede3b60..f267917 100644
        aFontVisibilityProvider
            ? aFontVisibilityProvider->ShouldResistFingerprinting(
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index a4d99f4..54ee38f 100644
+index a4d99f4..1dc8eb7 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
-@@ -2154,6 +2154,25 @@ bool gfxPlatformFontList::FindAndAddFamilies(
-   return didFind;
- }
+@@ -1324,6 +1324,11 @@ static const char* const kCamouSerifRow[] = {
+     "Noto Serif",
+     nullptr};
  
-+#ifndef MOZ_WIDGET_GTK
-+#  include "FontAliasesLinux.hpp"
++#include "FontAliasesLinux.hpp"
 +
 +static MaskConfig::SpoofedOS SystemUISpoofedOS(
 +    FontVisibilityProvider* aFontVisibilityProvider);
 +
+ /* static */
+ bool gfxPlatformFontList::CamouGenericTableApplies(
+     FontVisibilityProvider* aFontVisibilityProvider) {
+@@ -1346,6 +1351,40 @@ bool gfxPlatformFontList::CamouGenericCandidate(
+     return false;
+   }
+ 
++  // Camoufox (#333): a Linux claim draws the faces fontconfig ranks for the
++  // generic (FontAliasesLinux.hpp, generated from fonts.conf), on every host:
++  // a Linux claim on Windows or macOS has no fontconfig of its own, and the
++  // rows below are OS-agnostic. The first face the context's list admits wins,
++  // as gfxFcPlatformFontList::FindGenericFamilies takes each ranked family
++  // through the same gates. Only when none is admitted do the rows answer.
++  if (SystemUISpoofedOS(aFontVisibilityProvider) ==
++      MaskConfig::SpoofedOS::Linux) {
++    const char* const* chain;
++    switch (aGeneric) {
++      case StyleGenericFontFamily::Monospace:
++        chain = kCamouLinuxMonospaceChain;
++        break;
++      case StyleGenericFontFamily::Serif:
++        chain = kCamouLinuxSerifChain;
++        break;
++      case StyleGenericFontFamily::Cursive:
++        chain = kCamouLinuxCursiveChain;
++        break;
++      default:
++        chain = kCamouLinuxSansSerifChain;
++        break;
++    }
++    for (; *chain; ++chain) {
++      nsAutoCString key;
++      if (CamouIsFamilyAllowed(aFontVisibilityProvider,
++                               nsDependentCString(*chain), &key)) {
++        aKeyOut = key;
++        aStepOut.AssignLiteral("chain");
++        return true;
++      }
++    }
++  }
++
+   const char* const* rows[3];
+   switch (aGeneric) {
+     case StyleGenericFontFamily::Monospace:
+@@ -2154,6 +2193,20 @@ bool gfxPlatformFontList::FindAndAddFamilies(
+   return didFind;
+ }
+ 
++#ifndef MOZ_WIDGET_GTK
 +// Camoufox (#325): the Linux faces fontconfig substitutes for a name no Linux
 +// face carries (FontAliasesLinux.hpp, generated from fonts.conf). A Linux claim
 +// on a host without fontconfig has to apply them itself.
@@ -51,7 +99,7 @@ index a4d99f4..54ee38f 100644
  bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGeneric, const nsACString& aFamily,
-@@ -2162,6 +2181,31 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -2162,6 +2215,31 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
  

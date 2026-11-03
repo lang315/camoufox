@@ -907,13 +907,13 @@ function warnManualConfig(config: Record<string, any>): void {
 // them, generics resolve through the HOST's font.name-list.* prefs, which the
 // launch font mask refuses. Kept identical to GENERIC_FONT_FAMILIES in
 // python/src/camoufox/utils.py (the launch golden compares CAMOU_PREFS byte
-// for byte, key order included).
+// for byte, key order included). Linux has no entry: its generics are the chains in
+// browser/additions/camoucfg/FontAliasesLinux.hpp (#333).
 // ponytail: x-western and x-unicode only; other lang groups keep the host
 // default until the browser-side fix (W1) lands.
 export const GENERIC_FONT_FAMILIES: Record<string, [string, string, string]> = {
 	win: ["Consolas, Courier New", "Times New Roman", "Arial"],
 	mac: ["Menlo, Courier New", "Times", "Helvetica"],
-	lin: ["Cousine", "Tinos", "Arimo"],
 };
 
 export function genericFontPrefs(targetOs: string): Record<string, string> {

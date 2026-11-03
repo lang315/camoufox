@@ -13,18 +13,24 @@ from test_launch_geometry import host  # noqa: E402
 FONTS = orjson.loads(open(os.path.join(os.path.dirname(utils.__file__), "fonts.json"), "rb").read())
 
 
-@pytest.mark.parametrize("os_key", ["win", "mac", "lin"])
+@pytest.mark.parametrize("os_key", ["win", "mac"])
 def test_every_named_family_ships_in_that_os_list(os_key):
     for pref, value in utils.generic_font_prefs(os_key).items():
         for fam in (f.strip() for f in value.split(",")):
             assert fam in FONTS[os_key], f"{os_key} {pref} names {fam!r}, which {os_key}'s list lacks"
 
 
-@pytest.mark.parametrize("spoof,mono", [("windows", "Consolas, Courier New"), ("macos", "Menlo, Courier New"), ("linux", "Cousine")])
+@pytest.mark.parametrize("spoof,mono", [("windows", "Consolas, Courier New"), ("macos", "Menlo, Courier New")])
 def test_launch_options_sets_the_spoofed_generics(spoof, mono):
     with host(None):
         prefs = utils.launch_options(os=spoof, i_know_what_im_doing=True)["firefox_user_prefs"]
     assert prefs["font.name-list.monospace.x-western"] == mono
+
+
+def test_linux_names_no_generics_the_browser_has_its_own_chains():
+    with host(None):
+        prefs = utils.launch_options(os="linux", i_know_what_im_doing=True)["firefox_user_prefs"]
+    assert not any(k.startswith("font.name-list.") for k in prefs)
 
 
 def test_the_test_hook_turns_them_off(monkeypatch):
