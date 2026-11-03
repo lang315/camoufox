@@ -1,5 +1,5 @@
 from pathlib import Path
-import contextlib, functools, hashlib, http.server, json, os, re, socketserver, threading, time
+import contextlib, functools, hashlib, http.server, json, os, re, shutil, socketserver, tempfile, threading, time
 
 ACCESS_OBSERVER_HPP = Path(__file__).resolve().parents[3] / "additions" / "camoucfg" / "AccessObserver.hpp"
 
@@ -121,13 +121,18 @@ class Session:
         else:
             os.environ.pop("CAMOU_CONFIG", None)
         from marionette_driver.marionette import Marionette
-        self.m = Marionette(bin=self.binary, port=0, headless=not os.environ.get("DISPLAY"), prefs=self.prefs)
+        # A log of its own per session: marionette_driver's default is ./gecko.log, which it
+        # deletes at the next start, and Windows will not delete a file the last browser holds.
+        self.log_dir = tempfile.mkdtemp(prefix="observer-")
+        self.m = Marionette(bin=self.binary, port=0, headless=not os.environ.get("DISPLAY"), prefs=self.prefs,
+                            gecko_log=os.path.join(self.log_dir, "gecko.log"))
         self.m.start_session()
         return self
 
     def __exit__(self, *a):
         try: self.m.cleanup()
         except Exception: pass
+        shutil.rmtree(self.log_dir, ignore_errors=True)
 
     def navigate(self, url): self.m.navigate(url)
     def eval_content(self, js): return self.m.execute_script(js)
