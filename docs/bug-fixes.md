@@ -12,6 +12,22 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #375: the Skiplist audit failed on every run once pip 26.3 came out
+
+**Fixed by:** the PR that closes #375. **Found by:** Tests run 41553986984 on PR #374, `Skiplist audit`, with no code in the PR that could reach it.
+
+**Symptom.** `ci.run_skiplist_audit` died while installing the upstream suite's requirements: `ERROR: Distributions from PyPI cannot declare direct URL dependencies. autobahn depends on web3[ipfs] @ git+https://github.com/ethereum/web3.py.git#v6.0.0-beta.9#egg=web3 ; extra == "all"`. The same job had passed on main about nine hours earlier (run 41475235918).
+
+**Root cause.** `make_venv` in `ci/suite.py` ran `pip install --upgrade pip` in the fresh venv, so the suite's install ran under whichever pip PyPI had that day. playwright-python v1.62.0 pins `autobahn==23.1.2` in `local-requirements.txt`, and that release lists a `git+https` dependency in its `all` extra, which nothing in the suite selects. pip 26.3 (published 2026-11-02 20:34Z, between the two runs) applies PyPI's direct-URL rule to extras as well: "Apply PyPI's direct URL dependency restriction to extras and cached wheels" (pypa/pip#14341). Earlier pip checked only the dependencies it installed.
+
+**Fix.** `make_venv` installs `pip==PIP_VERSION` (26.2.2) instead of upgrading. The constant carries the reason, and says to raise it once a venv for the current tag installs under the newer pip. Alternatives rejected: skipping the audit or letting the install fail quietly (the audit is the check), `--no-deps` (drops the suite's real dependencies), and a constraint on autobahn (the pin is upstream's, and a different autobahn is not the suite the tag shipped with).
+
+**Evidence.**
+- Same `local-requirements.txt` (v1.62.0), fresh venvs, this host: `pip install --upgrade pip` gave pip 26.3 and the install exited 1 with the error above; `pip==26.2.2` exited 0 with autobahn 23.1.2, pytest 9.0.3 and Twisted 25.5.0 installed.
+- Red to green: `test_the_suite_venv_pins_pip` records the commands `make_venv` runs. On the old `ci/suite.py` the pip install is a bare `pip` (`assert ['pip'] == ['pip==26.2.2']`); with the fix it passes.
+
+**What misled the investigation.** The failing step is the audit, so the audit's skiplist looked like the suspect, but the error came from `pip` before any test ran. Nothing in the PR under test could have caused it: a red check with no related diff is a change in the environment, and an unpinned tool is where one comes in.
+
 ## #359: getter-cost-parity was red on the hosted macOS runner
 
 **Fixed by:** the PR that closes #359. **Found by:** the macOS leg of the guard, red on and off with no code change.
