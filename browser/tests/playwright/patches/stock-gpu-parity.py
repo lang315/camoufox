@@ -20,7 +20,9 @@ the GPU stock reports, with the recorded device of that GPU nearest to stock,
 so a machine with a hardware GPU fpgen never recorded fails, by the same exact match of
 vendor and renderer strings as the launcher's (utils.plan_rendering, which would turn canvas
 noise on there). A software renderer (llvmpipe, Microsoft Basic Render Driver) matches any
-GPU in the launcher and is not gated here. The hosted macOS runner fails this guard: its
+GPU in the launcher and is not gated here. One fpgen never recorded on the OS (Microsoft
+Basic Render Driver on Windows) cannot be claimed, so the identity is the nearest recorded
+device and its renderer string is not compared. The hosted macOS runner fails this guard: its
 virtual GPU is spelled 'Apple Inc.' where fpgen has 'Apple', a runner spelling and not a
 product bug (a real Apple M1 passes).
 
