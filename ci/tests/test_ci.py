@@ -1657,6 +1657,22 @@ def test_the_overlay_is_idempotent_and_clears_stale_files(tmp_path, monkeypatch)
     assert (checkout / "tests" / "async" / "test_page.py").read_text() == "# upstream\n"
 
 
+def test_the_suite_venv_pins_pip(tmp_path, monkeypatch):
+    """pip is not upgraded to whatever PyPI has that day (#375).
+
+    pip 26.3 started rejecting the `web3 @ git+...` extra in autobahn 23.1.2,
+    which the upstream suite pins, and the suite's install died in every run.
+    """
+    from ci import suite
+
+    commands = []
+    monkeypatch.setattr(suite, "run", lambda cmd, **kw: commands.append([str(c) for c in cmd]))
+    suite.make_venv(tmp_path, "v1.62.0", reuse=False)
+
+    pip_installs = [c[-1] for c in commands if c[-1].split("==")[0] == "pip"]
+    assert pip_installs == [f"pip=={suite.PIP_VERSION}"], commands
+
+
 def test_every_camoufox_test_module_is_named_unlike_upstreams():
     """Names are the only thing standing between an overlay and a shadowed module.
 
