@@ -23,6 +23,69 @@ behaviour; on a browser launched as Linux, a Windows context has Linux's.
 from fpgen's mix, and a refusal would then come and go with the draw. Launch
 with the `os` whose behaviour the contexts need, or one browser per OS.
 
+## Not closed: the sign of a NaN made at run time
+
+A NaN that the CPU makes, rather than one the engine writes as a constant, has the sign
+that CPU gives it: x86-64 returns `0xfff8...` (the "real indefinite"), arm64 `0x7ff8...`.
+Stock Windows Firefox runs on x86-64, so a Windows identity on an Apple-silicon host
+reads `0x7ff8...` where Windows reads `0xfff8...`. A page sees it by storing the number
+in a `Float64Array` and reading the same buffer through a `Uint32Array`. This is not
+emulated; #381 holds the measurements and the design notes.
+
+**What was measured** (the probe is a list of expressions with run-time operands, read
+interpreted and after a 30,000-iteration loop; high 16 bits of each result):
+
+- macOS arm64 app of `main` (build run 41542471998, commit `1935b4a6`), launched through
+  the Python launcher with `os="windows"` (`use_ucrt_math` on). Against stock Windows
+  Firefox, 9 of 25 expressions match: `Math.sin/cos/tan(Infinity)` and
+  `Math.pow(-8, 1/3)` (windows-crt-math), `x % 0`, `Infinity % 2`, `parseFloat("x")`,
+  `Number("x")` and a literal `NaN`. The other 16 read `7ff8` where Windows reads
+  `fff8`: `Math.sqrt` of a negative, `0 / 0`, `Infinity - Infinity`, `Infinity * 0`,
+  `Math.log`, `log2`, `log10`, `log1p`, `acos`, `asin`, `acosh`, `atanh`, and
+  `Math.pow(-2, ±0.5)`. The `%` rows and the controls are canonical NaNs by
+  construction, so they agree on every host.
+- Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
+  `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
+
+**Stock Windows is not one value.** An interpreted `0 / 0` reads `7ff8` and the same
+expression after the loop reads `fff8`. In one of three 158.0.1 launches `Math.sqrt(-1)`
+read `7ff8` after the loop, where the other two launches and 159.0 read `fff8`; the cause
+was not found. With literal operands the optimizer folds, and 158.0.1 read `7ff8` for
+`Infinity - Infinity` and `Infinity * 0` after the loop in all three launches where
+159.0 read `fff8`. A fix would aim at a set of values Windows shows, not one.
+
+**Why no chokepoint.** In a release build every path that writes a double to memory
+stores its bits as they are: `js::SupportDifferentialTesting()` is `return false` outside
+a DEBUG build (`js/src/util/DifferentialTesting.h:14-21`), and the `CanonicalizeNaN` calls
+at the `DataView` and typed-array stores sit behind it (`js/src/builtin/DataViewObject.cpp:577-581`,
+`js/src/jit/CacheIRCompiler.cpp:7716-7725`). A double becomes a canonical `7ff8` only when it
+is boxed with `Value::setDouble` (`js/public/Value.h:584-588`); the interpreter's arithmetic
+uses `setNumberAssumeCanonicalNaN`, which keeps the sign (`js/public/Value.h:725-732`,
+`js/src/vm/Interpreter-inl.h:700`, `:716`, `:732`). The sign is therefore decided by how the
+number was made: `NumberDiv` returns the canonical NaN for a zero divisor with a zero or
+NaN dividend (`js/src/util/PortableMath.h:18-31`), `NumberMod` for any zero divisor
+(`:33-37`), and the JIT divides in hardware (`js/src/jit/CacheIRCompiler.cpp:3392-3407`,
+`js/src/jit/x86-shared/CodeGenerator-x86-shared.cpp:1809-1810`), which is why interpreted
+and hot `0 / 0` differ. By the time a number reaches a store, which operation made it is
+gone. Rewriting every NaN at a store would make a literal `NaN` and `Math.sqrt(-1)` read
+alike, which Windows does not.
+
+**The direction considered, and why it was not taken.** Return `fff8` where x86 does: when
+an operation's result is NaN and neither operand is, in the interpreter's arithmetic, the
+`Math` results, the arm64 JIT's double operations and the optimizer's constant folding, only
+for a Windows identity on an arm64 host. It would also reproduce the `0 / 0` split. It
+needs a patch to the JIT back end, which is carried across every Firefox upgrade, and it
+would not reach WebAssembly or SIMD, float32 (x86's default is `0xffc00000`, arm64's
+`0x7fc00000`), NaNs made inside Gecko's native code (Web Audio, WebGL), or the NaN a
+NaN operand propagates (x86 and arm64 pick different operands). Its cost in speed was not
+measured. The limit is documented instead.
+
+**Windows on ARM.** fpgen draws no Windows-on-ARM identity: in 3,000 draws with
+`os="windows"` no GPU, platform or `oscpu` value named Adreno, Qualcomm, Snapdragon,
+arm64 or aarch64. A real Windows-on-ARM host is a Windows host, so the launcher's
+Windows-identity-on-another-host settings (`python/src/camoufox/utils.py:1589`) do not
+apply to it.
+
 ## AltGr: what is left
 
 On Windows, AltGr is Ctrl+Alt to the OS. Pressing it sends a ControlLeft

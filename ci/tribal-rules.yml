@@ -1011,3 +1011,24 @@ rules:
       A guard that does not apply on one platform for that platform's reason
       (system-font-alias-stall on macOS, windows-keyboard on Windows) sits in NOT_ON
       with the reason, counted the same way.
+
+  # -------------------------------------------------------------------------
+  # Host parity
+  # -------------------------------------------------------------------------
+
+  - id: runtime-nan-sign-not-emulated-on-arm64
+    title: Runtime NaN sign on an arm64 host is not emulated for a Windows identity
+    check: manual   # docs/HOST-PARITY.md, "Not closed: the sign of a NaN made at run time"
+    evidence:
+      - "issue #381: 16 of 25 expressions read 0x7ff8 on the macOS arm64 app (build run 41542471998, commit 1935b4a6) launched with os=\"windows\", where stock Windows Firefox reads 0xfff8"
+      - "stock Firefox 158.0.1 on a hosted Windows x64 runner, run 41649632064 (three launches), and 159.0, run 41640652457: not one value (interpreted 0/0 is 7ff8, hot 0/0 is fff8; Math.sqrt(-1) hot read 7ff8 in one launch)"
+      - "FIREFOX_158_0_1_RELEASE js/src/util/DifferentialTesting.h:14-21: SupportDifferentialTesting() is false in a release build, so typed-array and DataView stores keep the raw bits"
+    rationale: >-
+      A faithful fix produces x86's default NaN where x86 produces it (the
+      interpreter's arithmetic, Math results, the arm64 JIT's double operations and
+      constant folding), because by the time a NaN is stored the operation that made it
+      is gone and a store-time rewrite would make a literal NaN and Math.sqrt(-1)
+      read alike. That is a patch to the JIT back end carried across every Firefox
+      upgrade, and it leaves WebAssembly, SIMD, float32 and native Gecko NaNs
+      uncovered. The limit is documented instead; use an x64 host for a Windows
+      identity when it matters.
