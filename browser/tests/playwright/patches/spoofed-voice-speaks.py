@@ -17,6 +17,12 @@ What PASS means:
     * `end` arrives about as long after `start` as the text takes to say at
       ~150 words per minute (2s here), not in the same tick.
 
+`end` is scheduled by the browser's main thread (a delayed runnable in
+nsSynthVoiceRegistry::SpeakImpl) and reaches the page over IPC, so a late `end`
+can be a stalled parent, a stalled page, or a slow hop between them. The printed
+phases tell which: how long the voices took, how long speak() blocked, and how
+far the page's own event loop lagged while the utterance ran.
+
     python browser/tests/playwright/patches/spoofed-voice-speaks.py
 """
 
@@ -30,15 +36,23 @@ from helpers import resolve_binary  # noqa: E402
 
 TEXT = "a" * 25  # 25 chars at 12.5 chars/s = 2.0s
 PROBE = """async (text) => {
+  const p0 = performance.now();
   let voices = speechSynthesis.getVoices();
   if (!voices.length) {
     await new Promise(r => { speechSynthesis.onvoiceschanged = r; setTimeout(r, 3000); });
     voices = speechSynthesis.getVoices();
   }
+  const loaded = Math.round(performance.now() - p0);
   if (!voices.length) return {voices: 0};
   const u = new SpeechSynthesisUtterance(text);
   u.voice = voices[0];
   const events = [];
+  let last = performance.now(), lag = 0;
+  const beat = setInterval(() => {
+    const now = performance.now();
+    lag = Math.max(lag, Math.round(now - last - 50));
+    last = now;
+  }, 50);
   const t0 = performance.now();
   const done = new Promise(resolve => {
     for (const type of ['start', 'end', 'error']) {
@@ -50,8 +64,10 @@ PROBE = """async (text) => {
     setTimeout(resolve, 10000);
   });
   speechSynthesis.speak(u);
+  const speakCall = Math.round(performance.now() - t0);
   await done;
-  return {voices: voices.length, events};
+  clearInterval(beat);
+  return {voices: voices.length, loaded, speakCall, lag, events};
 }"""
 
 
@@ -77,7 +93,9 @@ async def main() -> int:
         return 1
     spoken = got["events"][1][1] - got["events"][0][1]
     if not 1500 <= spoken <= 4000:
-        print(f"  FAIL: end came {spoken}ms after start, expected about 2000ms")
+        print(f"  FAIL: end came {spoken}ms after start, expected about 2000ms "
+              f"(voices loaded in {got['loaded']}ms, speak() took {got['speakCall']}ms, "
+              f"the page's event loop lagged up to {got['lag']}ms)")
         return 1
     print(f"  PASS: start, then end {spoken}ms later, no error")
     return 0
