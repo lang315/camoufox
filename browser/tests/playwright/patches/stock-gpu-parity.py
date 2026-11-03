@@ -331,11 +331,12 @@ def main() -> int:
     # device's tables. A software renderer it leaves to the draw, so that one
     # is named.
     device = nearest_device(target_os, gpu, stock_flat)
-    named = () if renders_on_hardware(tuple(gpu)) else ("webGl:vendor", "webGl:renderer")
     pinned = {
         k: v for k, v in device.items()
-        if k in named or k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
+        if k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
     }
+    if not renders_on_hardware(tuple(gpu)):
+        pinned.update({"webGl:vendor": gpu[0], "webGl:renderer": gpu[1]})
     options = launch_options(
         os=host_os, headless=True, executable_path=str(camoufox), config=pinned, i_know_what_im_doing=True
     )
