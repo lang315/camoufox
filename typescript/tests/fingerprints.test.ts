@@ -587,6 +587,13 @@ describe("font distribution (test_font_distribution.py)", () => {
 		for (const s of sets) for (const x of s) out.add(x);
 		return out;
 	};
+	it("a Linux draw claims Calibri and Cambria only with their metric targets (#318)", () => {
+		for (const [alias, target] of [["Calibri", "Carlito"], ["Cambria", "Caladea"]]) {
+			expect(samples.linux.some((f) => f.has(alias)), `${alias} is never claimed (else VACUOUS)`).toBe(true);
+			const stray = samples.linux.filter((f) => f.has(alias) && !f.has(target)).length;
+			expect(stray, `${alias} without ${target}`).toBe(0);
+		}
+	});
 	const unitExclusive = (osKey: string, unit: any) => {
 		const others = union(
 			GROUPS[osKey]

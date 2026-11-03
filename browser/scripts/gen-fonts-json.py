@@ -255,7 +255,7 @@ def main():
                 with open(os.path.join(args.dump_union, f'{os_key}-{tag}.txt'), 'w', encoding='utf-8') as fh:
                     fh.write('\n'.join(data) + '\n')
         bases_out[os_key] = {
-            key: sorted((set(base['fonts']) & reportable) | set(ALIASES[os_key]))
+            key: sorted(set(base['fonts']) & reportable)
             for key, base in man[os_key]['bases'].items()
             if base['fonts'] and not base.get('deferred')
         }
@@ -303,7 +303,10 @@ def main():
             common = set(bases[0])
             for b in bases[1:]:
                 common &= set(b)
-            common |= set(ALIASES[os_key])
+            # An alias is metric-compatible only with its target (fontconfig names it, it
+            # installs nothing): Calibri is Carlito's, so it belongs to the units that bring
+            # Carlito, not to the floor (#318).
+            common |= {name for name, target in ALIASES[os_key].items() if target in common}
             common &= set(result[os_key])
             suffix = {'win': 'WINDOWS', 'mac': 'MACOS', 'lin': 'LINUX'}[os_key]
             print(f'# _ESSENTIAL_FONTS_{suffix}: {len(common)} families '
