@@ -133,17 +133,18 @@ Those are browser settings, so a macOS context on it has them too, and a
 Windows context on a browser launched as another OS has the host's. `NewContext`
 does not refuse the mix. Pass `os` at launch for the OS whose behaviour matters,
 or use one browser per OS.
+A context of another OS on a browser launched as the host's OS draws only the
+host's fonts that its list admits
+([docs/fonts-gating.md](../docs/fonts-gating.md#a-context-of-another-os-in-a-host-os-launch-320)).
 
-On an Apple-silicon (arm64) host, a Windows identity shows arm64's NaN sign for a
-NaN made at run time: `0x7ff8...` for the square root of a negative number, `0 / 0`,
+On an arm64 host (measured on Apple silicon; Linux arm64 uses the same instruction
+set but was not measured), a Windows identity shows arm64's NaN sign for a NaN made at
+run time: `0x7ff8...` for the square root of a negative number, `0 / 0`,
 `Infinity - Infinity`, `Math.log` of a negative number and similar, where Windows
 Firefox on x64 shows `0xfff8...`. A page reads it through a `Float64Array` and an
 integer view of the same buffer. It is not emulated
 ([docs/HOST-PARITY.md](../docs/HOST-PARITY.md)); use an x64 host for a Windows
 identity when that matters.
-A context of another OS on a browser launched as the host's OS draws only the
-host's fonts that its list admits
-([docs/fonts-gating.md](../docs/fonts-gating.md#a-context-of-another-os-in-a-host-os-launch-320)).
 
 ### The canvas on another OS
 

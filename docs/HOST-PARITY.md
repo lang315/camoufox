@@ -27,10 +27,12 @@ with the `os` whose behaviour the contexts need, or one browser per OS.
 
 A NaN that the CPU makes, rather than one the engine writes as a constant, has the sign
 that CPU gives it: x86-64 returns `0xfff8...` (the "real indefinite"), arm64 `0x7ff8...`.
-Stock Windows Firefox runs on x86-64, so a Windows identity on an Apple-silicon host
+Stock Windows Firefox runs on x86-64, so a Windows identity on an arm64 host
 reads `0x7ff8...` where Windows reads `0xfff8...`. A page sees it by storing the number
 in a `Float64Array` and reading the same buffer through a `Uint32Array`. This is not
-emulated; #381 holds the measurements and the design notes.
+emulated; #381 holds the measurements and the design notes. It was measured on Apple
+silicon only; Linux arm64 (also a build target) uses the same instruction set and was not
+measured.
 
 **What was measured** (the probe is a list of expressions with run-time operands, read
 interpreted and after a 30,000-iteration loop; high 16 bits of each result):
