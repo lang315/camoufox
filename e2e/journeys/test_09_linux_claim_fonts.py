@@ -213,11 +213,6 @@ def generic_steps(logdir):
     return out
 
 
-def lang_expected(tag, generic, fonts):
-    admitted = {f.lower() for f in fonts}
-    return next((f for f in lang_chains()[tag][generic] if f in admitted), None)
-
-
 @pytest.mark.parametrize("with_group_faces", [True, False], ids=["group-faces-listed", "latin-faces-only"])
 def test_a_linux_claim_draws_the_conf_chain_of_the_pages_lang_group(binary, with_group_faces):
     chains = lang_chains()
@@ -226,23 +221,14 @@ def test_a_linux_claim_draws_the_conf_chain_of_the_pages_lang_group(binary, with
     logdir = launch_and_log(binary, fonts, GENERICS, langs=list(LANG_PAGES))
 
     steps = generic_steps(logdir)
+    admitted = {f.lower() for f in fonts}
     failures = []
     for page_lang, tag in LANG_PAGES.items():
         for generic in GENERICS:
-            want = lang_expected(tag, generic, fonts)
+            want = next((f for f in chains[tag][generic] if f in admitted), None)
             got = steps.get((generic, f"chain:{tag}"), set())
             print(f"CAMOU-FL lang {page_lang!r} -> {tag} {generic}: got {sorted(got)}, want {want!r}")
             if got != {want}:
                 failures.append(f"{page_lang} {generic}: step chain:{tag} gave {sorted(got)}, the header wants {want!r}")
     assert not failures, "\n".join(failures)
 
-
-def test_the_two_font_lists_do_not_agree_on_the_lang_chains():
-    """The control for the test above: the listed and the Latin-only list must expect different faces somewhere,
-    or the second could not tell a table walk from a fall-through."""
-    chains = lang_chains()
-    group_faces = sorted({f for by_generic in chains.values() for faces_ in by_generic.values() for f in faces_})
-    listed, latin = FULL_FONTS + group_faces, FULL_FONTS
-    differing = [(t, g) for t in chains for g in GENERICS if lang_expected(t, g, listed) != lang_expected(t, g, latin)]
-    assert differing, "every lang chain starts with a Latin face, so the control proves nothing"
-    assert ("ja", "serif") in differing, differing

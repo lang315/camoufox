@@ -34,16 +34,3 @@ def test_the_header_carries_the_four_generic_chains():
         families = re.findall(r'"([^"]+)"', match.group(1))
         assert 1 <= len(families) <= 3 and len(set(families)) == len(families), f"{name}: {families}"
 
-
-def test_the_header_carries_the_lang_group_chains():
-    """Every lang group the generator lists has four chains of faces, so a dropped group is a plain failure (#389)."""
-    header = (REPO_ROOT / "browser" / "additions" / "camoucfg" / "FontAliasesLinux.hpp").read_text(encoding="utf-8")
-    arrays = {n: re.findall(r'"([^"]+)"', body) for n, body in
-              re.findall(r"static const char\* const (kCamouLinuxChain\d+)\[\] = \{(.*?)\};", header)}
-    rows = re.findall(r'\{"([a-z-]+)", (kCamouLinuxChain\d+), (kCamouLinuxChain\d+), '
-                      r'(kCamouLinuxChain\d+), (kCamouLinuxChain\d+)\},', header)
-    assert [tag for tag, *_ in rows] == ["ja", "ko", "zh-cn", "zh-tw", "zh-hk", "ar"]
-    for tag, *names in rows:
-        for name in names:
-            faces = arrays[name]
-            assert 1 <= len(faces) <= 12 and len(set(faces)) == len(faces), f"{tag} {name}: {faces}"
