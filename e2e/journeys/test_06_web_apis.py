@@ -15,7 +15,7 @@ READBACK = ("canvas", "webgl")
 
 def run_apps(driver, site):
     """The page's results, two reads of one canvas and one GL buffer, whether the launch was covered,
-    and each failed probe's message and the step it had reached."""
+    each failed probe's message and the step it had reached, and every probe's milliseconds."""
     b = driver.launch(headless=False)
     page = b.new_context().new_page()
     page.goto(site.url("/apps"))
@@ -23,9 +23,10 @@ def run_apps(driver, site):
     got = wait_out(page, 90)
     reads = {**page.eval(TWO_READS), **page.eval(TWO_READS_GL)}
     errors = page.eval("document.getElementById('out').dataset.errors")
+    timings = page.eval("document.getElementById('out').dataset.timings")
     covered = b.canvas_covered
     b.close()
-    return got, reads, covered, errors
+    return got, reads, covered, errors, timings
 
 
 @pytest.fixture(scope="module")
@@ -34,9 +35,10 @@ def reference(ref, site):
 
 
 def test_web_apis_behave_like_the_reference(drv, site, reference, check):
-    got, reads, covered, errors = run_apps(drv, site)
-    want, plain, _, ref_errors = reference
+    got, reads, covered, errors, timings = run_apps(drv, site)
+    want, plain, _, ref_errors, ref_timings = reference
     print(f"probe errors: camoufox={errors} reference={ref_errors}")
+    print(f"probe timings: camoufox={timings} reference={ref_timings}")
     for api in sorted(want):
         if not (covered and api in READBACK):
             verdict = reference_verdict(api, got.get(api), want[api], errors, ref_errors)
@@ -44,7 +46,8 @@ def test_web_apis_behave_like_the_reference(drv, site, reference, check):
                 check(False, f"REFERENCE INVALID {api}: the reference Firefox ran out of the page's time budget "
                               f"({json.loads(ref_errors)[api]}) while camoufox={got.get(api)!r}; not a Camoufox difference", ledger=False)
             else:
-                check(verdict == "same", f"{api}: camoufox={got.get(api)!r} reference={want[api]!r}")
+                check(verdict == "same", f"{api}: camoufox={got.get(api)!r} reference={want[api]!r} "
+                                         f"(camoufox {json.loads(timings)[api]}, reference {json.loads(ref_timings)[api]})")
     # The placeholder replaces pixels, not the context: WebGL exists either way.
     check(got["webgl"] != "no context", "a WebGL context exists")
     if covered:
