@@ -149,8 +149,8 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	}
 	args = append(args, lc.args...)
 
-	// Firefox locates libxul from the path it is started with: a relative path,
-	// a ".." or a symlink to the binary makes the macOS app exit with
+	// Firefox locates libxul from the path it is started with: a ".." component
+	// or a symlink to the binary makes the macOS app exit with
 	// "Couldn't load XPCOM." (#362).
 	exe, err := exec.LookPath(lc.executablePath) // a bare name searches PATH, as exec does
 	if err == nil {

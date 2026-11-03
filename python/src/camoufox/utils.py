@@ -3,8 +3,8 @@ import os
 import platform
 import shutil
 from functools import wraps
-from os import environ
-from os.path import abspath
+from os import environ, fspath
+from os.path import realpath
 from pathlib import Path
 from pprint import pprint
 from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
@@ -1342,9 +1342,11 @@ def launch_options(
         executable_path = selected_launch_path(browser)
     elif executable_path is None and _env_executable:
         executable_path = _env_executable
-    if isinstance(executable_path, str):
-        # Convert executable path to a Path object
-        executable_path = Path(abspath(executable_path))
+    if executable_path is not None:
+        # The macOS app finds libxul from the path it is started with and exits
+        # with "Couldn't load XPCOM." for a ".." or a symlink (#378). Everything
+        # below, the GPU probe and Playwright included, gets the real path.
+        executable_path = Path(realpath(fspath(executable_path)))
 
     # Handle virtual display
     if virtual_display:

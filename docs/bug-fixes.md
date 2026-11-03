@@ -26,6 +26,20 @@ later change should read first.
 
 **What misled the investigation.** The Windows log showed PASS lines before the traceback, which reads as a passing test with noisy teardown; the exit code and the `PermissionError` frame are what failed the run.
 
+## #378: the Python and TypeScript launchers handed a symlinked or ".." executable path to the macOS app
+
+**Fixed by:** the PR that closes #378. **Found by:** reading both launchers for the shape of #362, then launching the fork.2 macOS arm64 app through bare Playwright 1.58.
+
+**Symptom.** `[err] Couldn't load XPCOM.` from `playwright.firefox.launch(executable_path=...)` for a symlink to the binary and for a path with a `..` component. An absolute path and a plain relative path launched.
+
+**Root cause.** Python's `launch_options` converted only a `str`, with `os.path.abspath`: absolute, `..` collapsed, symlinks kept, and a `Path` argument untouched (`python/src/camoufox/utils.py`, the `isinstance(executable_path, str)` check). TypeScript used `path.resolve` (`typescript/src/utils.ts`): the same, minus the `Path` case. The launchers read `application.ini`, `properties.json` and the fonts from beside that path, so a symlink kept outside the build also failed earlier, with a missing file, which hid the XPCOM error.
+
+**Fix.** Python resolves the value once where it enters, for `str` and `Path` alike, with `os.path.realpath`. It sits above the version read, the GPU probe and the returned `executable_path`, which all use the one value. TypeScript uses `fs.realpathSync(path.resolve(p))` when the file exists, and leaves a missing binary to the existing read of its files, which names `application.ini`. The Python function imports `realpath` and `fspath` by name, because `launch_options` has an `os` parameter that shadows the module; a first attempt with `os.path.realpath` failed on that.
+
+**Evidence.** Python `tests/test_executable_path_resolution.py` (symlink and `..`, each as `str` and as `Path`) and TypeScript `executable_path resolution` in `tests/launch.test.ts` (symlink, `..`, a missing binary), none of them needing a browser. On main: Python 3 of 4 red (symlink as `str` and `Path`, `..` as `Path`; `..` as `str` already passed), TypeScript 1 of 3 red (the symlink; `..` and the missing binary already passed). After the fix all pass.
+
+**What misled the investigation.** The goapi fix for #362 was written from a test that used `..` and called it a relative path, so the same shape looked like it applied to a plain relative path in the other launchers too. It does not: only `..` and symlinks fail, and each launcher already normalized one of them.
+
 ## #375: the Skiplist audit failed on every run once pip 26.3 came out
 
 **Fixed by:** the PR that closes #375. **Found by:** Tests run 41553986984 on PR #374, `Skiplist audit`, with no code in the PR that could reach it.
@@ -96,17 +110,17 @@ How N was chosen. Simulation over every pair of N-subsets of 8 launches per brow
 - The new guard arm failed once (`first page read=8 first worker read=8` for a requested 3, probe run 41438746894, job 125272343860) while the same browser passed in the PR's run. Not the browser: with no `os`, the launcher draws a random identity, and on an Apple Silicon draw `coherence.py` snaps the user's core count up to 8 (`appleSiliconCores`, `_repair_apple_silicon_cores`). The arm now launches as `windows`.
 - The first fix read is not a fail-open: a navigator that has not resolved a value returns stock's, so the guard's new arm needs an explicit value to be non-vacuous.
 
-## #362: the macOS app exited with "Couldn't load XPCOM." when the executable path was relative, had a "..", or was a symlink
+## #362: the macOS app exited with "Couldn't load XPCOM." when the executable path had a "..", or was a symlink
 
 **Fixed by:** the PR that references #362. **Found by:** a developer Mac, where every launching goapi test failed with `camoufox: Browser.enable: juggler: EOF` after 0.01 s.
 
 **Symptom.** `Browser.enable: juggler: EOF` at once, and with `WithDebug(true)` the single line `Couldn't load XPCOM.`. The same app started from a shell with an absolute path.
 
-**Root cause.** The macOS app finds libxul from the path it is started with. `Launch` handed `WithExecutablePath`'s value to `exec.CommandContext` unchanged. Started by hand, `Camoufox.app/Contents/MacOS/camoufox --headless --version` printed the version for the absolute path and `Couldn't load XPCOM.` for each of: a path with a `..` component, a symlink to the binary, and a relative path (`../x/Camoufox.app/Contents/MacOS/camoufox` from `goapi/`). The reporter's own spelling is not recorded in the issue, so that one of these three was the reporter's is an inference; the symptom and the output match.
+**Root cause.** The macOS app finds libxul from the path it is started with. `Launch` handed `WithExecutablePath`'s value to `exec.CommandContext` unchanged. Started by hand, `Camoufox.app/Contents/MacOS/camoufox --headless --version` printed the version for the absolute path and `Couldn't load XPCOM.` for each of: a path with a `..` component and a symlink to the binary. A plain relative path (`Camoufox.app/Contents/MacOS/camoufox`) launches. The first write-up of this entry said a relative path fails too; it had tested `../x/Camoufox.app/...`, which has a `..`, and the mistake was found while checking the Python launcher (#378). The reporter's own spelling is not recorded in the issue, so that one of these three was the reporter's is an inference; the symptom and the output match.
 
 **Fix.** Just before it starts the browser, `Launch` resolves the path the way `exec` does (`exec.LookPath`: a bare name is searched on PATH, a path with a separator is checked as given), then makes it absolute and resolves symlinks (`filepath.Abs`, `filepath.EvalSymlinks`). A missing binary now fails with `camoufox: resolve executable path: ...` instead of the browser's start error. A first version used `filepath.Abs` alone and turned a bare `camoufox` into `<cwd>/camoufox`, which broke a name found on PATH; the `path` subtest covers it. The Linux launch uses the same path, so the fontconfig lookup in `launchEnv` also gets the real location.
 
-**Evidence.** `TestLaunchResolvesTheExecutablePath` launches through each of four spellings (relative, `..`, symlink, bare name on PATH). Red before the fix, the first three with `Browser.enable: juggler: EOF`; green after, 4 of 4, three runs in a row, with the fork.2 macOS arm64 app (macOS 15.7.4, Go 1.27.3, scratch HOME). The existing launching tests passed with a clean absolute path before and after.
+**Evidence.** `TestLaunchResolvesTheExecutablePath` launches through four spellings (a plain relative path as a control that works unresolved, `..`, symlink, bare name on PATH). Red before the fix: `..` and symlink with `Browser.enable: juggler: EOF` (the bare name went red only against the first version of the fix, which used `filepath.Abs` alone); green after, 4 of 4, three runs in a row, with the fork.2 macOS arm64 app (macOS 15.7.4, Go 1.27.3, scratch HOME). The existing launching tests passed with a clean absolute path before and after.
 
 **What misled the investigation.** The issue ruled out the environment, the arguments and the inherited pipes, and it did. A path that is spelled differently is none of those, and a shell test used an absolute path while `go test` was driven with whatever `CAMOUFOX_BIN` held. My first attempt to reproduce passed for the same reason: it used a clean absolute path. The failure appeared only when a probe test took its path from `$PWD/../..`.
 
