@@ -31,11 +31,17 @@ func TestLaunchResolvesTheExecutablePath(t *testing.T) {
 	if err := os.Symlink(bin, link); err != nil {
 		t.Fatal(err)
 	}
+	pathDir := t.TempDir()
+	if err := os.Symlink(bin, filepath.Join(pathDir, "camoufox")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", pathDir)
 	dir := filepath.Dir(bin)
 	for name, path := range map[string]string{
 		"relative": rel,
 		"dotdot":   dir + "/../" + filepath.Base(dir) + "/" + filepath.Base(bin),
 		"symlink":  link,
+		"path":     "camoufox", // a bare name is searched on PATH, as exec does
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
