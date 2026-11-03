@@ -48,6 +48,20 @@ How N was chosen. Simulation over every pair of N-subsets of 8 launches per brow
 - The new guard arm failed once (`first page read=8 first worker read=8` for a requested 3, probe run 41438746894, job 125272343860) while the same browser passed in the PR's run. Not the browser: with no `os`, the launcher draws a random identity, and on an Apple Silicon draw `coherence.py` snaps the user's core count up to 8 (`appleSiliconCores`, `_repair_apple_silicon_cores`). The arm now launches as `windows`.
 - The first fix read is not a fail-open: a navigator that has not resolved a value returns stock's, so the guard's new arm needs an explicit value to be non-vacuous.
 
+## #362: the macOS app exited with "Couldn't load XPCOM." when the executable path was relative, had a "..", or was a symlink
+
+**Fixed by:** the PR that references #362. **Found by:** a developer Mac, where every launching goapi test failed with `camoufox: Browser.enable: juggler: EOF` after 0.01 s.
+
+**Symptom.** `Browser.enable: juggler: EOF` at once, and with `WithDebug(true)` the single line `Couldn't load XPCOM.`. The same app started from a shell with an absolute path.
+
+**Root cause.** The macOS app finds libxul from the path it is started with. `Launch` handed `WithExecutablePath`'s value to `exec.CommandContext` unchanged. Started by hand, `Camoufox.app/Contents/MacOS/camoufox --headless --version` printed the version for the absolute path and `Couldn't load XPCOM.` for each of: a path with a `..` component, a symlink to the binary, and a relative path (`../x/Camoufox.app/Contents/MacOS/camoufox` from `goapi/`). The reporter's own spelling is not recorded in the issue, so that one of these three was the reporter's is an inference; the symptom and the output match.
+
+**Fix.** `Launch` makes the path absolute and resolves symlinks (`filepath.Abs`, `filepath.EvalSymlinks`) before it starts the browser, and returns an error when the path does not exist. The Linux launch uses the same path, so the fontconfig lookup in `launchEnv` also gets the real location.
+
+**Evidence.** `TestLaunchResolvesTheExecutablePath` launches through each of the three spellings. Red before the fix, 3 of 3 with `Browser.enable: juggler: EOF`; green after, 3 of 3, with the fork.2 macOS arm64 app (macOS 15.7.4, Go 1.27.3, scratch HOME). The existing launching tests passed with a clean absolute path before and after.
+
+**What misled the investigation.** The issue ruled out the environment, the arguments and the inherited pipes, and it did. A path that is spelled differently is none of those, and a shell test used an absolute path while `go test` was driven with whatever `CAMOUFOX_BIN` held. My first attempt to reproduce passed for the same reason: it used a clean absolute path. The failure appeared only when a probe test took its path from `$PWD/../..`.
+
 ## #371: TestWatchMutations raced the page's own timer
 
 **Fixed by:** the PR that closes #371. **Found by:** `goapi (browser)` in Tests run 41405543370 on PR #364, whose diff did not touch the test. It failed again on main at 4ab01128 (Tests run 41425224297, job 125231861359, 8.71 s), so it was not rare.
