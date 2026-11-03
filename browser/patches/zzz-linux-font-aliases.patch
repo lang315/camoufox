@@ -21,6 +21,21 @@ index ede3b60..f267917 100644
    const bool useHardcodedList =
        aFontVisibilityProvider
            ? aFontVisibilityProvider->ShouldResistFingerprinting(
+diff --git a/gfx/thebes/gfxFcPlatformFontList.cpp b/gfx/thebes/gfxFcPlatformFontList.cpp
+index c8710f8..4eca4cd 100644
+--- a/gfx/thebes/gfxFcPlatformFontList.cpp
++++ b/gfx/thebes/gfxFcPlatformFontList.cpp
+@@ -2896,6 +2896,10 @@ gfxPlatformFontList::PrefFontList* gfxFcPlatformFontList::FindGenericFamilies(
+               camouGeneric = StyleGenericFontFamily::Serif;
+             } else if (aGeneric.EqualsLiteral("monospace")) {
+               camouGeneric = StyleGenericFontFamily::Monospace;
++            } else if (aGeneric.EqualsLiteral("cursive")) {
++              // Camoufox (#333): a Linux claim's cursive chain starts at Z003.
++              // Every other claim takes the sans-serif row for it, as before.
++              camouGeneric = StyleGenericFontFamily::Cursive;
+             }
+             nsAutoCString camouKey, camouStep;
+             bool camouAnswered = false;
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
 index a4d99f4..1dc8eb7 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
