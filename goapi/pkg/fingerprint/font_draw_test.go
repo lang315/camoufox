@@ -102,3 +102,31 @@ func TestNativeWindowsDrawOnAWindows10Host(t *testing.T) {
 		}
 	}
 }
+
+// fontconfig's metric-alias rule names Carlito for Calibri and Caladea for Cambria and installs
+// neither, so a Linux machine without them does not have the names (#318).
+func TestLinuxDrawClaimsCalibriAndCambriaOnlyWithTheirTargets(t *testing.T) {
+	rng := rand.New(rand.NewPCG(11, 12))
+	claimed := map[string]int{}
+	for i := range 1500 {
+		fonts, err := RandomFontSubset("linux", false, rng)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := setOf(fonts)
+		for alias, target := range map[string]string{"Calibri": "Carlito", "Cambria": "Caladea"} {
+			if got[alias] {
+				claimed[alias]++
+				if !got[target] {
+					t.Fatalf("draw %d claims %s without %s", i, alias, target)
+				}
+			}
+		}
+	}
+	for _, alias := range []string{"Calibri", "Cambria"} {
+		if claimed[alias] == 0 {
+			t.Errorf("%s is never claimed (else VACUOUS)", alias)
+		}
+	}
+}
+

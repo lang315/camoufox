@@ -275,3 +275,14 @@ def test_no_duplicate_families_in_a_draw(os_name, samples):
     for i in range(min(N, 200)):
         lst = draw(os_name, seed=i)
         assert len(lst) == len(set(lst)), f'{os_name} draw #{i} repeats a family'
+
+
+def test_a_linux_draw_claims_calibri_and_cambria_only_with_their_metric_targets(samples):
+    """fontconfig's 30-metric-aliases rule names Carlito for Calibri and Caladea for Cambria; it installs
+    neither, so a machine without them does not have the names (#318). fc-match with the bundle's
+    fonts.conf: Calibri is Carlito with Carlito installed and the default face without."""
+    for alias, target in (('Calibri', 'Carlito'), ('Cambria', 'Caladea')):
+        assert any(alias in fonts for fonts in samples['linux']), f'{alias} is never claimed (else VACUOUS)'
+        stray = [i for i, fonts in enumerate(samples['linux']) if alias in fonts and target not in fonts]
+        assert not stray, f'{alias} claimed without {target} in {len(stray)} of {N} Linux draws, first #{stray[0]}'
+
