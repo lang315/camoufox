@@ -80,7 +80,8 @@ class PwBrowser:
         self.canvas_covered = canvas_covered
         self._ctx_kwargs = context_kwargs or {}
 
-    def new_context(self, **kw) -> PwCtx:
+    def new_context(self, origin=None, **kw) -> PwCtx:
+        # `origin` is what goapi grants a permission for; Playwright grants it to the whole context.
         return PwCtx(self.b.new_context(**self._ctx_kwargs, **kw))
 
     def new_identity_context(self, **kw) -> PwCtx:

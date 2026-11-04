@@ -13,6 +13,20 @@ from util import TWO_READS, TWO_READS_GL, reference_verdict, wait_out
 READBACK = ("canvas", "webgl")
 
 
+GEO = {"latitude": 41.89, "longitude": 12.49}
+OTHER_GEO = {"latitude": 35.68, "longitude": 139.69}
+
+
+def run_geo(driver, site, geo):
+    """What the page's own getCurrentPosition gets in a context granted the permission and `geo`."""
+    b = driver.launch(headless=False)
+    page = b.new_context(permissions=["geolocation"], geolocation=geo, origin=site.url("/").rstrip("/")).new_page()
+    page.goto(site.url("/geo"))
+    got = wait_out(page, 15)
+    b.close()
+    return got
+
+
 def run_apps(driver, site):
     """The page's results, two reads of one canvas and one GL buffer, whether the launch was covered,
     each failed probe's message and the step it had reached, and every probe's milliseconds."""
@@ -61,4 +75,22 @@ def test_web_apis_behave_like_the_reference(drv, site, reference, check):
         # Absolute, with an in-page control: drawn canvas vs a blank one, cleared GL vs its clear colour.
         check(got["canvas"] is True, "canvas draws")
         check(got["webgl"] is True, "WebGL renders")
+    check.done()
+
+
+@pytest.fixture(scope="module")
+def reference_geo(ref, site):
+    return run_geo(ref, site, GEO)
+
+
+def test_geolocation_answers_like_the_reference(drv, site, reference_geo, check):
+    """Both sides are granted the permission and given the same position, so each answers at once with it.
+    Granted nothing, the page's request never completes in either browser and the two would match on
+    that (#385); the second launch is the control that shows this comparison can see a difference."""
+    print(f"geolocation: reference={reference_geo}")
+    got = run_geo(drv, site, GEO)
+    check(reference_geo["kind"] == "position", f"the reference Firefox answers with a position: {reference_geo}", ledger=False)
+    check(got == reference_geo, f"geolocation: camoufox={got} reference={reference_geo}")
+    other = run_geo(drv, site, OTHER_GEO)
+    check(other != reference_geo, f"a different position is told from the reference (else VACUOUS): {other}", ledger=False)
     check.done()
