@@ -188,7 +188,7 @@ def no_proxy_env():
 
 
 def run_stock(binary, url):
-    """Starts stock Firefox on the page; returns (profile, process)."""
+    """Starts stock Firefox on the page; returns (profile, process, output file)."""
     prepare_stock(binary)
     profile = tempfile.mkdtemp(prefix="getter-cost-parity-")
     Path(profile, "user.js").write_text(
@@ -197,14 +197,34 @@ def run_stock(binary, url):
         'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
         'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);\n'
         'user_pref("browser.aboutwelcome.enabled", false);\n', encoding="utf-8")
-    return profile, subprocess.Popen(
-        [str(binary), "--headless", "--no-remote", "--profile", profile, url],
-        env=no_proxy_env(), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    with tempfile.NamedTemporaryFile(prefix="getter-cost-parity-", suffix=".log", delete=False) as out:
+        proc = subprocess.Popen([str(binary), "--headless", "--no-remote", "--profile", profile, url],
+                                env=no_proxy_env(), stdout=out, stderr=subprocess.STDOUT)
+    return profile, proc, out.name
 
 
 def stop_stock(profile, proc):
     # A content process left behind would slow every later guard on the runner.
     stock_gpu_parity().stop_browser(proc, profile)
+
+
+def stock_launch(binary, url, server, timeout=PAGE_TIMEOUT_S):
+    """One stock launch: (its result, "") or (None, how it ended). A launch that
+    reports nothing is otherwise silent (#384), so its output is printed and its
+    exit status returned for the failure line."""
+    server.results = []
+    profile, proc, log = run_stock(binary, url)
+    deadline = time.time() + timeout
+    while not server.results and time.time() < deadline:
+        time.sleep(0.5)
+    status = proc.poll()
+    stop_stock(profile, proc)
+    output = Path(log).read_text(encoding="utf-8", errors="replace")
+    Path(log).unlink(missing_ok=True)
+    if server.results:
+        return server.results[0], ""
+    print(f"stock Firefox output ({len(output)} bytes, last 3000):\n{output[-3000:]}")
+    return None, f"{'still running' if status is None else f'exit status {status}'}"
 
 
 def run_camoufox(binary, url, identity):
@@ -274,16 +294,11 @@ def main() -> int:
     camou_runs = {"launch": [], "context": []}
     try:
         for _ in range(LAUNCHES):
-            server.results = []
-            profile, proc = run_stock(stock_bin, url)
-            deadline = time.time() + PAGE_TIMEOUT_S
-            while not server.results and time.time() < deadline:
-                time.sleep(0.5)
-            stop_stock(profile, proc)
-            if not server.results:
-                print("FAIL: stock Firefox never reported -- check is vacuous")
+            result, why = stock_launch(stock_bin, url, server)
+            if result is None:
+                print(f"FAIL: stock Firefox never reported ({why}) -- check is vacuous")
                 return 1
-            stock_runs.append(server.results[0])
+            stock_runs.append(result)
             for identity, runs in camou_runs.items():
                 runs.append(run_camoufox(camoufox_bin, url, identity))
     finally:
