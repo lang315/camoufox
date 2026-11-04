@@ -126,8 +126,8 @@ that OS's own groups (810 / 780 / 793 faces, including browser-shipped
 `TwemojiMozilla.ttf`).
 
 The reverse direction of invariant 1 is deliberately loose: an OS renders more
-families than it ever reports (529 published vs 335 reported on Windows, 872 vs
-567 on macOS, 583 vs 358 on Linux; `gen-fonts-json.py --dump-union` lists the
+families than it ever reports (536 published vs 335 reported on Windows, 879 vs
+538 on macOS, 600 vs 358 on Linux; `gen-fonts-json.py --dump-union` lists the
 gap). Those are names a real OS never presents as a family — weight-variant
 subfamilies DirectWrite folds into their parent ("Barlow Black"), the bare
 `Sitka` / `Segoe UI Variable` umbrella names, and CJK families a stock install
@@ -200,7 +200,7 @@ plus independent per-unit draws. Not a uniform percentage of a pool.
    families and is identified by the *absence* of `Noto Sans Brahmi` /
    `Noto Sans CanAborig`.
 
-2. **The essential floor** (`essential-fonts.json`: 125 / 369 / 274) — the
+2. **The essential floor** (`essential-fonts.json`: 125 / 368 / 272) — the
    intersection of that OS's bases, so it holds whichever base was drawn.
 
 3. **Per-unit Bernoulli draws, per OS.** Each addition is one independent
@@ -243,8 +243,8 @@ plus independent per-unit draws. Not a uniform percentage of a pool.
 
 4. **Marker fonts** appended if missing (`_ensure_marker_fonts`).
 
-Resulting list sizes over 20 draws: 125–281 of 335 (Windows), 369–526 of 567
-(macOS), 278–319 of 358 (Linux).
+Resulting list sizes over 20 draws (seeds 0 to 19): 125–282 of 335 (Windows),
+368–492 of 538 (macOS), 276–310 of 358 (Linux).
 
 For a **native** identity — the host's own OS — on macOS and Windows the draw
 claims the OS base only, because the real system fonts are the right ones there
