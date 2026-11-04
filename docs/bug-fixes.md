@@ -26,6 +26,34 @@ later change should read first.
 
 **What misled the investigation.** `navigator.permissions.query` read `prompt` on Windows after a grant, which pointed at the grant's principal; it was the Permissions API folding in the OS state (`dom.permissions.testing.enabled`), and the grant code was identical to Playwright's. A local Mac that has allowed location access answers, so every local run was green.
 
+## #385: the e2e geolocation arm compared a timeout with a timeout
+
+**Fixed by:** the PR that moves the probe to its own page and test (`e2e/journeys/test_06_web_apis.py::test_geolocation_answers_like_the_reference`). **Found by:** reading the `pkg`, `pw` and `go` probe timings of `test_web_apis_behave_like_the_reference` (8001 ms on every launch).
+
+**Symptom.** The `geolocation` probe of `test_06_web_apis` read `error: Error` (`timeout`) on Camoufox and on the reference Firefox, on all three operating systems, and scored `same`. It spent the page's whole 8 s budget on every launch.
+
+**Root cause.** `apps.html` asked for a position at load in a context with no geolocation permission. The browser raises its permission prompt, nothing answers it, and neither callback runs; the `timeout: 3000` option does not start until the permission is settled, so only the page's own 8 s race ended the wait. A reference that cannot differ from the value under test (the same non-answer on both sides) scores `same` whatever Camoufox does. Measured on macOS arm64 with the page's script: no callback within 9 s at load, 500 ms after load and on a click, on Camoufox and on Playwright's Firefox 153; with `permissions=["geolocation"]` and a `geolocation`, the position comes back in 13 to 520 ms on both. Playwright's `evaluate` is not the page's own call: it got `User denied geolocation prompt` in about 1 s, which is why a quick check from `evaluate` looked fine.
+
+**Fix.** The probe left `apps.html` for `web/pages/geo.html` and its own test. Every driver's context is granted `geolocation` and given the same position, so each side answers at once with a position (kind and coordinates are compared). A second Camoufox launch with another position must differ from the reference, and the reference must answer with a position, so a run that falls back to the old non-answer fails instead of passing. `goapi/cmd/e2edriver` took `permissions`, `geolocation` and `origin` for `browser.new_context` so the `go` driver runs the same arm; The grant under the wrong name (`geolocation` for goapi) was #397: it leaves the permission denied without an error.
+
+**Evidence.** The old arm: `ok geolocation: camoufox='error: Error' reference='error: Error' (camoufox {'ms': 8001}...)`. The new test with the grant removed fails on both controls (`the reference Firefox answers with a position`, `a different position is told from the reference (else VACUOUS)`). With the grant, `test_06_web_apis.py` passes for `pkg`, `pw` and `go` on macOS arm64 (6 passed, 71 s) and the browser cache stays empty. See the PR for CI.
+
+**What misled the investigation.** A grant under the wrong name (`geolocation` for goapi) reads as "geolocation is broken in goapi": the permission query said `denied`. And `permissions=[]` is not "no grant": Juggler records a denial, both browsers answer error 1 at once, and the comparison still matches.
+
+## #318: a Linux identity always claimed Calibri and Cambria
+
+**Fixed by:** the PR that takes the two names out of the Linux essential floor and gives them to the LibreOffice unit. **Found by:** the Linux claim table of the fonts work (#312), 300 of 300 draws.
+
+**Symptom.** Every Linux draw listed `Calibri` and `Cambria`, while `Carlito` and `Caladea` appeared in 29 of 300 (the LibreOffice addition, p = 0.112). A page measuring the real families found them absent.
+
+**Root cause.** `browser/scripts/gen-fonts-json.py` added every name of its Linux `ALIASES` table to the essential floor (`common |= set(ALIASES[os_key])`, and into each base it intersected), on the argument that fonts.conf rewrites them unconditionally. fontconfig's `30-metric-aliases.conf` only names a substitute: `Calibri` accepts `Carlito`, and installs nothing. Measured with the bundle's `fonts.conf` in Docker linux/amd64 (Ubuntu 24.04): with Carlito and Caladea installed `fc-match Calibri` is `Carlito` and `fc-match Cambria` is `Caladea`; with only Liberation installed both are `Liberation Mono`, the default face, the answer for a family that does not exist (`Zzz Not A Font`). The other fifteen aliases have targets that every Linux base carries, so they stay.
+
+**Fix.** The generator adds an alias to the floor only when its target is in every base, and no longer unions the aliases into the bases it intersects; `gen-font-groups.py` gives every unit that brings an alias's target the alias too, unless the floor already claims it, from the same `ALIASES` table (so `Calibri` and `Cambria` join the Linux `libreoffice` unit beside `Carlito` and `Caladea`, and the manifest needs no copy of the table). Regenerated, the diff is `essential-fonts.json` (Linux 274 to 272 names: `Calibri`, `Cambria`) and `font-groups.json` (the Linux `libreoffice` unit gains the same two); `goapi/pkg/fingerprint/data/` carries byte-identical copies, and the TypeScript launcher reads the pythonlib files. No launcher code changed: all three read the same draw tables, so the rule lives in one place. Not done: tying all aliases generically in the launchers, which would add three copies of a rule the data already expresses.
+
+**Evidence.** One test per launcher (`python/tests/test_font_distribution.py`, `typescript/tests/fingerprints.test.ts`, `goapi/pkg/fingerprint/font_draw_test.go`) draws 1500 Linux identities and requires that `Calibri` implies `Carlito` and `Cambria` implies `Caladea`, and that each name is claimed at all. Before: Python `Calibri claimed without Carlito`, TypeScript `Calibri without Carlito: expected 1341 to be +0`, Go `draw 0 claims Cambria without Caladea`. After: all three pass.
+
+**What misled the investigation.** Regenerating on the pinned bundle also changes the macOS part of `fonts.json` (29 families, 567 to 538) and one macOS essential name (`Noto Sans Canadian Aboriginal Regular`), independent of this change (#400); those files were not regenerated here, so the diff stays the issue's.
+
 ## #387: the stock-parity storage-partition check timed out on about 3 launches in 100
 
 **Fixed by:** the PR that launches the probe page without uBlock Origin. **Found by:** Tests run 41611148277 (PR #380), job "Patch guards: stock parity".
