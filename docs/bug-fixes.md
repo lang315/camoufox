@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #395: a Linux claim's generics ignored the shipped fonts.conf for Hebrew, Thai and the Indic, Armenian, Georgian, Ethiopic, Khmer and Tibetan pages
+
+**Fixed by:** the PR that fixes #395. **Found by:** the Latin fix for #333, then #389.
+
+**Symptom.** A Linux identity drew `serif`, `sans-serif` and `monospace` on a `lang="hi"`, `ta`, `he`, `th` and the other pages of `LANG_GROUPS` as on a Latin page. A Linux host with the same bundle draws FreeSerif for `hi` serif, Frank Ruehl CLM for `he` serif and Cascadia Code for `he` monospace.
+
+**Root cause.** The same as #389: `kCamouLinuxLangChains` held six groups, and a group without a row took the Latin chain.
+
+**Fix.** `gen-font-aliases.py` takes `LANG_GROUPS`, a map from the lang group the browser keys on to the `lang` fontconfig is asked for (`x-devanagari` is measured as `hi`), and writes 18 more rows. The browser needs no change: the row is found by the page's lang group, as in #389.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The issue's table is keyed by `fcLang`, not by lang group. The browser matches the group, which for a script is `x-devanagari`, and `vi` is not a group at all: Vietnamese is written in Latn, so a `lang="vi"` page is `x-western` and never reaches the `vi` row.
+
 ## #410: a bare `vitest run <file>` skipped the cache isolation and wrote the fpgen model to the real cache
 
 **Fixed by:** the PR that moves `vitest.config.ts` to the package root. **Found by:** a single-file run during the #318 work.
@@ -42,13 +56,13 @@ later change should read first.
 
 ## #389: a Linux claim's generics ignored the shipped fonts.conf for Japanese, Chinese, Korean and Arabic pages
 
-**Fixed by:** the PR that fixes #389 (the six lang groups; the other groups are #395). **Found by:** the Latin fix for #333.
+**Fixed by:** the PR that fixes #389 (the six lang groups; the others are #395). **Found by:** the Latin fix for #333.
 
 **Symptom.** A Linux identity drew `serif`, `sans-serif` and `monospace` on a `lang="ja"`, `ko`, `zh-CN`, `zh-TW`, `zh-HK` or `ar` page as it does on a Latin one: Noto Serif, Noto Sans and DejaVu Sans Mono. A Linux host with the same bundle and conf draws Noto Serif CJK JP (ja serif), Droid Sans Fallback (ja sans-serif), Noto Sans CJK SC (zh-cn sans-serif), and so on, and Cascadia Code for Arabic serif.
 
 **Root cause.** The #333 chains were measured for `lang=en`, and `CamouGenericCandidate` picked a chain by generic alone. `FcFontSort` ranks by language before the conf's weak family order (`PRI_LANG` before `PRI_FAMILY_WEAK`), and Firefox caches a generic by the exact language for Hans, Hant, Jpan, Kore and Arab, so each group is its own list. The Arabic serif head is Cascadia Code because it is the only face of the first few that carries `ar`.
 
-**Fix.** `gen-font-aliases.py` measures the six groups (`LANG_TAGS`) and writes `kCamouLinuxLangChains`: the shipped faces in `FcFontSort` order, twelve at most. `CamouGenericCandidate` takes the page's lang group on both paths (base `AddGenericFonts`, whose `langGroup` is already derived, and the `FindGenericFamilies` table step, which passes `GetLangGroup(aLanguage)`) and walks that group's list; a group with no row keeps the Latin chain.
+**Fix.** `gen-font-aliases.py` measures the six groups (then `LANG_TAGS`, now `LANG_GROUPS`) and writes `kCamouLinuxLangChains`: the shipped faces in `FcFontSort` order, twelve at most. `CamouGenericCandidate` takes the page's lang group on both paths (base `AddGenericFonts`, whose `langGroup` is already derived, and the `FindGenericFamilies` table step, which passes `GetLangGroup(aLanguage)`) and walks that group's list; a group with no row keeps the Latin chain.
 
 **Alternatives.** Filtering the chain by the Linux font pool in the generator was rejected: it is a second copy of the pool, and an identity's list is a random subset of it, so the admission has to happen at lookup. A covers-lang bit and the pref limit were left out because they cannot change which face is first admitted.
 

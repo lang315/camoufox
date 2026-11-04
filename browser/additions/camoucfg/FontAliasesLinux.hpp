@@ -3,7 +3,7 @@
 // Each key is a name a Linux identity can report that no Linux face carries; its targets
 // are the Linux faces fontconfig substitutes for it, in preference order.
 // The chains are the faces fontconfig ranks for each CSS generic on a Latin page; the
-// language chains are the same for the tags in LANG_TAGS, which fontconfig answers differently.
+// language chains are the same for the groups in LANG_GROUPS, which fontconfig answers differently.
 #pragma once
 
 namespace mozilla {
@@ -14,7 +14,7 @@ struct CamouFontAlias {
 };
 
 struct CamouLangChains {
-  const char* lang;  // lowercase page language; nullptr ends the table
+  const char* lang;  // lowercase lang group of the page; nullptr ends the table
   const char* const* serif;
   const char* const* sansSerif;
   const char* const* monospace;
@@ -88,6 +88,44 @@ static const char* const kCamouLinuxChain20[] = {"cascadia code", "noto serif", 
 static const char* const kCamouLinuxChain21[] = {"dejavu sans", "noto sans", "nimbus sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
 static const char* const kCamouLinuxChain22[] = {"dejavu sans mono", "noto mono", "noto sans mono", "inconsolata", "nimbus mono ps", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
 static const char* const kCamouLinuxChain23[] = {"z003", "dejavu sans", "noto sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain24[] = {"frank ruehl clm", "cascadia code", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain25[] = {"cascadia code", "dejavu sans mono", "noto mono", "noto sans mono", "inconsolata", "nimbus mono ps", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain26[] = {"freeserif", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain27[] = {"freeserif", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain28[] = {"freeserif", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", "linux libertine display o", nullptr};
+static const char* const kCamouLinuxChain29[] = {"z003", "freeserif", "noto sans", "dejavu sans", "droid sans fallback", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain30[] = {"freeserif", "freesans", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain31[] = {"noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain32[] = {"freeserif", "freesans", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", "linux libertine display o", nullptr};
+static const char* const kCamouLinuxChain33[] = {"z003", "noto sans", "dejavu sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain34[] = {"freeserif", "freesans", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain35[] = {"dejavu serif", "noto serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain36[] = {"freesans", "dejavu sans", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freeserif", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain37[] = {"freesans", "dejavu sans", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freeserif", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain38[] = {"freeserif", "noto sans ethiopic", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain39[] = {"freeserif", "noto sans ethiopic", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain40[] = {"freeserif", "noto sans ethiopic", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain41[] = {"freeserif", "noto sans gujarati", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain42[] = {"freeserif", "noto sans gujarati", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain43[] = {"freeserif", "noto sans gujarati", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain44[] = {"noto sans khmer", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain45[] = {"noto sans khmer", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain46[] = {"noto sans khmer", "dejavu sans mono", "noto mono", "noto sans mono", "inconsolata", "nimbus mono ps", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain47[] = {"z003", "noto sans khmer", "noto sans", "dejavu sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain48[] = {"freeserif", "noto serif kannada", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain49[] = {"freeserif", "noto serif kannada", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain50[] = {"freeserif", "noto serif kannada", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain51[] = {"freeserif", "noto serif sinhala", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain52[] = {"freeserif", "noto serif sinhala", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain53[] = {"freeserif", "noto serif sinhala", "dejavu sans mono", "noto sans mono", "nimbus mono ps", "cascadia code", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", "linux libertine o", nullptr};
+static const char* const kCamouLinuxChain54[] = {"noto sans telugu", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain55[] = {"noto sans telugu", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain56[] = {"noto sans telugu", "dejavu sans mono", "noto mono", "noto sans mono", "inconsolata", "nimbus mono ps", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain57[] = {"z003", "noto sans telugu", "noto sans", "dejavu sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain58[] = {"noto serif tibetan", "noto serif", "dejavu serif", "nimbus roman", "standard symbols ps", "frank ruehl clm", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain59[] = {"noto serif tibetan", "noto sans", "dejavu sans", "nimbus sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
+static const char* const kCamouLinuxChain60[] = {"noto serif tibetan", "dejavu sans mono", "noto mono", "noto sans mono", "inconsolata", "nimbus mono ps", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", nullptr};
+static const char* const kCamouLinuxChain61[] = {"z003", "noto serif tibetan", "noto sans", "dejavu sans", "droid sans fallback", "cascadia code", "freeserif", "freesans", "freemono", "opensymbol", "iosevka", "kozuka mincho pr6n", nullptr};
 
 static const CamouLangChains kCamouLinuxLangChains[] = {
     {"ja", kCamouLinuxChain0, kCamouLinuxChain1, kCamouLinuxChain2, kCamouLinuxChain3},
@@ -96,6 +134,24 @@ static const CamouLangChains kCamouLinuxLangChains[] = {
     {"zh-tw", kCamouLinuxChain12, kCamouLinuxChain13, kCamouLinuxChain14, kCamouLinuxChain15},
     {"zh-hk", kCamouLinuxChain16, kCamouLinuxChain17, kCamouLinuxChain18, kCamouLinuxChain19},
     {"ar", kCamouLinuxChain20, kCamouLinuxChain21, kCamouLinuxChain22, kCamouLinuxChain23},
+    {"he", kCamouLinuxChain24, kCamouLinuxChain21, kCamouLinuxChain25, kCamouLinuxChain23},
+    {"th", kCamouLinuxChain26, kCamouLinuxChain27, kCamouLinuxChain28, kCamouLinuxChain29},
+    {"x-devanagari", kCamouLinuxChain30, kCamouLinuxChain31, kCamouLinuxChain32, kCamouLinuxChain33},
+    {"x-tamil", kCamouLinuxChain30, kCamouLinuxChain34, kCamouLinuxChain32, kCamouLinuxChain29},
+    {"x-armn", kCamouLinuxChain35, kCamouLinuxChain21, kCamouLinuxChain22, kCamouLinuxChain23},
+    {"x-beng", kCamouLinuxChain30, kCamouLinuxChain34, kCamouLinuxChain32, kCamouLinuxChain29},
+    {"x-cans", kCamouLinuxChain36, kCamouLinuxChain21, kCamouLinuxChain37, kCamouLinuxChain23},
+    {"x-ethi", kCamouLinuxChain38, kCamouLinuxChain39, kCamouLinuxChain40, kCamouLinuxChain29},
+    {"x-geor", kCamouLinuxChain35, kCamouLinuxChain21, kCamouLinuxChain22, kCamouLinuxChain23},
+    {"x-gujr", kCamouLinuxChain41, kCamouLinuxChain42, kCamouLinuxChain43, kCamouLinuxChain29},
+    {"x-guru", kCamouLinuxChain30, kCamouLinuxChain34, kCamouLinuxChain32, kCamouLinuxChain29},
+    {"x-khmr", kCamouLinuxChain44, kCamouLinuxChain45, kCamouLinuxChain46, kCamouLinuxChain47},
+    {"x-knda", kCamouLinuxChain48, kCamouLinuxChain49, kCamouLinuxChain50, kCamouLinuxChain29},
+    {"x-mlym", kCamouLinuxChain30, kCamouLinuxChain34, kCamouLinuxChain32, kCamouLinuxChain29},
+    {"x-orya", kCamouLinuxChain26, kCamouLinuxChain27, kCamouLinuxChain28, kCamouLinuxChain29},
+    {"x-sinh", kCamouLinuxChain51, kCamouLinuxChain52, kCamouLinuxChain53, kCamouLinuxChain29},
+    {"x-telu", kCamouLinuxChain54, kCamouLinuxChain55, kCamouLinuxChain56, kCamouLinuxChain57},
+    {"x-tibt", kCamouLinuxChain58, kCamouLinuxChain59, kCamouLinuxChain60, kCamouLinuxChain61},
     {nullptr, nullptr, nullptr, nullptr, nullptr}};
 
 }  // namespace mozilla

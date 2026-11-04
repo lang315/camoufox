@@ -20,10 +20,10 @@ monospace, cursive) for a Latin page (#333). gfxFcPlatformFontList::FindGenericF
 asks FcFontSort for a pattern of [generic, scalable, lang] and keeps the first
 max_generic_substitutions families it can find (gfxFcPlatformFontList.cpp:2791-2896
 at FIREFOX_158_0_1_RELEASE), so a Linux claim on any host walks the same list. The Latin chains keep the first three
-faces. For the lang groups in LANG_TAGS (#389) the header carries the faces in FcFontSort
+faces. For the lang groups in LANG_GROUPS (#389, #395) the header carries the faces in FcFontSort
 order, LANG_DEPTH of them, because the browser takes the first one an identity's list
 admits and a group's leading faces (Cascadia Code, Kozuka Mincho Pr6N) are not all in
-every list. The other lang groups keep the Latin chain (#395).
+every list. The other lang groups keep the Latin chain.
 
 Needs a Linux machine with fontconfig and a staged bundle (fonts/ and
 fontconfig/linux/ beside camoufox-bin):
@@ -53,12 +53,21 @@ GENERICS = ("serif", "sans-serif", "monospace", "cursive")
 # gfx.font_rendering.fontconfig.max_generic_substitutions in modules/libpref/init/StaticPrefList.yaml
 # at FIREFOX_158_0_1_RELEASE.
 GENERIC_LIMIT = 3
-# The lang groups (langGroups.properties) whose generics fontconfig answers differently from the Latin
-# ones (#389). A group not in MozLangGroups reaches fontconfig as its own name, lowercased
-# (gfxFcPlatformFontList::GetSampleLangForGroup at FIREFOX_158_0_1_RELEASE), so each group is measured
-# with that string as `lang`. A group not listed keeps the Latin chain.
-LANG_TAGS = ("ja", "ko", "zh-cn", "zh-tw", "zh-hk", "ar")
-# Faces kept per tag. The browser takes the first one its gates admit, so a short list would let an identity
+# The lang groups whose generics fontconfig answers differently from the Latin ones (#389, #395), each
+# with the `lang` the browser hands fontconfig for it: gfxFcPlatformFontList::GetSampleLangForGroup at
+# FIREFOX_158_0_1_RELEASE gives the MozLangGroups language for an x-* group and the group's own name for
+# any other. A page language reaches its group through nsLanguageAtomService (its likely script), so
+# `vi`, `tr` and `ru` are x-western and x-cyrillic and keep the Latin chain, and x-math is left out: it is
+# asked for the `math` family, which is not one of the four generics measured here. A group not listed
+# keeps the Latin chain.
+LANG_GROUPS = {
+    "ja": "ja", "ko": "ko", "zh-cn": "zh-cn", "zh-tw": "zh-tw", "zh-hk": "zh-hk", "ar": "ar",
+    "he": "he", "th": "th",
+    "x-devanagari": "hi", "x-tamil": "ta", "x-armn": "hy", "x-beng": "bn", "x-cans": "iu", "x-ethi": "am",
+    "x-geor": "ka", "x-gujr": "gu", "x-guru": "pa", "x-khmr": "km", "x-knda": "kn", "x-mlym": "ml",
+    "x-orya": "or", "x-sinh": "si", "x-telu": "te", "x-tibt": "bo",
+}
+# Faces kept per group. The browser takes the first one its gates admit, so a short list would let an identity
 # whose mask lacks the leading faces fall to the Latin rows while the conf names more.
 LANG_DEPTH = 12
 
@@ -139,7 +148,7 @@ def build(bin_dir):
         fonts = re.search(r"--fonts ([^\\\n]+)", recipe.group(1)) if recipe else None
         if not fonts or "linux" not in fonts.group(1).split():
             raise SystemExit(f"{package} does not bundle the Linux font groups, so the alias targets would not ship")
-    langs = {tag: {g: lang_chain(conf, g, tag, shipped) for g in GENERICS} for tag in LANG_TAGS}
+    langs = {group: {g: lang_chain(conf, g, lang, shipped) for g in GENERICS} for group, lang in LANG_GROUPS.items()}
     return render(table, {g: generic_chain(conf, g, shipped) for g in GENERICS}, langs)
 
 
@@ -154,7 +163,7 @@ def render(table, chains, langs):
         "// Each key is a name a Linux identity can report that no Linux face carries; its targets",
         "// are the Linux faces fontconfig substitutes for it, in preference order.",
         "// The chains are the faces fontconfig ranks for each CSS generic on a Latin page; the",
-        "// language chains are the same for the tags in LANG_TAGS, which fontconfig answers differently.",
+        "// language chains are the same for the groups in LANG_GROUPS, which fontconfig answers differently.",
         "#pragma once",
         "",
         "namespace mozilla {",
@@ -165,7 +174,7 @@ def render(table, chains, langs):
         "};",
         "",
         "struct CamouLangChains {",
-        "  const char* lang;  // lowercase page language; nullptr ends the table",
+        "  const char* lang;  // lowercase lang group of the page; nullptr ends the table",
         "  const char* const* serif;",
         "  const char* const* sansSerif;",
         "  const char* const* monospace;",
@@ -182,18 +191,18 @@ def render(table, chains, langs):
     for generic, chain in chains.items():
         body = ", ".join(json.dumps(f) for f in chain + [None]).replace("null", "nullptr")
         lines.append(f"static const char* const {chain_name(generic)}[] = {{{body}}};")
-    shared = {}  # a list several tags and generics have in common is written once
+    shared = {}  # a list several groups and generics have in common is written once
     rows = []
-    for tag, by_generic in langs.items():
+    for group, by_generic in langs.items():
         names = []
         for generic in GENERICS:
             chain = tuple(by_generic[generic])
             if not chain:
-                raise SystemExit(f"no face for {generic} on a {tag} page")
+                raise SystemExit(f"no face for {generic} on a {group} page")
             if chain not in shared:
                 shared[chain] = f"kCamouLinuxChain{len(shared)}"
             names.append(shared[chain])
-        rows.append(f"    {{{json.dumps(tag)}, {', '.join(names)}}},")
+        rows.append(f"    {{{json.dumps(group)}, {', '.join(names)}}},")
     lines.append("")
     for chain, name in shared.items():
         body = ", ".join(json.dumps(f) for f in (*chain, None)).replace("null", "nullptr")

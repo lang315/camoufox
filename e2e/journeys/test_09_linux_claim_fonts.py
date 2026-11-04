@@ -19,8 +19,9 @@ holds no Noto face and no Z003, so every generic must fall to the conf's next
 face and not to a hand-written row; the full one holds every chain face, so
 each generic must draw the conf's first.
 
-The lang groups fontconfig answers differently (ja, ko, zh-CN, zh-TW, zh-HK, ar) have
-chains of their own in the same header (#389), keyed by the lang group of the page.
+The lang groups fontconfig answers differently (ja, ko, zh-CN, zh-TW, zh-HK, ar, he, th and the
+Indic, Armenian, Georgian, Ethiopic, Khmer, Tibetan and Canadian Aboriginal groups) have chains of
+their own in the same header (#389, #395), keyed by the lang group of the page.
 They are read from the header too. Each page language is set on the document, so the
 browser derives the group from it, and the face is read from `CAMOU-FL generic-map`,
 whose `step=chain:<group>` names the table that answered. Two lists are run: one that
@@ -35,7 +36,7 @@ the default depends on the list.
 
 What this cannot see: codepoint fallback to host fonts is ungated, a custom
 `fonts=` list can still admit a foreign name with no alias, and the lang groups
-outside the table keep the Latin chain (#395).
+outside the table keep the Latin chain.
 """
 
 import glob
@@ -87,10 +88,14 @@ def first_admitted(generic, fonts):
 
 
 GENERIC_IDS = {1: "serif", 2: "sans-serif", 3: "monospace", 4: "cursive"}
-# The page language set on the document -> the table row the browser must pick (langGroups.properties).
+# The page language set on the document -> the table row the browser must pick (nsLanguageAtomService:
+# the script a language is written in gives its lang group).
 LANG_PAGES = {
     "ja": "ja", "ja-JP": "ja", "ko": "ko", "zh-CN": "zh-cn", "zh-TW": "zh-tw", "zh-HK": "zh-hk",
-    "ar": "ar", "fa": "ar",
+    "ar": "ar", "fa": "ar", "he": "he", "th": "th",
+    "hi": "x-devanagari", "ta": "x-tamil", "hy": "x-armn", "bn": "x-beng", "iu": "x-cans", "am": "x-ethi",
+    "ka": "x-geor", "gu": "x-gujr", "pa": "x-guru", "km": "x-khmr", "kn": "x-knda", "ml": "x-mlym",
+    "or": "x-orya", "si": "x-sinh", "te": "x-telu", "bo": "x-tibt",
 }
 
 
