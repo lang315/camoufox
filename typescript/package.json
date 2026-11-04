@@ -6,8 +6,8 @@
   "scripts": {
     "build": "rimraf dist && tsc && pnpm copy-files",
     "copy-files": "node scripts/copy-files.mjs",
-    "test": "vitest run --config tests/vitest.config.ts",
-    "test:watch": "vitest --config tests/vitest.config.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "check": "biome check",
     "typecheck": "tsc --noEmit",
     "prepare": "pnpm build",
