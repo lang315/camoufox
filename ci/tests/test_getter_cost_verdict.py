@@ -1,11 +1,16 @@
-"""getter-cost-parity.py's verdict: what it calls slower, faster and equal.
+"""getter-cost-parity.py: its verdict (what it calls slower, faster and equal) and what a silent stock launch reports.
 
 The negative controls for #359: a getter three times its control's cost against
 stock's one times fails, a build that is uniformly slower does not, and a getter
-that skips stock's work still fails the other way.
+that skips stock's work still fails the other way. The #384 tests run `stock_launch`
+against a stand-in for stock Firefox that exits, hangs or reports.
 """
 
 import importlib.util
+import shutil
+import sys
+import tempfile
+import threading
 from pathlib import Path
 
 import pytest
@@ -69,3 +74,67 @@ def test_faster_needs_the_gap_and_a_strictly_smaller_ratio(guard):
     assert guard.verdict(100, 70.5, 40, 200) == (False, False)
     # Same ratio to the control on both sides: not faster, however large the gap.
     assert guard.verdict(100, 50, 40, 40) == (False, False)
+
+
+def fake_stock(tmp_path, body):
+    """An executable that stands in for stock Firefox: `body` runs with the page URL as `url`."""
+    script = tmp_path / "fake-firefox"
+    script.write_text(f"#!{sys.executable}\nimport sys\nurl = sys.argv[-1]\n{body}\n")
+    script.chmod(0o755)
+    return script
+
+
+@pytest.fixture
+def server(guard, tmp_path, monkeypatch):
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(guard, "stop_stock", lambda profile, proc: (proc.kill(), proc.wait(), shutil.rmtree(profile)))
+    srv = guard.Server(("127.0.0.1", 0), guard.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield srv
+    srv.shutdown()
+
+
+def test_a_stock_launch_that_exits_without_reporting_shows_its_status_and_output(guard, server, tmp_path, capsys):
+    binary = fake_stock(tmp_path, "print('crashed: boom', flush=True); sys.exit(3)")
+    result, why = guard.stock_launch(binary, "http://127.0.0.1/", server, timeout=2)
+    assert result is None and why == "exit status 3"
+    assert "crashed: boom" in capsys.readouterr().out
+
+
+def test_a_stock_launch_that_hangs_says_it_is_still_running(guard, server, tmp_path, capsys):
+    binary = fake_stock(tmp_path, "import time; print('started', flush=True); time.sleep(60)")
+    result, why = guard.stock_launch(binary, "http://127.0.0.1/", server, timeout=2)
+    assert result is None and why == "still running"
+    assert "started" in capsys.readouterr().out
+
+
+def test_a_stock_launch_that_reports_returns_its_result_and_leaves_nothing_behind(guard, server, tmp_path, capsys):
+    port = server.server_address[1]
+    binary = fake_stock(
+        tmp_path,
+        f"import urllib.request\nurllib.request.urlopen(urllib.request.Request("
+        f"'http://127.0.0.1:{port}/result', data=b'{{\"ok\": 1}}'))",
+    )
+    result, why = guard.stock_launch(binary, "http://127.0.0.1/", server, timeout=30)
+    assert (result, why) == ({"ok": 1}, "")
+    assert capsys.readouterr().out == ""
+    assert not list(tmp_path.glob("getter-cost-parity-*"))
+
+
+def test_a_log_that_cannot_be_deleted_does_not_hide_the_result(guard, server, tmp_path, monkeypatch):
+    # Windows: an orphan that inherited stdout still holds the log open.
+    unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self.suffix == ".log":
+            raise PermissionError(13, "in use", str(self))
+        return unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    port = server.server_address[1]
+    binary = fake_stock(
+        tmp_path,
+        f"import urllib.request\nurllib.request.urlopen(urllib.request.Request("
+        f"'http://127.0.0.1:{port}/result', data=b'{{\"ok\": 1}}'))",
+    )
+    assert guard.stock_launch(binary, "http://127.0.0.1/", server, timeout=30) == ({"ok": 1}, "")
