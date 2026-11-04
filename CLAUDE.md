@@ -133,8 +133,9 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   three OSes with `gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=other_names_stall.py`
   (a probe that takes `--zip`).
   `e2e.yml` runs only the legs the build or release holds, and fails when it holds none.
-  The Linux and macOS legs also run the observer and goapi gates (`ci.run_observer`, `ci.run_goapi`) before the journeys, so
-  macOS gets the coverage `tests.yml` gives Linux (#310; the Windows leg waits for #345); a dispatch with `probe` or `k` leaves them out.
+  Every leg also runs the observer and goapi gates (`ci.run_observer`, `ci.run_goapi`) before the journeys, so
+  macOS and Windows get the coverage `tests.yml` gives Linux (#310; the Windows goapi gate pins a Windows identity with
+  `CAMOUFOX_TEST_OS`, because another OS's identity starts slowly there, #345); a dispatch with `probe` or `k` leaves them out.
 - **The suites isolate the launcher cache** (TypeScript #269, Python #280) and
   fail before any test if a cache path escapes the temp root. On macOS a launched
   browser still creates an empty `~/Library/Caches/camoufox` by itself, so check

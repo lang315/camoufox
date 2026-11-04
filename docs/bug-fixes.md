@@ -26,6 +26,20 @@ later change should read first.
 
 **What misled the investigation.** The issue's table is keyed by `fcLang`, not by lang group. The browser matches the group, which for a script is `x-devanagari`, and `vi` is not a group at all: Vietnamese is written in Latn, so a `lang="vi"` page is `x-western` and never reaches the `vi` row.
 
+## #404: a granted geolocation permission gave no callback where the OS has not granted location access
+
+**Fixed by:** the PR that adds the `GetIgnoreAllowSitePermission` hunk to `0-playwright.patch`. **Found by:** the e2e geolocation arm (#385): red on hosted Windows and macOS, green on Linux.
+
+**Symptom.** A context granted `geolocation` and given a position never called back from `getCurrentPosition` on hosted Windows (every run) and on some hosted macOS runners, with the `timeout` option never starting. Playwright's Firefox answered on the same runners.
+
+**Root cause.** Stock `Geolocation.cpp` (`FIREFOX_158_0_1_RELEASE`, :102-108) has `nsGeolocationRequest::GetIgnoreAllowSitePermission` return `mBehavior != NoPrompt`, and `mBehavior` is the OS location-permission state (`RequestIfPermitted`, :1180-1195), which is not `NoPrompt` on macOS and Windows while the OS has not granted location access. The stored `geo` ALLOW permission that Juggler's grant writes is then ignored, and a content permission prompt is raised that nothing answers. Playwright's `bootstrap.diff` (v1.62.0, :1056-1064) changes both this function and `Allow()` to `mBehavior != NoPrompt && !gs->IsOverride()`; `0-playwright.patch` carried only the `Allow()` hunk. Ruled out: the grant code (`TargetRegistry.js`, identical to Playwright's v1.62.0), the launcher's config (the bare binary failed the same), `geo.provider.testing`.
+
+**Fix.** The missing hunk, as Playwright writes it with the service type this tree uses. It applies with GNU `patch -p1 --forward -l --binary --dry-run` against the pristine 158.0.1 `Geolocation.cpp`, and `geolocation-spoofing.patch`'s `Geolocation.cpp` hunks still apply after it (offset 3 lines, no fuzz). Not done: `dom.permissions.testing.enabled`, which Playwright sets and Camoufox does not; it changes what `navigator.permissions.query` reads (`prompt` after a grant on Windows), not whether `getCurrentPosition` answers.
+
+**Evidence.** See the PR: the e2e geolocation arm of #396 on a fixed Windows and macOS build, where its `KNOWN #404` entry flips to "fixed?".
+
+**What misled the investigation.** `navigator.permissions.query` read `prompt` on Windows after a grant, which pointed at the grant's principal; it was the Permissions API folding in the OS state (`dom.permissions.testing.enabled`), and the grant code was identical to Playwright's. A local Mac that has allowed location access answers, so every local run was green.
+
 ## #389: a Linux claim's generics ignored the shipped fonts.conf for Japanese, Chinese, Korean and Arabic pages
 
 **Fixed by:** the PR that fixes #389 (the six lang groups; the others are #395). **Found by:** the Latin fix for #333.
