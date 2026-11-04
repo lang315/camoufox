@@ -13,12 +13,7 @@ import re
 HOST = platform.system()
 
 # (test node id regex, check text prefix, issue, strict, hosts measured on)
-CHECKS = [
-    # #404: where the OS has not granted location access, Camoufox ignores the granted site permission and no callback
-    # runs. Hosted Windows fails every time; a hosted macOS runner fails or passes with its location state, so not strict.
-    (r"test_geolocation_answers_like_the_reference", "geolocation: camoufox=", 404, True, ("Windows",)),
-    (r"test_geolocation_answers_like_the_reference", "geolocation: camoufox=", 404, False, ("Darwin",)),
-]
+CHECKS = []
 
 # Findings that surface as an exception: (node id regex, issue, hosts, exception, strict).
 RAISES = []
