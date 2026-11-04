@@ -289,11 +289,24 @@ Before this change a Linux claim drew Nimbus Roman, Nimbus Sans, Cousine and Nim
 `e2e/journeys/test_09_linux_claim_fonts.py` reads the drawn face of each generic from `CAMOU-FL face` and compares it with the first face of the header's chain that the list admits, on a short list (no Noto face: every generic must fall to the conf's next face, not to a row) and a full one.
 
 What this does not close:
-- Only a Latin page. `fc-match -s` gives other chains for `ja`, `zh-cn`, `ko` and `ar`; that is #389.
-- `fantasy` is not generated: a Linux claim draws the sans-serif chain for it (and for `system-ui`'s fallback, `math` and `-moz-emoji` requests), where a Linux host asks fontconfig for `fantasy`. Before this change it took the sans-serif row (Nimbus Sans); now it draws Noto Sans. The chain under the bundled Linux fonts.conf was not measured.
+- Only the lang groups of the next section have a chain of their own. Every other group keeps the Latin chain, and the conf ranks other faces for some of them (#395).
+- `fantasy` is not generated: a Linux claim draws the sans-serif chain for it (and for `system-ui`'s fallback, `math` and `-moz-emoji` requests): the page's lang-group sans-serif chain on the six generated groups, the Latin chain elsewhere, where a Linux host asks fontconfig for `fantasy`. Before this change it took the sans-serif row (Nimbus Sans); now it draws Noto Sans. The chain under the bundled Linux fonts.conf was not measured.
 - A list that refuses every face of a chain gets the old hand-written rows (`step=rows`), which is a hand-written answer for a Linux claim. No drawn list does this (300 of 300 draws of `generate_context_fingerprint(os="linux")` admit every chain face), so only a custom `fonts=` list reaches it; `test_a_list_with_no_chain_face_falls_to_the_rows` pins it.
-- `GetDefaultFontLocked` and the `step=none` corner (no list and no mask) are unchanged.
+- `GetDefaultFontLocked` and the `step=none` corner (no list and no mask) are unchanged. `GetDefaultFontLocked` takes no language, and stock asks fontconfig for `-moz-default` as `x_western` (`GetDefaultFontForPlatform` without a language), so its table call keeps the Latin chain by design (#389).
 - A goapi launch with `WithNoFingerprint()` and a `Config` without `Fonts` has no launch mask, so the page sees the host's fonts.
+
+### The lang groups (#389)
+
+Under the bundle conf `FcFontSort` ranks different faces per language: `ja` serif starts at Noto Serif CJK JP, `zh-cn` at Noto Serif CJK SC, `ko` at Noto Serif CJK KR, and `ar` serif at Cascadia Code. The Arabic case is `fcmatch.c`'s priority order, not a conf rule: `PRI_CHARSET`, `PRI_FAMILY_STRONG`, `PRI_LANG`, `PRI_FAMILY_WEAK`. The conf's `serif` alias adds its families with the default weak binding, and the family list after `FcConfigSubstitute` is the same for `lang=ar` and `lang=en` (Noto Serif first). Among the faces, only Cascadia Code (a Windows face the bundle ships) carries `ar`; Noto Serif and DejaVu Serif do not. A strong language match outranks a weak family match, so Cascadia Code sorts first (e2e run 41729645836, probe `generic_langs.py`).
+
+`FindGenericFamilies` caches a generic by the exact lowercase `fcLang` for Hans, Hant, Jpan, Kore and Arab (`UseCustomFontconfigLookupsForLocale`, `gfxFcPlatformFontList.cpp:2458`) and by script for the rest. The atom it receives is the one `AddGenericFonts` was given, but the table step cannot key on it: on Windows and macOS the base `AddGenericFonts` has already mapped the page language to its lang group (`GetLangGroup`), and the table step sees only that group. `CamouGenericCandidate` takes the group on both paths (`GetLangGroup(aLanguage)` in the Fc step), so a Linux, a Windows and a macOS host agree. `lang="fa"` and `lang="ja-JP"` therefore reach `ar` and `ja`. The conf measures the same for the group name as for the tag (`fcLang` is the group's name lowercased for a group outside `MozLangGroups`).
+
+`FontAliasesLinux.hpp` carries `kCamouLinuxLangChains`: for `ja`, `ko`, `zh-cn`, `zh-tw`, `zh-hk` and `ar` the shipped faces of each generic in `FcFontSort` order, twelve at most (`LANG_DEPTH`). The Latin chains keep three. The browser takes the first face the identity's own list admits, and a chain that no face of the list is in falls through to the rows as before. That is the whole of what `FindGenericFamilies` decides for a table answer: it keeps one family, the first one the gates admit. The pref limit (3) and the "no face has the lang, keep the first" cut act only after the first admitted face, so neither can change it, and the header carries no covers-lang bit. Cascadia Code and Kozuka Mincho Pr6N are in the chains but not in the Linux font pool, so most identities skip them; the next face of the same list answers. There is no copy of the pool in the generator for that reason: an identity's list is a random subset of it, and which faces are kept is known only at lookup.
+
+What this does not close:
+- Groups outside the six keep the Latin chain, although the conf ranks other faces for `he`, `th` and the Indic and other scripts (#395). `ru`, `el` and `tr` match the Latin chain.
+- A page language that `langGroups.properties` maps to none of the six (an unlisted `lang`, no `lang` at all) is a Latin page.
+- The chain is not cut to three faces nor trimmed by language coverage, as Firefox's own list is: the table answers one family, and glyphs the face lacks come from codepoint fallback, which is ungated (see above).
 
 ## Legacy family names: first lookup (#247, #319, #321, #322)
 

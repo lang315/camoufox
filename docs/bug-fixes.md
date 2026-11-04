@@ -12,6 +12,50 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #404: a granted geolocation permission gave no callback where the OS has not granted location access
+
+**Fixed by:** the PR that adds the `GetIgnoreAllowSitePermission` hunk to `0-playwright.patch`. **Found by:** the e2e geolocation arm (#385): red on hosted Windows and macOS, green on Linux.
+
+**Symptom.** A context granted `geolocation` and given a position never called back from `getCurrentPosition` on hosted Windows (every run) and on some hosted macOS runners, with the `timeout` option never starting. Playwright's Firefox answered on the same runners.
+
+**Root cause.** Stock `Geolocation.cpp` (`FIREFOX_158_0_1_RELEASE`, :102-108) has `nsGeolocationRequest::GetIgnoreAllowSitePermission` return `mBehavior != NoPrompt`, and `mBehavior` is the OS location-permission state (`RequestIfPermitted`, :1180-1195), which is not `NoPrompt` on macOS and Windows while the OS has not granted location access. The stored `geo` ALLOW permission that Juggler's grant writes is then ignored, and a content permission prompt is raised that nothing answers. Playwright's `bootstrap.diff` (v1.62.0, :1056-1064) changes both this function and `Allow()` to `mBehavior != NoPrompt && !gs->IsOverride()`; `0-playwright.patch` carried only the `Allow()` hunk. Ruled out: the grant code (`TargetRegistry.js`, identical to Playwright's v1.62.0), the launcher's config (the bare binary failed the same), `geo.provider.testing`.
+
+**Fix.** The missing hunk, as Playwright writes it with the service type this tree uses. It applies with GNU `patch -p1 --forward -l --binary --dry-run` against the pristine 158.0.1 `Geolocation.cpp`, and `geolocation-spoofing.patch`'s `Geolocation.cpp` hunks still apply after it (offset 3 lines, no fuzz). Not done: `dom.permissions.testing.enabled`, which Playwright sets and Camoufox does not; it changes what `navigator.permissions.query` reads (`prompt` after a grant on Windows), not whether `getCurrentPosition` answers.
+
+**Evidence.** See the PR: the e2e geolocation arm of #396 on a fixed Windows and macOS build, where its `KNOWN #404` entry flips to "fixed?".
+
+**What misled the investigation.** `navigator.permissions.query` read `prompt` on Windows after a grant, which pointed at the grant's principal; it was the Permissions API folding in the OS state (`dom.permissions.testing.enabled`), and the grant code was identical to Playwright's. A local Mac that has allowed location access answers, so every local run was green.
+
+## #389: a Linux claim's generics ignored the shipped fonts.conf for Japanese, Chinese, Korean and Arabic pages
+
+**Fixed by:** the PR that fixes #389 (the six lang groups; the other groups are #395). **Found by:** the Latin fix for #333.
+
+**Symptom.** A Linux identity drew `serif`, `sans-serif` and `monospace` on a `lang="ja"`, `ko`, `zh-CN`, `zh-TW`, `zh-HK` or `ar` page as it does on a Latin one: Noto Serif, Noto Sans and DejaVu Sans Mono. A Linux host with the same bundle and conf draws Noto Serif CJK JP (ja serif), Droid Sans Fallback (ja sans-serif), Noto Sans CJK SC (zh-cn sans-serif), and so on, and Cascadia Code for Arabic serif.
+
+**Root cause.** The #333 chains were measured for `lang=en`, and `CamouGenericCandidate` picked a chain by generic alone. `FcFontSort` ranks by language before the conf's weak family order (`PRI_LANG` before `PRI_FAMILY_WEAK`), and Firefox caches a generic by the exact language for Hans, Hant, Jpan, Kore and Arab, so each group is its own list. The Arabic serif head is Cascadia Code because it is the only face of the first few that carries `ar`.
+
+**Fix.** `gen-font-aliases.py` measures the six groups (`LANG_TAGS`) and writes `kCamouLinuxLangChains`: the shipped faces in `FcFontSort` order, twelve at most. `CamouGenericCandidate` takes the page's lang group on both paths (base `AddGenericFonts`, whose `langGroup` is already derived, and the `FindGenericFamilies` table step, which passes `GetLangGroup(aLanguage)`) and walks that group's list; a group with no row keeps the Latin chain.
+
+**Alternatives.** Filtering the chain by the Linux font pool in the generator was rejected: it is a second copy of the pool, and an identity's list is a random subset of it, so the admission has to happen at lookup. A covers-lang bit and the pref limit were left out because they cannot change which face is first admitted.
+
+**Evidence.** See the PR.
+
+**What misled the investigation.** The page language is not what the table step sees: on Windows and macOS only the lang group reaches it, and on Linux the raw atom does, so a table keyed on tags such as `ja-JP` would have worked on one path and not the other. The Latin test of #333 could not see any of it, because `about:blank` has no language.
+
+## #385: the e2e geolocation arm compared a timeout with a timeout
+
+**Fixed by:** the PR that moves the probe to its own page and test (`e2e/journeys/test_06_web_apis.py::test_geolocation_answers_like_the_reference`). **Found by:** reading the `pkg`, `pw` and `go` probe timings of `test_web_apis_behave_like_the_reference` (8001 ms on every launch).
+
+**Symptom.** The `geolocation` probe of `test_06_web_apis` read `error: Error` (`timeout`) on Camoufox and on the reference Firefox, on all three operating systems, and scored `same`. It spent the page's whole 8 s budget on every launch.
+
+**Root cause.** `apps.html` asked for a position at load in a context with no geolocation permission. The browser raises its permission prompt, nothing answers it, and neither callback runs; the `timeout: 3000` option does not start until the permission is settled, so only the page's own 8 s race ended the wait. A reference that cannot differ from the value under test (the same non-answer on both sides) scores `same` whatever Camoufox does. Measured on macOS arm64 with the page's script: no callback within 9 s at load, 500 ms after load and on a click, on Camoufox and on Playwright's Firefox 153; with `permissions=["geolocation"]` and a `geolocation`, the position comes back in 13 to 520 ms on both. Playwright's `evaluate` is not the page's own call: it got `User denied geolocation prompt` in about 1 s, which is why a quick check from `evaluate` looked fine.
+
+**Fix.** The probe left `apps.html` for `web/pages/geo.html` and its own test. Every driver's context is granted `geolocation` and given the same position, so each side answers at once with a position (kind and coordinates are compared). A second Camoufox launch with another position must differ from the reference, and the reference must answer with a position, so a run that falls back to the old non-answer fails instead of passing. `goapi/cmd/e2edriver` took `permissions`, `geolocation` and `origin` for `browser.new_context` so the `go` driver runs the same arm; The grant under the wrong name (`geolocation` for goapi) was #397: it leaves the permission denied without an error.
+
+**Evidence.** The old arm: `ok geolocation: camoufox='error: Error' reference='error: Error' (camoufox {'ms': 8001}...)`. The new test with the grant removed fails on both controls (`the reference Firefox answers with a position`, `a different position is told from the reference (else VACUOUS)`). With the grant, `test_06_web_apis.py` passes for `pkg`, `pw` and `go` on macOS arm64 (6 passed, 71 s) and the browser cache stays empty. See the PR for CI.
+
+**What misled the investigation.** A grant under the wrong name (`geolocation` for goapi) reads as "geolocation is broken in goapi": the permission query said `denied`. And `permissions=[]` is not "no grant": Juggler records a denial, both browsers answer error 1 at once, and the comparison still matches.
+
 ## #318: a Linux identity always claimed Calibri and Cambria
 
 **Fixed by:** the PR that takes the two names out of the Linux essential floor and gives them to the LibreOffice unit. **Found by:** the Linux claim table of the fonts work (#312), 300 of 300 draws.
@@ -34,7 +78,7 @@ later change should read first.
 
 **Root cause.** The iframe's request was held for about 6 s before it left the browser, and the probe's timer starts when the iframe is appended and runs 5 s. In the parent log of a red iteration (`MOZ_LOG=nsHttp:4,DocumentChannel:5`) the channel for `http://127.0.0.1:<port>/frame` is opened at 36.970, then `nsHttpChannel::Suspend` is called from `resource://gre/modules/WebRequest.sys.mjs:998` (an extension's blocking `webRequest` listener) at 36.973, and `ResumeInternal` from `WebRequest.sys.mjs:1147` at 42.949. The `GET /frame` reaches the server at 42.951. The socket thread is idle in between. The message from the iframe then arrives 5.8 to 8.1 s after the append, after the timer has fired. The only extension a default launch installs is uBlock Origin, and the existing entry #211 shows the mechanism that holds requests there (`loadFilterLists()` suspends the network). I did not read which uBO code path held this particular request.
 
-**Fix.** `run_probes` in `stock-parity-probes.py` launches with `exclude_addons=[DefaultAddons.UBO]`, as `worker-config-reads.py` already does for a similar harness error. The check asks about storage partitioning, not about ad blocking. The 5 s timer, the order of the steps and the page are unchanged. The hold itself is not fixed here: a user's first cross-site request can still wait on uBO.
+**Fix.** `run_probes` in `stock-parity-probes.py` launches with `exclude_addons=[DefaultAddons.UBO]`, as `worker-config-reads.py` already does for a similar harness error. The check asks about storage partitioning, not about ad blocking. The 5 s timer, the order of the steps and the page are unchanged. The hold itself is not fixed here: every default launch holds page requests until uBO has compiled its lists (#403 measured it and documents the opt-out).
 
 **Evidence.** The browser was main's Linux build `camoufox-dist` of Tests run 41716611808 (ed74a287; it differs from the 3a370c3c base only in the Linux font-alias patch). Every number is a hosted ubuntu-24.04 runner, a fresh browser per iteration, from a throwaway branch's workflow (deleted since). Reproduction, with the probe's page and launch and the storage step instrumented: 3 of 100 timeouts (run 41729632285), 12 of 200 (41731450117), 12 of 600 with `MOZ_LOG` on (41734720703). Arms that cut earlier steps out of the page (41733100357): without the `RTCPeerConnection` block 0 of 300, with it 5 of 240. With the default addon removed (41736351708): 0 of 400, against 11 of 400 with it. Red to green on the real guard, 240 runs each (41739961405): main's `stock-parity-probes.py` red 8 times, all `storage-partition ... = timeout`; with the fix 0 times.
 

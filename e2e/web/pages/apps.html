@@ -91,8 +91,6 @@ async function run() {
     o.connect(ac.destination); o.start();
     return (await ac.startRendering()).getChannelData(0).some(s => s !== 0);
   });
-  await t("geolocation", () => new Promise(ok =>
-    navigator.geolocation.getCurrentPosition(() => ok("position"), e => ok("error " + e.code), {timeout: 3000})));
   autoDone = true; finish();
 }
 $("clip").onclick = () => t("clipboard", () => navigator.clipboard.writeText("e2e").then(() => true))
