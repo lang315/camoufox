@@ -13,7 +13,7 @@ Three properties, each of which a plausible refactor could silently break:
                        INTERSECTION of the versions, so asserting it is not the
                        same as asserting a base.
                        Caveat, measured by mutation-testing this file: the
-                       essential floor is large (125 win / 369 mac / 274 lin)
+                       essential floor is large (125 win / 368 mac / 272 lin)
                        and refills most of a subsetted base, so
                        test_every_draw_contains_one_complete_base alone does NOT
                        catch a base that is silently truncated -- what catches
