@@ -28,6 +28,20 @@ later change should read first.
 
 **What misled the investigation.** The page language is not what the table step sees: on Windows and macOS only the lang group reaches it, and on Linux the raw atom does, so a table keyed on tags such as `ja-JP` would have worked on one path and not the other. The Latin test of #333 could not see any of it, because `about:blank` has no language.
 
+## #397: goapi GrantPermissions forwarded Playwright's names to Juggler, which denied them silently
+
+**Fixed by:** the PR that translates the names in `goapi/permissions.go`. **Found by:** the e2e geolocation arm (#385), whose `go` driver read `denied` after a grant.
+
+**Symptom.** `GrantPermissions(ctx, origin, []string{"geolocation"})` returned nil, then `navigator.permissions.query({name: "geolocation"})` read `denied` and `getCurrentPosition` failed with code 1.
+
+**Root cause.** The names went to `Browser.grantPermissions` unchanged. Juggler uses its own (`ALL_PERMISSIONS` in `TargetRegistry.js`: `geo`, `desktop-notification`, `local-network`, `loopback-network`), and `grantPermissionsToOrigin` allows the listed ones and denies every other name of that list, with no error for a name it does not know. Playwright's Firefox client translates and throws on an unknown name (playwright v1.62.0 `ffBrowser.ts`, `doGrantPermissions`); goapi, which mirrors the Playwright API, did neither.
+
+**Fix.** `jugglerPermissions` maps `geolocation`, `notifications` and `local-network-access` once, and any other name is an error (Juggler's own `geo` included, so a caller sees the API's names only). Playwright's `persistent-storage`, `push` and `screen-wake-lock` are refused too: Juggler has no permission to grant for them.
+
+**Evidence.** `goapi/permissions_test.go` captures the `Browser.grantPermissions` request on a scripted connection. Before the fix: `GrantPermissions([geolocation]) sent [geolocation], want [geo]`, and `GrantPermissions("camera") sent [camera] and returned no error`. After: both tests pass, `go test ./...` in `goapi` passes. Against the macOS arm64 build, granting `geolocation` through the e2e `go` driver reads `granted` and the page gets the position set with `SetGeolocation`.
+
+**What misled the investigation.** A grant that returns nil and then reads `denied` looked like geolocation being broken in goapi, not a name that never reached a permission.
+
 ## #333: a Linux claim's generics ignored the shipped fonts.conf
 
 **Fixed by:** the PR that refs #333 (the Latin page; other language groups are #389). **Found by:** the realism review of #325.
