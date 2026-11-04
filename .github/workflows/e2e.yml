@@ -135,7 +135,7 @@ jobs:
       # then run whatever they conclude, so a red gate does not hide the journeys.
       # goapi draws its identity from any OS; on Windows a Linux or macOS identity spends ~6
       # CPU-seconds per process indexing the bundled fonts and its 30 s main-context wait
-      # expires on a loaded runner (#345), so that leg pins a Windows identity (CAMOUFOX_OS).
+      # expires on a loaded runner (#345), so that leg pins a Windows identity (CAMOUFOX_TEST_OS).
       - name: Unpack the browser for the guards
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
@@ -156,7 +156,7 @@ jobs:
         if: ${{ !cancelled() && inputs.probe == '' && inputs.k == '' }}
         shell: bash
         env:
-          CAMOUFOX_OS: ${{ runner.os == 'Windows' && 'windows' || '' }}
+          CAMOUFOX_TEST_OS: ${{ runner.os == 'Windows' && 'windows' || '' }}
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then xvfb-run -a python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; else python -m ci.run_goapi --binary "$CAMOUFOX_BINARY"; fi
       - name: Run

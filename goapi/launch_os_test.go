@@ -20,14 +20,14 @@ func drawnPlatform(t *testing.T, opts ...camoufox.Option) string {
 	return cfg.NavigatorPlatform
 }
 
-func TestCamoufoxOSPinsTheIdentity(t *testing.T) {
-	t.Setenv("CAMOUFOX_OS", "windows")
+func TestDefaultOSPinsTheIdentity(t *testing.T) {
+	t.Cleanup(camoufox.SetDefaultOS("windows"))
 	for i := 0; i < 20; i++ {
 		if got := drawnPlatform(t); got != "Win32" {
-			t.Fatalf("CAMOUFOX_OS=windows drew navigator.platform %q on draw %d", got, i)
+			t.Fatalf("default OS windows drew navigator.platform %q on draw %d", got, i)
 		}
 	}
 	if got := drawnPlatform(t, camoufox.WithOS("macos")); got != "MacIntel" {
-		t.Fatalf("WithOS(macos) under CAMOUFOX_OS=windows drew %q; the option must win", got)
+		t.Fatalf("WithOS(macos) under default OS windows drew %q; the option must win", got)
 	}
 }

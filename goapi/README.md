@@ -33,8 +33,6 @@ The package implements the launch path and Juggler RPC core:
 - `pkg/fingerprint` — minimal Firefox fingerprint sampler (presets + font/voice subset)
 - `camoufox` — top-level public API: `Launch`, `Browser`, `BrowserContext`, `Page`
 
-`CAMOUFOX_OS` (`windows`, `macos` or `linux`) stands in for `WithOS` when the caller gives none. `e2e.yml` sets it on its Windows leg: a Linux or macOS identity there spends minutes indexing the bundled fonts at every process start (#345).
-
 On Linux, `Launch` points the browser at a runtime fontconfig (`FONTCONFIG_FILE`) built from
 `fontconfig/<os>/fonts.conf` beside the binary, so it renders only the bundled fonts of the
 identity's OS rather than the host's. The file is written to `$XDG_CACHE_HOME/camoufox/fontconfig/`

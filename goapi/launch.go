@@ -50,6 +50,10 @@ type Browser struct {
 	pageAwaiters map[string]chan *Page
 }
 
+// defaultOS stands in for WithOS when the caller gives none. Only export_test.go sets it, so a
+// test run can pin one identity (#310); a launcher user never reaches it.
+var defaultOS string
+
 // Launch spawns the Camoufox binary and connects via the Juggler pipe
 // transport. The returned Browser owns the subprocess; call Close.
 func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
@@ -94,9 +98,8 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	// Fingerprint injection (skipped if caller passed a complete
 	// config or asked to skip).
 	if !lc.skipFingerprint {
-		// CAMOUFOX_OS stands in for WithOS, so CI can pin one identity for a whole test run (#310).
 		if lc.os == "" {
-			lc.os = os.Getenv("CAMOUFOX_OS")
+			lc.os = defaultOS
 		}
 		fpOpts := fingerprint.Options{
 			OS:             lc.os,
