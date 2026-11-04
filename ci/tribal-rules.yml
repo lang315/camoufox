@@ -317,6 +317,7 @@ rules:
       - "uBO platform/common/vapi-background.js: onBeforeRequest holds tabId >= 0 while suspendDepth != 0"
       - "uBO src/js/storage.js: loadFilterLists() calls vAPI.net.suspend() whenever vAPI.Net.canSuspend(), true on Firefox"
       - "uBO src/js/background.js: assetFetchTimeout 30"
+      - "issue #403; uBO 1.75.4 js/traffic.js:1349, js/start.js:456, js/storage.js:909 and :961; hold measured on hosted ubuntu-24.04 in runs 41748394329 and 41750523526, browser of Tests run 41739273709"
     rationale: >-
       On Firefox uBO holds every page request while it loads its filter lists.
       Every Camoufox launch is a first run, and on a first run uBO auto-selects
@@ -331,6 +332,24 @@ rules:
       is that a non-English locale loses its regional list. When uBO changes
       its default lists, update the keys in policies.json from its
       assets.json.
+
+      The lists are also why every launch holds page requests for seconds.
+      A launch has a fresh profile and so no saved filter state, and uBO
+      parks every tab request from when it registers its listener until all
+      pinned lists are compiled. On a hosted two-vCPU Linux runner all 45
+      default launches had that hold: it began a median 2.3 s after launch
+      (1.6 to 5.9 s), ended a median 9.2 s after launch (6.7 to 12.0 s) and
+      lasted 2.4 to 7.5 s; with the addon excluded none of 45 did (worst
+      request latency 138 ms). The hold follows the number of pinned lists,
+      36 launches each: ten lists (shipped) held 36 of 36, median 6.8 s;
+      three (user-filters, ublock-filters, easylist) 36 of 36, median 1.0 s;
+      one (user-filters) 1 of 36. The lists stay at ten: fewer would end
+      blocking for badware, privacy, unbreak, quick-fixes, easyprivacy,
+      urlhaus and plowe-0, which is a coverage choice and not a fix, and a
+      saved filter state helps only a persistent profile. The hold was
+      measured on Linux only. Users who do not want uBO, and its hold, pass
+      exclude_addons=[DefaultAddons.UBO] (TypeScript: exclude_addons:
+      ["UBO"]).
 
   - id: canvas-noise-entropy-is-lower-than-audio
     title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)
