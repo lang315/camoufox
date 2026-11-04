@@ -39,8 +39,8 @@ outside the table keep the Latin chain (#395).
 """
 
 import glob
-import os
 import re
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -133,8 +133,9 @@ def launch_and_log(binary, fonts, requests, langs=()):
     from camoufox.sync_api import NewBrowser
     from drivers.playwright_drivers import playwright
 
-    logdir = Path(__file__).resolve().parents[2] / ".ci-work" / f"linux-claim-fonts-{os.getpid()}-{len(fonts)}"
-    logdir.mkdir(parents=True)
+    root = Path(__file__).resolve().parents[2] / ".ci-work"
+    root.mkdir(exist_ok=True)
+    logdir = Path(tempfile.mkdtemp(prefix="linux-claim-fonts-", dir=root))
     env = {"MOZ_LOG": "fontlist:4,sync,append", "MOZ_LOG_FILE": str(logdir / "cfx%PID")}
     for _ in range(15):
         try:
