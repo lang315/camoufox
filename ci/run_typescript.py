@@ -142,7 +142,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     # tier 1, and running it again here would need that job's prerequisites.
     files = ["tests/e2e.test.ts"] if args.browser else []
     proc = run(
-        ["pnpm", "exec", "vitest", "run", "--config", "tests/vitest.config.ts",
+        ["pnpm", "exec", "vitest", "run",
          "--reporter=default", "--reporter=junit", f"--outputFile.junit={junit}", *files],
         cwd=TYPESCRIPT, env=env, timeout=args.timeout, tee=True, capture=False,
     )
