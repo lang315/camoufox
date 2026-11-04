@@ -119,3 +119,22 @@ def test_a_stock_launch_that_reports_returns_its_result_and_leaves_nothing_behin
     assert (result, why) == ({"ok": 1}, "")
     assert capsys.readouterr().out == ""
     assert not list(tmp_path.glob("getter-cost-parity-*"))
+
+
+def test_a_log_that_cannot_be_deleted_does_not_hide_the_result(guard, server, tmp_path, monkeypatch):
+    # Windows: an orphan that inherited stdout still holds the log open.
+    unlink = Path.unlink
+
+    def locked(self, *args, **kwargs):
+        if self.suffix == ".log":
+            raise PermissionError(13, "in use", str(self))
+        return unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", locked)
+    port = server.server_address[1]
+    binary = fake_stock(
+        tmp_path,
+        f"import urllib.request\nurllib.request.urlopen(urllib.request.Request("
+        f"'http://127.0.0.1:{port}/result', data=b'{{\"ok\": 1}}'))",
+    )
+    assert guard.stock_launch(binary, "http://127.0.0.1/", server, timeout=30) == ({"ok": 1}, "")
