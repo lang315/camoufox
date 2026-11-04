@@ -22,10 +22,10 @@ index ede3b60..f267917 100644
        aFontVisibilityProvider
            ? aFontVisibilityProvider->ShouldResistFingerprinting(
 diff --git a/gfx/thebes/gfxFcPlatformFontList.cpp b/gfx/thebes/gfxFcPlatformFontList.cpp
-index c8710f8..4eca4cd 100644
+index c8710f8..86e0edd 100644
 --- a/gfx/thebes/gfxFcPlatformFontList.cpp
 +++ b/gfx/thebes/gfxFcPlatformFontList.cpp
-@@ -2896,6 +2896,10 @@ gfxPlatformFontList::PrefFontList* gfxFcPlatformFontList::FindGenericFamilies(
+@@ -2896,11 +2896,16 @@ gfxPlatformFontList::PrefFontList* gfxFcPlatformFontList::FindGenericFamilies(
                camouGeneric = StyleGenericFontFamily::Serif;
              } else if (aGeneric.EqualsLiteral("monospace")) {
                camouGeneric = StyleGenericFontFamily::Monospace;
@@ -36,8 +36,15 @@ index c8710f8..4eca4cd 100644
              }
              nsAutoCString camouKey, camouStep;
              bool camouAnswered = false;
+             if (CamouGenericCandidate(aFontVisibilityProvider, camouGeneric,
+-                                      camouKey, camouStep)) {
++                                      camouKey, camouStep,
++                                      GetLangGroup(aLanguage))) {
+               AutoTArray<FamilyAndGeneric, 1> camouFamilies;
+               if (gfxPlatformFontList::FindAndAddFamiliesLocked(
+                       aFontVisibilityProvider, StyleGenericFontFamily::None,
 diff --git a/gfx/thebes/gfxPlatformFontList.cpp b/gfx/thebes/gfxPlatformFontList.cpp
-index a4d99f4..1dc8eb7 100644
+index a4d99f4..b81f8a6 100644
 --- a/gfx/thebes/gfxPlatformFontList.cpp
 +++ b/gfx/thebes/gfxPlatformFontList.cpp
 @@ -1324,6 +1324,11 @@ static const char* const kCamouSerifRow[] = {
@@ -52,7 +59,36 @@ index a4d99f4..1dc8eb7 100644
  /* static */
  bool gfxPlatformFontList::CamouGenericTableApplies(
      FontVisibilityProvider* aFontVisibilityProvider) {
-@@ -1346,6 +1351,40 @@ bool gfxPlatformFontList::CamouGenericCandidate(
+@@ -1332,10 +1337,26 @@ bool gfxPlatformFontList::CamouGenericTableApplies(
+          MaskedFontListAppliesTo(aFontVisibilityProvider);
+ }
+ 
++// Camoufox (#389): the chains fontconfig ranks for a lang group, matched on the
++// group's name as gfxFcPlatformFontList::GetSampleLangForGroup spells it.
++static const CamouLangChains* CamouLinuxLangChainsFor(nsAtom* aLangGroup) {
++  if (!aLangGroup) {
++    return nullptr;
++  }
++  nsAutoCString group;
++  aLangGroup->ToUTF8String(group);
++  for (const CamouLangChains* row = kCamouLinuxLangChains; row->lang; ++row) {
++    if (group.EqualsIgnoreCase(row->lang)) {
++      return row;
++    }
++  }
++  return nullptr;
++}
++
+ bool gfxPlatformFontList::CamouGenericCandidate(
+     FontVisibilityProvider* aFontVisibilityProvider,
+-    StyleGenericFontFamily aGeneric, nsACString& aKeyOut,
+-    nsACString& aStepOut) {
++    StyleGenericFontFamily aGeneric, nsACString& aKeyOut, nsACString& aStepOut,
++    nsAtom* aLangGroup) {
+   aKeyOut.Truncate();
+   aStepOut.AssignLiteral("none");
+ 
+@@ -1346,6 +1367,45 @@ bool gfxPlatformFontList::CamouGenericCandidate(
      return false;
    }
  
@@ -64,19 +100,20 @@ index a4d99f4..1dc8eb7 100644
 +  // through the same gates. Only when none is admitted do the rows answer.
 +  if (SystemUISpoofedOS(aFontVisibilityProvider) ==
 +      MaskConfig::SpoofedOS::Linux) {
++    const CamouLangChains* lang = CamouLinuxLangChainsFor(aLangGroup);
 +    const char* const* chain;
 +    switch (aGeneric) {
 +      case StyleGenericFontFamily::Monospace:
-+        chain = kCamouLinuxMonospaceChain;
++        chain = lang ? lang->monospace : kCamouLinuxMonospaceChain;
 +        break;
 +      case StyleGenericFontFamily::Serif:
-+        chain = kCamouLinuxSerifChain;
++        chain = lang ? lang->serif : kCamouLinuxSerifChain;
 +        break;
 +      case StyleGenericFontFamily::Cursive:
-+        chain = kCamouLinuxCursiveChain;
++        chain = lang ? lang->cursive : kCamouLinuxCursiveChain;
 +        break;
 +      default:
-+        chain = kCamouLinuxSansSerifChain;
++        chain = lang ? lang->sansSerif : kCamouLinuxSansSerifChain;
 +        break;
 +    }
 +    for (; *chain; ++chain) {
@@ -85,6 +122,10 @@ index a4d99f4..1dc8eb7 100644
 +                               nsDependentCString(*chain), &key)) {
 +        aKeyOut = key;
 +        aStepOut.AssignLiteral("chain");
++        if (lang) {
++          aStepOut.Append(':');
++          aStepOut.Append(lang->lang);
++        }
 +        return true;
 +      }
 +    }
@@ -93,7 +134,7 @@ index a4d99f4..1dc8eb7 100644
    const char* const* rows[3];
    switch (aGeneric) {
      case StyleGenericFontFamily::Monospace:
-@@ -2154,6 +2193,20 @@ bool gfxPlatformFontList::FindAndAddFamilies(
+@@ -2154,6 +2214,20 @@ bool gfxPlatformFontList::FindAndAddFamilies(
    return didFind;
  }
  
@@ -114,7 +155,7 @@ index a4d99f4..1dc8eb7 100644
  bool gfxPlatformFontList::FindAndAddFamiliesLocked(
      FontVisibilityProvider* aFontVisibilityProvider,
      StyleGenericFontFamily aGeneric, const nsACString& aFamily,
-@@ -2162,6 +2215,31 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
+@@ -2162,6 +2236,31 @@ bool gfxPlatformFontList::FindAndAddFamiliesLocked(
    nsAutoCString key;
    GenerateFontListKey(aFamily, key);
  
@@ -146,3 +187,26 @@ index a4d99f4..1dc8eb7 100644
    bool allowHidden = bool(aFlags & FindFamiliesFlags::eSearchHiddenFamilies);
    FontVisibility visibilityLevel =
        aFontVisibilityProvider ? aFontVisibilityProvider->GetFontVisibility()
+@@ -3051,7 +3150,7 @@ void gfxPlatformFontList::AddGenericFonts(
+       nsAutoCString camouKey, camouStep;
+       bool camouAnswered = false;
+       if (CamouGenericCandidate(aFontVisibilityProvider, aGenericType, camouKey,
+-                                camouStep)) {
++                                camouStep, langGroup)) {
+         AutoTArray<FamilyAndGeneric, 1> camouFamilies;
+         if (FindAndAddFamiliesLocked(aFontVisibilityProvider,
+                                      StyleGenericFontFamily::None, camouKey,
+diff --git a/gfx/thebes/gfxPlatformFontList.h b/gfx/thebes/gfxPlatformFontList.h
+index 0cc37a1..6eb490a 100644
+--- a/gfx/thebes/gfxPlatformFontList.h
++++ b/gfx/thebes/gfxPlatformFontList.h
+@@ -718,7 +718,8 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
+   // holds.
+   bool CamouGenericCandidate(FontVisibilityProvider* aFontVisibilityProvider,
+                              mozilla::StyleGenericFontFamily aGeneric,
+-                             nsACString& aKeyOut, nsACString& aStepOut)
++                             nsACString& aKeyOut, nsACString& aStepOut,
++                             nsAtom* aLangGroup = nullptr)
+       MOZ_REQUIRES(mLock);
+ 
+   // Camoufox (#263): the family system-ui resolves to when the document's

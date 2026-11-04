@@ -33,3 +33,4 @@ def test_the_header_carries_the_four_generic_chains():
         assert match, f"no {name} chain"
         families = re.findall(r'"([^"]+)"', match.group(1))
         assert 1 <= len(families) <= 3 and len(set(families)) == len(families), f"{name}: {families}"
+
