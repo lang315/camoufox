@@ -28,6 +28,24 @@ later change should read first.
 
 **What misled the investigation.** The page language is not what the table step sees: on Windows and macOS only the lang group reaches it, and on Linux the raw atom does, so a table keyed on tags such as `ja-JP` would have worked on one path and not the other. The Latin test of #333 could not see any of it, because `about:blank` has no language.
 
+## #387: the stock-parity storage-partition check timed out on about 3 launches in 100
+
+**Fixed by:** the PR that launches the probe page without uBlock Origin. **Found by:** Tests run 41611148277 (PR #380), job "Patch guards: stock parity".
+
+**Symptom.** `stock-parity-probes.py` failed with `storage-partition: cross-site iframe hasStorageAccess() = timeout`, on a hosted Linux runner, in a PR that touched none of the browser.
+
+**Root cause.** The iframe's request was held for about 6 s before it left the browser, and the probe's timer starts when the iframe is appended and runs 5 s. In the parent log of a red iteration (`MOZ_LOG=nsHttp:4,DocumentChannel:5`) the channel for `http://127.0.0.1:<port>/frame` is opened at 36.970, then `nsHttpChannel::Suspend` is called from `resource://gre/modules/WebRequest.sys.mjs:998` (an extension's blocking `webRequest` listener) at 36.973, and `ResumeInternal` from `WebRequest.sys.mjs:1147` at 42.949. The `GET /frame` reaches the server at 42.951. The socket thread is idle in between. The message from the iframe then arrives 5.8 to 8.1 s after the append, after the timer has fired. The only extension a default launch installs is uBlock Origin, and the existing entry #211 shows the mechanism that holds requests there (`loadFilterLists()` suspends the network). I did not read which uBO code path held this particular request.
+
+**Fix.** `run_probes` in `stock-parity-probes.py` launches with `exclude_addons=[DefaultAddons.UBO]`, as `worker-config-reads.py` already does for a similar harness error. The check asks about storage partitioning, not about ad blocking. The 5 s timer, the order of the steps and the page are unchanged. The hold itself is not fixed here: a user's first cross-site request can still wait on uBO.
+
+**Evidence.** The browser was main's Linux build `camoufox-dist` of Tests run 41716611808 (ed74a287; it differs from the 3a370c3c base only in the Linux font-alias patch). Every number is a hosted ubuntu-24.04 runner, a fresh browser per iteration, from a throwaway branch's workflow (deleted since). Reproduction, with the probe's page and launch and the storage step instrumented: 3 of 100 timeouts (run 41729632285), 12 of 200 (41731450117), 12 of 600 with `MOZ_LOG` on (41734720703). Arms that cut earlier steps out of the page (41733100357): without the `RTCPeerConnection` block 0 of 300, with it 5 of 240. With the default addon removed (41736351708): 0 of 400, against 11 of 400 with it. Red to green on the real guard, 240 runs each (41739961405): main's `stock-parity-probes.py` red 8 times, all `storage-partition ... = timeout`; with the fix 0 times.
+
+**What misled the investigation.**
+
+- **The issue's candidate, a slow runner, was not what the log shows.** The held request waited on a suspended channel, not on CPU or on the network.
+- **The `RTCPeerConnection` correlation is not the cause.** Cutting that block removed every red, which reads like a WebRTC teardown delay. The log shows an extension holding the request, and removing the addon removes the reds with WebRTC still running. Why the WebRTC step makes the hold likelier I did not establish; it delays the iframe by up to 6 s, so it may move the request into the window in which uBO holds requests.
+- **The iframe never loaded** was the first reading of the three first reds, because the server saw no `/frame` request before the browser closed. A run that kept listening 25 s past the timer showed the request arriving late, not never.
+
 ## #397: goapi GrantPermissions forwarded Playwright's names to Juggler, which denied them silently
 
 **Fixed by:** the PR that translates the names in `goapi/permissions.go`. **Found by:** the e2e geolocation arm (#385), whose `go` driver read `denied` after a grant.

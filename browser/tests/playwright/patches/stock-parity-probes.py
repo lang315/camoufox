@@ -185,10 +185,15 @@ PAGE = PAGE.replace(b"%PROBES%", PROBES.encode())
 
 
 def run_probes(binary, port):
+    from camoufox import DefaultAddons
     from camoufox.sync_api import Camoufox
 
     config = {"webrtc:ipv4": "203.0.113.7", "timezone": "Asia/Tokyo"}
-    with Camoufox(headless=True, executable_path=str(binary), config=config, i_know_what_im_doing=True) as b:
+    # Without uBlock Origin: its webRequest listener holds a request for ~6 s in
+    # about 3 launches in 100 on a hosted runner, which makes the iframe's 5 s timer
+    # below measure uBO, not storage partitioning (#387).
+    with Camoufox(headless=True, executable_path=str(binary), config=config,
+                  exclude_addons=[DefaultAddons.UBO], i_know_what_im_doing=True) as b:
         page = b.new_page()
         page.goto(f"http://localhost:{port}/")
         page.wait_for_function("() => document.body.dataset.result", timeout=60000)
