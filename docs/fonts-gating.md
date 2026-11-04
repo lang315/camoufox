@@ -276,7 +276,7 @@ What this does not close:
 - A custom `fonts=` list that admits a foreign name with no alias in `fonts.conf` still draws the flat package's face for it, as before.
 - Codepoint fallback to host fonts is still ungated (lesson 3).
 - The generics are not aliases of the rows: see "The generics of a Linux claim" below (#333).
-- Counted on 150 draws of `generate_context_fingerprint(os="linux")`: every list admitted all 17 table names; `Calibri` and `Cambria` had no admitted target in 136 of 150 (Carlito and Caladea come with the LibreOffice addition, p = 0.112), and `Avant Garde` and `Zapf Chancery` have no target in the conf at all. Each of those draws the list's default font on a Linux host and, now, on Windows and macOS.
+- Counted on 150 draws of `generate_context_fingerprint(os="linux")`: every list admitted all 17 table names; `Calibri` and `Cambria` had no admitted target in 136 of 150 (Carlito and Caladea come with the LibreOffice addition, p = 0.112), and `Avant Garde` and `Zapf Chancery` have no target in the conf at all. Each of those draws the list's default font on a Linux host and, now, on Windows and macOS. Since #318 a Linux draw claims `Calibri` and `Cambria` only with Carlito and Caladea, so for those two the count is now 0.
 
 ## The generics of a Linux claim (#333)
 

@@ -25,6 +25,7 @@ Usage (after the bundle or the manifest changed, and AFTER gen-fonts-json.py):
 """
 
 import argparse
+import importlib.util
 import json
 import os
 
@@ -61,14 +62,28 @@ def build_bases(manifest, reportable):
     return out
 
 
-def build(manifest, reportable):
-    """The reportable projection of each OS's additions, in manifest order."""
+def load_aliases():
+    """gen-fonts-json.py's ALIASES: the one table of metric-compatible alias names."""
+    spec = importlib.util.spec_from_file_location('gen_fonts_json', os.path.join(REPO, 'scripts', 'gen-fonts-json.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.ALIASES
+
+
+def build(manifest, reportable, essential, aliases):
+    """The reportable projection of each OS's additions, in manifest order.
+
+    An alias is metric-compatible only with its target, so a unit that brings the target
+    brings the alias too, unless the essential floor already claims it (#318).
+    """
     out = {}
     for os_key in OS_KEYS:
         pool = set(reportable.get(os_key, []))
         units = []
         for addition in manifest[os_key]['additions']:
             fonts = [f for f in addition['fonts'] if f in pool]
+            fonts += [a for a, target in aliases[os_key].items()
+                      if target in fonts and a in pool and a not in fonts and a not in essential[os_key]]
             if not fonts:
                 # Nothing this unit names can be reported under this OS, so a
                 # draw could never produce it; leaving it out keeps the file a
@@ -110,7 +125,10 @@ def main():
     with open(args.fonts) as fh:
         reportable = json.load(fh)
 
-    groups = build(manifest, reportable)
+    with open(os.path.join(PACKAGE, 'essential-fonts.json')) as fh:
+        essential = json.load(fh)
+
+    groups = build(manifest, reportable, essential, load_aliases())
     with open(args.out, 'w') as fh:
         json.dump(groups, fh, indent=1, ensure_ascii=False, sort_keys=False)
         fh.write('\n')
