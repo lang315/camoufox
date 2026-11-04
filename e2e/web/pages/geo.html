@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>Geolocation</title>
+<div id="out"></div>
+<script>
+// The page asks for a position at load. Without a permission the browser's prompt is never answered
+// here, so neither callback runs and the timeout option never starts (#385): the context must grant it.
+const out = o => { const e = document.getElementById("out"); e.textContent = JSON.stringify(o); e.dataset.done = "1"; };
+navigator.geolocation.getCurrentPosition(
+  p => out({kind: "position", latitude: p.coords.latitude, longitude: p.coords.longitude}),
+  e => out({kind: "error", code: e.code}), {timeout: 3000});
+setTimeout(() => out({kind: "no callback"}), 8000);
+</script>
