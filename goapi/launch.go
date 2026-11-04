@@ -94,6 +94,10 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	// Fingerprint injection (skipped if caller passed a complete
 	// config or asked to skip).
 	if !lc.skipFingerprint {
+		// CAMOUFOX_OS stands in for WithOS, so CI can pin one identity for a whole test run (#310).
+		if lc.os == "" {
+			lc.os = os.Getenv("CAMOUFOX_OS")
+		}
 		fpOpts := fingerprint.Options{
 			OS:             lc.os,
 			FirefoxVersion: lc.firefoxVersion,
