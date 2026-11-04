@@ -477,6 +477,8 @@ def test_linux_claim_generics_come_from_fonts_conf():
         assert f"kCamouLinux{chain}Chain" in header, why
         assert f"kCamouLinux{chain}Chain" in patch, why
     assert "+  if (SystemUISpoofedOS(aFontVisibilityProvider) ==" in patch, why
+    assert "kCamouLinuxLangChains" in header, why
+    assert "+static const CamouLangChains* CamouLinuxLangChainsFor(nsAtom* aLangGroup)" in patch, why
 
 
 def test_a_native_identitys_system_ui_family_is_never_masked():
