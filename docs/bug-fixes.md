@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #318: a Linux identity always claimed Calibri and Cambria
+
+**Fixed by:** the PR that takes the two names out of the Linux essential floor and gives them to the LibreOffice unit. **Found by:** the Linux claim table of the fonts work (#312), 300 of 300 draws.
+
+**Symptom.** Every Linux draw listed `Calibri` and `Cambria`, while `Carlito` and `Caladea` appeared in 29 of 300 (the LibreOffice addition, p = 0.112). A page measuring the real families found them absent.
+
+**Root cause.** `browser/scripts/gen-fonts-json.py` added every name of its Linux `ALIASES` table to the essential floor (`common |= set(ALIASES[os_key])`, and into each base it intersected), on the argument that fonts.conf rewrites them unconditionally. fontconfig's `30-metric-aliases.conf` only names a substitute: `Calibri` accepts `Carlito`, and installs nothing. Measured with the bundle's `fonts.conf` in Docker linux/amd64 (Ubuntu 24.04): with Carlito and Caladea installed `fc-match Calibri` is `Carlito` and `fc-match Cambria` is `Caladea`; with only Liberation installed both are `Liberation Mono`, the default face, the answer for a family that does not exist (`Zzz Not A Font`). The other fifteen aliases have targets that every Linux base carries, so they stay.
+
+**Fix.** The generator adds an alias to the floor only when its target is in every base, and no longer unions the aliases into the bases it intersects; `gen-font-groups.py` gives every unit that brings an alias's target the alias too, unless the floor already claims it, from the same `ALIASES` table (so `Calibri` and `Cambria` join the Linux `libreoffice` unit beside `Carlito` and `Caladea`, and the manifest needs no copy of the table). Regenerated, the diff is `essential-fonts.json` (Linux 274 to 272 names: `Calibri`, `Cambria`) and `font-groups.json` (the Linux `libreoffice` unit gains the same two); `goapi/pkg/fingerprint/data/` carries byte-identical copies, and the TypeScript launcher reads the pythonlib files. No launcher code changed: all three read the same draw tables, so the rule lives in one place. Not done: tying all aliases generically in the launchers, which would add three copies of a rule the data already expresses.
+
+**Evidence.** One test per launcher (`python/tests/test_font_distribution.py`, `typescript/tests/fingerprints.test.ts`, `goapi/pkg/fingerprint/font_draw_test.go`) draws 1500 Linux identities and requires that `Calibri` implies `Carlito` and `Cambria` implies `Caladea`, and that each name is claimed at all. Before: Python `Calibri claimed without Carlito`, TypeScript `Calibri without Carlito: expected 1341 to be +0`, Go `draw 0 claims Cambria without Caladea`. After: all three pass.
+
+**What misled the investigation.** Regenerating on the pinned bundle also changes the macOS part of `fonts.json` (29 families, 567 to 538) and one macOS essential name (`Noto Sans Canadian Aboriginal Regular`), independent of this change (#400); those files were not regenerated here, so the diff stays the issue's.
+
 ## #387: the stock-parity storage-partition check timed out on about 3 launches in 100
 
 **Fixed by:** the PR that launches the probe page without uBlock Origin. **Found by:** Tests run 41611148277 (PR #380), job "Patch guards: stock parity".
