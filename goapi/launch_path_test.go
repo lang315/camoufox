@@ -30,12 +30,14 @@ func TestLaunchResolvesTheExecutablePath(t *testing.T) {
 		t.Fatal(err)
 	}
 	rel := filepath.Join(filepath.Base(filepath.Dir(bin)), filepath.Base(bin))
-	link := filepath.Join(t.TempDir(), "camoufox-link")
+	// Windows runs a file only if its name carries the binary's own extension (".exe").
+	ext := filepath.Ext(bin)
+	link := filepath.Join(t.TempDir(), "camoufox-link"+ext)
 	if err := os.Symlink(bin, link); err != nil {
 		t.Fatal(err)
 	}
 	pathDir := t.TempDir()
-	if err := os.Symlink(bin, filepath.Join(pathDir, "camoufox")); err != nil {
+	if err := os.Symlink(bin, filepath.Join(pathDir, "camoufox"+ext)); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", pathDir)

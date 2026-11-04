@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #410: a bare `vitest run <file>` skipped the cache isolation and wrote the fpgen model to the real cache
+
+**Fixed by:** the PR that moves `vitest.config.ts` to the package root. **Found by:** a single-file run during the #318 work.
+
+**Symptom.** `cd typescript && npx vitest run tests/fingerprints.test.ts -t "Calibri"` left five files, about 210 MB, in `~/Library/Caches/camoufox/fpgen`, although #269 isolates the TypeScript tests from the real cache.
+
+**Root cause.** The isolation (`setupFiles: tests/isolate-cache.ts`, `globalSetup: tests/golden-setup.ts`) was in `typescript/tests/vitest.config.ts`. Vitest finds a config only in the package root, so only `pnpm test` and `ci.run_typescript`, which passed `--config tests/vitest.config.ts`, got it. A bare run used the defaults: `src/paths.ts` set the fpgen model directory to `INSTALL_DIR/fpgen`, and `ensureModel()` downloaded into it.
+
+**Fix.** `typescript/tests/vitest.config.ts` moved to `typescript/vitest.config.ts`, and the `--config` argument left `package.json` and `ci/run_typescript.py`. Every way of starting vitest in `typescript/` now has the isolation. A bare run also records the golden fixtures first, so it needs `CAMOUFOX_PYTHON` or the repo `.venv`, as `pnpm test` always did.
+
+**Evidence.** With a scratch `HOME` and `TMPDIR` at fb9a894d, a bare `vitest run tests/fingerprints.test.ts -t "Calibri"` wrote 5 files under `$HOME/Library/Caches/camoufox`; after the move it wrote 0. The real cache held 0 files before and after. The CI run is on the PR.
+
+**What misled the investigation.** `CLAUDE.md` and #269 say the suites fail before any test when a cache path escapes, which is true of the suite as `pnpm test` starts it and not of the vitest binary.
+
 ## #404: a granted geolocation permission gave no callback where the OS has not granted location access
 
 **Fixed by:** the PR that adds the `GetIgnoreAllowSitePermission` hunk to `0-playwright.patch`. **Found by:** the e2e geolocation arm (#385): red on hosted Windows and macOS, green on Linux.
