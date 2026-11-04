@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #400: fonts.json and essential-fonts.json still claimed 29 macOS names the manifest had dropped
+
+**Fixed by:** the PR that regenerates both files and adds `ci/tests/test_font_data_matches_manifest.py`. **Found by:** regenerating on the pinned bundle while fixing #318 (#399).
+
+**Symptom.** `gen-fonts-json.py --print-bases` on the pinned font bundle (`font-bundle-v1`) did not reproduce the committed macOS data: `fonts.json[mac]` had 567 names against 538 regenerated, and `essential-fonts.json[mac]` had 369 against 368. Windows and Linux reproduced exactly.
+
+**Root cause.** The committed files were current when written (658806eb, 2026-10-06): the generator at that commit, run on the same bundle, reproduces both files byte for byte, so the bundle did not move. Two later changes moved the inputs and nobody regenerated. c27396c3 (2026-10-16) removed the 29 localized `System Font` names from the sonoma base in `font-manifests.json` and regenerated `font-bases.json`, but not `fonts.json`, which the font draw samples; so a macOS identity could still report `Police système` or `系統字體`, which a real Mac does not resolve (the macOS 26.6.2 and 27.0 captures in the manifest claim `System Font` once and none of the 29). #318 changed `gen-fonts-json.py` so an alias name enters the essential floor only when its target is in every base; `Noto Sans Canadian Aboriginal Regular` is an alias of `Noto Sans Canadian Aboriginal`, which only the sonoma base has, so the floor, which every macOS identity carries, should not hold it. Nothing compared the committed pools with the manifest, and the Go drift test only compares the Go copy with the Python one.
+
+**Fix.** Regenerate both files with `gen-fonts-json.py --print-bases` on the pinned bundle, copy them to `goapi/pkg/fingerprint/data/`, and add `ci/tests/test_font_data_matches_manifest.py`. It needs no bundle: every name in `fonts.json` must be one the generator can report (manifest, marker fonts, aliases, extras), and the essential floor must be common to every base or an alias of such a family. Only the macOS part changed: 29 names left `fonts.json` and one left `essential-fonts.json`; Windows, Linux and name order are unchanged. Not done: a CI step that regenerates from the bundle, which is 843 MB.
+
+**Evidence.** The new test fails on the committed files (`fonts.json[mac]` 29 stale names, `essential-fonts.json[mac]` `Noto Sans Canadian Aboriginal Regular`; the other four cases pass) and passes on the regenerated ones. `go test ./pkg/fingerprint/` and `tests/test_font_distribution.py` pass.
+
+**What misled the investigation.** The issue guessed at a stale `SCAN_FAMILIES` entry or a changed bundle. The bundle had not changed; regenerating at the commit that last wrote the files, before reading the manifest history, is what separated the two.
+
 ## #395: a Linux claim's generics ignored the shipped fonts.conf for Hebrew, Thai and the Indic, Armenian, Georgian, Ethiopic, Khmer and Tibetan pages
 
 **Fixed by:** the PR that fixes #395. **Found by:** the Latin fix for #333, then #389.
@@ -39,6 +53,7 @@ later change should read first.
 **Evidence.** With a scratch `HOME` and `TMPDIR` at fb9a894d, a bare `vitest run tests/fingerprints.test.ts -t "Calibri"` wrote 5 files under `$HOME/Library/Caches/camoufox`; after the move it wrote 0. The real cache held 0 files before and after. The CI run is on the PR.
 
 **What misled the investigation.** `CLAUDE.md` and #269 say the suites fail before any test when a cache path escapes, which is true of the suite as `pnpm test` starts it and not of the vitest binary.
+
 
 ## #404: a granted geolocation permission gave no callback where the OS has not granted location access
 
