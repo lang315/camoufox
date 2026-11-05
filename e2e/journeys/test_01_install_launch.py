@@ -29,9 +29,29 @@ def test_launch_modes(drv, site, binary, mode, check):
     page.goto(site.url("/login"))
     print(f"{drv.name} headless={mode!r}: launch + first page {time.monotonic() - t0:.1f}s")
     check(page.eval("document.title") == "Sign in", "page title read back")
+    if mode == "virtual":
+        # The Xvfb root is 1x1: a window sized from it, not from the identity, reads 1x1.
+        inner = tuple(page.eval("[innerWidth, innerHeight]"))
+        check(inner != (1, 1), f"innerWidth x innerHeight is not the 1x1 display (got {inner})")
+        if drv.name == "pkg":
+            want = b.b._camoufox_launch_window["inner"]
+            check(None not in want, f"the identity names an inner window (got {want})")
+            check(inner == tuple(want), f"innerWidth x innerHeight {inner} equals the identity's window.inner* {want}")
     b.close()
     left = wait_gone(binary)
     check(not left, f"no browser process left 15 s after close (left: {left})")
+    check.done()
+
+
+def test_new_context_inner_within_outer(drv, site, check):
+    """A NewContext lives in the launch's one real window, so it cannot report an inner size
+    beyond the outer one (#164, #190)."""
+    b = drv.launch()
+    page = b.new_identity_context().new_page()
+    page.goto(site.url("/login"))
+    inner, outer = (tuple(page.eval(f"[{k}Width, {k}Height]")) for k in ("inner", "outer"))
+    check(inner[0] <= outer[0] and inner[1] <= outer[1], f"innerWidth x innerHeight {inner} fits in outerWidth x outerHeight {outer}")
+    b.close()
     check.done()
 
 
