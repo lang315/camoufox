@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #415: the macOS build failed in `mach package`: `llvm-strip: error: unsupported load command (cmd=0x27)`
+
+**Fixed by:** the PR that fixes #415. **Found by:** build run 41984983254 (`macos-arm64`, 3 h 9 min in).
+
+**Symptom.** The compile finished and the Build step failed at the end of `mach package` on `Camoufox.app/Contents/MacOS/camoufox`: `llvm-strip: error: unsupported load command (cmd=0x27)`.
+
+**Root cause.** 0x27 is `LC_DYLD_ENVIRONMENT` (`mach-o/loader.h`). Firefox 159's `browser/app/moz.build` links the browser with `-Wl,-dyld_env,DYLD_VERSIONED_FRAMEWORK_PATH=/Library/Apple/System/Library/StagedFrameworks/Safari`, so the binary now carries one. `moz.configure` resolves `STRIP` to `llvm-strip` on the clang search path (the log: `checking for strip... /opt/homebrew/Cellar/llvm@20/20.1.8/bin/llvm-strip`), and neither llvm@20 (20.1.8) nor Homebrew's current llvm (23.1.5) handles that command. Mozilla patches its own toolchain's `llvm-objcopy` for it (`build/build-clang/llvm-objcopy-macho-dyld-environment.patch`). The fork.3 run (41840755185, Firefox 158) had no such command, and strip passed there.
+
+**Fix.** `build.yml` sets `STRIP=/usr/bin/strip` for the macOS legs; configure reads it from the environment (`mozbuild/base.py` passes `os.environ` to the configure sandbox) and `validate_strip` accepts a path that is not `llvm-strip`. Not done: deleting `-dyld_env` from `moz.build` (it is a Mozilla change for macOS 10.15's AuthenticationServices; not read through to a conclusion for this fork), or `browser/assets/macos.mozconfig`, which would change the compiled-input key of every target.
+
+**Evidence.** A hello binary linked by lld with the same `-dyld_env` flag: `llvm-strip -x -S` (the flags `moz.configure` uses on Darwin) fails with the error above on llvm@20 20.1.8 and on llvm 23.1.5; Apple `/usr/bin/strip -x -S` exits 0, the binary runs, and `otool -l` shows the `LC_DYLD_ENVIRONMENT` command identical before and after. Apple's strip re-signs ad hoc (the file grew 24 bytes). Not shown: dyld acting on the variable after strip (a `DYLD_PRINT_LIBRARIES` probe printed nothing before or after, so it did not discriminate), and a full Firefox binary through strip; the green is a macOS build run on the fix.
+
+**What misled the investigation.** The failure comes 3 hours into the build, so it reads as a late toolchain fault. The compile was fine; only packaging failed.
+
 ## #415: the Windows guards broke on the Firefox 159 merge: HiDPI arm, stale manifests, EXT_texture_norm16
 
 **Fixed by:** the PR that fixes #415. **Found by:** e2e probe run 41987190894 (`patch_guard.py` on the Windows build 41968410837).
