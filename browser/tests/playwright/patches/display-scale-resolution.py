@@ -7,10 +7,14 @@ machine reports. The launcher now renders at the claimed scale. That includes
 a ratio of 1 on a HiDPI host, which otherwise rendered at the host's scale and
 read (resolution: 2dppx). The host is a private Xvfb display with GDK_SCALE=2.
 
+The HiDPI arm needs Xvfb and GDK_SCALE, so it runs on Linux only. It is not
+measured on Windows or macOS; the headless arm runs on every OS.
+
     python browser/tests/playwright/patches/display-scale-resolution.py
 """
 
 import os
+import platform
 import sys
 from pathlib import Path
 
@@ -41,8 +45,12 @@ def read_on_hidpi_host(dpr: float) -> list:
 
 def main() -> int:
     failures = []
-    for label, dpr, (seen, matches) in (("headless", 2.5, read(2.5)),
-                                        ("headed on a 2x host", 1, read_on_hidpi_host(1))):
+    arms = [("headless", 2.5, read(2.5))]
+    if platform.system() == "Linux":
+        arms.append(("headed on a 2x host", 1, read_on_hidpi_host(1)))
+    else:
+        print("  headed on a 2x host: not measured here (Linux only: needs Xvfb and GDK_SCALE)")
+    for label, dpr, (seen, matches) in arms:
         print(f"  {label}: devicePixelRatio {seen}, (resolution: {seen}dppx) {matches}")
         if seen != dpr or not matches:
             failures.append(f"{label}: (resolution) does not match devicePixelRatio {dpr}")
