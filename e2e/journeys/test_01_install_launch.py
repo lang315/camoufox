@@ -34,9 +34,13 @@ def test_launch_modes(drv, site, binary, mode, check):
         inner = tuple(page.eval("[innerWidth, innerHeight]"))
         check(inner != (1, 1), f"innerWidth x innerHeight is not the 1x1 display (got {inner})")
         if drv.name == "pkg":
-            want = b.b._camoufox_launch_window["inner"]
-            check(None not in want, f"the identity names an inner window (got {want})")
-            check(inner == tuple(want), f"innerWidth x innerHeight {inner} equals the identity's window.inner* {want}")
+            # The launcher pins the identity's outer window and screen; the browser derives the inner size.
+            window = b.b._camoufox_launch_window
+            outer, screen = window["outer"], window["screen"]
+            if check(None not in (*outer, *screen), f"the launch records an outer window and a screen (got {window})"):
+                check(inner[0] == outer[0], f"the real window took the identity's width: inner {inner}, outer {outer}")
+                check(0 < inner[1] < outer[1], f"browser chrome takes the height difference: inner {inner}, outer {outer}")
+                check(outer[0] <= screen[0] and outer[1] <= screen[1], f"the window fits the screen: outer {outer}, screen {screen}")
     b.close()
     left = wait_gone(binary)
     check(not left, f"no browser process left 15 s after close (left: {left})")
