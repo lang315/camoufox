@@ -421,8 +421,10 @@ Firefox 158 added `EXT_polygon_offset_clamp` on Windows devices with WebGL2
 (ANGLE's D3D11 backend at feature level 10_0 and above) and on Linux desktop GL,
 but not on macOS, where release builds use CGL's GL 4.1. Firefox 159 exposes
 `EXT_texture_norm16` on WebGL2 wherever the GL has 16-bit normalized textures,
-which is every macOS and x86_64 Linux WebGL2 context; on Windows, ANGLE decides
-per device. It also adds `EXT_clip_control` and `EXT_texture_mirror_clamp_to_edge`
+which is every macOS, x86_64 Linux and Windows WebGL2 context: on Windows, ANGLE's
+D3D11 caps report the 16-bit formats Direct3D feature level 10_0 requires, and
+WebGL2 needs 10_0. That rests on reading ANGLE and one hosted software device,
+not shown on real Windows hardware. It also adds `EXT_clip_control` and `EXT_texture_mirror_clamp_to_edge`
 to both contexts on Linux desktop GL and on Windows (clip control from feature
 level 10_0), but not on macOS.
 The `stock-gpu-parity` guard finds them. It runs stock Firefox of the new version,

@@ -12,6 +12,23 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #415: the Windows guards broke on the Firefox 159 merge: HiDPI arm, stale manifests, EXT_texture_norm16
+
+**Fixed by:** the PR that fixes #415. **Found by:** e2e probe run 41987190894 (`patch_guard.py` on the Windows build 41968410837).
+
+**Symptom.** Three Windows guards failed. `display-scale-resolution`: `ValueError: window.outerWidth 1280 at display scale 1 needs 1280 pixels, but this monitor has 1024`. `contentaccessible-parity`: `manifest records Firefox 158.0.1 but this build is 159.0`. `stock-gpu-parity`: `webgl2 EXT_texture_norm16: stock True, recorded release None, Camoufox None`.
+
+**Root cause.**
+- `display-scale-resolution.py` ran its second arm on every OS. That arm needs a private Xvfb display and `GDK_SCALE=2`; `hidden_display` yields `""` off Linux, so it asked a 1024-pixel Windows monitor for a 1280-pixel window.
+- The upstream merge regenerated only the Linux contentaccessible manifest; `contentaccessible-manifest-windows.json` and `-macos.json` still recorded 158.0.1. Regenerating them failed first: Mozilla's Windows and macOS installers ship `omni.ja` optimized, with the central directory at offset 4, and `zipfile` looks for it before the end record (`BadZipFile: Bad magic number for central directory`). 158.0.1's Windows manifest had been recorded with `unzip`, which tolerates it; #338 later moved the generator to `zipfile`, so no one had run it on a stock Windows or macOS jar.
+- `_TEXTURE_NORM16_OSES = ('mac', 'lin')` filtered the extension on Windows on the claim that "ANGLE decides per device". ANGLE sets it from `DetermineTextureNorm16Support` (`Caps.cpp`) over the D3D11 caps of the 16-bit UNORM and SNORM formats, and Direct3D feature level 10_0 requires every capability that function asks for, on all six DXGI formats (Microsoft's feature level 10.0 format table: Texture2D, TextureCube, Texture3D, sample, mip, render target). WebGL2 needs 10_0.
+
+**Fix.** The HiDPI arm runs on Linux only and the docstring says it is not measured on Windows or macOS. `open_jar` in the generator moves an optimized jar's central directory to where `zipfile` looks; both manifests were regenerated from stock 159.0 (installer SHA-256 checked against `SHA256SUMS`): 22 files added, 13 removed, 279 and 280 changed against 158.0.1 on Windows and macOS. `win` joins `_TEXTURE_NORM16_OSES` in Python and TypeScript. Not done: exempting the extension in `stock-gpu-parity`.
+
+**Evidence.** `ci/tests/test_contentaccessible_open_jar.py` fails on the old generator (`BadZipFile`) and passes now. `test_texture_norm16_follows_the_backend` and `test_draft_extensions_filtered_on_every_os` (Python) and the same two in `webgl.test.ts` fail with the old constant and pass with `win` added. The guards' green on the Windows build is recorded in the PR. The Windows claim rests on reading ANGLE and one hosted software device: not shown on real Windows hardware.
+
+**What misled the investigation.** The comment's "ANGLE decides per device": the caps are queried per device, but feature level 10_0 fixes what they must report for these formats. The regenerate error looked like a corrupt download; the installer hash matched.
+
 ## #415: pointer-lock-offscreen failed on Firefox 159 with "System access is required"
 
 **Fixed by:** the PR that fixes #415. **Found by:** Tests run 41968323976 on 69e8607e (job 127080661246).

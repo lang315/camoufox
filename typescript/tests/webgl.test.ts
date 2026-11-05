@@ -339,9 +339,11 @@ describe.skipIf(!MODEL.ok)("webgl (test_webgl.py)", () => {
 
 	it("EXT_texture_norm16 follows the backend", () => {
 		// Firefox 159 exposes it on WebGL2 wherever the GL has 16-bit normalized
-		// textures (core in desktop GL 3.1): every macOS and Linux device with
-		// WebGL2, never WebGL1. Measured on stock 159.0 on macOS (Apple M1) and
-		// Linux (llvmpipe); 158.0.1 and fpgen's Firefox 146 records lack it.
+		// textures: desktop GL 3.1 on macOS and Linux, and every D3D11 feature
+		// level 10_0 device on Windows, which requires those formats. Never
+		// WebGL1. Measured on stock 159.0 on macOS (Apple M1), Linux (llvmpipe)
+		// and a hosted Windows runner; 158.0.1 and fpgen's Firefox 146 records
+		// lack it. Not shown on real Windows hardware.
 		for (const os of OSES) {
 			for (let s = 0; s < 100; s++) {
 				const config = sampleWebglForScreen(os, 1920, 1080, s);
@@ -357,7 +359,7 @@ describe.skipIf(!MODEL.ok)("webgl (test_webgl.py)", () => {
 							"EXT_texture_norm16",
 						),
 						`${os} ${s}`,
-					).toBe(os === "mac" || os === "lin");
+					).toBe(true);
 				}
 			}
 		}
@@ -458,9 +460,11 @@ it("draft extensions are filtered on every OS", () => {
 			...backend,
 		]);
 		// The recorded EXT_texture_norm16 is dropped; Firefox 159 exposes it on
-		// every macOS and Linux WebGL2 context.
+		// every WebGL2 context.
 		expect(config["webGl2:supportedExtensions"]).toEqual(
-			os === "win" ? [...backend, "OVR_multiview2"] : ["EXT_texture_norm16"],
+			os === "win"
+				? [...backend, "EXT_texture_norm16", "OVR_multiview2"]
+				: ["EXT_texture_norm16"],
 		);
 	}
 });
