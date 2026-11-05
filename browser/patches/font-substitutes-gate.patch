@@ -3,15 +3,15 @@ index 5b659113f3..82932d796e 100644
 --- a/gfx/thebes/gfxDWriteFontList.cpp
 +++ b/gfx/thebes/gfxDWriteFontList.cpp
 @@ -22,6 +22,8 @@
+ #include "mozilla/StaticPrefs_gfx.h"
  #include "mozilla/Utf16.h"
- #include "mozilla/WindowsProcessMitigations.h"
  #include "mozilla/dom/Document.h"
 +#include "mozilla/dom/FontListManager.h"
 +#include "mozilla/dom/NavigatorManager.h"
  #include "mozilla/gfx/Logging.h"
  #include "mozilla/glean/GfxMetrics.h"
  #include "mozilla/intl/OSPreferences.h"
-@@ -2155,10 +2157,32 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
+@@ -2174,10 +2176,32 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
            : nsContentUtils::ShouldResistFingerprinting(
                  "aFontVisibilityProvider is not available",
                  RFPTarget::UseHardcodedFontSubstitutes);
@@ -44,7 +44,7 @@ index 5b659113f3..82932d796e 100644
        keyName = *subst;
      }
    } else {
-@@ -2169,6 +2193,9 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
+@@ -2188,6 +2212,9 @@ bool gfxDWriteFontList::FindAndAddFamiliesLocked(
                                 ? aFontVisibilityProvider->GetFontVisibility()
                                 : FontVisibility::User;
      if (ff && IsVisibleToCSS(*ff, level)) {
