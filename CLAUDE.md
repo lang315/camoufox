@@ -36,7 +36,13 @@ unpatched browser there.
 Dispatch `build.yml` from `main` for each target, download the artifacts, then
 `gh release create v<version>-<release>-fork.<n> --target <main sha>` with the
 packages attached. `build.yml` runs only when dispatched, so creating that tag
-starts no build (#203).
+starts no build (#203). Before creating it, run the patch guards on each build
+(`gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=patch_guard.py`,
+#416): `tests.yml` runs them on Linux only. On a hosted macOS runner
+`stock-gpu-parity` stays red by design, because the runner's GPU reads `Apple Inc.`
+where fpgen recorded `Apple`. A macOS job that gets no `macos-26` runner is
+cancelled after 15 minutes with no step run; dispatch it again, it is not a code
+failure.
 
 ### Record every bug fix in `docs/bug-fixes.md`
 
@@ -129,7 +135,8 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `mozlog=true` uploads a `MOZ_LOG` capture (`mozlog-<target>`) of the
   fingerprint and fifty-contexts journeys (#171). `e2e/probes/` holds one-off
   measurements, not collected by pytest: `emoji_timing.py` is #165's and
-  `other_names_stall.py` is #253's. Run one by hand against a binary, or on all
+  `other_names_stall.py` is #253's; `patch_guard.py` runs the three patch-guard
+  groups on the build (#416). Run one by hand against a binary, or on all
   three OSes with `gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=other_names_stall.py`
   (a probe that takes `--zip`).
   `e2e.yml` runs only the legs the build or release holds, and fails when it holds none.
