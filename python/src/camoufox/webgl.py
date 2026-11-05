@@ -59,15 +59,14 @@ _BACKEND_EXTENSIONS = {'win': ('EXT_depth_clamp',)}
 # run WebGL on CGL's GL 4.1, which lacks it.
 _POLYGON_OFFSET_CLAMP = 'EXT_polygon_offset_clamp'
 
-# Firefox 159 (bug 1735401) exposes EXT_texture_norm16 on WebGL2 wherever the
-# GL has 16-bit normalized textures, core in desktop GL 3.1: every WebGL2
-# context on macOS (CGL's GL 4.1) and x86_64 Linux (desktop GL). On Windows,
-# ANGLE sets it when its D3D11 caps report the R, RG, RGB and RGBA 16-bit UNORM and SNORM
-# formats as texturable and filterable, and R, RG and RGBA UNORM as renderable
-# (Caps.cpp DetermineTextureNorm16Support). Direct3D feature level 10_0, which
-# WebGL2 needs, requires every one of those capabilities.
+# Firefox 159 (bug 1735401) exposes EXT_texture_norm16 on every WebGL2 context:
+# its GL feature is desktop GL 3.1 or the driver's GL_EXT_texture_norm16
+# (GLContextFeatures.cpp), a rule of GL version, not of architecture. macOS runs
+# CGL's GL 4.1 and Linux desktop GL. On Windows ANGLE sets it from the D3D11
+# caps of the R, RG, RGB and RGBA 16-bit UNORM and SNORM formats (texturable and
+# filterable) and R, RG and RGBA UNORM (renderable), which Direct3D feature
+# level 10_0, needed by WebGL2, requires (Caps.cpp DetermineTextureNorm16Support).
 _TEXTURE_NORM16 = 'EXT_texture_norm16'
-_TEXTURE_NORM16_OSES = ('mac', 'lin', 'win')
 
 # Firefox 159 adds EXT_clip_control (core in GL 4.5) and
 # EXT_texture_mirror_clamp_to_edge (core in GL 4.4) to WebGL1 and WebGL2. ANGLE's
@@ -182,8 +181,7 @@ def to_config(webgl: Dict[str, Any], webgl2: Any, target_os: str) -> Dict[str, A
         'webGl2Enabled': bool(webgl2),
     }
     if webgl2:
-        if target_os in _TEXTURE_NORM16_OSES:
-            backend += (_TEXTURE_NORM16,)
+        backend += (_TEXTURE_NORM16,)
         config.update(_context_config('webGl2', webgl2, target_os, backend))
         # Firefox 156 creates WebGL1 on the same GL profile as WebGL2, so both
         # report one line width range. 146 forced WebGL1 onto a compatibility
