@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #415: pointer-lock-offscreen failed on Firefox 159 with "System access is required"
+
+**Fixed by:** the PR that fixes #415. **Found by:** Tests run 41968323976 on 69e8607e (job 127080661246).
+
+**Symptom.** The `pointer-lock-offscreen` guard was the only one of 21 automation guards to fail; `Marionette:SetContext` answered "System access is required".
+
+**Root cause.** `run()` built the browser env as `{**os.environ, "LD_PRELOAD": ...}`. Firefox 159 grants Marionette chrome access only through `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS`, which `helpers.marionette_env()` adds and this guard bypassed. The other four Marionette guards already used it.
+
+**Fix.** `env = {**marionette_env(), "LD_PRELOAD": ..., "MOZ_CRASHREPORTER_DISABLE": "1"}`.
+
+**Evidence.** Red: the job above. Green: the Tests run on the PR head.
+
+**What misled the investigation.** Nothing; the error names the missing grant.
+
 ## #400: fonts.json and essential-fonts.json still claimed 29 macOS names the manifest had dropped
 
 **Fixed by:** the PR that regenerates both files and adds `ci/tests/test_font_data_matches_manifest.py`. **Found by:** regenerating on the pinned bundle while fixing #318 (#399).
