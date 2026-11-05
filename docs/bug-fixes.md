@@ -12,6 +12,51 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #415: the macOS build failed in `mach package`: `llvm-strip: error: unsupported load command (cmd=0x27)`
+
+**Fixed by:** the PR that fixes #415. **Found by:** build run 41984983254 (`macos-arm64`, 3 h 9 min in).
+
+**Symptom.** The compile finished and the Build step failed at the end of `mach package` on `Camoufox.app/Contents/MacOS/camoufox`: `llvm-strip: error: unsupported load command (cmd=0x27)`.
+
+**Root cause.** 0x27 is `LC_DYLD_ENVIRONMENT` (`mach-o/loader.h`). Firefox 159's `browser/app/moz.build` links the browser with `-Wl,-dyld_env,DYLD_VERSIONED_FRAMEWORK_PATH=/Library/Apple/System/Library/StagedFrameworks/Safari`, so the binary now carries one. `moz.configure` resolves `STRIP` to `llvm-strip` on the clang search path (the log: `checking for strip... /opt/homebrew/Cellar/llvm@20/20.1.8/bin/llvm-strip`), and neither llvm@20 (20.1.8) nor Homebrew's current llvm (23.1.5) handles that command. Mozilla patches its own toolchain's `llvm-objcopy` for it (`build/build-clang/llvm-objcopy-macho-dyld-environment.patch`). The fork.3 run (41840755185, Firefox 158) had no such command, and strip passed there.
+
+**Fix.** `build.yml` sets `STRIP=/usr/bin/strip` for the macOS legs; configure reads it from the environment (`mozbuild/base.py` passes `os.environ` to the configure sandbox) and `validate_strip` accepts a path that is not `llvm-strip`. A local macOS build with Homebrew's llvm still fails the same way; set `STRIP=/usr/bin/strip` in the environment before `./mach build`. Not done: deleting `-dyld_env` from `moz.build` (it is a Mozilla change for macOS 10.15's AuthenticationServices; not read through to a conclusion for this fork), or `browser/assets/macos.mozconfig`, which would change the compiled-input key of every target.
+
+**Evidence.** A hello binary linked by lld with the same `-dyld_env` flag: `llvm-strip -x -S` (the flags `moz.configure` uses on Darwin) fails with the error above on llvm@20 20.1.8 and on llvm 23.1.5; Apple `/usr/bin/strip -x -S` exits 0, the binary runs, and `otool -l` shows the `LC_DYLD_ENVIRONMENT` command identical before and after. Apple's strip re-signs ad hoc (the file grew 24 bytes). Not shown: dyld acting on the variable after strip (a `DYLD_PRINT_LIBRARIES` probe printed nothing before or after, so it did not discriminate), and a full Firefox binary through strip; the green is a macOS build run on the fix.
+
+**What misled the investigation.** The failure comes 3 hours into the build, so it reads as a late toolchain fault. The compile was fine; only packaging failed.
+
+## #415: the Windows guards broke on the Firefox 159 merge: HiDPI arm, stale manifests, EXT_texture_norm16
+
+**Fixed by:** the PR that fixes #415. **Found by:** e2e probe run 41987190894 (`patch_guard.py` on the Windows build 41968410837).
+
+**Symptom.** Three Windows guards failed. `display-scale-resolution`: `ValueError: window.outerWidth 1280 at display scale 1 needs 1280 pixels, but this monitor has 1024`. `contentaccessible-parity`: `manifest records Firefox 158.0.1 but this build is 159.0`. `stock-gpu-parity`: `webgl2 EXT_texture_norm16: stock True, recorded release None, Camoufox None`.
+
+**Root cause.**
+- `display-scale-resolution.py` ran its second arm on every OS. That arm needs a private Xvfb display and `GDK_SCALE=2`; `hidden_display` yields `""` off Linux, so it asked a 1024-pixel Windows monitor for a 1280-pixel window.
+- The upstream merge regenerated only the Linux contentaccessible manifest; `contentaccessible-manifest-windows.json` and `-macos.json` still recorded 158.0.1. Regenerating them failed first: Mozilla's Windows and macOS installers ship `omni.ja` optimized, with the central directory at offset 4, and `zipfile` looks for it before the end record (`BadZipFile: Bad magic number for central directory`). 158.0.1's Windows manifest had been recorded with `unzip`, which tolerates it; #338 later moved the generator to `zipfile`, so no one had run it on a stock Windows or macOS jar.
+- `_TEXTURE_NORM16_OSES = ('mac', 'lin')` filtered the extension on Windows on the claim that "ANGLE decides per device". ANGLE sets it from `DetermineTextureNorm16Support` (`Caps.cpp`) over the D3D11 caps of the 16-bit UNORM and SNORM formats, and Direct3D feature level 10_0 requires every capability that function asks for, on all six DXGI formats (Microsoft's feature level 10.0 format table: Texture2D, TextureCube, Texture3D, sample, mip, render target). WebGL2 needs 10_0.
+
+**Fix.** The HiDPI arm runs on Linux only and the docstring says it is not measured on Windows or macOS. `open_jar` in the generator moves an optimized jar's central directory to where `zipfile` looks; both manifests were regenerated from stock 159.0 (installer SHA-256 checked against `SHA256SUMS`): 22 files added, 13 removed, 279 and 280 changed against 158.0.1 on Windows and macOS. `win` joins `_TEXTURE_NORM16_OSES` in Python and TypeScript. Not done: exempting the extension in `stock-gpu-parity`.
+
+**Evidence.** `ci/tests/test_contentaccessible_open_jar.py` fails on the old generator (`BadZipFile`) and passes now. `test_texture_norm16_follows_the_backend` and `test_draft_extensions_filtered_on_every_os` (Python) and the same two in `webgl.test.ts` fail with the old constant and pass with `win` added. The guards' green on the Windows build is recorded in the PR. The Windows claim rests on reading ANGLE and one hosted software device: not shown on real Windows hardware.
+
+**What misled the investigation.** The comment's "ANGLE decides per device": the caps are queried per device, but feature level 10_0 fixes what they must report for these formats. The regenerate error looked like a corrupt download; the installer hash matched.
+
+## #415: pointer-lock-offscreen failed on Firefox 159 with "System access is required"
+
+**Fixed by:** the PR that fixes #415. **Found by:** Tests run 41968323976 on 69e8607e (job 127080661246).
+
+**Symptom.** The `pointer-lock-offscreen` guard was the only one of 21 automation guards to fail; `Marionette:SetContext` answered "System access is required".
+
+**Root cause.** `run()` built the browser env as `{**os.environ, "LD_PRELOAD": ...}`. Firefox 159 grants Marionette chrome access only through `MOZ_REMOTE_ALLOW_SYSTEM_ACCESS`, which `helpers.marionette_env()` adds and this guard bypassed. The other four Marionette guards already used it.
+
+**Fix.** `env = {**marionette_env(), "LD_PRELOAD": ..., "MOZ_CRASHREPORTER_DISABLE": "1"}`.
+
+**Evidence.** Red: the job above. Green: the Tests run on the PR head.
+
+**What misled the investigation.** Nothing; the error names the missing grant.
+
 ## #400: fonts.json and essential-fonts.json still claimed 29 macOS names the manifest had dropped
 
 **Fixed by:** the PR that regenerates both files and adds `ci/tests/test_font_data_matches_manifest.py`. **Found by:** regenerating on the pinned bundle while fixing #318 (#399).

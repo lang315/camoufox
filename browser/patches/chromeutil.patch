@@ -10,15 +10,15 @@ index fa5b75742a..009c1bc3c5 100644
  
  #include "JSOracleParent.h"
  #include "NonSharedGlobalSyncModuleLoaderScope.h"
-@@ -22,6 +23,7 @@
- #include "js/Value.h"  // JS::Value, JS::StringValue
+@@ -23,6 +24,7 @@
+ #include "jsapi.h"
  #include "jsfriendapi.h"
  #include "mozJSModuleLoader.h"
 +#include "AccessObserver.hpp"
  #include "mozilla/AwakeTimeStamp.h"
  #include "mozilla/Base64.h"
  #include "mozilla/ChromeProfilerCounter.h"
-@@ -2724,6 +2726,27 @@ bool ChromeUtils::IsDarkBackground(GlobalObject&, Element& aElement) {
+@@ -2722,6 +2724,27 @@ bool ChromeUtils::IsDarkBackground(GlobalObject&, Element& aElement) {
    return nsNativeTheme::IsDarkBackground(f);
  }
  
@@ -46,7 +46,7 @@ index fa5b75742a..009c1bc3c5 100644
  double ChromeUtils::DateNow(GlobalObject&) { return JS_Now() / 1000.0; }
  
  /* static */
-@@ -2761,6 +2784,57 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
+@@ -2759,6 +2782,57 @@ void ChromeUtils::GetAllPossibleUtilityActorNames(GlobalObject& aGlobal,
    }
  }
  

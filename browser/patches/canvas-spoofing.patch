@@ -490,8 +490,7 @@ diff --git a/dom/webidl/Window.webidl b/dom/webidl/Window.webidl
 index a736c1d37a..e4677248a6 100644
 --- a/dom/webidl/Window.webidl
 +++ b/dom/webidl/Window.webidl
-@@ -970,3 +970,9 @@ partial interface Window {
-   [SameObject, SecureContext, Pref="dom.documentpip.enabled"]
+@@ -1053,4 +1053,10 @@ partial interface Window {
    readonly attribute DocumentPictureInPicture documentPictureInPicture;
  };
 +
@@ -500,3 +499,5 @@ index a736c1d37a..e4677248a6 100644
 +  [Throws, Func="mozilla::dom::CanvasSeedManager::IsFunctionEnabledForWebIDL"]
 +  undefined setCanvasSeed(unsigned long seed);
 +};
+ 
+ Window includes PushManagerAttribute;

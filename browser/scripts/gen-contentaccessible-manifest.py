@@ -26,8 +26,10 @@ Re-run it on a Firefox uplift, once per OS; the guard refuses to compare across 
 """
 
 import hashlib
+import io
 import json
 import re
+import struct
 import sys
 import zipfile
 from pathlib import Path
@@ -49,9 +51,22 @@ def stock_os(root: Path) -> str:
     return "macos" if root.name == "Resources" else "linux"
 
 
+def open_jar(jar: Path) -> zipfile.ZipFile:
+    """Open a jar. Mozilla's installers ship omni.ja optimized, with the central
+    directory at offset 4 instead of before the end record, which zipfile cannot
+    find; move it to where zipfile looks."""
+    try:
+        return zipfile.ZipFile(jar)
+    except zipfile.BadZipFile:
+        data = Path(jar).read_bytes()
+        end = data.rfind(b"PK\x05\x06")
+        size, offset = struct.unpack_from("<LL", data, end + 12)
+        return zipfile.ZipFile(io.BytesIO(data[:end] + data[offset:offset + size] + struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, *struct.unpack_from("<2H", data, end + 8), size, end, 0)))
+
+
 def zip_entries(jar: Path) -> dict:
     """Map member -> size of the files in a jar."""
-    with zipfile.ZipFile(jar) as z:
+    with open_jar(jar) as z:
         return {i.filename: i.file_size for i in z.infolist() if not i.is_dir()}
 
 
@@ -79,7 +94,7 @@ def tree_hashes(base: Path, prefixes: list) -> dict:
 
 def jar_hashes(jar: Path, prefixes: list) -> dict:
     """Member -> SHA-256 for the files under `prefixes` in a jar."""
-    with zipfile.ZipFile(jar) as z:
+    with open_jar(jar) as z:
         return {
             n: hashlib.sha256(packaged_bytes(n, z.read(n))).hexdigest()
             for n in z.namelist() if not n.endswith("/") and any(n.startswith(p) for p in prefixes)
@@ -87,7 +102,7 @@ def jar_hashes(jar: Path, prefixes: list) -> dict:
 
 
 def zip_read(jar: Path, member: str) -> str:
-    with zipfile.ZipFile(jar) as z:
+    with open_jar(jar) as z:
         return z.read(member).decode("utf8", "replace")
 
 
