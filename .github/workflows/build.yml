@@ -185,6 +185,11 @@ jobs:
           # were regenerated against FF150 source, so they now apply cleanly
           # under gpatch (verified by a local strict-patch audit).
           echo "CAMOU_PATCH=$(command -v gpatch)" >> $GITHUB_ENV
+          # Firefox 159 links the browser with -dyld_env, an LC_DYLD_ENVIRONMENT
+          # load command. llvm-strip (llvm@20 and 23) fails on it, "unsupported
+          # load command (cmd=0x27)", at the end of `mach package`; Apple's strip
+          # accepts it and leaves it intact. configure reads STRIP from here.
+          echo "STRIP=/usr/bin/strip" >> $GITHUB_ENV
 
       - name: Pin Rust toolchain
         run: |
