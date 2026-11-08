@@ -1,5 +1,6 @@
 """#164: NewContext's geometry must fit the launch window, which is process-wide."""
 
+from types import SimpleNamespace
 import os
 import sys
 
@@ -62,6 +63,7 @@ def test_new_context_passes_the_launch_window_and_an_explicit_viewport_wins():
 
     class B:
         version = "156.0"
+        _impl_obj = SimpleNamespace()  # nothing for the launcher's wrappers to wrap
         _camoufox_launch_window = {**LW, "inner": (None, None)}
 
         def new_context(self, **opts):
