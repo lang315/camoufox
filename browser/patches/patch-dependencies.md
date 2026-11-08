@@ -135,8 +135,9 @@ context:
   ASSOCIATE relay on the tab's proxy, and makes a refused destination fail at
   once instead of being dropped silently.
 - `webrtc-ip-spoofing.patch` rewrites candidate, SDP and `getStats()` addresses
-  to `webrtc:ipv4`/`ipv6`; it makes up host candidates when none reached the
-  page, never a srflx. It also decides whether a page is behind a proxy
+  to the context's IP (`webrtc:ipv4`/`ipv6` for a launch); it makes up no
+  candidate (`no_host` keeps host candidates off the page, and a srflx comes
+  only from a STUN answer: rule `webrtc-fork-model`). It also decides whether a page is behind a proxy
   (`ShouldForceProxy`): Juggler records each proxy it sets, which decides for a
   document with no HTTP channel, so a direct launch stays direct and a proxied
   one never gathers around its proxy. The new patch keeps a srflx or
