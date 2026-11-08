@@ -1,47 +1,29 @@
 """
-Verify WebRTC's UDP sockets bind in the identity's OS ephemeral port range.
+Verify WebRTC candidate ports are in the identity's OS port range.
 
 A UDP candidate's port is the ephemeral port the OS gave its socket: 32768-60999
 on Linux (the kernel's ip_local_port_range), 49152-65535 on Windows and macOS.
-The host kernel picked it, so a Windows or macOS identity on a Linux host bound
-Linux ports, which reach the page in every candidate that carries them: ports
-the claimed OS could not have used. NrSocketBase::CreateSocket now picks the
-port from the spoofed OS's range.
+The host kernel picked it, so a Windows or macOS identity on a Linux host showed
+Linux ports in its host candidates, and in the srflx candidate that reuses the
+host port: ports the claimed OS could not have used.
 
-The port is read at the STUN server, not from candidates. camoufox.cfg sets
-media.peerconnection.ice.no_host, so host candidates never reach the page, and
-the fork fabricates no srflx candidate; but nICEr still opens a UDP socket per
-local address and sends a STUN Binding Request from it (no_host only hides the
-host candidate). The probe owns that server: a socket that never answers, so
-the run needs no network, and whose recvfrom source port is the bound port.
-It listens on the host's default-route address, because nICEr skips a loopback
-STUN server unless media.peerconnection.ice.loopback is set, and the browser is
-measured with the prefs it ships.
+The probe gathers several peer connections against a STUN server on this host that
+answers, so the run needs no network and every connection gets a real srflx
+candidate. Twelve connections make a range that is off by one OS fail almost every run, while a correct one
+always passes.
 
-Twelve connections per identity: 49152-65535 overlaps Linux's 32768-60999, so a
-single Linux-range port can still land inside it, while twelve fall below 49152
-almost every run.
-
-What PASS means: for a Windows, a macOS and a Linux identity, the STUN server
-received Binding Requests from at least one socket per connection, and every
-source port is inside that OS's range. No arrivals at all is SETUP-INVALID, not
-a pass: nothing was measured.
-
-On a Linux host the Linux arm is not a control, since the host range is the
-claimed range; the Windows and macOS arms are the test. A browser without the
-CreateSocket hunk (main's, for instance) should turn those arms red with ports
-below 49152 on a Linux host; that red run has not been made.
+What PASS means: for a Windows, a macOS and a Linux identity, every UDP host
+and srflx candidate port is inside that OS's range.
 
     python browser/tests/playwright/patches/webrtc-port-range.py
 """
 
 import asyncio
-import socket
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import default_route_ipv4, is_binding_request, launch_kwargs  # noqa: E402
+from helpers import AnsweringStun, resolve_binary  # noqa: E402
 
 RANGES = {"windows": (49152, 65535), "macos": (49152, 65535), "linux": (32768, 60999)}
 CONNECTIONS = 12
@@ -49,80 +31,50 @@ CONNECTIONS = 12
 PROBE = """async ([stun, count]) => {
   const gather = async () => {
     const pc = new RTCPeerConnection({iceServers: [{urls: stun}]});
+    const ports = {host: [], srflx: []};
     const done = new Promise(resolve => {
       setTimeout(resolve, 30000);
-      pc.onicecandidate = e => { if (!e.candidate) resolve(); };
+      pc.onicecandidate = e => {
+        if (!e.candidate) return resolve();
+        const m = e.candidate.candidate.match(/ UDP \\d+ \\S+ (\\d+) typ (host|srflx)/);
+        if (m) ports[m[2]].push(Number(m[1]));
+      };
     });
     pc.createDataChannel('probe');
     await pc.setLocalDescription(await pc.createOffer());
     await done;
     pc.close();
+    return ports;
   };
-  await Promise.all(Array.from({length: count}, gather));
+  const all = await Promise.all(Array.from({length: count}, gather));
+  return {host: all.flatMap(p => p.host), srflx: all.flatMap(p => p.srflx)};
 }"""
-
-
-def silent_stun_server() -> socket.socket:
-    """A UDP socket on the default-route address that never answers."""
-    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server.bind((default_route_ipv4(), 0))
-    server.setblocking(False)
-    return server
-
-
-def drain_binding_requests(server: socket.socket) -> list:
-    """Source ports of every STUN Binding Request queued at the server."""
-    ports = []
-    while True:
-        try:
-            data, (_, port) = server.recvfrom(2048)
-        except BlockingIOError:
-            return ports
-        if is_binding_request(data):
-            ports.append(port)
-
-
-def judge(os_name: str, lo: int, hi: int, ports: list, failures: list) -> None:
-    if not ports:
-        failures.append(f"SETUP-INVALID {os_name}: no STUN Binding Request reached the server")
-        return
-    distinct = sorted(set(ports))
-    outside = [p for p in distinct if not lo <= p <= hi]
-    if len(distinct) < CONNECTIONS:
-        failures.append(f"{os_name}: {len(distinct)} sockets from {CONNECTIONS} connections")
-    if outside:
-        failures.append(f"{os_name}: ports outside {lo}-{hi}: {outside}")
-    print(f"  {os_name}: {len(ports)} requests from {len(distinct)} ports, "
-          f"min {distinct[0]} max {distinct[-1]}, outside {lo}-{hi}: {len(outside)}")
 
 
 async def main() -> int:
     from camoufox.async_api import AsyncCamoufox
 
-    failures = []
-    try:
-        server = silent_stun_server()
-    except OSError as e:
-        print(f"  FAIL SETUP-INVALID: no default-route address for the STUN server ({e})")
-        return 1
-    host, port = server.getsockname()
-    stun = f"stun:{host}:{port}"
+    stun = AnsweringStun()
 
+    passed = True
     for os_name, (lo, hi) in RANGES.items():
-        async with AsyncCamoufox(**launch_kwargs(os=os_name, i_know_what_im_doing=True)) as browser:
+        async with AsyncCamoufox(headless=True, os=os_name, config={"webrtc:ipv4": "203.0.113.9"},
+                                 i_know_what_im_doing=True,
+                                 executable_path=str(resolve_binary())) as browser:
             page = await browser.new_page()
             await page.goto("about:blank")
-            await page.evaluate(PROBE, [stun, CONNECTIONS])
-        # The browser is closed, so every request it sent is already queued.
-        judge(os_name, lo, hi, drain_binding_requests(server), failures)
-    server.close()
-
-    if failures:
-        for f in failures:
-            print(f"  FAIL {f}")
-        return 1
-    print("  PASS")
-    return 0
+            ports = await page.evaluate(PROBE, [stun.url, CONNECTIONS])
+        for kind in ("host", "srflx"):
+            got = ports[kind]
+            outside = [p for p in got if not lo <= p <= hi]
+            if len(got) >= CONNECTIONS and not outside:
+                print(f"  PASS {os_name} {kind}: {len(got)} ports, all in {lo}-{hi}")
+            else:
+                passed = False
+                print(f"  FAIL {os_name} {kind}: {len(got)} ports from {CONNECTIONS} connections; "
+                      f"outside {lo}-{hi}: {outside}")
+    stun.close()
+    return 0 if passed else 1
 
 
 if __name__ == "__main__":

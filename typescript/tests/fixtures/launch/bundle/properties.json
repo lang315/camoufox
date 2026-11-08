@@ -66,6 +66,7 @@
   { "property": "canvas:noiseDensity", "type": "double" },
   { "property": "canvas:noiseStrength", "type": "uint" },
   { "property": "voices", "type": "array" },
+  { "property": "voices:speechd", "type": "dict" },
   { "property": "voices:blockIfNotDefined", "type": "bool" },
   { "property": "mediaDevices:micros", "type": "uint" },
   { "property": "mediaDevices:webcams", "type": "uint" },
