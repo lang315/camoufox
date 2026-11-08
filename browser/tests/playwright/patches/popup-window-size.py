@@ -17,6 +17,8 @@ Position the same way: window.screenX/screenY answered the identity's
 position for every window, so the popup below read the main window's
 position instead of the left=37,top=41 it asked for. Now the first window is
 moved to the identity's position and every window reports where it is.
+A headless launch and a headful one (Xvfb with no window manager on Linux, the host's
+desktop elsewhere) both report the identity's position.
 
 innerWidth and innerHeight returned the identity's window.innerWidth and
 innerHeight in every window, so that popup and every iframe reported the main
@@ -34,7 +36,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+from helpers import hidden_display, resolve_binary  # noqa: E402
 
 REQUESTED = [400, 300]
 FRAME = [300, 150]
@@ -90,8 +92,24 @@ async def probe(binary):
         return main_size, main_pos, frame_size, readings, positions
 
 
+async def headful_position(binary):
+    """The identity's position on a window with a real X display (an Xvfb with no
+    window manager on Linux, the host's desktop elsewhere)."""
+    from camoufox.async_api import AsyncCamoufox
+
+    async with AsyncCamoufox(headless=False, executable_path=str(binary), config=CONFIG,
+                             i_know_what_im_doing=True) as browser:
+        page = await browser.new_page()
+        await page.goto("about:blank")
+        await asyncio.sleep(2)
+        return await page.evaluate("() => [screenX, screenY]")
+
+
 def main() -> int:
     main_size, main_pos, frame_size, readings, positions = asyncio.run(probe(resolve_binary()))
+    with hidden_display():
+        headful_pos = asyncio.run(headful_position(resolve_binary()))
+    print(f"headful main window at {headful_pos}")
     print(f"main window inner and outer {main_size} at {main_pos}, iframe inner {frame_size}, "
           f"popup inner {readings} at {positions}")
     failures = []
@@ -104,7 +122,9 @@ def main() -> int:
     if any(reading != REQUESTED for reading in readings):
         failures.append(f"the popup's content area is not the {REQUESTED} its features asked for")
     if main_pos != CLAIMED:
-        failures.append(f"the main window is not at the identity's position {CLAIMED}")
+        failures.append(f"the headless main window is not at the identity's position {CLAIMED}")
+    if headful_pos != CLAIMED:
+        failures.append(f"the headful main window is at {headful_pos}, not the identity's position {CLAIMED}")
     if any(position != PLACED for position in positions):
         failures.append(f"the popup does not report the position {PLACED} its features asked for")
     for failure in failures:
