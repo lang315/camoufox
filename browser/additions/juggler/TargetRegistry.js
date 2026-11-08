@@ -116,7 +116,17 @@ function usesSystemProxy() {
   if (Services.prefs.getIntPref('network.proxy.type') !== 5)
     return false;
   const settings = Cc['@mozilla.org/system-proxy-settings;1'].getService(Ci.nsISystemProxySettings);
-  if (settings.PACURI)
+  let pacURI = '';
+  try {
+    pacURI = settings.PACURI;
+  } catch (e) {
+    // macOS fails the getter when no autoconfig URL is set
+    // (nsOSXSystemProxySettings.mm, GetPACURI: return NS_ERROR_FAILURE). That
+    // means no PAC file; it must not stop the proxy lookup below.
+    if (e.result !== Cr.NS_ERROR_FAILURE)
+      throw e;
+  }
+  if (pacURI)
     return true;
   try {
     return settings.getProxyForURI('https://camoufox.invalid/', 'https', 'camoufox.invalid', 443) !== 'DIRECT';
