@@ -110,7 +110,8 @@ def report(binary: Path, display: str | None) -> dict:
     profile = tempfile.mkdtemp(prefix="headless-webgl-")
     Path(profile, "user.js").write_text(
         'user_pref("browser.shell.checkDefaultBrowser", false);\n'
-        'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);\n')
+        'user_pref("datareporting.policy.dataSubmissionPolicyBypassNotification", true);\n',
+        encoding="utf-8")
     env = {k: v for k, v in os.environ.items()
            if k not in ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET", "MOZ_HEADLESS", "LIBGL_ALWAYS_SOFTWARE")}
     if display:

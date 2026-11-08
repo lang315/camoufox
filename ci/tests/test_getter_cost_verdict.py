@@ -69,9 +69,9 @@ def test_exactly_the_gap_is_slower_and_just_under_it_is_not(guard):
 
 
 def test_faster_needs_the_gap_and_a_strictly_smaller_ratio(guard):
-    # 30 ns cheaper against a control that is 5x dearer here: faster.
-    assert guard.verdict(100, 70, 40, 200) == (False, True)
-    assert guard.verdict(100, 70.5, 40, 200) == (False, False)
+    # FASTER_MIN_GAP_NS (12) cheaper against a control that is 5x dearer here: faster.
+    assert guard.verdict(100, 88, 40, 200) == (False, True)
+    assert guard.verdict(100, 88.1, 40, 200) == (False, False)
     # Same ratio to the control on both sides: not faster, however large the gap.
     assert guard.verdict(100, 50, 40, 40) == (False, False)
 

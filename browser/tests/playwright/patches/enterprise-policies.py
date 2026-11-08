@@ -62,7 +62,7 @@ def main() -> int:
             failures.append(f"the install ships {shipped}")
     port = free_port()
     with tempfile.TemporaryDirectory() as profile, hidden_display():
-        Path(profile, "user.js").write_text(f'user_pref("marionette.port", {port});\n')
+        Path(profile, "user.js").write_text(f'user_pref("marionette.port", {port});\n', encoding="utf-8")
         proc = subprocess.Popen(
             [str(binary), "-no-remote", "-profile", profile, *marionette_args(), "about:blank"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=marionette_env(),

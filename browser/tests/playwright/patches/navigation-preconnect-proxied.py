@@ -101,7 +101,7 @@ def main() -> int:
         prefetch_from(browser.new_context(proxy={"server": server}), "context-prefetch.test")
     with Camoufox(**launch, proxy={"server": server}, geoip=False) as browser:
         prefetch_from(browser.new_context(), "launch-prefetch.test")
-    resolved = "".join(path.read_text(errors="replace") for path in Path(resolver_log.name).iterdir())
+    resolved = "".join(path.read_text(encoding="utf-8", errors="replace") for path in Path(resolver_log.name).iterdir())
     resolver_log.cleanup()
 
     with Camoufox(**launch) as browser:

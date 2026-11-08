@@ -44,8 +44,7 @@ def launch_and_capture(binary: Path, profile: Path) -> str:
         'user_pref("devtools.console.stdout.chrome", true);\n'
         # The engines depend on the region, which Firefox otherwise detects
         # from the network partway through startup.
-        'user_pref("browser.search.region", "US");
-'
+        'user_pref("browser.search.region", "US");\n'
     , encoding="utf-8")
     proc = subprocess.Popen(
         [str(binary), "-profile", str(profile), "-headless", "-no-remote", "about:blank"],

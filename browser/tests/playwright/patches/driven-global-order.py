@@ -58,7 +58,8 @@ def undriven(binary, options, url):
     """The binary with the launcher's prefs, environment and arguments, and no Juggler pipe."""
     profile = tempfile.mkdtemp(prefix="driven-global-order-")
     Path(profile, "user.js").write_text("".join(
-        f"user_pref({json.dumps(k)}, {json.dumps(v)});\n" for k, v in options["firefox_user_prefs"].items()))
+        f"user_pref({json.dumps(k)}, {json.dumps(v)});\n" for k, v in options["firefox_user_prefs"].items()),
+        encoding="utf-8")
     env = {**os.environ, **{k: str(v) for k, v in options["env"].items()}}
     args = [a for a in options["args"] if a not in ("-headless", "--headless")]
     proc = subprocess.Popen([str(binary), *args, "--headless", "--no-remote", "--profile", profile, url],
