@@ -118,15 +118,13 @@ async def load(context) -> str:
 
 
 def camoufox_processes(binary: Path):
-    for pid in os.listdir("/proc"):
-        if not pid.isdigit():
-            continue
-        try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-        except OSError:
-            continue
-        if cmdline and cmdline[0] and Path(cmdline[0].decode(errors="replace")).name == binary.name:
-            yield cmdline
+    """The argument lists of the browser's processes, on any OS."""
+    import psutil
+
+    for process in psutil.process_iter(["name", "cmdline"]):
+        cmdline = process.info["cmdline"] or []
+        if cmdline and Path(cmdline[0]).name == binary.name:
+            yield [arg.encode() for arg in cmdline]
 
 
 def leaks(binary: Path) -> list:

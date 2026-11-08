@@ -151,7 +151,10 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 # A guard is Linux-only when its subject is: ipv4-only-network builds a
 # network namespace (unshare, ip), the two WebGL guards start headless="virtual"
 # (Xvfb), occluded-window-active is X11 window occlusion, pointer-lock-offscreen
-# is nsWindowX11.cpp (GTK/X11 only) and windows-keyboard drives GTK with xdotool.
+# is nsWindowX11.cpp (GTK/X11 only), windows-keyboard drives GTK with xdotool,
+# virtual-display-window-visible is the virtual display (Xvfb, Linux only),
+# driven-drag-gtk is a GTK drag session and headless-software-webgl is Mesa's
+# EGL rasterizer.
 # A guard that needs Xvfb only for a display is not here: it runs on the host's
 # display elsewhere. On any other platform the runner does not run a Linux-only
 # guard and counts it apart from the passes; on Linux a missing prerequisite
@@ -160,6 +163,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 LINUX_ONLY = frozenset({
     "ipv4-only-network", "webgl-live-state", "webgl-renderer-pair",
     "occluded-window-active", "pointer-lock-offscreen",
+    "virtual-display-window-visible", "driven-drag-gtk", "headless-software-webgl",
 })
 
 # Guards that do not run on one platform for a reason of that platform, counted

@@ -28,7 +28,7 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+from helpers import kill_by_profile, resolve_binary  # noqa: E402
 
 PAGE_TIMEOUT_S = 60
 PAGE = (b"<!doctype html><html><head><script>"
@@ -83,7 +83,7 @@ def main() -> int:
             if server.arrived.wait(PAGE_TIMEOUT_S):
                 lists["undriven"] = server.names
         finally:
-            subprocess.run(["pkill", "-9", "-f", profile], capture_output=True)
+            kill_by_profile(profile)
             proc.wait()
         server.arrived = threading.Event()
         with Camoufox(executable_path=str(binary), headless=True, os="linux") as browser:

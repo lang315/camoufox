@@ -294,3 +294,16 @@ class AnsweringStun:
 
     def close(self) -> None:
         self.sock.close()
+
+
+def kill_by_profile(profile: str) -> None:
+    """End every process whose command line names `profile`, on any OS: each
+    process of one browser carries its throwaway profile path."""
+    import psutil
+
+    for process in psutil.process_iter(["cmdline"]):
+        if any(profile in arg for arg in process.info["cmdline"] or []):
+            try:
+                process.kill()
+            except psutil.NoSuchProcess:
+                pass
