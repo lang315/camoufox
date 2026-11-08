@@ -721,7 +721,7 @@ rules:
       parent as an application font directory, which put every group of every
       OS on the search path regardless of that conf; the allowlist filters by
       family name, not by origin, so any admitted name drew whatever group
-      carried it. linux-bundled-fonts-toplevel.patch adds only the files
+      carried it. font-hijacker.patch adds only the files
       directly in fonts/ (Firefox's own bundled faces). A harness that launches
       the Linux binary and reads fonts must set FONTCONFIG_FILE from the
       launcher's generator; a raw launch measures the host's fonts.

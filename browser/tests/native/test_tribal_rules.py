@@ -450,7 +450,7 @@ def test_bundled_fonts_registered_in_the_macos_gpu_process():
 
 def test_fc_activates_only_firefox_own_bundled_fonts():
     """Rule: fc-activates-only-firefox-own-bundled-fonts."""
-    patch = (BROWSER / "patches" / "linux-bundled-fonts-toplevel.patch").read_text(encoding="utf-8")
+    patch = (BROWSER / "patches" / "font-hijacker.patch").read_text(encoding="utf-8")
     added = [line for line in patch.splitlines() if line.startswith("+") and not line.startswith("+++")]
     removed = [line for line in patch.splitlines() if line.startswith("-") and not line.startswith("---")]
     why = explain("fc-activates-only-firefox-own-bundled-fonts")

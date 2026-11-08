@@ -78,7 +78,7 @@ What differs is how the groups are gated:
   fontconfig scans `<dir>` **recursively** — naming it would put every other
   OS's faces on the search path.
   The browser holds the same line: `gfxFcPlatformFontList::ActivateBundledFonts`
-  (`linux-bundled-fonts-toplevel.patch`) adds only the files directly in
+  (`font-hijacker.patch`) adds only the files directly in
   `fonts/`, Firefox's own, and never the directory. Upstream added the directory
   as an application font directory, which put every group on the search path
   past this conf (#329). A raw launch of the Linux binary with no
