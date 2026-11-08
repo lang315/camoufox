@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #419: every launch of the Firefox 159 macOS build timed out: `usesSystemProxy()` read `PACURI` outside a try
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe 42487844362 on build 42465077569. The defect is in upstream's #997 (`browser/additions/juggler/TargetRegistry.js`); it never reached `main` or a release of this fork.
+
+**Symptom.** Nearly every guard of the probe died with `BrowserType.launch: Timeout 180000ms exceeded`, and the job hit its limit. The browser's own stderr in the call log read `JavaScript error: resource://gre/modules/juggler/TargetRegistry.js, line 119: NS_ERROR_FAILURE ... [nsISystemProxySettings.PACURI]`.
+
+**Root cause.** `usesSystemProxy()` read `settings.PACURI` before its `try`, and only the `getProxyForURI` call after it handled `NS_ERROR_FAILURE`. On macOS the getter fails with exactly that code whenever no autoconfig URL is set: `toolkit/system/osxproxy/nsOSXSystemProxySettings.mm`, `GetPACURI` (lines 327-338 in Firefox 159.0) returns `NS_ERROR_FAILURE` when `IsAutoconfigEnabled()` is false. The exception left `TargetRegistry`'s startup unfinished, so Juggler never answered Playwright's launch.
+
+**Fix.** `PACURI` has its own `try`, and `NS_ERROR_FAILURE` there means "no PAC file". It must not share a `try` with `getProxyForURI`, which would also skip that call: a macOS host with a manual system proxy and no PAC file would then read as direct. `getProxyForURI` keeps its own handling.
+
+**Evidence.** Red: probe 42487844362 (above). Green: see the PR for the rebuilt macOS binary's probe and e2e run.
+
+**What misled the investigation.** Only macOS throws there. The Linux and Windows builds launched (the Windows probe 42487841636 ran its guards), so the Linux and Windows builds and tests stayed green and the failure looked like a slow runner.
+
 ## #415: the macOS build failed in `mach package`: `llvm-strip: error: unsupported load command (cmd=0x27)`
 
 **Fixed by:** the PR that fixes #415. **Found by:** build run 41984983254 (`macos-arm64`, 3 h 9 min in).
