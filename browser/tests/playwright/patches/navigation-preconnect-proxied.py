@@ -92,7 +92,7 @@ def main() -> int:
     url = f"http://{origin.server_address[0]}:{origin.server_address[1]}/"
     server = f"http://127.0.0.1:{proxy.server_address[1]}"
     resolver_log = tempfile.TemporaryDirectory()
-    env = {**os.environ, "MOZ_LOG": "append,nsHostResolver:5", "MOZ_LOG_FILE": str(Path(resolver_log.name) / "resolver")}
+    env = {**os.environ, "MOZ_LOG": "sync,append,nsHostResolver:5", "MOZ_LOG_FILE": str(Path(resolver_log.name) / "resolver")}
     launch = dict(headless=True, os="linux", executable_path=str(resolve_binary()), i_know_what_im_doing=True, env=env)
 
     with Camoufox(**launch) as browser:
