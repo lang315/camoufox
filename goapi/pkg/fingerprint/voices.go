@@ -40,7 +40,16 @@ type voiceAddition struct {
 	} `json:"sizes"`
 }
 
+// speechdRelease is one Ubuntu release's speech-dispatcher grid.
+type speechdRelease struct {
+	Speechd config.SpeechdGrid `json:"speechd"`
+}
+
 type voiceManifest struct {
+	Releases    map[string]speechdRelease `json:"releases"`
+	SystemVoice struct {
+		Default string `json:"default"`
+	} `json:"systemVoice"`
 	Base           []string             `json:"base"`
 	LangPacks      map[string]voicePack `json:"langPacks"`
 	FallbackLocale string               `json:"fallbackLocale"`
@@ -102,6 +111,14 @@ func RandomVoices(targetOS, locale string, rng *rand.Rand) ([]config.Voice, erro
 	m, ok := voiceManifests[key]
 	if !ok {
 		return nil, fmt.Errorf("fingerprint: no voice manifest for %q", key)
+	}
+	if key == "lin" {
+		// The release is drawn here only when the caller has no fonts' release.
+		grid, err := SpeechdGridFor("", rng)
+		if err != nil {
+			return nil, err
+		}
+		return ExpandSpeechdGrid(grid), nil
 	}
 	var out, legacy []string
 	seen := map[string]bool{}
@@ -201,7 +218,53 @@ func RandomVoices(targetOS, locale string, rng *rand.Rand) ([]config.Voice, erro
 			IsLocalService: vtype == "local",
 		})
 	}
+	// macOS marks its system voice default; Windows (SAPI) and Linux mark none.
+	if m.SystemVoice.Default != "" {
+		for i := range voices {
+			if voices[i].Name == m.SystemVoice.Default {
+				voices[i].IsDefault = true
+				break
+			}
+		}
+	}
 	return voices, nil
+}
+
+// SpeechdGridFor is _speechd_grid: the speech-dispatcher grid of the Ubuntu
+// release the identity runs. releaseID names it (the release its fonts were
+// drawn from); with none, one is drawn from rng by weight.
+func SpeechdGridFor(releaseID string, rng *rand.Rand) (config.SpeechdGrid, error) {
+	m, ok := voiceManifests["lin"]
+	if !ok || len(m.Releases) == 0 {
+		return config.SpeechdGrid{}, fmt.Errorf("fingerprint: no Linux voice releases")
+	}
+	if releaseID == "" {
+		if release := pickRelease("lin", rng); release != nil {
+			releaseID = release.ID
+		}
+	}
+	if r, ok := m.Releases[releaseID]; ok {
+		return r.Speechd, nil
+	}
+	if releaseID != "" {
+		return config.SpeechdGrid{}, fmt.Errorf("fingerprint: no Linux voice grid for release %q", releaseID)
+	}
+	return config.SpeechdGrid{}, fmt.Errorf("fingerprint: no Linux release to draw voices for")
+}
+
+// ExpandSpeechdGrid is _speechd_voices over _generate_random_voice_subset's
+// Linux branch: each language alone, then with every variant. SpeechDispatcher
+// registers voices as local only when one is named "default"; espeak-ng has none.
+func ExpandSpeechdGrid(g config.SpeechdGrid) []config.Voice {
+	voices := make([]config.Voice, 0, len(g.Languages)*(1+len(g.Variants)))
+	for _, l := range g.Languages {
+		name, lang := l[0], l[1]
+		voices = append(voices, config.Voice{VoiceURI: voiceURI("lin", name, lang), Name: name, Lang: lang})
+		for _, v := range g.Variants {
+			voices = append(voices, config.Voice{VoiceURI: voiceURI("lin", name+"+"+v, lang), Name: name + "+" + v, Lang: lang})
+		}
+	}
+	return voices
 }
 
 // displayPack is _resolve_display_pack: the locale's own pack, else the first

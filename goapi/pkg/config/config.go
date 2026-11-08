@@ -23,6 +23,16 @@ type Voice struct {
 	IsDefault      bool   `json:"isDefault"`
 }
 
+// SpeechdGrid is a Linux identity's speech-dispatcher voices as the browser
+// expands them (MaskConfig::MSpeechdVoices): every language alone, then with
+// each variant ("Afrikaans", "Afrikaans+Adam", ...). ~14000 voice objects do
+// not fit in the environment, so only the grid is sent.
+type SpeechdGrid struct {
+	// Languages holds [name, lang] pairs.
+	Languages [][]string `json:"languages"`
+	Variants  []string   `json:"variants"`
+}
+
 // MediaDecodeInfo is a spoofed mediaCapabilities.decodingInfo() result for one
 // codec, read by MaskConfig::GetMediaDecodingInfo.
 type MediaDecodeInfo struct {
@@ -50,14 +60,14 @@ type Config struct {
 	NavigatorBuildID              string  `json:"navigator.buildID,omitempty"`
 
 	// screen.*
-	ScreenAvailHeight *uint32  `json:"screen.availHeight,omitempty"`
-	ScreenAvailWidth  *uint32  `json:"screen.availWidth,omitempty"`
-	ScreenAvailTop    *uint32  `json:"screen.availTop,omitempty"`
-	ScreenAvailLeft   *uint32  `json:"screen.availLeft,omitempty"`
-	ScreenHeight      *uint32  `json:"screen.height,omitempty"`
-	ScreenWidth       *uint32  `json:"screen.width,omitempty"`
-	ScreenColorDepth  *uint32  `json:"screen.colorDepth,omitempty"`
-	ScreenPixelDepth  *uint32  `json:"screen.pixelDepth,omitempty"`
+	ScreenAvailHeight *uint32 `json:"screen.availHeight,omitempty"`
+	ScreenAvailWidth  *uint32 `json:"screen.availWidth,omitempty"`
+	ScreenAvailTop    *uint32 `json:"screen.availTop,omitempty"`
+	ScreenAvailLeft   *uint32 `json:"screen.availLeft,omitempty"`
+	ScreenHeight      *uint32 `json:"screen.height,omitempty"`
+	ScreenWidth       *uint32 `json:"screen.width,omitempty"`
+	ScreenColorDepth  *uint32 `json:"screen.colorDepth,omitempty"`
+	ScreenPixelDepth  *uint32 `json:"screen.pixelDepth,omitempty"`
 	// screen.orientation (#20) — type + angle, kept coherent with the spoofed
 	// screen dimensions so the real host orientation doesn't leak.
 	ScreenOrientation      string  `json:"screen:orientation,omitempty"`
@@ -137,8 +147,9 @@ type Config struct {
 	CanvasNoiseStrength *uint32  `json:"canvas:noiseStrength,omitempty"`
 
 	// voices:*
-	Voices                  []Voice `json:"voices,omitempty"`
-	VoicesBlockIfNotDefined *bool   `json:"voices:blockIfNotDefined,omitempty"`
+	Voices                  []Voice      `json:"voices,omitempty"`
+	VoicesSpeechd           *SpeechdGrid `json:"voices:speechd,omitempty"`
+	VoicesBlockIfNotDefined *bool        `json:"voices:blockIfNotDefined,omitempty"`
 
 	// mediaDevices:*
 	MediaDevicesMicros           *uint32  `json:"mediaDevices:micros,omitempty"`

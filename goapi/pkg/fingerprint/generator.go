@@ -79,15 +79,25 @@ func Generate(cfg *config.Config, opts Options) error {
 	if cfg.VoicesBlockIfNotDefined == nil {
 		cfg.VoicesBlockIfNotDefined = config.Bool(true)
 	}
+	var releaseID string
 	if len(cfg.Fonts) == 0 {
 		native := targetOS == opts.HostOS && targetOS != "linux"
-		fonts, err := RandomFontSubset(targetOS, native, rng)
+		fonts, err := randomFontSubset(targetOS, native, rng, &releaseID)
 		if err != nil {
 			return err
 		}
 		cfg.Fonts = fonts
 	}
-	if len(cfg.Voices) == 0 {
+	if osKey(targetOS) == "lin" && cfg.VoicesSpeechd == nil && len(cfg.Voices) == 0 {
+		// A Linux identity's ~14000 voices go to the browser as their grid, from
+		// the release its fonts came from.
+		grid, err := SpeechdGridFor(releaseID, rng)
+		if err != nil {
+			return err
+		}
+		cfg.VoicesSpeechd = &grid
+	}
+	if osKey(targetOS) != "lin" && len(cfg.Voices) == 0 {
 		// Drawn after the locale is known: the Windows list is the display
 		// language's pack, so an fr-FR identity has French voices.
 		locale := cfg.NavigatorLanguage

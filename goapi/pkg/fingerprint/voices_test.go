@@ -4,6 +4,8 @@ import (
 	"math/rand/v2"
 	"slices"
 	"testing"
+
+	"github.com/lang315/camoufox/goapi/pkg/config"
 )
 
 // The values pythonlib's _voice_uri returns for the same inputs.
@@ -46,7 +48,8 @@ func TestMacVoicesOutsideTheCatalogueAreASCII(t *testing.T) {
 	}
 }
 
-// Every draw holds the OS's base and no default voice; Windows follows the
+// Every draw holds the OS's base; only the manifest's system voice is the
+// default (macOS marks Samantha, Windows and Linux none); Windows follows the
 // display locale's pack (#185).
 func TestVoicesFollowTheManifest(t *testing.T) {
 	rng := rand.New(rand.NewPCG(21, 22))
@@ -64,14 +67,22 @@ func TestVoicesFollowTheManifest(t *testing.T) {
 				t.Fatal(err)
 			}
 			names := map[string]bool{}
+			system := voiceManifests[osKey(c.os)].SystemVoice.Default
+			defaults := 0
 			for _, v := range voices {
 				if v.IsDefault {
-					t.Fatalf("%s draw %d: %q is marked default; stock Firefox marks none", c.os, i, v.Name)
+					defaults++
+					if v.Name != system {
+						t.Fatalf("%s draw %d: %q is marked default; only %q may be", c.os, i, v.Name, system)
+					}
 				}
 				if names[v.Name+"|"+v.Lang] {
 					t.Fatalf("%s draw %d: %q twice", c.os, i, v.Name)
 				}
 				names[v.Name+"|"+v.Lang] = true
+			}
+			if want := map[bool]int{true: 1, false: 0}[system != ""]; defaults != want {
+				t.Fatalf("%s draw %d: %d default voices, want %d", c.os, i, defaults, want)
 			}
 			for _, e := range base {
 				name, lang, _ := splitVoiceEntry(e)
@@ -92,6 +103,13 @@ func langOf(t *testing.T, os, name string) string {
 	for _, p := range m.LangPacks {
 		all = append(all, p.OneCore...)
 	}
+	for _, r := range m.Releases {
+		for _, l := range r.Speechd.Languages {
+			if l[0] == name {
+				return l[1]
+			}
+		}
+	}
 	for _, e := range all {
 		if n, l, _ := splitVoiceEntry(e); n == name {
 			return l
@@ -99,4 +117,28 @@ func langOf(t *testing.T, os, name string) string {
 	}
 	t.Fatalf("%q is in no %s base or pack", name, os)
 	return ""
+}
+
+// A Linux identity's voices are its release's grid, from the release its fonts
+// were drawn from: the language alone, then with every variant.
+func TestLinuxVoicesAreTheReleasesSpeechdGrid(t *testing.T) {
+	for id, r := range voiceManifests["lin"].Releases {
+		voices := ExpandSpeechdGrid(r.Speechd)
+		if want := len(r.Speechd.Languages) * (1 + len(r.Speechd.Variants)); len(voices) != want {
+			t.Errorf("%s: %d voices, want %d", id, len(voices), want)
+		}
+		if voices[0].Name != r.Speechd.Languages[0][0] || voices[1].Name != r.Speechd.Languages[0][0]+"+"+r.Speechd.Variants[0] {
+			t.Errorf("%s: voices are not in speech-dispatcher's order: %q, %q", id, voices[0].Name, voices[1].Name)
+		}
+	}
+	rng := rand.New(rand.NewPCG(3, 4))
+	for range 50 {
+		var cfg config.Config
+		if err := Generate(&cfg, Options{OS: "linux", Rand: rng, HostOS: "linux"}); err != nil {
+			t.Fatal(err)
+		}
+		if cfg.VoicesSpeechd == nil || len(cfg.Voices) != 0 {
+			t.Fatalf("a Linux identity carries the speechd grid and no voice list: %+v", cfg.VoicesSpeechd == nil)
+		}
+	}
 }
