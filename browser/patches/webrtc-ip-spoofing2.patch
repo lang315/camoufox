@@ -1,5 +1,5 @@
 diff --git a/dom/base/WebRTCIPManager.cpp b/dom/base/WebRTCIPManager.cpp
-index df6b8d4..42b6333 100644
+index df6b8d4e05..42b6333190 100644
 --- a/dom/base/WebRTCIPManager.cpp
 +++ b/dom/base/WebRTCIPManager.cpp
 @@ -1,6 +1,7 @@
@@ -79,7 +79,7 @@ index df6b8d4..42b6333 100644
  WebRTCIPManager::GetIPv6(uint32_t userContextId, nsAString& outIPv6) {
    nsString key = IPv6KeyForUserContext(userContextId);
 diff --git a/dom/base/WebRTCIPManager.h b/dom/base/WebRTCIPManager.h
-index a134ba6..a15ac37 100644
+index a134ba615a..a15ac372e0 100644
 --- a/dom/base/WebRTCIPManager.h
 +++ b/dom/base/WebRTCIPManager.h
 @@ -44,6 +44,13 @@ public:
@@ -106,7 +106,7 @@ index a134ba6..a15ac37 100644
  
  } // namespace dom
 diff --git a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp b/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
-index bdedcaa..d55a606 100644
+index 2348423dd7..a9c77b2f06 100644
 --- a/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
 +++ b/dom/media/webrtc/jsapi/PeerConnectionImpl.cpp
 @@ -104,6 +104,7 @@
@@ -116,8 +116,8 @@ index bdedcaa..d55a606 100644
 +#include "mozilla/HashFunctions.h"  // mozilla::HashGeneric for FabricateLinkLocalIPv6
  #include "WebRTCIPManager.h"
  #include "nsDocShell.h"
- #include "nsPIDOMWindow.h"
-@@ -3487,8 +3488,36 @@ bool isSpecialIP(const std::string& ip) {
+ #include "nsContentUtils.h"
+@@ -3467,8 +3468,36 @@ bool isSpecialIP(const std::string& ip) {
    // Check if an IP should not be masked (special addresses)
    return (ip == "0.0.0.0" || ip == "127.0.0.1" || 
            ip == "::" || ip == "::1" || 
@@ -156,7 +156,7 @@ index bdedcaa..d55a606 100644
  }
  
  bool isPrivateIP(const std::string& ip) {
-@@ -3518,21 +3547,32 @@ std::string getMaskForIP(const std::string& ip, uint32_t userContextId) {
+@@ -3498,21 +3527,32 @@ std::string getMaskForIP(const std::string& ip, uint32_t userContextId) {
    if (isSpecialIP(ip)) {
      return ip;  // dont mask special IPs
    }

@@ -124,36 +124,6 @@ nothing writes a fallback copy under context 0.
   every generated binding rebuilds, and `BindingUtils.h`
   (`DoGetOrCreateDOMReflector`), which most of `dom/` includes.
 
-## WebRTC behind a proxy
-
-`webrtc-socks5-udp.patch` builds on two earlier patches and uses their lines as
-context:
-
-- `webrtc-proxy-local-network.patch` keeps UDP host sockets behind a proxy and
-  limits them to the local network (`NrSocketBase::RefusesDestination`). The
-  new patch adds `NrUdpRelaySocket`, which sends the rest through a SOCKS5 UDP
-  ASSOCIATE relay on the tab's proxy, and makes a refused destination fail at
-  once instead of being dropped silently.
-- `webrtc-ip-spoofing.patch` rewrites candidate, SDP and `getStats()` addresses
-  to the context's IP (`webrtc:ipv4`/`ipv6` for a launch); it makes up no
-  candidate (`no_host` keeps host candidates off the page, and a srflx comes
-  only from a STUN answer: rule `webrtc-fork-model`). It also decides whether a page is behind a proxy
-  (`ShouldForceProxy`): Juggler records each proxy it sets, which decides for a
-  document with no HTTP channel, so a direct launch stays direct and a proxied
-  one never gathers around its proxy. The new patch keeps a srflx or
-  relay address gathered through the proxy as it is, because a page's own STUN
-  server already saw that address. Behind an HTTP proxy, or a SOCKS5 proxy that
-  refuses UDP, no srflx surfaces: the page reads a machine whose UDP is
-  blocked, not one that made a STUN answer up.
-
-ICE sockets live in the socket process, and proxies are resolved in the
-parent. The patch adds an optional `LoadInfoArgs` to the existing
-`PProxyConfigLookup` constructor (`netwerk/ipc`), so the parent resolves the
-proxy with the tab's load info, as it does for the tab's own loads. Juggler's
-per-context proxy filter then picks that context's proxy. The SOCKS5 control
-connection (`WebrtcUdpAssociation`) runs in the socket process, so the relay
-sees the control connection and the datagrams come from the same address.
-
 ## Backports
 
 These patches carry upstream Firefox changes that `browser/upstream.sh`'s

@@ -70,9 +70,6 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "webgl-spoofed-limit-cost",
         "webrtc-context-ip",
         "webrtc-port-range",
-        "webrtc-proxy-local-network",
-        "webrtc-proxy-no-udp-around",
-        "webrtc-socks5-udp",
         "worker-config-reads",
         # Beyond worker-config-reads: the worker's userAgent, and the launch-level context's worker.
         "worker-navigator-spoofing",

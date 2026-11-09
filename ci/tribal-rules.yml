@@ -324,10 +324,9 @@ rules:
 
   - id: no-made-up-srflx
     title: A srflx candidate comes only from a STUN answer
-    check: manual   # browser/tests/playwright/patches/webrtc-context-ip.py, webrtc-socks5-udp.py
+    check: manual   # browser/tests/playwright/patches/webrtc-context-ip.py
     evidence:
       - "daijro/camoufox#997: the fabricated srflx is removed, and its guards now run against a STUN server that answers"
-      - "webrtc-socks5-udp.py: gathering behind a proxy with no UDP takes as long as against a STUN server that never answers"
     rationale: >-
       A srflx says the page's STUN server saw a Binding Request from that
       address, and a page running its own server can tell it never did. Behind
@@ -336,20 +335,6 @@ rules:
       datagrams dropped silently so gathering times out as it does on a
       firewalled machine. The identity's address replaces a srflx the browser
       really gathered; it never invents one.
-
-  - id: juggler-records-the-proxy
-    title: Juggler records which contexts are proxied, not the launcher and not the page
-    check: manual   # browser/tests/playwright/patches/webrtc-socks5-udp.py (blob:, about:blank, launch proxy), webrtc-proxy-no-udp-around.py (bypass, system proxy)
-    evidence:
-      - "daijro/camoufox#997, CI run 42147151481: a raw browser.new_context(proxy=...) gathered around its SOCKS5 proxy on a blob: page"
-    rationale: >-
-      A document with no HTTP channel has no proxy lookup to go by, so WebRTC
-      needs another answer. Every proxy reaches Juggler, however the caller
-      set it, and Juggler's flag is a default-branch pref a page cannot see. A
-      launcher config key misses a caller's own new_context, and a window
-      method is one more name a page can find. A system proxy is recorded at
-      startup, and a page in its proxy's bypass list counts as proxied: it
-      gets no UDP or ICE TCP, because this machine is not the identity's.
 
   - id: no-glyph-spacing-noise
     title: Text is shaped exactly as stock Firefox shapes it; there is no spacing seed
@@ -978,6 +963,7 @@ rules:
       - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
       - "CI run 38310314782 (head 7e03c7e): both adapted guards passed, patch guards spoofing 22/22"
       - "CI run 38992109773 (head a4236f8): upstream's ipv4-only-network guard read no host candidate with network:ipv4Only off or on, because of no_host; it now sets no_host false for its own probe"
+      - "#419, #420: upstream's webrtc-socks5-udp, webrtc-proxy-local-network and zz-webrtc-proxied-context patches and their guards (webrtc-socks5-udp.py, webrtc-proxy-local-network.py, webrtc-proxy-no-udp-around.py) are left out. The guards need host candidates and a connecting loopback pair, which no_host rules out (run 42494604689 on main's build: a page's two RTCPeerConnections end `failed`, and `connected` with no_host false); on the merged stack the unmasked control's srflx timed out with the request sent and no response processed (run 42532435441, nICEr log), and no line of the new code was named. #420 reopens the model and takes them with it"
     rationale: >-
       The fork's WebRTC model diverges from upstream's. A context's IP masks the
       srflx candidate a real STUN answer produces, no srflx candidate is made up,
