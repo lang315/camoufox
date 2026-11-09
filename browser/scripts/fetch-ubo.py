@@ -25,6 +25,13 @@ import argparse, hashlib, io, json, os, shutil, sys, tempfile, time, urllib.requ
 
 # uBO's userSettingsDefault entry, as js/background.js writes it.
 AUTO_UPDATE_DEFAULT = "    autoUpdate: true,\n"
+# js/storage.js autoSelectRegionalFilterLists: on a first run it switches on
+# every list that matches the UI language.
+REGIONAL_SELECTION = """        if ( this.listMatchesEnvironment(list) ) {
+            selectedListKeys.push(key);
+            list.off = false;
+        }
+"""
 
 AMO_ADDON = "https://addons.mozilla.org/api/v5/addons/addon/ublock-origin/"
 GUID = "uBlock0@raymondhill.net"
@@ -73,17 +80,25 @@ def pin_from_env():
 
 
 def freeze_lists(addon_dir):
-    """Make the extracted uBO default to autoUpdate: false. Fails if uBO's
-    source no longer has the one line this edits, rather than shipping a uBO
-    that downloads its lists."""
-    path = os.path.join(addon_dir, "js", "background.js")
-    with open(path, encoding="utf-8") as f:
-        source = f.read()
-    if source.count(AUTO_UPDATE_DEFAULT) != 1:
-        raise SystemExit(f"{path}: expected one {AUTO_UPDATE_DEFAULT.strip()!r} in "
-                         "userSettingsDefault; uBO changed, update freeze_lists()")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(source.replace(AUTO_UPDATE_DEFAULT, "    autoUpdate: false,\n"))
+    """Make the extracted uBO default to autoUpdate: false and to the lists that
+    ship switched on. Each fails if uBO's source no longer has the text it
+    edits, rather than shipping a uBO that downloads lists.
+
+    Every launch is a first run, and a first run switches on the regional list of
+    the UI language, which uBO does not package: a de-DE launch held every page
+    for the download's 30 s timeout (#211). The selection that was pinned through
+    a policy's toOverwrite.filterLists is the lists uBO ships on."""
+    for name, old, new in (
+        (os.path.join("js", "background.js"), AUTO_UPDATE_DEFAULT, "    autoUpdate: false,\n"),
+        (os.path.join("js", "storage.js"), REGIONAL_SELECTION, ""),
+    ):
+        path = os.path.join(addon_dir, name)
+        with open(path, encoding="utf-8") as f:
+            source = f.read()
+        if source.count(old) != 1:
+            raise SystemExit(f"{path}: expected one {old.strip()!r}; uBO changed, update freeze_lists()")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(source.replace(old, new))
 
 
 def extract(xpi, pin, dest):

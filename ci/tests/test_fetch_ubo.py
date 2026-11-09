@@ -25,6 +25,8 @@ def xpi(version="1.76.0", guid=GUID, extra=()):
         z.writestr("manifest.json", json.dumps(
             {"version": version, "browser_specific_settings": {"gecko": {"id": guid}}}))
         z.writestr("js/background.js", "const userSettingsDefault = {\n    autoUpdate: true,\n};\n")
+        z.writestr("js/storage.js", "µb.autoSelectRegionalFilterLists = function(lists) {\n"
+                   + fetch_ubo.REGIONAL_SELECTION + "};\n")
         for name in extra:
             z.writestr(name, "")
     return buf.getvalue()
@@ -124,5 +126,32 @@ def test_a_ubo_whose_default_moved_is_refused(tmp_path):
     """Shipping a uBO that downloads its lists is worse than failing the build."""
     (tmp_path / "js").mkdir()
     (tmp_path / "js" / "background.js").write_text("const userSettingsDefault = {};\n")
+    with pytest.raises(SystemExit, match="freeze_lists"):
+        fetch_ubo.freeze_lists(str(tmp_path))
+
+
+def _ubo(tmp_path):
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "background.js").write_text(
+        "const userSettingsDefault = {\n" + fetch_ubo.AUTO_UPDATE_DEFAULT + "};\n", encoding="utf-8")
+    (tmp_path / "js" / "storage.js").write_text(
+        "µb.autoSelectRegionalFilterLists = function(lists) {\n"
+        "        if ( list.off !== true ) {\n            selectedListKeys.push(key);\n            continue;\n        }\n"
+        + fetch_ubo.REGIONAL_SELECTION + "};\n", encoding="utf-8")
+
+
+def test_freezing_keeps_ubo_off_the_regional_list_of_the_ui_language(tmp_path):
+    """#211: a de-DE first run switched on a list uBO does not package, and downloaded it."""
+    _ubo(tmp_path)
+    fetch_ubo.freeze_lists(str(tmp_path))
+    storage = (tmp_path / "js" / "storage.js").read_text(encoding="utf-8")
+    assert "listMatchesEnvironment" not in storage
+    assert "list.off !== true" in storage, "the lists that ship switched on stay selected"
+    assert "autoUpdate: false" in (tmp_path / "js" / "background.js").read_text(encoding="utf-8")
+
+
+def test_a_ubo_whose_regional_selection_moved_is_refused(tmp_path):
+    _ubo(tmp_path)
+    (tmp_path / "js" / "storage.js").write_text("// reworked\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="freeze_lists"):
         fetch_ubo.freeze_lists(str(tmp_path))
