@@ -225,7 +225,27 @@ describe("parseSemver", () => {
 describe("webdl network failures", () => {
 	afterEach(() => {
 		vi.unstubAllGlobals();
+		vi.useRealTimers();
 	});
+
+	/** webdl() with the retry delays (75 s in all) run on fake timers. */
+	async function fetchWithRetries(): Promise<string> {
+		vi.useFakeTimers();
+		const outcome = webdl(
+			"https://example.test/a.zip",
+			undefined,
+			false,
+			null,
+			{
+				progressCallback: () => {},
+			},
+		).then(
+			(body) => body.toString(),
+			(error: Error) => error.message,
+		);
+		await vi.advanceTimersByTimeAsync(75_000);
+		return outcome;
+	}
 
 	it("retries a request that failed before any response", async () => {
 		const closed = Object.assign(new TypeError("fetch failed"), {
@@ -236,63 +256,38 @@ describe("webdl network failures", () => {
 			.mockRejectedValueOnce(closed)
 			.mockResolvedValueOnce(new Response("mmdb"));
 		vi.stubGlobal("fetch", fetchMock);
-		const body = await webdl(
-			"https://example.test/a.zip",
-			undefined,
-			false,
-			null,
-			{
-				progressCallback: () => {},
-			},
-		);
-		expect(body.toString()).toBe("mmdb");
+		expect(await fetchWithRetries()).toBe("mmdb");
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
-	it.each([429, 500, 503])("retries a %i answer", async (status) => {
+	it.each([429, 500, 503, 504])("retries a %i answer", async (status) => {
 		const fetchMock = vi
 			.fn()
 			.mockResolvedValueOnce(new Response("", { status }))
 			.mockResolvedValueOnce(new Response("model"));
 		vi.stubGlobal("fetch", fetchMock);
-		const body = await webdl(
-			"https://example.test/a.zip",
-			undefined,
-			false,
-			null,
-			{
-				progressCallback: () => {},
-			},
-		);
-		expect(body.toString()).toBe("model");
+		expect(await fetchWithRetries()).toBe("model");
 		expect(fetchMock).toHaveBeenCalledTimes(2);
 	});
 
-	it("raises the last 5xx once the retries are spent", async () => {
-		vi.useFakeTimers();
-		try {
-			const fetchMock = vi
-				.fn()
-				.mockImplementation(async () => new Response("", { status: 502 }));
-			vi.stubGlobal("fetch", fetchMock);
-			const outcome = webdl(
-				"https://example.test/a.zip",
-				undefined,
-				false,
-				null,
-				{
-					progressCallback: () => {},
-				},
-			).then(
-				() => "resolved",
-				(error: Error) => error.message,
-			);
-			await vi.advanceTimersByTimeAsync(3000);
-			expect(await outcome).toContain("502 Server Error");
-			expect(fetchMock).toHaveBeenCalledTimes(3);
-		} finally {
-			vi.useRealTimers();
+	it("rides out an outage of four 504 answers", async () => {
+		const fetchMock = vi.fn();
+		for (let i = 0; i < 4; i++) {
+			fetchMock.mockResolvedValueOnce(new Response("", { status: 504 }));
 		}
+		fetchMock.mockResolvedValueOnce(new Response("model"));
+		vi.stubGlobal("fetch", fetchMock);
+		expect(await fetchWithRetries()).toBe("model");
+		expect(fetchMock).toHaveBeenCalledTimes(5);
+	});
+
+	it("raises the last 5xx once the retries are spent", async () => {
+		const fetchMock = vi
+			.fn()
+			.mockImplementation(async () => new Response("", { status: 502 }));
+		vi.stubGlobal("fetch", fetchMock);
+		expect(await fetchWithRetries()).toContain("502 Server Error");
+		expect(fetchMock).toHaveBeenCalledTimes(5);
 	});
 
 	it("does not retry an HTTP error", async () => {

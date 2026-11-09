@@ -67,8 +67,11 @@ function githubHeaders(url: string): Record<string, string> {
 		: {};
 }
 
-/** Delays before each retry of a request that failed or got a transient answer. */
-const NETWORK_RETRY_DELAYS_MS = [1000, 2000];
+/**
+ * Delays before each retry of a request that failed or got a transient answer.
+ * GitHub's release-asset host has answered 504 for longer than 14 s (#421).
+ */
+const NETWORK_RETRY_DELAYS_MS = [5000, 10000, 20000, 40000];
 
 /**
  * fetch(), retried when the request fails without any response or gets a 429

@@ -15,6 +15,7 @@ freshCachePerTest("dl");
 
 afterEach(() => {
 	vi.unstubAllGlobals();
+	vi.useRealTimers();
 });
 
 it("a failed write rejects, and the partial install is removed", async () => {
@@ -99,7 +100,19 @@ it("a network failure names the URL and its cause", async () => {
 	const { port } = server.address() as net.AddressInfo;
 	await new Promise((resolve) => server.close(resolve));
 	const url = `http://127.0.0.1:${port}/geoip.zip`;
-	await expect(webdl(url, "x", false)).rejects.toThrow(
+	// Node's real refusal, served again on every retry so the retry delays
+	// (75 s in all) can run on fake timers.
+	const refused = await fetch(url).catch((error: unknown) => error);
+	const fetchMock = vi.fn().mockRejectedValue(refused);
+	vi.stubGlobal("fetch", fetchMock);
+	vi.useFakeTimers();
+	const outcome = webdl(url, "x", false).then(
+		() => "resolved",
+		(error: Error) => error.message,
+	);
+	await vi.advanceTimersByTimeAsync(75_000);
+	expect(await outcome).toContain(
 		`Could not download ${url}: fetch failed (ECONNREFUSED`,
 	);
+	expect(fetchMock).toHaveBeenCalledTimes(5);
 });
