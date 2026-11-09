@@ -50,21 +50,6 @@ NOTCH = [["wheel", 1, 0, 6, -120], ["DOMMouseScroll", 3], ["MozMousePixelScroll"
 NOTCH_PX = 120
 
 
-def settled_scroll_top(page):
-    """The scroller's position once its smooth-scroll animation has finished: the
-    wheel's events all arrive at once, but a long scroll takes longer to play, and
-    a fixed wait read it part-way (1016 and 999 px of 1071 on two runs of one build,
-    the events summing to 1071 both times)."""
-    last = page.evaluate("document.getElementById('s').scrollTop")
-    for _ in range(40):
-        page.wait_for_timeout(250)
-        now = page.evaluate("document.getElementById('s').scrollTop")
-        if now == last:
-            return now
-        last = now
-    return last
-
-
 def probe(binary, os, turns):
     from camoufox.sync_api import Camoufox
 
@@ -78,7 +63,7 @@ def probe(binary, os, turns):
             page.evaluate("() => { window.__events = []; document.getElementById('s').scrollTop = 0; }")
             page.mouse.wheel(0, dy)
             page.wait_for_timeout(800)
-            out[name] = (page.evaluate("window.__events"), settled_scroll_top(page))
+            out[name] = (page.evaluate("window.__events"), page.evaluate("document.getElementById('s').scrollTop"))
         return out
 
 
