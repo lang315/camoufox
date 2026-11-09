@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #423: `test_sign_in_and_shop` read the account page before it was parsed
+
+**Fixed by:** the PR that fixes #423. **Found by:** Tests run 42574217947 (job 129024553516, `pw-humanize`) and Tests run 42581191693 (job 129045079910, `pkg-humanize`), both on PR #422, whose diff does not reach the journey.
+
+**Symptom.** `Page.evaluate: can't access property "textContent", document.getElementById(...) is null` on the line that reads `#welcome` after signing in.
+
+**Root cause.** The test waited for `location.pathname === '/account'` and then read `#welcome` once (`e2e/journeys/test_04_automation.py`). The URL is the new document's as soon as the navigation commits, while the parser has yet to reach `<h1 id="welcome">` in `e2e/web/pages/account.html`. A poll that lands in between passes the wait and finds no element.
+
+**Fix.** The wait also requires `document.readyState !== 'loading'`, which holds once the parser has finished the document, so the read that follows sees the whole page. The check itself is unchanged. The SPA wait on `/shop/cart` in the same test has the same shape but no race: `history.pushState` and `render()` run in one task, so no evaluate lands between them. `sign_in` in `test_05_contexts.py` waits on the pathname too, but its callers read nothing from the account page.
+
+**Evidence.** With `/account`'s body held back for 2 s after its first 60 bytes (a local, uncommitted change to `e2e/web/server.py`), the old test fails 2 of 2 (`pw-plain`, `pw-humanize`) with the error above, and the fixed test passes 2 of 2. Without the delay the fixed test passes 4 of 4 (`pw` and `pkg` drivers). Release `v159.0-beta.35-fork.1`, macOS arm64.
+
+**What misled the investigation.** Nothing. The first local reproduction crashed in its own server change (`render()` already returns bytes) and produced the same error from a broken response, so it was discarded and repeated with a clean server.
+
 ## #415: the macOS build failed in `mach package`: `llvm-strip: error: unsupported load command (cmd=0x27)`
 
 **Fixed by:** the PR that fixes #415. **Found by:** build run 41984983254 (`macos-arm64`, 3 h 9 min in).
