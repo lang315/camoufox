@@ -25,6 +25,24 @@ later change should read first.
 **Evidence.** With `/account`'s body held back for 2 s after its first 60 bytes (a local, uncommitted change to `e2e/web/server.py`), the old test fails 2 of 2 (`pw-plain`, `pw-humanize`) with the error above, and the fixed test passes 2 of 2. Without the delay the fixed test passes 4 of 4 (`pw` and `pkg` drivers). Release `v159.0-beta.35-fork.1`, macOS arm64.
 
 **What misled the investigation.** Nothing. The first local reproduction crashed in its own server change (`render()` already returns bytes) and produced the same error from a broken response, so it was discarded and repeated with a clean server.
+## #421: a release-asset 504 in pythonlib skipped the Linux build
+
+**Fixed by:** the PR that fixes #421. **Found by:** three `pythonlib` failures on 2026-11-09 (jobs 129007541532, 129008759434 and 129011278012).
+
+**Symptom.** `pythonlib` failed on `504 Server Error: Gateway Time-out` from `github.com/.../releases/download/...`: once in `test_geoip_sources.py` for the GeoIP All-in-One database, twice in `pin-fpgen-model.py` for the fpgen model. `build` needs `pythonlib`, so each 504 also skipped the Linux build and every browser suite behind it. The same URL answered 200 from a workstation in between.
+
+**Root cause.**
+- Both downloads already went through `webdl`'s retry from #242 (`pkgman._get_with_retry`): three attempts, 1 s and 2 s apart. Every failure spent all three, about 14 s from the request to the error (06:04:47 to 06:05:01, 06:08:28 to 06:08:42, 06:16:32 to 06:16:47 UTC). The host answered 504 for longer than the budget.
+- Eleven jobs in `tests.yml` and one in `e2e.yml` downloaded the sha256-pinned fpgen model for Python on every run, so every run was exposed to the host. Only the TypeScript launcher's copy was cached.
+
+**Fix.**
+- `DOWNLOAD_RETRY_DELAYS` is `(5, 10, 20, 40)`: five attempts over about 75 s. TypeScript's `NETWORK_RETRY_DELAYS_MS` matches it, as #242 kept the two equal. A 4xx other than 429 still fails at once. An outage longer than 75 s still fails, after 75 s rather than 3 s: the GeoIP liveness test failed that way on the second Tests run of the fix, during the same outage, and that is by design, since the test gates on the source publishing.
+- `.github/actions/pin-fpgen-model` caches fpgen's data directory with `actions/cache`, keyed on `fpgen-model.json`, and runs the pin script after the restore, so a cached pin makes no request to the model URL. Every pin site in `tests.yml` and `e2e.yml` uses it.
+- Not done: pointing the Python jobs at `CAMOUFOX_FPGEN_DATA`. Python's fpgen reads its model only from its own package directory (`fpgen/pkgman.py`: `DATA_DIR = Path(__file__).parent / 'data'`); the variable moves only the TypeScript launcher's copy. Not done: caching the GeoIP databases, which would stop `test_geoip_sources.py` from noticing a source that no longer publishes. Not done: retrying a connection reset after the response headers, which no failure here showed.
+
+**Evidence.** `python/tests/test_webdl_retry.py`: 8 of 12 fail on `origin/main`, among them four 504 answers then a 200 (the three 4xx controls and the connection-error retry pass there); all 12 pass with the fix. `typescript/tests/pkgman.test.ts`: the four-504 outage and the spent-budget tests fail on `origin/main`; all 36 pass with the fix. The cache hit is in the pull request: the second Tests run's `static` and `pythonlib` restore the model and log no `Downloading fpgen model`.
+
+**What misled the investigation.** The issue asked for a retry, as if `webdl` had none; it had one since #242, too short for this outage. Its scope also read as if the Python jobs could reuse the `typescript` job's `CAMOUFOX_FPGEN_DATA` cache; only the TypeScript launcher honours that variable.
 
 ## #415: the macOS build failed in `mach package`: `llvm-strip: error: unsupported load command (cmd=0x27)`
 

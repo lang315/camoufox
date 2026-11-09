@@ -1030,7 +1030,8 @@ ProgressCallback: TypeAlias = 'Callable[[int, int], None]'
 
 
 # Seconds to wait before each retry of a download that failed transiently.
-DOWNLOAD_RETRY_DELAYS = (1, 2)
+# GitHub's release-asset host has answered 504 for longer than 14 s (#421).
+DOWNLOAD_RETRY_DELAYS = (5, 10, 20, 40)
 
 
 def _get_with_retry(url: str, headers: Dict[str, str]) -> requests.Response:
