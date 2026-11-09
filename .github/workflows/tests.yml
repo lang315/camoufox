@@ -284,6 +284,17 @@ jobs:
       # assert against it. It is a pure-Python install; no browser involved.
       - run: |
           pip install -r ci/requirements.txt pytest -e python
+          # fpgen reads its model only from its own package directory, so that
+          # directory is what gets cached (CAMOUFOX_FPGEN_DATA moves only the
+          # TypeScript launcher's copy).
+          echo "FPGEN_DATA_DIR=$(python3 -c 'from camoufox.fpgen_model import fpgen_data_dir; print(fpgen_data_dir())')" >> "$GITHUB_ENV"
+      # The pinned model, downloaded once per pin rather than once per job: a
+      # release-asset 5xx here skips the build (#421).
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FPGEN_DATA_DIR }}
+          key: fpgen-model-python-${{ hashFiles('python/src/camoufox/fpgen-model.json') }}
+      - run: |
           # fpgen downloads its model on first import with TLS verification
           # OFF and no checksum, and its release picker can only ever reach the
           # April-2025 model. Install the pinned one first: see
@@ -352,6 +363,17 @@ jobs:
           # The geoip extra: python/tests/test_geoip_sources.py downloads every GeoIP
           # source and fails when one stops publishing, which gates releases.
           pip install -r ci/requirements.txt pytest -e 'python[geoip]'
+          # fpgen reads its model only from its own package directory, so that
+          # directory is what gets cached (CAMOUFOX_FPGEN_DATA moves only the
+          # TypeScript launcher's copy).
+          echo "FPGEN_DATA_DIR=$(python3 -c 'from camoufox.fpgen_model import fpgen_data_dir; print(fpgen_data_dir())')" >> "$GITHUB_ENV"
+      # The pinned model, downloaded once per pin rather than once per job: a
+      # release-asset 5xx here skips the build (#421).
+      - uses: actions/cache@v4
+        with:
+          path: ${{ env.FPGEN_DATA_DIR }}
+          key: fpgen-model-python-${{ hashFiles('python/src/camoufox/fpgen-model.json') }}
+      - run: |
           # fpgen downloads its model on first import with TLS verification
           # OFF and no checksum, and its release picker can only ever reach the
           # April-2025 model. Install the pinned one first: see
