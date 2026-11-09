@@ -32,7 +32,8 @@ def test_sign_in_and_shop(drv, site, humanize, check):
     page.type("#user", "alice")
     page.type("#pass", "s3cret")
     page.click("#go")
-    wait_for(page, "location.pathname === '/account'")
+    # The URL changes when the account page commits, before its body is parsed (#423).
+    wait_for(page, "location.pathname === '/account' && document.readyState !== 'loading'")
     check(page.eval("document.getElementById('welcome').textContent") == "Welcome alice", "signed in")
     trusted = json.loads(parse_qs(posts(site, "/login")[-1]["body"].decode())["trusted"][0])
     check(trusted["n"] > 0 and trusted["all"], f"every input event the page saw was isTrusted ({trusted})")
