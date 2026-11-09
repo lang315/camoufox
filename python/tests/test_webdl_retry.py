@@ -1,7 +1,9 @@
-"""webdl() retries a download the host failed transiently (#242).
+"""webdl() retries a download the host failed transiently (#242, #421).
 
 A GitHub 5xx once failed the whole fpgen model install in CI. The retry covers
 connection errors, 429 and 5xx; any other 4xx is an answer and is raised at once.
+GeoIP databases download through webdl() too. Three 504s in 14 s outlasted the
+first budget of two retries (#421), so it now spans about 75 s.
 """
 
 import time
@@ -61,12 +63,19 @@ def fetch() -> bytes:
     return webdl(URL, bar=False, buffer=BytesIO()).read()
 
 
-@pytest.mark.parametrize('status', [429, 500, 502, 503])
+@pytest.mark.parametrize('status', [429, 500, 502, 503, 504])
 def test_transient_status_is_retried(script, status):
     calls, sleeps = script(Reply(status), Reply(200, b'model'))
     assert fetch() == b'model'
     assert len(calls) == 2
-    assert sleeps == [1]
+    assert sleeps == [5]
+
+
+def test_an_outage_of_four_answers_is_ridden_out(script):
+    calls, sleeps = script(*[Reply(504)] * 4, Reply(200, b'model'))
+    assert fetch() == b'model'
+    assert len(calls) == 5
+    assert sleeps == [5, 10, 20, 40]
 
 
 def test_connection_error_is_retried(script):
@@ -76,19 +85,19 @@ def test_connection_error_is_retried(script):
 
 
 def test_gives_up_after_the_last_delay_and_raises_the_status(script):
-    calls, sleeps = script(Reply(500), Reply(500), Reply(500))
+    calls, sleeps = script(*[Reply(500)] * 5)
     with pytest.raises(requests.HTTPError, match='500'):
         fetch()
-    assert len(calls) == 3
-    assert sleeps == [1, 2]
+    assert len(calls) == 5
+    assert sleeps == [5, 10, 20, 40]
 
 
 def test_connection_error_surfaces_after_the_last_delay(script):
     err = requests.ConnectionError('refused')
-    calls, _ = script(err, err, err)
+    calls, _ = script(*[err] * 5)
     with pytest.raises(requests.ConnectionError):
         fetch()
-    assert len(calls) == 3
+    assert len(calls) == 5
 
 
 @pytest.mark.parametrize('status', [401, 403, 404])

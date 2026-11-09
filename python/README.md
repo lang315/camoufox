@@ -34,7 +34,9 @@ camoufox fetch
 fpgen's model, pinned by sha256. Without it, the first launch downloads both.
 It reads the build's release with one GitHub API call and exits non-zero
 when it installs nothing. On a shared CI runner, set `GITHUB_TOKEN` to raise
-GitHub's API rate limit.
+GitHub's API rate limit. A download whose connection fails before any answer,
+or that the host answers with a 429 or a 5xx, is retried four times over about
+75 s before it fails; any other HTTP error fails at once.
 Run `fetch` as the user that owns the Python environment if the browser will
 run as someone else, for example while building a Docker image.
 `camoufox remove` deletes everything that was downloaded.

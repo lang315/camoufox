@@ -37,7 +37,9 @@ npx camoufox fetch
 Without it, the first launch downloads it.
 It reads the build's release with one GitHub API call and exits non-zero
 when it installs nothing. On a shared CI runner, set `GITHUB_TOKEN` to raise
-GitHub's API rate limit.
+GitHub's API rate limit. A download whose connection fails before any answer,
+or that the host answers with a 429 or a 5xx, is retried four times over about
+75 s before it fails; any other HTTP error fails at once.
 
 ## Usage
 
