@@ -373,9 +373,13 @@ rules:
       no network. The cost is that a non-English locale loses its regional
       list. It was pinned through managed storage (toOverwrite.filterLists in
       policies.json) until Camoufox stopped shipping a policy file
-      (no-enterprise-policies); uBO now keeps its packaged lists through its
-      own autoUpdate default (scripts/fetch-ubo.py freeze_lists), and
-      ubo-lists-frozen.py guards that a first run starts no download.
+      (no-enterprise-policies). scripts/fetch-ubo.py freeze_lists now does
+      both halves in the bundled copy: autoUpdate defaults to false, and the
+      first-run selection (storage.js autoSelectRegionalFilterLists) keeps only
+      the lists uBO ships on, without the regional list of the UI language.
+      ubo-lists-frozen.py guards that a first run starts no download, and the
+      de-DE e2e (test_a_hanging_filter_list_download_does_not_hold_pages) that
+      a page is not held.
 
       The lists are also why every launch holds page requests for seconds.
       A launch has a fresh profile and so no saved filter state, and uBO
