@@ -20,11 +20,11 @@ later change should read first.
 
 **Root cause.**
 - Both downloads already went through `webdl`'s retry from #242 (`pkgman._get_with_retry`): three attempts, 1 s and 2 s apart. Every failure spent all three, about 14 s from the request to the error (06:04:47 to 06:05:01, 06:08:28 to 06:08:42, 06:16:32 to 06:16:47 UTC). The host answered 504 for longer than the budget.
-- `static` and `pythonlib` downloaded the sha256-pinned fpgen model on every run, so every run was exposed to the host. Only `typescript` cached it.
+- Eleven jobs in `tests.yml` and one in `e2e.yml` downloaded the sha256-pinned fpgen model for Python on every run, so every run was exposed to the host. Only the TypeScript launcher's copy was cached.
 
 **Fix.**
-- `DOWNLOAD_RETRY_DELAYS` is `(5, 10, 20, 40)`: five attempts over about 75 s. TypeScript's `NETWORK_RETRY_DELAYS_MS` matches it, as #242 kept the two equal. A 4xx other than 429 still fails at once. An outage longer than 75 s still fails, after 75 s rather than 3 s.
-- `static` and `pythonlib` cache fpgen's data directory with `actions/cache`, keyed on `fpgen-model.json`, and run the pin script after the restore, so a cached pin makes no request to the model URL.
+- `DOWNLOAD_RETRY_DELAYS` is `(5, 10, 20, 40)`: five attempts over about 75 s. TypeScript's `NETWORK_RETRY_DELAYS_MS` matches it, as #242 kept the two equal. A 4xx other than 429 still fails at once. An outage longer than 75 s still fails, after 75 s rather than 3 s: the GeoIP liveness test failed that way on the second Tests run of the fix, during the same outage, and that is by design, since the test gates on the source publishing.
+- `.github/actions/pin-fpgen-model` caches fpgen's data directory with `actions/cache`, keyed on `fpgen-model.json`, and runs the pin script after the restore, so a cached pin makes no request to the model URL. Every pin site in `tests.yml` and `e2e.yml` uses it.
 - Not done: pointing the Python jobs at `CAMOUFOX_FPGEN_DATA`. Python's fpgen reads its model only from its own package directory (`fpgen/pkgman.py`: `DATA_DIR = Path(__file__).parent / 'data'`); the variable moves only the TypeScript launcher's copy. Not done: caching the GeoIP databases, which would stop `test_geoip_sources.py` from noticing a source that no longer publishes. Not done: retrying a connection reset after the response headers, which no failure here showed.
 
 **Evidence.** `python/tests/test_webdl_retry.py`: 8 of 12 fail on `origin/main`, among them four 504 answers then a 200 (the three 4xx controls and the connection-error retry pass there); all 12 pass with the fix. `typescript/tests/pkgman.test.ts`: the four-504 outage and the spent-budget tests fail on `origin/main`; all 36 pass with the fix. The cache hit is in the pull request: the second Tests run's `static` and `pythonlib` restore the model and log no `Downloading fpgen model`.
