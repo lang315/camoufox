@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #419: the merge of upstream's #997 undid two fixes: the spoofed voices came after the speech services, and `--enable-stdcxx-compat` never applied
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Windows patch-guard probe 42487841636 (`spoofed-voice-speaks.py`, `context-lists-across-processes.py`) and Tests run 42488209417 (`getter-cost-parity.py`).
+
+**Symptom.** On the Windows build the page read `{'voices': 0}` and "the launch level has 0 voices". On Linux, `getter-cost-parity.py` read WebGL `VENDOR` and `VERSION` at 24 ns against stock's 51 ns (0.58x), the case the faster-than-stock check exists for.
+
+**Root cause.** Two separate merge conflicts resolved to the wrong side. Upstream's `voice-spoofing.patch` calls `AddSpoofedVoices()` after `NS_CreateServicesFromCategory`, which is the order #313 fixed: SAPI registers voices synchronously and notifies content as soon as it runs. Upstream's `base.mozconfig` selects `--enable-stdcxx-compat` from `$CAMOUFOX_TARGET`, which upstream's `patch.py` sets. This fork's `patch.py` never wrote it (it came with #886's LTO/PGO, which this fork keeps reverted), so the flag was dead and `std::string` kept its small-string buffer, which stock Linux's old-ABI build lacks.
+
+**Fix.** `AddSpoofedVoices()` runs before the services start, with the #313 comment. `patch.py` prepends `CAMOUFOX_TARGET=<moz_target>` to the mozconfig; base.mozconfig takes only the stdcxx `case` and none of #886.
+
+**Evidence.** See the PR: the Windows rebuild's `spoofed-voice-speaks.py` and `context-lists-across-processes.py`, and the Linux build's configure line and `getter-cost-parity.py`.
+
+**What misled the investigation.** The stricter `FASTER_MIN_GAP_NS` upstream added to the same guard made it look like a new, over-tight check. It is the check doing its job.
+
 ## #419: every launch of the Firefox 159 macOS build timed out: `usesSystemProxy()` read `PACURI` outside a try
 
 **Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe 42487844362 on build 42465077569. The defect is in upstream's #997 (`browser/additions/juggler/TargetRegistry.js`); it never reached `main` or a release of this fork.
