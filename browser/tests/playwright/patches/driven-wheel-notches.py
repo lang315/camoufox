@@ -10,8 +10,9 @@ identical). docs/input-dispatch.md has the Windows measurement, which has the
 same shape with that platform's line height: three native lines need no per-OS constant.
 The pixels are checked against what one arrow key press scrolls, read from scrollTop at the scroller's
 scrollend: three lines because toolkit.scrollbox.verticalScrollDistance is 3, and not a page because three
-lines are shorter than the scroller. window.scrollByLines(1) is no read for it: it reads 0 in this
-browser under Juggler (diag-52).
+lines are shorter than the scroller. window.scrollByLines(1) is no read for it: it scrolls after it
+returns, in stock 159.0 as in this browser (read at once: 0; a second later: 34 px; diag-53), so it
+gives no value to read at a known moment.
 
 macOS differs (driven-wheel-notches-macos.py).
 

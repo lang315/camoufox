@@ -19,6 +19,11 @@ What PASS means:
       resolves the name on this machine only when no proxy is in play, which
       the resolver's log shows.
 
+The guard launches without uBlock Origin. uBO's default `prefetchingDisabled` turns Firefox's prefetching
+off (network.dns.disablePrefetch) at some moment after startup (js/start.js, uBO 1.76.0), so with it loaded the
+direct link resolves in some launches and never in others (Windows, diag-56: 3 of 8 resolved, and the pref read
+true by the end of every launch), and the proxied arms would pass whatever the browser did.
+
 The direct link must show up in the log, and the guard waits for it instead of for a
 fixed time (a loaded Windows runner took longer than the second the guard once gave it). The
 two proxied launches then wait max(1 s, 3 x that latency) for a name that must not appear.
@@ -41,6 +46,8 @@ from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import default_route_ipv4, resolve_binary  # noqa: E402
+
+from camoufox import DefaultAddons  # noqa: E402
 
 PAGE = b"<!doctype html><title>page</title>"
 # Long enough for a preconnect behind a finished load to reach the listener.
@@ -117,7 +124,8 @@ def main() -> int:
     server = f"http://127.0.0.1:{proxy.server_address[1]}"
     log_holder = tempfile.TemporaryDirectory()
     env = {**os.environ, "MOZ_LOG": "sync,append,nsHostResolver:5", "MOZ_LOG_FILE": str(Path(log_holder.name) / "resolver")}
-    launch = dict(headless=True, os="linux", executable_path=str(resolve_binary()), i_know_what_im_doing=True, env=env)
+    launch = dict(headless=True, os="linux", executable_path=str(resolve_binary()), i_know_what_im_doing=True, env=env,
+                  exclude_addons=[DefaultAddons.UBO])
 
     log_dir = Path(log_holder.name)
     with Camoufox(**launch) as browser:
