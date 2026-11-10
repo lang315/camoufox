@@ -12,6 +12,34 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #419: `main-world-eval-globals` failed whenever uBlock Origin was loaded: the guard compared a first tab with a later one
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head c12894fa, run 42540349228). The bundled uBlock Origin is not part of the build's inputs, see #425.
+
+**Symptom.** The guard, which arrived with upstream's #997, failed with `global order moved by one mw: evaluate: [['RegExp'], ['RegExp']]`: `RegExp` stood at index 22 of the watched names in the `mw:` tab and index 2 in the plain tab. The bb24 browser (built 2026-11-08) passed it, every browser built from the sync branch afterwards failed.
+
+**Root cause.** The guard compares the window's property order in a plain tab with the order in a tab that got `mw:() => 1`. With uBlock Origin loaded, the second tab of a browser lists the standard classes in a different order from the first even when no `mw:` evaluate runs. Measured on the browser of run 42744962270 (uBO 1.76.0), 12 launches per arm, one job, interleaved (run 42794433294): two plain tabs differed in 12 of 12 launches (`RegExp` at index 7 in the first tab and 925 in the second in 11; the twelfth stayed at 7 but the full orders differed); plain then mw differed 12 of 12; mw then plain differed 12 of 12 with the first (mw) tab canonical, so it follows the tab's position, not the evaluate; plain then mw with uBO excluded was identical in 12 of 12. What decided it: swapping `addons/UBO` between the failing browser and the passing one flipped the result both ways, 12 of 12 each (run 42786962179), and swapping `libxul.so`, the three Juggler files that differ, or every other file changed nothing. The two bundled different uBO releases, 1.75.4 and 1.76.0 (published 2026-11-08 17:02 UTC). In the failing tab `Boolean`, `String`, `RegExp` and `JSON` left the front group of the order and stand near its end. A control with uBO off and a script that touched `String` and `Boolean` before the enumeration put exactly those two at the end in the order they were touched (run 42802030765), so that pattern is what a touch looks like, and it is consistent with a main-world script having run in the failing tab. Which uBO script it is has not been shown. The control did not settle `RegExp`: the page source held a regex literal that the first tab never ran, and `RegExp` stood at the end in both tabs, so it resolves when the script compiles.
+
+**Fix.** The guard launches the browser with `exclude_addons=[DefaultAddons.UBO]`, as `driven-evaluate-globals.py` does for the same reason, and its docstring states what that gives up: it no longer covers an `mw:` evaluate in a browser that has uBO loaded. It watches `RegExp` among the classes a script touches, not `String` or `Boolean`. `driven-global-order.py` also loads uBO, but it compares one driven page with one undriven page, not a first tab with a later one; it passed in run 42540349228 with uBO 1.76.0 (one run).
+
+**Evidence.** Red to green, one job, B5 browser, 12 launches each (run 42802030765): the guard as it was, with uBO loaded, failed 11 and passed 1 (the same race as the rest); the fixed guard passed 12; the fixed guard with an `mw:` evaluate that touches `RegExp`, `String` and `Boolean` failed 12, so it can still go red. Not measured: pages uBO has scriptlets for, Windows, macOS.
+
+**What misled the investigation.** Four reads were wrong before a file diff of the two browsers: the voice-spoofing registration order, `stdcxx-compat`, bb24's whole WebRTC patch set, and an exact rebuild of bb24's compiled inputs (digest equal to bb24's, still failing). Each changed only compiled inputs, and uBO is not one: `tests.yml` stages it per run after a cache hit. No identity line printed the uBO version until diag-31, so the bb24 browser (1.75.4, staged 14:09 UTC on 2026-11-08) looked like the same inputs. A hybrid that swapped config, defaults and the Juggler files but not `addons/UBO` gave a mixed result that looked like a race.
+
+## #419: `driven-wheel-notches` scrolled short on a 200 px scroller: Gecko limits one wheel scroll to a page
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head c12894fa, run 42540349228, the stock-parity job).
+
+**Symptom.** `FAIL: macOS mouse.wheel (long) scrolled 999 px, expected 1071`: the 63-line turn scrolled short of 63 times the 17 px line. Later launches read 1016 to 1040.
+
+**Root cause.** The guard's scroller was 200 px tall. Gecko limits one wheel scroll to a page of the scroller unless the user allows more (`dom/events/EventStateManager.cpp:3779-3797`), and the long turn sends events of up to 12 lines, 204 px at a 17 px line. It is not the browser's input path: the same scroll on a 600 px scroller was exact.
+
+**Fix.** The scroller is 600 px tall; the docstring gives the clamp and the arithmetic (a 15 px line makes 180 px, under 200).
+
+**Evidence.** Five launches each, one job: 600 px scroller 1071 in 5 of 5; 200 px scroller 1016 to 1040 with this build and 999 to 1057 with a 16 px font page.
+
+**What misled the investigation.** The guard passes at upstream with a 200 px scroller, which looked like a regression in the sync. A 15 px line would keep the largest event under the page; whether upstream's runs had that line was not measured.
+
 ## #419: the merge of upstream's #997 undid two fixes: the spoofed voices came after the speech services, and `--enable-stdcxx-compat` never applied
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Windows patch-guard probe 42487841636 (`spoofed-voice-speaks.py`, `context-lists-across-processes.py`) and Tests run 42488209417 (`getter-cost-parity.py`).

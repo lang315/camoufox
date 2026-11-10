@@ -23,6 +23,12 @@ notches of one call arrive tens of milliseconds apart. A long wheel leaves the
 browser-wide activation slot free between them, so input in another context does
 not wait for it to finish.
 
+The scroller is 600 px tall. Gecko limits one wheel scroll to a page of the scroller unless the
+user allows more (dom/events/EventStateManager.cpp:3779-3797), and the longest turn here sends events
+of up to 12 lines: 204 px at the 17 px line this page gives, which a 200 px scroller cut short (1016
+to 1040 px of 1071 in five launches of this build, 999 to 1057 with a 16 px font page), where a
+600 px one scrolled exactly 1071 in five of five. A 15 px line would give 180 px and not meet it.
+
     python browser/tests/playwright/patches/driven-wheel-notches.py
 """
 
@@ -34,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import hidden_display, resolve_binary  # noqa: E402
 
 PAGE = """<!doctype html><html><body style="margin:0;font:14px/18px sans-serif">
-<div id="s" style="position:absolute;left:40px;top:40px;width:300px;height:200px;overflow:auto">
+<div id="s" style="position:absolute;left:40px;top:40px;width:300px;height:600px;overflow:auto">
 <div style="width:3000px;height:3000px"></div></div></body></html>"""
 RECORD = """() => {
   window.__events = [];

@@ -27,6 +27,14 @@ them. It is compared with an untouched tab opened just before it, not the
 first: the first tab of a browser places HTMLCollection differently from every
 later one with no evaluate at all (measured 2026-11-04: 415 vs ~944).
 
+The browser runs without uBlock Origin, as driven-evaluate-globals.py does. With it loaded, two
+untouched tabs opened one after the other list the standard classes differently: with uBO 1.76.0
+RegExp stood at index 7 in the first tab and 925 in the second in 11 of 12 launches (the full
+orders differed in all 12), with no `mw:` evaluate at all, and with uBO excluded the two orders were
+identical in 12 of 12. No tab is a fair reference for an evaluated one while uBO is loaded, so this
+guard does not cover an `mw:` evaluate in a browser that has it. Of the classes a script touches it
+watches RegExp, not String or Boolean. docs/bug-fixes.md has the measurements.
+
     python browser/tests/playwright/patches/main-world-eval-globals.py
 """
 
@@ -62,6 +70,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 def probe(binary):
     import json
+    from camoufox import DefaultAddons
     from camoufox.sync_api import Camoufox
 
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
@@ -70,7 +79,7 @@ def probe(binary):
     out = {}
     try:
         with Camoufox(executable_path=str(binary), headless=True, os="linux", main_world_eval=True,
-                      i_know_what_im_doing=True) as browser:
+                      i_know_what_im_doing=True, exclude_addons=[DefaultAddons.UBO]) as browser:
             for name in ("plain", "mw", "plain2", "scrape"):
                 page = browser.new_page()
                 page.goto(url, wait_until="load")
