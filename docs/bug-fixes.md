@@ -13,6 +13,27 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+
+## #419: five patch guards were red on a hosted Windows runner after the upstream sync, for five different reasons
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Windows patch-guard probe (`e2e.yml`, `probe=patch_guard.py`) on the sync's Windows build: run 42888796068, job 130084161444, head `be03d4d8`. The browser was not the cause of any of them.
+
+**Symptom.** Parity and spoofing groups red: `stock-gpu-parity`, `navigation-preconnect-proxied`, `css-device-size-fractional`, `driven-wheel-notches`, `driven-move-coalescing` (and `popup-window-size`, on `main` too, see below). Each was measured in a diag run on the same Windows artifact before it was changed.
+
+**Root causes and fixes.**
+
+- `stock-gpu-parity`: the runner's stock Firefox reads `Microsoft Basic Render Driver`, a software renderer fpgen never recorded (diag-47, run 42901810722, job 130129491408). Main's guard pinned `webGl:vendor` and `webGl:renderer` to the nearest device's pair in that case; the merge took upstream's guard, which dropped the pin because upstream's software renderer (llvmpipe) is recorded. The launcher drew a random GPU and the guard compared it with the device pair (`claimed GPU`). The pin is back for a host GPU that is not in `firefox_gpus(target_os)`, and on that branch the guard prints that the claimed GPU is not measured (reading back what it pinned would prove nothing) and checks what the launcher does decide there: the canvas is covered. The launcher is coherent: `plan_rendering` returned `(True, None)` for that host, canvas noise on.
+- `navigation-preconnect-proxied`: the direct arm waited a fixed second for `direct-prefetch.test` to reach the resolver's log. On the same browser it appeared in 2 of 4 launches (diag-46, run 42900315227), with the socket process on or off, so the process layout was not the cause (the first guess; refuted: the child logs are empty, the parent writes the log). The guard now polls for the direct name (30 s, "never resolved" fails) and the proxied arms wait max(1 s, 3 x that latency). Firefox's HTMLDNSPrefetch has no skip log line to wait for (read in mainline, not the 159 tree), so the negative wait is a calibration, said so in the docstring.
+- `css-device-size-fractional`: it needs two Xvfb displays of fixed sizes, so it is Linux-only (`LINUX_ONLY`), with the reason in its docstring; not measured on Windows or macOS (the #415 form).
+- `driven-wheel-notches`: it hard-coded GTK's 20 px line (`MozMousePixelScroll` 60, 120 px a notch); Windows' line is 19 px, which `docs/input-dispatch.md` says of stock 159.0 ("same shape, pixels differ only because line height does"). The line is now read from the page with `window.scrollByLines(1)` on a root with the scroller's font, not from the wheel's events (an arrow key was tried first and does not scroll one line). Its macOS-identity arm cannot be drawn on a 1366x768 display (`RestrictiveConstraints`, diag-48, run 42902541346, not a crash: every browser exited 0) and moved into `driven-wheel-notches-macos.py`, not applicable on Windows (`NOT_ON`).
+- `driven-move-coalescing`: coalescing needs moves that outrun the refresh tick. On this runner Juggler's moves arrive 16.0 ms apart (median, max 32.0) against a 15.6 ms rAF tick, with `performance.now()` resolving 1 ms; stock's real input (`SendInput`) coalesces at 8 ms a move and gives one pointermove each at 25 ms (diag-50, run 42909452571). The guard now fails with `SETUP-INVALID` on any OS where the sweep does not outrun the tick, prints the gap and the tick in its PASS line, and is not applicable on Windows (`NOT_ON`). An earlier reading of the gap from `event.timeStamp` was a quantized OS clock and was not trusted until the handler clock agreed.
+
+**Not done.** `popup-window-size` (on `main`) is red for the same monitor reason as `css-device-size-fractional` (a 1366 px window on a 1024 px monitor); not part of this change. Whether Juggler's moves are slower per move on Windows than on Linux is not measured (the Linux gap now prints in the guard's PASS line).
+
+**Evidence.** The diag runs above, each on the sync's Windows artifact (run 42873288735). The fixed guards' own runs are in the PR.
+
+**What misled the investigation.** Two comparisons that compared a binary with itself: `util.unpack` names its directory after the zip, so the release and the build zip (same name) shared one (diag-45's first run, diag-47's browser column), which would have shown "no difference" for the browsers; fixed in the probes and not used. A pace read from `event.timeStamp` looked like a 16 ms tick. "GTK-only reference" for the wheel guard came from a code comment; the guard's own docstring points at a Windows measurement.
+
 ## #419: `webrtc-context-ip` and `webrtc-port-range` saw no STUN Binding Request after the upstream sync
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head 08bccb9b, run 42807370183, the spoofing job).
