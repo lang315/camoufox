@@ -12,6 +12,20 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+## #419: `popup-covered-click` clicked a second after `showPicker()` returned, before the picker was open
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head 08bccb9b, run 42807370183, the stock-parity job). The guard came with upstream's #997.
+
+**Symptom.** One red in about 25 launches: `FAIL: headless: the page got the clicks, so no popup covered #t: ['picker', 'mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click']`. The same dist and launcher passed 24 of 24 launches in run 42830763227 (8 each of three arms), and the guard had passed in runs 42488209417 and 42540349228.
+
+**Root cause, by reading.** `MouseDispatch.sendAcked` (`browser/additions/juggler/input/MouseDispatch.js`) hands a click to a popup only when `_popupAt` finds a `panel`, `menupopup` or `tooltip` whose `state` is `open` at that moment. The guard's page logs `picker` when `showPicker()` returns, which only asks the parent to open the picker, and the guard then waited a fixed 1000 ms before it clicked. A picker that had not reached state `open` by then let both clicks through to the page, which is the log above. No launch has been caught in the `showing` state, so the mechanism is a reading of the code, consistent with the red, not a measurement of a slow open.
+
+**Fix.** The guard waits for the condition `_popupAt` tests. After the picker click it reads the parent's popups through Marionette's chrome context (`helpers.Marionette`, as `long-press-no-link-preview.py` does) until one is `open` and takes mouse events, under a 10 s deadline. A miss fails with the states it last saw (`closed`, `showing`, or none), so a red names the half of the race it lost. The time from `picker` to `open` goes in the PASS line. Nothing is retried and no threshold changed.
+
+**Evidence.** Run 42840257675, the sync dist (42807370183), libegl1 installed as in the parity leg: 12 of 12 launches green in both arms (headless, and a private Xvfb display), and Marionette's chrome context worked in the headless arm. Milliseconds from `picker` to an open popup (an upper bound: it includes the Marionette connection made after the click, the 20 ms poll and one round trip): headless 1397, 110, 321, 315, 412, 297, 478, 221, 695, 492, 113, 349 (median 335); display 346, 473, 480, 356, 479, 341, 289, 114, 463, 451, 318, 432 (median 394). One of 24 readings, the first launch of the job, is above the old 1000 ms; it includes the connection setup, so it is not proof that the panel itself took longer. Red capability: three launches with no picker open, two clicks on `#t`, and the page log held `mousedown`, `mouseup`, `click` twice each in 3 of 3; with run 42807370183's red, that is the evidence that the page log sees an uncovered click. There is no red-to-green: the red does not reproduce on demand.
+
+**What misled the investigation.** The guard is not on `main` (it came with #997), so the red looked like a regression of the sync; the compiled inputs and the launcher of the red run and of a green run were the same. A 24-launch rerun that passed was read as "not reproduced", not as "fixed": the diag job was the automation leg, without the parity leg's setup.
+
 ## #419: `main-world-eval-globals` failed whenever uBlock Origin was loaded: the guard compared a first tab with a later one
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head c12894fa, run 42540349228). The bundled uBlock Origin is not part of the build's inputs, see #425.
