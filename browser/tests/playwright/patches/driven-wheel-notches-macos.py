@@ -36,9 +36,12 @@ spec.loader.exec_module(notches)
 
 def mac_failures(got):
     failures = []
-    line = got["line"]
-    if line < 8:
-        failures.append(f"scrollByLines(1) moved the window {line} px: the line height could not be read")
+    step = got["step"]
+    if not step:
+        failures.append(f"ArrowDown did not finish scrolling ({got['arrow']})")
+    elif step % 3 or not 24 <= step <= 120:
+        failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px were expected")
+    line = step // 3
     for name, lines in (("slow", 1), ("turn", 6), ("long", 63)):
         events, scrolled = got[name]
         wheels = [e[3] for e in events if e[0] == "wheel"]

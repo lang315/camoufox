@@ -8,8 +8,10 @@ with detail three lines (60 for the 20 px lines of the GTK fonts), and the scrol
 moves six lines, 120 px, per notch. Measured with XTest button 5 on Xvfb (three runs,
 identical). docs/input-dispatch.md has the Windows measurement, which has the
 same shape with that platform's line height: three native lines need no per-OS constant.
-The line is read with window.scrollByLines(1) on a page whose root has the scroller's font, so the
-pixels are checked against a line that the wheel's own events did not supply.
+The pixels are checked against what one arrow key press scrolls, read from scrollTop at the scroller's
+scrollend: three lines because toolkit.scrollbox.verticalScrollDistance is 3, and not a page because three
+lines are shorter than the scroller. window.scrollByLines(1) is no read for it: it reads 0 in this
+browser under Juggler (diag-52).
 
 macOS differs (driven-wheel-notches-macos.py).
 
@@ -34,16 +36,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import hidden_display, resolve_binary  # noqa: E402
 
-PAGE = """<!doctype html><html style="font:14px/18px sans-serif"><body style="margin:0">
-<div id="s" style="position:absolute;left:40px;top:40px;width:300px;height:600px;overflow:auto">
+PAGE = """<!doctype html><html><body style="margin:0;font:14px/18px sans-serif">
+<div id="s" tabindex="0" style="position:absolute;left:40px;top:40px;width:300px;height:600px;overflow:auto">
 <div style="width:3000px;height:3000px"></div></div></body></html>"""
-LINE = """() => {
-  document.body.style.height = '5000px';
-  window.scrollByLines(1);
-  const line = window.scrollY;
-  window.scrollTo(0, 0);
-  document.body.style.height = '';
-  return line;
+ARROW = """() => {
+  const s = document.getElementById('s');
+  window.__arrow = new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 5000);
+    s.addEventListener('scrollend', () => { clearTimeout(timer); resolve(s.scrollTop); }, {once: true});
+  });
 }"""
 RECORD = """() => {
   window.__events = [];
@@ -54,10 +55,12 @@ RECORD = """() => {
   for (const t of ['wheel', 'DOMMouseScroll', 'MozMousePixelScroll']) s.addEventListener(t, on);
 }"""
 
-# One notch of stock on GTK/X11 (158.0.1) and on Windows (159.0, docs/input-dispatch.md): three lines, so the
-# pixels are three and six of the scroller's own lines, which the guard reads with scrollByLines below.
-def notch(line):
-    return [["wheel", 1, 0, 6, -120], ["DOMMouseScroll", 3], ["MozMousePixelScroll", 3 * line]]
+# One notch of stock on GTK/X11 (158.0.1) and on Windows (159.0, docs/input-dispatch.md): three lines. The
+# pixels are those of three of the scroller's own lines, which an arrow key scrolls too (diag-52: 60 px on
+# Linux, 57 on Windows, 51 under the macOS identity, equal to a notch's MozMousePixelScroll on each),
+# so a notch is checked against a scroll the wheel did not make.
+def notch(step):
+    return [["wheel", 1, 0, 6, -120], ["DOMMouseScroll", 3], ["MozMousePixelScroll", step]]
 
 
 def probe(binary, os, turns):
@@ -66,10 +69,15 @@ def probe(binary, os, turns):
     with Camoufox(executable_path=str(binary), headless=False, os=os, window=(1280, 900)) as browser:
         page = browser.new_page()
         page.set_content(PAGE)
-        # The window scrolls by one line through a call the wheel does not take, using the root's font
-        # (the same as the scroller's, set on <html>), so the line the wheel's pixels are checked against
-        # is not read off the wheel's own events. The page is made tall for the call and put back after.
-        out = {"line": page.evaluate(LINE)}
+        # One arrow key press scrolls toolkit.scrollbox.verticalScrollDistance (3) lines by a path the wheel does
+        # not take, and not a page, since three lines are shorter than the 600 px scroller. It is read at its
+        # scrollend, not after a fixed wait.
+        page.evaluate(ARROW)
+        page.focus("#s")
+        page.keyboard.press("ArrowDown")
+        step = page.evaluate("() => window.__arrow")
+        out = {"step": step or 0, "arrow": f"scrollTop {page.evaluate('document.getElementById(\'s\').scrollTop')}"}
+        page.evaluate("() => { document.getElementById('s').scrollTop = 0; }")
         page.mouse.move(190, 140)
         page.evaluate(RECORD)
         for name, dy in turns:
@@ -108,9 +116,11 @@ def main() -> int:
         got = probe(binary, "linux", (("one", 100), ("three", 300)))
         wheel_finished_first, contended = asyncio.run(contended_wheel(binary))
     failures = []
-    line = got["line"]
-    if line < 8:
-        failures.append(f"scrollByLines(1) moved the window {line} px: the line height could not be read")
+    step = got["step"]
+    if not step:
+        failures.append(f"ArrowDown did not finish scrolling ({got['arrow']})")
+    elif step % 3 or not 24 <= step <= 120:
+        failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px were expected")
     if wheel_finished_first:
         failures.append("a click in another context waited for a long wheel to finish")
     if any(b - a < 10 for a, b in zip(contended, contended[1:])):
@@ -118,10 +128,10 @@ def main() -> int:
     for name, notches in (("one", 1), ("three", 3)):
         events, scrolled = got[name]
         shape = [e[:5] if e[0] == "wheel" else e for e in events]
-        if shape != notch(line) * notches:
-            failures.append(f"mouse.wheel ({name}) delivered {shape}, stock {notch(line) * notches}")
-        if scrolled != 6 * line * notches:
-            failures.append(f"mouse.wheel ({name}) scrolled {scrolled} px, stock {6 * line * notches} (six {line} px lines)")
+        if shape != notch(step) * notches:
+            failures.append(f"mouse.wheel ({name}) delivered {shape}, stock {notch(step) * notches}")
+        if scrolled != 2 * step * notches:
+            failures.append(f"mouse.wheel ({name}) scrolled {scrolled} px, stock {2 * step * notches} (six lines of {step // 3} px)")
         stamps = [e[5] for e in events if e[0] == "wheel"]
         gaps = [b - a for a, b in zip(stamps, stamps[1:])]
         if any(g < 10 for g in gaps):
@@ -130,7 +140,7 @@ def main() -> int:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"PASS: mouse.wheel turns notches as a wheel does in stock ({line} px lines)")
+    print(f"PASS: mouse.wheel turns notches as a wheel does in stock ({step // 3} px lines)")
     return 0
 
 
