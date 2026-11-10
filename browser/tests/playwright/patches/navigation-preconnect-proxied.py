@@ -32,7 +32,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import own_address, resolve_binary  # noqa: E402
+from helpers import default_route_ipv4, resolve_binary  # noqa: E402
 
 PAGE = b"<!doctype html><title>page</title>"
 # Long enough for a preconnect behind a finished load to reach the listener.
@@ -87,7 +87,7 @@ def prefetch_from(context, name: str) -> None:
 def main() -> int:
     from camoufox.sync_api import Camoufox
 
-    origin = Listener(own_address())
+    origin = Listener(default_route_ipv4())
     proxy = Listener("127.0.0.1")
     url = f"http://{origin.server_address[0]}:{origin.server_address[1]}/"
     server = f"http://127.0.0.1:{proxy.server_address[1]}"
