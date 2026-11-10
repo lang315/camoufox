@@ -357,11 +357,12 @@ def main() -> int:
     claims_host = tuple(gpu) in webgl.firefox_gpus(target_os)
     # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
     # device's pair is named, and the launcher covers the canvas for a named GPU.
-    named = () if claims_host else ("webGl:vendor", "webGl:renderer")
-    pinned = {
+    tables = {
         k: v for k, v in device.items()
-        if k in named or k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
+        if k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
     }
+    named = () if claims_host else ("webGl:vendor", "webGl:renderer")
+    pinned = {**tables, **{k: v for k, v in device.items() if k in named}}
     options = launch_options(
         os=host_os, headless=True, executable_path=str(camoufox), config=pinned, i_know_what_im_doing=True
     )
@@ -374,11 +375,16 @@ def main() -> int:
             print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {gpu}")
             failures.append("claimed GPU")
     else:
-        # Reading back the pair just pinned would prove nothing: what the launcher decides here is that
-        # the canvas is covered.
+        # Reading back the pair just pinned would prove nothing, and naming a GPU covers the canvas by itself
+        # (plan_rendering skips the host for a named one), so `options` cannot say what the launcher decides
+        # here. A launch with the tables alone, which is what a real launch on this host is, can: it probes
+        # the host and covers the canvas for a renderer fpgen never recorded.
         print(f"    claimed GPU: not measured, host renderer {gpu[1]} is not recorded for {target_os}; "
               "vendor/renderer pinned to the device pair")
-        if not has_canvas_placeholder(options["firefox_user_prefs"]):
+        real = launch_options(
+            os=host_os, headless=True, executable_path=str(camoufox), config=tables, i_know_what_im_doing=True
+        )
+        if not has_canvas_placeholder(real["firefox_user_prefs"]):
             print("    [FAIL] the launcher left the canvas uncovered for an unrecorded host renderer")
             failures.append("canvas cover")
     recorded_flat, camoufox_flat = flatten(recorded_out), flatten(camoufox_out)

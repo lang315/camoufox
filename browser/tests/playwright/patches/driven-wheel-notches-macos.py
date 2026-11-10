@@ -36,7 +36,9 @@ spec.loader.exec_module(notches)
 
 def mac_failures(got):
     failures = []
-    line = next(e[1] for e in got["slow"][0] if e[0] == "MozMousePixelScroll")
+    line = got["line"]
+    if line < 8:
+        failures.append(f"scrollByLines(1) moved the window {line} px: the line height could not be read")
     for name, lines in (("slow", 1), ("turn", 6), ("long", 63)):
         events, scrolled = got[name]
         wheels = [e[3] for e in events if e[0] == "wheel"]
