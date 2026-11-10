@@ -12,6 +12,21 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+
+## #419: `webrtc-context-ip` and `webrtc-port-range` saw no STUN Binding Request after the upstream sync
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head 08bccb9b, run 42807370183, the spoofing job).
+
+**Symptom.** Both guards failed with `SETUP-INVALID`: "no srflx candidate, the STUN responder was not reached" and "no STUN Binding Request reached the server". They were green on `main`.
+
+**Root cause.** `browser/tests/playwright/patches/helpers.py` defines `STUN_COOKIE = b"\x21\x12\xa4\x42"` (bytes) for `is_binding_request` and `binding_success`. The merge appended upstream's STUN block below it, including a second `STUN_COOKIE = 0x2112A442` (int). The later binding won, so `is_binding_request` compared `data[4:8]` with an int, never matched, and the guard's responder answered nothing.
+
+**Fix.** Upstream's STUN block (`own_address`, `stun_binding_response`, `AnsweringStun`, the int cookie) is deleted. This branch keeps the fork's WebRTC guards, so the block duplicated `is_binding_request` and `binding_success` and had one caller, `navigation-preconnect-proxied.py`, which now takes `default_route_ipv4` (both pick the default-route source address with a UDP connect). The imports the block orphaned are removed.
+
+**Evidence.** diag-44, run 42858339235, two launches per arm, both guards: main tree with main dist and main tree with the sync dist green 2/2; sync tree with either dist red 2/2; main tree with only the sync `helpers.py` and main dist red 2/2, which isolates the file. The fix's own Tests run is in the PR.
+
+**What misled the investigation.** The dist, the launcher, the AppArmor sysctl and the runner were each suspected first (diag-40 to diag-42) and each was cleared by measurement. The guards are byte-equal to main's, so the difference sat in a shared helper that nobody had read for a name collision.
+
 ## #419: `popup-covered-click` clicked a second after `showPicker()` returned, before the picker was open
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head 08bccb9b, run 42807370183, the stock-parity job). The guard came with upstream's #997.
