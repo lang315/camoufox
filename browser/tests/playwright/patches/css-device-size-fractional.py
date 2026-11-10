@@ -13,6 +13,9 @@ rounded size must not match, the real one must. The control is a display that
 is not the identity's screen (3840x2400, 1536x960 CSS px), where the claimed size is all there
 is and the rounded query matches.
 
+Linux only: it needs two displays of fixed sizes, which only Xvfb gives (a hosted Windows
+monitor is 1024 px wide). Not measured on Windows or macOS.
+
     python browser/tests/playwright/patches/css-device-size-fractional.py
 """
 

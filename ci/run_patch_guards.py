@@ -114,6 +114,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "driven-move-coalescing",
         "driven-page-real-focus",
         "driven-wheel-notches",
+        "driven-wheel-notches-macos",
         "enterprise-policies",
         "firefox-version-pin",
         "getter-cost-parity",
@@ -150,8 +151,9 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 # (Xvfb), occluded-window-active is X11 window occlusion, pointer-lock-offscreen
 # is nsWindowX11.cpp (GTK/X11 only), windows-keyboard drives GTK with xdotool,
 # virtual-display-window-visible is the virtual display (Xvfb, Linux only),
-# driven-drag-gtk is a GTK drag session and headless-software-webgl is Mesa's
-# EGL rasterizer.
+# driven-drag-gtk is a GTK drag session, headless-software-webgl is Mesa's
+# EGL rasterizer and css-device-size-fractional needs two Xvfb displays of fixed
+# sizes (a hosted Windows monitor is 1024 px wide).
 # A guard that needs Xvfb only for a display is not here: it runs on the host's
 # display elsewhere. On any other platform the runner does not run a Linux-only
 # guard and counts it apart from the passes; on Linux a missing prerequisite
@@ -161,12 +163,15 @@ LINUX_ONLY = frozenset({
     "ipv4-only-network", "webgl-live-state", "webgl-renderer-pair",
     "occluded-window-active", "pointer-lock-offscreen",
     "virtual-display-window-visible", "driven-drag-gtk", "headless-software-webgl",
+    "css-device-size-fractional",
 })
 
 # Guards that do not run on one platform for a reason of that platform, counted
 # apart from the passes with the reason in the log. windows-keyboard compares a
 # Windows identity with Windows' keyboard, which a Windows host has natively, and
-# on a macOS host runs its caret arm alone (the rest is GTK).
+# on a macOS host runs its caret arm alone (the rest is GTK); driven-wheel-notches-macos
+# needs a macOS identity, and a hosted Windows display (1366x768) fits none;
+# driven-move-coalescing needs moves that outrun a refresh tick, which Juggler's do not on Windows.
 NOT_ON = {
     "darwin": {
         "system-font-alias-stall":
@@ -174,6 +179,11 @@ NOT_ON = {
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
+        "driven-wheel-notches-macos":
+            "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
+        "driven-move-coalescing":
+            "Juggler's driven moves arrive one refresh tick apart on hosted Windows (median 16.0 ms, max 32.0 ms), "
+            "so a sweep cannot outrun the tick; stock real input at 25 ms/move is one pointermove each as well",
     },
 }
 

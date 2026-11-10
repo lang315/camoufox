@@ -4,15 +4,14 @@ mouse.wheel() reaches the page as a mouse wheel does in stock Firefox.
 A wheel turns in notches. On Linux (GTK, X11) stock Firefox 158.0.1 delivers
 each notch as its own `wheel` event: deltaMode 1 (lines), deltaY 6,
 wheelDeltaY -120, then DOMMouseScroll with detail 3 and MozMousePixelScroll
-with detail 60 (three 20 px lines), and the scroller moves 120 px per notch.
-Measured with XTest button 5 on Xvfb (three runs,
+with detail three lines (60 for the 20 px lines of the GTK fonts), and the scroller
+moves six lines, 120 px, per notch. Measured with XTest button 5 on Xvfb (three runs,
 identical). docs/input-dispatch.md has the Windows measurement, which has the
-same shape.
+same shape with that platform's line height: three native lines need no per-OS constant.
+The line is read with window.scrollByLines(1) on a page whose root has the scroller's font, so the
+pixels are checked against a line that the wheel's own events did not supply.
 
-macOS differs. A person's notched mouse on stock 159.0 gives one line a slow
-notch: deltaY 1, wheelDeltaY -48, DOMMouseScroll detail 1, MozMousePixelScroll
-16. A faster turn starts at one line and grows, with those values in proportion.
-A line is the scroller's line height, so the 16 and 48 follow the page's font.
+macOS differs (driven-wheel-notches-macos.py).
 
 Juggler sent the requested pixels instead, unless humanize was on: deltaMode 0,
 deltaY 100, wheelDeltaY -300, DOMMouseScroll detail 5, one event however far
@@ -23,11 +22,7 @@ notches of one call arrive tens of milliseconds apart. A long wheel leaves the
 browser-wide activation slot free between them, so input in another context does
 not wait for it to finish.
 
-The scroller is 600 px tall. Gecko limits one wheel scroll to a page of the scroller unless the
-user allows more (dom/events/EventStateManager.cpp:3779-3797), and the longest turn here sends events
-of up to 12 lines: 204 px at the 17 px line this page gives, which a 200 px scroller cut short (1016
-to 1040 px of 1071 in five launches of this build, 999 to 1057 with a 16 px font page), where a
-600 px one scrolled exactly 1071 in five of five. A 15 px line would give 180 px and not meet it.
+The scroller is 600 px tall, for the reason given in driven-wheel-notches-macos.py.
 
     python browser/tests/playwright/patches/driven-wheel-notches.py
 """
@@ -39,9 +34,17 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import hidden_display, resolve_binary  # noqa: E402
 
-PAGE = """<!doctype html><html><body style="margin:0;font:14px/18px sans-serif">
+PAGE = """<!doctype html><html style="font:14px/18px sans-serif"><body style="margin:0">
 <div id="s" style="position:absolute;left:40px;top:40px;width:300px;height:600px;overflow:auto">
 <div style="width:3000px;height:3000px"></div></div></body></html>"""
+LINE = """() => {
+  document.body.style.height = '5000px';
+  window.scrollByLines(1);
+  const line = window.scrollY;
+  window.scrollTo(0, 0);
+  document.body.style.height = '';
+  return line;
+}"""
 RECORD = """() => {
   window.__events = [];
   const s = document.getElementById('s');
@@ -51,9 +54,10 @@ RECORD = """() => {
   for (const t of ['wheel', 'DOMMouseScroll', 'MozMousePixelScroll']) s.addEventListener(t, on);
 }"""
 
-# stock 158.0.1, GTK/X11, one notch
-NOTCH = [["wheel", 1, 0, 6, -120], ["DOMMouseScroll", 3], ["MozMousePixelScroll", 60]]
-NOTCH_PX = 120
+# One notch of stock on GTK/X11 (158.0.1) and on Windows (159.0, docs/input-dispatch.md): three lines, so the
+# pixels are three and six of the scroller's own lines, which the guard reads with scrollByLines below.
+def notch(line):
+    return [["wheel", 1, 0, 6, -120], ["DOMMouseScroll", 3], ["MozMousePixelScroll", 3 * line]]
 
 
 def probe(binary, os, turns):
@@ -62,9 +66,12 @@ def probe(binary, os, turns):
     with Camoufox(executable_path=str(binary), headless=False, os=os, window=(1280, 900)) as browser:
         page = browser.new_page()
         page.set_content(PAGE)
+        # The window scrolls by one line through a call the wheel does not take, using the root's font
+        # (the same as the scroller's, set on <html>), so the line the wheel's pixels are checked against
+        # is not read off the wheel's own events. The page is made tall for the call and put back after.
+        out = {"line": page.evaluate(LINE)}
         page.mouse.move(190, 140)
         page.evaluate(RECORD)
-        out = {}
         for name, dy in turns:
             page.evaluate("() => { window.__events = []; document.getElementById('s').scrollTop = 0; }")
             page.mouse.wheel(0, dy)
@@ -95,34 +102,15 @@ async def contended_wheel(binary):
         return finished_first, [e[5] for e in events if e[0] == "wheel"]
 
 
-def mac_failures(got):
-    failures = []
-    line = next(e[1] for e in got["slow"][0] if e[0] == "MozMousePixelScroll")
-    for name, lines in (("slow", 1), ("turn", 6), ("long", 63)):
-        events, scrolled = got[name]
-        wheels = [e[3] for e in events if e[0] == "wheel"]
-        expected = [
-            part
-            for dy in wheels
-            for part in (["wheel", 1, 0, dy, -3 * line * dy], ["DOMMouseScroll", dy], ["MozMousePixelScroll", line * dy])
-        ]
-        shape = [e[:5] if e[0] == "wheel" else e for e in events]
-        if shape != expected:
-            failures.append(f"macOS mouse.wheel ({name}) delivered {shape}, expected {expected}")
-        if not wheels or wheels[0] != 1 or sum(wheels) != lines:
-            failures.append(f"macOS mouse.wheel ({name}) sent lines {wheels}: a burst starts at 1 and totals {lines}")
-        if scrolled != line * lines:
-            failures.append(f"macOS mouse.wheel ({name}) scrolled {scrolled} px, expected {line * lines}")
-    return failures
-
-
 def main() -> int:
     with hidden_display("1920x1080"):
         binary = resolve_binary()
         got = probe(binary, "linux", (("one", 100), ("three", 300)))
-        mac = probe(binary, "macos", (("slow", 16), ("turn", 100), ("long", 1000)))
         wheel_finished_first, contended = asyncio.run(contended_wheel(binary))
-    failures = mac_failures(mac)
+    failures = []
+    line = got["line"]
+    if line < 8:
+        failures.append(f"scrollByLines(1) moved the window {line} px: the line height could not be read")
     if wheel_finished_first:
         failures.append("a click in another context waited for a long wheel to finish")
     if any(b - a < 10 for a, b in zip(contended, contended[1:])):
@@ -130,10 +118,10 @@ def main() -> int:
     for name, notches in (("one", 1), ("three", 3)):
         events, scrolled = got[name]
         shape = [e[:5] if e[0] == "wheel" else e for e in events]
-        if shape != NOTCH * notches:
-            failures.append(f"mouse.wheel ({name}) delivered {shape}, stock {NOTCH * notches}")
-        if scrolled != NOTCH_PX * notches:
-            failures.append(f"mouse.wheel ({name}) scrolled {scrolled} px, stock {NOTCH_PX * notches}")
+        if shape != notch(line) * notches:
+            failures.append(f"mouse.wheel ({name}) delivered {shape}, stock {notch(line) * notches}")
+        if scrolled != 6 * line * notches:
+            failures.append(f"mouse.wheel ({name}) scrolled {scrolled} px, stock {6 * line * notches} (six {line} px lines)")
         stamps = [e[5] for e in events if e[0] == "wheel"]
         gaps = [b - a for a, b in zip(stamps, stamps[1:])]
         if any(g < 10 for g in gaps):
@@ -142,7 +130,7 @@ def main() -> int:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print("PASS: mouse.wheel turns notches as a wheel does in stock")
+    print(f"PASS: mouse.wheel turns notches as a wheel does in stock ({line} px lines)")
     return 0
 
 

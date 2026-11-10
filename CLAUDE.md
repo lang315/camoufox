@@ -101,10 +101,10 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   ```bash
   python3 -m ci.run_patch_guards --binary /path/to/camoufox-bin
   ```
-  The runner works on Linux, macOS and Windows. Eight guards are Linux-only by
+  The runner works on Linux, macOS and Windows. Nine guards are Linux-only by
   subject (`ipv4-only-network`, `webgl-live-state`, `webgl-renderer-pair`,
   `occluded-window-active`, `pointer-lock-offscreen`,
-  `virtual-display-window-visible`, `driven-drag-gtk`, `headless-software-webgl`); `system-font-alias-stall`
+  `virtual-display-window-visible`, `driven-drag-gtk`, `headless-software-webgl`, `css-device-size-fractional`); `system-font-alias-stall`
   does not run on macOS and `windows-keyboard` not on Windows. On those platforms
   they are reported as "not applicable" with the reason, never as passes. On Linux a
   missing prerequisite fails. `stock-gpu-parity` fails on a host whose hardware GPU

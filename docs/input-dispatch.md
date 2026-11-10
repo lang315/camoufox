@@ -213,7 +213,7 @@ notch's distance (120 px here) or a whole number of lines, not the exact pixels 
 `mouse.wheel(0, 0)` sends nothing. Humanize does not change this. Each notch takes the activation slot alone, so a
 long wheel does not hold up input in other contexts.
 `browser/tests/playwright/patches/driven-wheel-notches.py` compares the result
-with stock's.
+with stock's on a Linux or Windows identity, and `driven-wheel-notches-macos.py` on a macOS one.
 
 ## Pasted text
 

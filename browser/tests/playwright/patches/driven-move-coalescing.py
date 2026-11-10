@@ -16,6 +16,13 @@ The guard moves along a 64-point path the way a script does
 (page.mouse.move(x, y, steps=63)) and checks the page's counts. It also checks
 that the page has the destination as soon as move() returns.
 
+Coalescing needs moves that outrun a refresh tick, so the guard reads the tick from
+requestAnimationFrame and the pace from the arrival times of the raw moves, and fails with
+SETUP-INVALID when the sweep is not faster. On a hosted Windows runner Juggler's moves arrive
+16.0 ms apart (median, max 32.0; performance.now() resolves 1 ms) against a 15.6 ms tick, and stock's
+real input at 25 ms a move gives one pointermove each (run 42909452571), so no sweep there can
+show coalescing and the runner does not run the guard on Windows (NOT_ON).
+
     python browser/tests/playwright/patches/driven-move-coalescing.py
 """
 
@@ -30,13 +37,24 @@ from helpers import hidden_display, resolve_binary  # noqa: E402
 # Served from 127.0.0.1: pointerrawupdate exists only in a secure context. The
 # page records its own events and keeps them in an attribute for the driver.
 PAGE = b"""<!doctype html><html><body style="margin:0;width:1200px;height:800px"><script>
-  const moves = []; let raws = 0;
+  const moves = [], raws = [];
   const keep = () => document.body.dataset.seen = JSON.stringify([moves, raws]);
   addEventListener('pointermove', (e) => { moves.push([e.getCoalescedEvents().length, e.clientX, e.clientY]); keep(); }, true);
-  addEventListener('pointerrawupdate', () => { raws++; keep(); }, true);
-  addEventListener('keydown', () => { moves.length = 0; raws = 0; keep(); }, true);
+  addEventListener('pointerrawupdate', () => { raws.push(performance.now()); keep(); }, true);
+  addEventListener('keydown', () => { moves.length = 0; raws.length = 0; keep(); }, true);
 </script></body></html>"""
-SEEN = "() => JSON.parse(document.body.dataset.seen || '[[], 0]')"
+SEEN = "() => JSON.parse(document.body.dataset.seen || '[[], []]')"
+# One refresh tick: the median distance between requestAnimationFrame callbacks.
+TICK = """() => new Promise((resolve) => {
+  const gaps = []; let last;
+  const frame = (now) => {
+    if (last !== undefined) gaps.push(now - last);
+    last = now;
+    if (gaps.length < 20) requestAnimationFrame(frame);
+    else resolve(gaps.sort((a, b) => a - b)[10]);
+  };
+  requestAnimationFrame(frame);
+})"""
 STEPS = 63
 
 
@@ -60,6 +78,7 @@ def probe(binary):
         with Camoufox(executable_path=str(binary), headless=False, os="linux", window=(1280, 900)) as browser:
             page = browser.new_page()
             page.goto(f"http://127.0.0.1:{server.server_address[1]}/")
+            tick = page.evaluate(TICK)
             page.mouse.move(100, 100)
             page.wait_for_timeout(300)
             page.keyboard.press("Shift")  # the page starts counting afresh
@@ -67,23 +86,31 @@ def probe(binary):
             sweep = page.evaluate(SEEN)
             page.mouse.move(700, 500)
             last = page.evaluate(SEEN)[0][-1]
-            return sweep, last
+            return sweep, last, tick
     finally:
         server.shutdown()
 
 
 def main() -> int:
     with hidden_display("1920x1080"):
-        (moves, raws), last = probe(resolve_binary())
+        (moves, raws), last, tick = probe(resolve_binary())
     lens = [m[0] for m in moves] or [0]
+    gaps = sorted(b - a for a, b in zip(raws, raws[1:]))
+    gap = gaps[len(gaps) // 2] if gaps else float("inf")
     failures = []
-    if raws != STEPS:
-        failures.append(f"{raws} pointerrawupdate for {STEPS} moves: stock fires one per move")
+    # The premise of the two rate checks below is a sweep faster than the refresh tick. Without it nothing
+    # queues, in stock as in Camoufox (stock real input at 25 ms a move is one pointermove each), so a
+    # sweep that does not outrun the tick measures nothing.
+    outran = gap < tick
+    if not outran:
+        failures.append(f"SETUP-INVALID: the sweep did not outrun the refresh tick (gap {gap:.1f} ms, tick {tick:.1f} ms)")
+    if len(raws) != STEPS:
+        failures.append(f"{len(raws)} pointerrawupdate for {STEPS} moves: stock fires one per move")
     if sum(lens) != STEPS:
         failures.append(f"pointermoves carry {sum(lens)} coalesced moves, {STEPS} were made")
-    if len(moves) > STEPS * 0.7:
+    if outran and len(moves) > STEPS * 0.7:
         failures.append(f"{len(moves)} pointermoves for {STEPS} moves at 125 Hz: stock dispatches one per frame")
-    if sorted(lens)[len(lens) // 2] < 2:
+    if outran and sorted(lens)[len(lens) // 2] < 2:
         failures.append(f"coalesced lengths {lens}: stock carries 2 to 4 per frame")
     if not moves or moves[-1][1:] != [100 + STEPS * 5, 100 + STEPS * 2]:
         failures.append(f"the page's last move is {moves[-1] if moves else None} when move() returned")
@@ -93,7 +120,8 @@ def main() -> int:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"PASS: {STEPS} moves reach the page as {len(moves)} pointermoves, coalesced {min(lens)}-{max(lens)}")
+    print(f"PASS: {STEPS} moves reach the page as {len(moves)} pointermoves, coalesced {min(lens)}-{max(lens)} "
+          f"(raw moves {gap:.1f} ms apart, tick {tick:.1f} ms)")
     return 0
 
 

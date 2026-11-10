@@ -63,7 +63,7 @@ from ci._util import WORK_DIR, read_upstream_sh  # noqa: E402
 from camoufox import webgl  # noqa: E402
 from camoufox.fingerprints import _FPGEN_OS  # noqa: E402
 from camoufox.fpgen_model import load_fpgen  # noqa: E402
-from camoufox.host_rendering import renders_on_hardware  # noqa: E402
+from camoufox.host_rendering import has_canvas_placeholder, renders_on_hardware  # noqa: E402
 from camoufox.utils import launch_options, resolve_verstr  # noqa: E402
 
 ARCHIVE = "https://archive.mozilla.org/pub/firefox/releases/{version}/"
@@ -354,9 +354,13 @@ def main() -> int:
     # software renderer, through the path a real launch takes, and keeps the
     # device's tables.
     device = nearest_device(target_os, gpu, stock_flat)
+    claims_host = tuple(gpu) in webgl.firefox_gpus(target_os)
+    # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
+    # device's pair is named, and the launcher covers the canvas for a named GPU.
+    named = () if claims_host else ("webGl:vendor", "webGl:renderer")
     pinned = {
         k: v for k, v in device.items()
-        if k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
+        if k in named or k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
     }
     options = launch_options(
         os=host_os, headless=True, executable_path=str(camoufox), config=pinned, i_know_what_im_doing=True
@@ -365,13 +369,18 @@ def main() -> int:
 
     failures: List[str] = []
     camoufox_gpu = (camoufox_out["webgl"] or {}).get("gpu")
-    # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
-    # identity is the chosen device's GPU and its renderer string is not stock's to compare.
-    claims_host = tuple(gpu) in webgl.firefox_gpus(target_os) or renders_on_hardware(tuple(gpu))
-    expected = gpu if claims_host else [device["webGl:vendor"], device["webGl:renderer"]]
-    if camoufox_gpu != expected:
-        print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {expected}")
-        failures.append("claimed GPU")
+    if claims_host:
+        if camoufox_gpu != gpu:
+            print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {gpu}")
+            failures.append("claimed GPU")
+    else:
+        # Reading back the pair just pinned would prove nothing: what the launcher decides here is that
+        # the canvas is covered.
+        print(f"    claimed GPU: not measured, host renderer {gpu[1]} is not recorded for {target_os}; "
+              "vendor/renderer pinned to the device pair")
+        if not has_canvas_placeholder(options["firefox_user_prefs"]):
+            print("    [FAIL] the launcher left the canvas uncovered for an unrecorded host renderer")
+            failures.append("canvas cover")
     recorded_flat, camoufox_flat = flatten(recorded_out), flatten(camoufox_out)
     for key in sorted(set(stock_flat) | set(recorded_flat)):
         new, old, got = stock_flat.get(key), recorded_flat.get(key), camoufox_flat.get(key)

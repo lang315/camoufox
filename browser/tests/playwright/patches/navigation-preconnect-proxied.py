@@ -19,6 +19,13 @@ What PASS means:
       resolves the name on this machine only when no proxy is in play, which
       the resolver's log shows.
 
+The direct link must show up in the log, and the guard waits for it instead of for a
+fixed time (a loaded Windows runner took longer than the second the guard once gave it). The
+two proxied launches then wait max(1 s, 3 x that latency) for a name that must not appear.
+shortcut: Firefox's HTMLDNSPrefetch has no skip log line to wait for (read in mainline, not the 159 tree), so
+the negative wait is a calibration: the context arm shares the direct arm's launch, but the launch-proxy arm's
+wait comes from another launch, so it is not a proof that the name would have shown in time.
+
     python browser/tests/playwright/patches/navigation-preconnect-proxied.py
 """
 
@@ -30,6 +37,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import default_route_ipv4, resolve_binary  # noqa: E402
@@ -37,6 +45,8 @@ from helpers import default_route_ipv4, resolve_binary  # noqa: E402
 PAGE = b"<!doctype html><title>page</title>"
 # Long enough for a preconnect behind a finished load to reach the listener.
 SETTLE_SECONDS = 1
+# How long the direct dns-prefetch link may take to reach the resolver's log before the guard gives up.
+RESOLVE_LIMIT_SECONDS = 30
 
 
 class Page(http.server.BaseHTTPRequestHandler):
@@ -75,13 +85,27 @@ def connections_during(listener: Listener, action) -> int:
     return listener.connections - before
 
 
-def prefetch_from(context, name: str) -> None:
+def prefetch_from(context, name: str, settle: float) -> None:
     """Open a route-fulfilled document, so no load shows Firefox the proxy."""
     page = context.new_page()
     body = f'<!doctype html><link rel="dns-prefetch" href="//{name}">'
     page.route("**/*", lambda route: route.fulfill(status=200, content_type="text/html", body=body))
     page.goto("http://document.test/")
-    time.sleep(SETTLE_SECONDS)
+    time.sleep(settle)
+
+
+def resolver_log(directory: Path) -> str:
+    return "".join(path.read_text(encoding="utf-8", errors="replace") for path in directory.iterdir())
+
+
+def seconds_until_resolved(directory: Path, name: str) -> Optional[float]:
+    """How long after now the resolver's log names `name`; None if it never does within the limit."""
+    start = time.monotonic()
+    while time.monotonic() - start < RESOLVE_LIMIT_SECONDS:
+        if name in resolver_log(directory):
+            return time.monotonic() - start
+        time.sleep(0.1)
+    return None
 
 
 def main() -> int:
@@ -91,18 +115,21 @@ def main() -> int:
     proxy = Listener("127.0.0.1")
     url = f"http://{origin.server_address[0]}:{origin.server_address[1]}/"
     server = f"http://127.0.0.1:{proxy.server_address[1]}"
-    resolver_log = tempfile.TemporaryDirectory()
-    env = {**os.environ, "MOZ_LOG": "sync,append,nsHostResolver:5", "MOZ_LOG_FILE": str(Path(resolver_log.name) / "resolver")}
+    log_holder = tempfile.TemporaryDirectory()
+    env = {**os.environ, "MOZ_LOG": "sync,append,nsHostResolver:5", "MOZ_LOG_FILE": str(Path(log_holder.name) / "resolver")}
     launch = dict(headless=True, os="linux", executable_path=str(resolve_binary()), i_know_what_im_doing=True, env=env)
 
+    log_dir = Path(log_holder.name)
     with Camoufox(**launch) as browser:
         # First: a proxied context turns prefetch off for the whole browser.
-        prefetch_from(browser.new_context(), "direct-prefetch.test")
-        prefetch_from(browser.new_context(proxy={"server": server}), "context-prefetch.test")
+        prefetch_from(browser.new_context(), "direct-prefetch.test", 0)
+        latency = seconds_until_resolved(log_dir, "direct-prefetch.test")
+        settle = max(SETTLE_SECONDS, 3 * latency) if latency is not None else SETTLE_SECONDS
+        prefetch_from(browser.new_context(proxy={"server": server}), "context-prefetch.test", settle)
     with Camoufox(**launch, proxy={"server": server}, geoip=False) as browser:
-        prefetch_from(browser.new_context(), "launch-prefetch.test")
-    resolved = "".join(path.read_text(encoding="utf-8", errors="replace") for path in Path(resolver_log.name).iterdir())
-    resolver_log.cleanup()
+        prefetch_from(browser.new_context(), "launch-prefetch.test", settle)
+    resolved = resolver_log(log_dir)
+    log_holder.cleanup()
 
     with Camoufox(**launch) as browser:
         direct = connections_during(origin, lambda: browser.new_page().goto(url))
@@ -127,7 +154,8 @@ def main() -> int:
         ("launch proxy: the proxy serves the page", served_launch >= 1, served_launch),
         ("launch proxy: nothing went around it", around_launch == 0, around_launch),
         ("a route answers the request: the origin hears nothing", around_route == 0, around_route),
-        ("direct: a dns-prefetch link is resolved", "direct-prefetch.test" in resolved, len(resolved)),
+        ("direct: a dns-prefetch link is resolved (the two below mean nothing without it)",
+         latency is not None, f"after {latency:.1f} s" if latency is not None else f"never resolved in {RESOLVE_LIMIT_SECONDS} s"),
         ("context proxy: a dns-prefetch link is not resolved here", "context-prefetch.test" not in resolved, ""),
         ("launch proxy: a dns-prefetch link is not resolved here", "launch-prefetch.test" not in resolved, ""),
     ]
