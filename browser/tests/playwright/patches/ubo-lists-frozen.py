@@ -20,6 +20,11 @@ returns.
     control  the page's ordinary image host is requested (the proxy sees traffic)
     frozen   no host uBO fetches lists from (its assets.json) is contacted
              from launch until WAIT_S after uBO first blocks
+    unheld   no page load before uBO first blocks takes HOLD_S or longer. uBO
+             parks every tab request from its listener's registration until
+             its ten lists are compiled, which stalled every launch's page,
+             media and fetch loads for seconds (#403, #431); freeze_lists
+             makes it pass them instead (canSuspend() false)
 
     python browser/tests/playwright/patches/ubo-lists-frozen.py
 """
@@ -43,6 +48,9 @@ from helpers import resolve_binary  # noqa: E402
 # between list fetches.
 WAIT_S = 50
 READY_S = 60
+# A load that is not held takes tens of milliseconds here; uBO's hold lasted 2.4 to 7.5 s
+# on a hosted runner (#403).
+HOLD_S = 1.5
 AD_HOST = "pagead2.googlesyndication.com"
 CONTROL_HOST = "example.com"
 AD_PAGE = (f'<!doctype html><script src="https://{AD_HOST}/pagead/js/adsbygoogle.js"></script>'
@@ -65,9 +73,11 @@ def list_hosts(addon_path: str) -> set:
     return {urlparse(u).hostname for u in urls if u.startswith("http")}
 
 
-def blocks_ad(page, url: str, hosts: list) -> bool:
+def blocks_ad(page, url: str, hosts: list, loads: list) -> bool:
     before = hosts.count(AD_HOST)
+    began = time.monotonic()
     page.goto(url)
+    loads.append(time.monotonic() - began)
     return hosts.count(AD_HOST) == before
 
 
@@ -110,6 +120,7 @@ def main() -> int:
     base = f"http://127.0.0.1:{srv.server_address[1]}"
 
     hosts: list = []
+    loads: list = []
     proxy = recording_proxy(hosts)
     try:
         # geoip=False: the recording proxy refuses every CONNECT, so the exit
@@ -118,7 +129,7 @@ def main() -> int:
                       proxy={"server": f"http://127.0.0.1:{proxy.getsockname()[1]}"}) as browser:
             page = browser.new_page()
             deadline = time.monotonic() + READY_S
-            while not blocks_ad(page, f"{base}/ad.html", hosts):
+            while not blocks_ad(page, f"{base}/ad.html", hosts, loads):
                 if time.monotonic() > deadline:
                     print(f"FAIL: uBO did not block {AD_HOST} within {READY_S}s -- check is vacuous")
                     return 1
@@ -133,7 +144,10 @@ def main() -> int:
     fetched = sorted(set(contacted) & ubo_hosts)
     print(f"hosts contacted until {WAIT_S}s after uBO first blocked: {', '.join(contacted) or 'none'}")
     print()
+    print(f"page loads until uBO first blocked: {len(loads)}, slowest {max(loads):.2f}s")
     failures = []
+    if max(loads) >= HOLD_S:
+        failures.append(f"a page load took {max(loads):.2f}s: uBO held it while its lists compiled")
     if CONTROL_HOST not in contacted:
         failures.append(f"{CONTROL_HOST} was never requested -- the proxy saw no traffic, check is vacuous")
     if fetched:
