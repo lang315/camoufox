@@ -360,7 +360,7 @@ rules:
       - "uBO src/js/storage.js: loadFilterLists() calls vAPI.net.suspend() whenever vAPI.Net.canSuspend(), true on Firefox"
       - "uBO src/js/background.js: assetFetchTimeout 30"
       - "issue #403; uBO 1.75.4 js/traffic.js:1349, js/start.js:456, js/storage.js:909 and :961; hold measured on hosted ubuntu-24.04 in runs 41748394329 and 41750523526, browser of Tests run 41739273709"
-      - "issue #431; uBO 1.76.0 js/vapi-background.js:1221 (listener registered in the Net constructor) and :1279 (setSuspendableListener), js/start.js:417 (webRequest.start() after the lists load); e2e.yml dispatches 43041843386 and 43048541138 (browser of Tests run 43011230804); audio numbers from 43038459124, hold arms from 43041843386 and 43048541138"
+      - "issue #431; uBO 1.76.0 js/vapi-background.js:1221 (listener registered in the Net constructor) and :1279 (setSuspendableListener), js/start.js:417 (webRequest.start() after the lists load); e2e.yml dispatches 43041843386 and 43048541138 (browser of Tests run 43011230804); audio numbers from 43038459124, hold arms from 43041843386, 43048541138 and, with #433's uBO, 43081011718"
     rationale: >-
       On Firefox uBO holds every page request while it loads its filter lists.
       Every Camoufox launch is a first run, and on a first run uBO auto-selects

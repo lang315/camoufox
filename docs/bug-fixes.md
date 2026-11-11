@@ -39,7 +39,9 @@ later change should read first.
 | 43062379383 (the audio probe) | shipped uBO | 40 | 1 | 7843 ms |
 | | fixed uBO | 40 | 0 | 352 ms |
 
-Red to green for the guard `ubo-lists-frozen.py`, which now fails when a plain page load takes 1.5 s or longer before uBO first blocks (run 43069498593, shipped then fixed uBO, three and six launches): shipped uBO FAIL 3 of 3 (5.05, 5.69 and 5.62 s), fixed uBO PASS 6 of 6 (slowest plain load 0.21 s). Tests on the PR's head: see the PR.
+After #433 landed (run 43081011718, uBO staged by `fetch-ubo.py` of main 019bf56c, which also sets `prefetchingDisabled: false`, against the merged fix; the browser is still that of Tests run 43011230804): a local page loaded every 300 ms was held in 10 of 10 launches on main's uBO (4.6 to 5.3 s) and in 0 of 10 on the merged fix (worst 260 ms); the audio probe was held in 0 of 40 on either, because all 80 requests were sent before the listener existed (so that run says nothing about the audio symptom).
+
+Red to green for the guard `ubo-lists-frozen.py`, which now fails when a plain page load takes 1.5 s or longer before uBO first blocks (run 43069498593, shipped then fixed uBO, three and six launches): shipped uBO FAIL 3 of 3 (5.05, 5.69 and 5.62 s), fixed uBO PASS 6 of 6 (slowest plain load 0.21 s), and on the merged tree 4 of 4 (slowest 0.16 s, run 43081011718). Tests on the PR's head: see the PR.
 
 **What misled the investigation.**
 
