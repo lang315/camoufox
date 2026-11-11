@@ -27,6 +27,22 @@ later change should read first.
 
 **What misled.** The existing voice-grid test passes a grid with empty lists, which encodes anywhere; only a real grid holds the non-ASCII voice names.
 
+## #431: `test_web_apis_behave_like_the_reference[pkg]` reported an audio difference when uBlock Origin held the probe's request
+
+**Fixed by:** PR #437. **Found by:** Tests runs 42956004271 (job 130318498018) and 43012099185 (job 130548452535).
+
+**Symptom.** `audio: camoufox='error: Error' reference=...`, the Camoufox probe stuck at `{'ms': 8000, 'step': 'loadstart'}` while the reference reached `loadedmetadata` in 11 ms. About 4% of launches (3 of 80, the request held 7.6 to 7.8 s against the probe's 8 s bound).
+
+**Root cause.** The journey compared a default Camoufox launch, which loads the bundled uBlock Origin, with Playwright's own Firefox, which loads no extension. uBO holds every page request from its listener's registration until its lists compile (#403, documented and settled). The audio probe's `/tone.wav` request sometimes lands in that window, so the journey reported uBO's start-up hold as a web-API difference. The two sides were not on the same axis.
+
+**Fix.** `run_apps` takes `exclude_addons`, and the Camoufox side of this journey launches with `exclude_addons=[DefaultAddons.UBO]` (the drivers pass it to `NewBrowser` / `launch_options`; goapi loads no uBO). Same remedy as #401. Coverage: this journey no longer exercises web APIs with uBO loaded; every other journey launches with defaults, uBO included.
+
+**Alternatives.** PR #434 patched uBO to remove the hold: rejected, because the hold is #403's documented behaviour and the defect is the comparison. Raising the 8 s bound would hide a real slow API and still lose to a longer hold.
+
+**Evidence.** Red: the two runs above. The collision is 4%, so a red cannot be reproduced on demand; the green is the Tests run on this PR's head. The evidence that uBO is absent is the code path (`launch_options(exclude_addons=...)`), not a printed line.
+
+**What misled.** Framing it as "uBO delays the probe" pointed at the browser; the failing line was a comparison, and the reference had nothing to delay it.
+
 ## #427: the bundled uBlock Origin switched Firefox's prefetch and preconnect off after startup
 
 **Fixed by:** the PR that fixes #427. **Found by:** e2e probe runs 42927033470, 42928752915 and 42930286175 (Windows), which read the prefs and the server's view in stock, with and without uBO.

@@ -27,10 +27,10 @@ def run_geo(driver, site, geo):
     return got
 
 
-def run_apps(driver, site):
+def run_apps(driver, site, exclude_addons=None):
     """The page's results, two reads of one canvas and one GL buffer, whether the launch was covered,
     each failed probe's message and the step it had reached, and every probe's milliseconds."""
-    b = driver.launch(headless=False)
+    b = driver.launch(headless=False, exclude_addons=exclude_addons)
     page = b.new_context().new_page()
     page.goto(site.url("/apps"))
     page.click("#clip")
@@ -49,7 +49,11 @@ def reference(ref, site):
 
 
 def test_web_apis_behave_like_the_reference(drv, site, reference, check):
-    got, reads, covered, errors, timings = run_apps(drv, site)
+    # The reference has no extension; uBO holds page requests until its lists compile (#403), which
+    # outlasts the audio probe's 8 s bound in ~4% of launches (#431). Same axis: no addon on either side.
+    from camoufox import DefaultAddons
+
+    got, reads, covered, errors, timings = run_apps(drv, site, exclude_addons=[DefaultAddons.UBO])
     want, plain, _, ref_errors, ref_timings = reference
     print(f"probe errors: camoufox={errors} reference={ref_errors}")
     print(f"probe timings: camoufox={timings} reference={ref_timings}")
