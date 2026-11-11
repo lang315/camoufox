@@ -74,7 +74,7 @@ class GoDriver:
         return reply.get("result")
 
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
-               webrtc_ip=None, prefs=None, env=None) -> "GoBrowser":
+               webrtc_ip=None, prefs=None, env=None, exclude_addons=None) -> "GoBrowser":  # goapi bundles no uBO: nothing to exclude
         for opt, value in (("humanize", humanize), ("geoip", geoip), ("locale", locale), ("env", env)):
             if value:
                 pytest.skip(f"go: no {opt}")
