@@ -31,6 +31,7 @@ page is the same, and the control arm requires the page itself to have reached t
 import functools
 import http.server
 import importlib.util
+import shutil
 import socket
 import sys
 import tempfile
@@ -74,10 +75,11 @@ def counting_listener() -> tuple:
     return sock, count
 
 
-def main() -> int:
+def arm(ubo, with_ubo: bool) -> dict:
+    """One launch: the same proxy and pages whether or not uBO is loaded."""
+    from camoufox import DefaultAddons
     from camoufox.sync_api import Camoufox
 
-    ubo = frozen()
     requested: list = []
 
     class Site(ubo.Quiet):
@@ -98,21 +100,23 @@ def main() -> int:
 
     hosts: list = []
     proxy = ubo.recording_proxy(hosts)
+    ready = True
     try:
         # The recording proxy refuses every CONNECT, as ubo-lists-frozen.py's does: uBO's
         # ad block is observable without a network, and geoip would fail through it.
         with Camoufox(**launch_kwargs(i_know_what_im_doing=True, geoip=False,
+                                      exclude_addons=[] if with_ubo else [DefaultAddons.UBO],
                                       proxy={"server": f"http://127.0.0.1:{proxy.getsockname()[1]}"})) as browser:
             page = browser.new_page()
-            deadline = time.monotonic() + ubo.READY_S
-            while not ubo.blocks_ad(page, f"{base}/ad.html", hosts):
-                if time.monotonic() > deadline:
-                    print(f"FAIL: uBO did not block {ubo.AD_HOST} within {ubo.READY_S}s -- check is vacuous")
-                    return 1
-                time.sleep(1)
+            if with_ubo:
+                deadline = time.monotonic() + ubo.READY_S
+                while not ubo.blocks_ad(page, f"{base}/ad.html", hosts):
+                    if time.monotonic() > deadline:
+                        ready = False
+                        break
+                    time.sleep(1)
             requested.clear()
             page.goto(f"{base}/links.html")
-            control = requested.count("/links.html")
             deadline = time.monotonic() + SETTLE_S
             while time.monotonic() < deadline and not (
                     "/prefetch-me.txt" in requested and connections[0]):
@@ -121,12 +125,26 @@ def main() -> int:
         proxy.close()
         listener.close()
         srv.shutdown()
+        shutil.rmtree(site, ignore_errors=True)
+    return {"ready": ready, "requested": list(requested), "connections": connections[0]}
 
+
+def main() -> int:
+    ubo = frozen()
+    control = arm(ubo, with_ubo=False)
+    loaded = arm(ubo, with_ubo=True)
+    print(f"control (no uBO): requests {control['requested']}, preconnect connections {control['connections']}")
+    print(f"uBO arm:          requests {loaded['requested']}, preconnect connections {loaded['connections']}")
     failures: list = []
-    print("after uBO blocked the ad script:")
-    check(failures, "control: the page reached the server itself", control, 1)
-    check(failures, "rel=prefetch requested /prefetch-me.txt", requested.count("/prefetch-me.txt"), 1)
-    check(failures, "rel=preconnect opened a connection", connections[0] >= 1, True)
+    print("control, same proxy and pages without uBO (a failure here is SETUP-INVALID, not a uBO finding):")
+    check(failures, "SETUP-INVALID: control page reached the server", control["requested"].count("/links.html"), 1)
+    check(failures, "SETUP-INVALID: control rel=prefetch requested", control["requested"].count("/prefetch-me.txt"), 1)
+    check(failures, "SETUP-INVALID: control rel=preconnect connected", control["connections"] >= 1, True)
+    print("uBO loaded, after it blocked the ad script:")
+    check(failures, f"uBO blocked {ubo.AD_HOST} within {ubo.READY_S}s", loaded["ready"], True)
+    check(failures, "uBO arm: page reached the server", loaded["requested"].count("/links.html"), 1)
+    check(failures, "uBO arm: rel=prefetch requested", loaded["requested"].count("/prefetch-me.txt"), 1)
+    check(failures, "uBO arm: rel=preconnect connected", loaded["connections"] >= 1, True)
     if failures:
         print(f"\nFAIL: {', '.join(failures)}")
         return 1
