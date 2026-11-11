@@ -100,13 +100,10 @@ function withProxyAuth(proxy, auth) {
   return {...proxy, username: auth.username, password: auth.password};
 }
 
-// Camoufox: WebRTC must not gather around a Juggler proxy, which is not in
-// network.proxy.*. WebRTCIPManager::IsProxied reads this in the content process.
-function recordProxied(owner) {
-  Services.prefs.getDefaultBranch('roverfox.s.').setCharPref(`webrtc_proxied_${owner}`, '1');
-  // Firefox turns prefetch off at its first proxied load. A document with no
-  // load yet (about:blank, a fulfilled route) would resolve its dns-prefetch
-  // links on this machine's resolver until then.
+// Firefox turns prefetch off at its first proxied load. A document with no load
+// yet (about:blank, a fulfilled route) would resolve its dns-prefetch links on
+// this machine's resolver until then.
+function disableDnsPrefetch() {
   Services.prefs.getDefaultBranch('network.dns.').setBoolPref('disablePrefetch', true);
 }
 
@@ -279,7 +276,7 @@ export class TargetRegistry {
     this._browserProxy = null;
     this._launchProxyAuth = readLaunchProxyAuth();
     if (usesSystemProxy())
-      recordProxied('browser');
+      disableDnsPrefetch();
 
     // Cleanup containers from previous runs (if any)
     ContextualIdentityService.ensureDataReady();
@@ -472,7 +469,7 @@ export class TargetRegistry {
 
   setBrowserProxy(proxy) {
     this._browserProxy = withProxyAuth(proxy, this._launchProxyAuth);
-    recordProxied('browser');
+    disableDnsPrefetch();
     this._updateProxiesWithSameAuthCacheAndDifferentCredentials();
   }
 
@@ -1456,7 +1453,7 @@ class BrowserContext {
     // Clear AuthCache.
     Services.obs.notifyObservers(null, "net:clear-active-logins");
     this._proxy = withProxyAuth(proxy, this._proxyAuth);
-    recordProxied(this.userContextId);
+    disableDnsPrefetch();
     this._registry._updateProxiesWithSameAuthCacheAndDifferentCredentials();
   }
 
