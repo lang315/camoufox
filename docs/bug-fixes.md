@@ -14,6 +14,16 @@ later change should read first.
 
 
 
+## #419: `getter-cost-parity` failed on a hosted macOS runner with "stock Firefox's page failed: worker died before it reported"
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42923629488, job 130204462226, parity group).
+
+**Symptom.** The reference launch, not the subject, failed: `FAIL: stock Firefox's page failed: Error: worker died before it reported`.
+
+**Root cause (by reading; the macOS probe on the PR's head is the proof).** The sync added a WebGL getter bench to the worker (`new OffscreenCanvas(16, 16).getContext('webgl')`, then `G.getParameter`) and a `w.onerror` that prints that message. `run_stock` launches stock Firefox raw, with no `webgl.force-enabled`, which the Camoufox launcher sets on every launch. On the hosted macOS VM native GL is refused (`FEATURE_FAILURE_CGL_FBO`), so stock got a null context and the worker threw. `stock-gpu-parity` sets the pref for stock and got a context on the same VM. The reference was not launched on the same axis as the subject.
+
+**Fix.** The stock profile gets `webgl.force-enabled: true`. A stock page that still fails fails with `SETUP-INVALID`, and the worker's error message now names the thrown message, so the failing side is readable (a worker error is the worker's context, any other the window's). The bench is not skipped when stock has no context.
+
 ## #419: `test_web_apis_behave_like_the_reference[go]` had no WebGL context on a hosted macOS runner: goapi never set `webgl.force-enabled`
 
 **Fixed by:** the PR that fixes #419. **Found by:** the macOS e2e control on the sync build (run 42934464186): only the `[go]` parameter failed; `[pkg]` and `[pw]` printed "ok a WebGL context exists".

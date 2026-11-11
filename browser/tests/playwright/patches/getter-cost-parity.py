@@ -153,7 +153,7 @@ function bench(exprs, setup) {
   const w = new Worker(URL.createObjectURL(new Blob([src])));
   const worker = await new Promise(r => {
     w.onmessage = e => r(e.data);
-    w.onerror = () => r({error: 'worker died before it reported'});
+    w.onerror = (e) => r({error: 'worker died before it reported: ' + (e.message || 'no message')});
     w.postMessage(spec.worker);
   });
   if (worker && worker.error) throw new Error(worker.error);
@@ -238,7 +238,10 @@ def run_stock(binary, url):
         'user_pref("browser.shell.checkDefaultBrowser", false);\n'
         'user_pref("datareporting.policy.dataSubmissionEnabled", false);\n'
         'user_pref("toolkit.telemetry.reportingpolicy.firstRun", false);\n'
-        'user_pref("browser.aboutwelcome.enabled", false);\n', encoding="utf-8")
+        'user_pref("browser.aboutwelcome.enabled", false);\n'
+        # The launcher gives Camoufox this pref on every launch; without it a host whose native GL is refused
+        # (a hosted macOS runner) gives stock a null WebGL context and the reference fails, not the subject.
+        'user_pref("webgl.force-enabled", true);\n', encoding="utf-8")
     with tempfile.NamedTemporaryFile(prefix="getter-cost-parity-", suffix=".log", delete=False) as out:
         proc = subprocess.Popen([str(binary), "--headless", "--no-remote", "--profile", profile, url],
                                 env=no_proxy_env(), stdout=out, stderr=subprocess.STDOUT)
@@ -354,7 +357,8 @@ def measure() -> int:
                 print(f"FAIL: stock Firefox never reported ({why}) -- check is vacuous")
                 return 1
             if "error" in result:
-                print(f"FAIL: stock Firefox's page failed: {result['error']}")
+                print(f"FAIL: SETUP-INVALID, the stock reference's page failed even with webgl.force-enabled "
+                      f"(a worker error is the worker's context, any other the window's): {result['error']}")
                 return 1
             stock_runs.append(result)
             for identity, runs in camou_runs.items():
