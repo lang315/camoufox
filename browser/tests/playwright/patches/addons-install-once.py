@@ -31,7 +31,7 @@ from helpers import resolve_binary  # noqa: E402
 
 CONTEXTS = 12
 # A request dropped by a restart never finishes. A healthy local load finishes
-# well inside this even when uBO holds it while compiling its filter lists.
+# well inside this even while uBO compiles its filter lists.
 GOTO_TIMEOUT_MS = 60000
 BACKGROUND_LOAD = re.compile(r"DocumentChannelParent Init \[this=\w+, uri=moz-extension://[^/]+/background")
 

@@ -32,6 +32,14 @@ REGIONAL_SELECTION = """        if ( this.listMatchesEnvironment(list) ) {
             list.off = false;
         }
 """
+# js/vapi-background.js: the Net constructor registers uBO's blocking onBeforeRequest
+# listener when traffic.js loads, seconds before the filter lists are compiled, and
+# setSuspendableListener runs once they are (js/start.js, webRequest.start()).
+NET_LISTENER = """        this.unprocessedTabs = new Map();
+
+        browser.webRequest.onBeforeRequest.addListener(
+"""
+SET_SUSPENDABLE_LISTENER = "    setSuspendableListener(listener) {\n"
 
 AMO_ADDON = "https://addons.mozilla.org/api/v5/addons/addon/ublock-origin/"
 GUID = "uBlock0@raymondhill.net"
@@ -81,16 +89,28 @@ def pin_from_env():
 
 def freeze_lists(addon_dir):
     """Make the extracted uBO default to autoUpdate: false and to the lists that
-    ship switched on. Each fails if uBO's source no longer has the text it
-    edits, rather than shipping a uBO that downloads lists.
+    ship switched on, and register its request listener once they are compiled.
+    Each fails if uBO's source no longer has the text it edits, rather than
+    shipping a uBO that downloads lists or holds pages.
 
     Every launch is a first run, and a first run switches on the regional list of
     the UI language, which uBO does not package: a de-DE launch held every page
     for the download's 30 s timeout (#211). The selection that was pinned through
-    a policy's toOverwrite.filterLists is the lists uBO ships on."""
+    a policy's toOverwrite.filterLists is the lists uBO ships on.
+
+    Every launch is also a fresh profile with no saved filter state, so uBO compiles
+    its ten lists, 5 to 8 s on a hosted runner, and every request that reaches its
+    blocking listener waits for that (#403, #431). Registered only when the lists
+    are ready, the listener holds nothing: a request before then passes unfiltered,
+    as one made before uBO's listener exists always did."""
     for name, old, new in (
         (os.path.join("js", "background.js"), AUTO_UPDATE_DEFAULT, "    autoUpdate: false,\n"),
         (os.path.join("js", "storage.js"), REGIONAL_SELECTION, ""),
+        (os.path.join("js", "vapi-background.js"), NET_LISTENER,
+         "        this.unprocessedTabs = new Map();\n    }\n    startBeforeRequest() {\n"
+         "        browser.webRequest.onBeforeRequest.addListener(\n"),
+        (os.path.join("js", "vapi-background.js"), SET_SUSPENDABLE_LISTENER,
+         SET_SUSPENDABLE_LISTENER + "        this.startBeforeRequest();\n"),
     ):
         path = os.path.join(addon_dir, name)
         with open(path, encoding="utf-8") as f:

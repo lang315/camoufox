@@ -27,6 +27,7 @@ def xpi(version="1.76.0", guid=GUID, extra=()):
         z.writestr("js/background.js", "const userSettingsDefault = {\n    autoUpdate: true,\n};\n")
         z.writestr("js/storage.js", "µb.autoSelectRegionalFilterLists = function(lists) {\n"
                    + fetch_ubo.REGIONAL_SELECTION + "};\n")
+        z.writestr("js/vapi-background.js", "class Net {\n    constructor() {\n" + fetch_ubo.NET_LISTENER + "        );\n    }\n" + fetch_ubo.SET_SUSPENDABLE_LISTENER + "    }\n};\n")
         for name in extra:
             z.writestr(name, "")
     return buf.getvalue()
@@ -67,6 +68,9 @@ def test_stage_extracts_the_pinned_release_beside_the_binary(tmp_path, monkeypat
     # Its filter lists stay the packaged ones: uBO's own default downloads them
     # within a minute of every launch.
     assert "    autoUpdate: false,\n" in (ubo / "js" / "background.js").read_text()
+    # Its request listener exists only once the lists are compiled: registered
+    # earlier it holds every page, media and fetch load for seconds (#431).
+    assert "startBeforeRequest() {" in (ubo / "js" / "vapi-background.js").read_text()
     assert [p.name for p in (tmp_path / "addons").iterdir()] == ["UBO"], "no staging directory is left"
 
 
@@ -138,6 +142,8 @@ def _ubo(tmp_path):
         "µb.autoSelectRegionalFilterLists = function(lists) {\n"
         "        if ( list.off !== true ) {\n            selectedListKeys.push(key);\n            continue;\n        }\n"
         + fetch_ubo.REGIONAL_SELECTION + "};\n", encoding="utf-8")
+    (tmp_path / "js" / "vapi-background.js").write_text(
+        "class Net {\n    constructor() {\n" + fetch_ubo.NET_LISTENER + "        );\n    }\n" + fetch_ubo.SET_SUSPENDABLE_LISTENER + "    }\n};\n", encoding="utf-8")
 
 
 def test_freezing_keeps_ubo_off_the_regional_list_of_the_ui_language(tmp_path):
@@ -148,6 +154,24 @@ def test_freezing_keeps_ubo_off_the_regional_list_of_the_ui_language(tmp_path):
     assert "listMatchesEnvironment" not in storage
     assert "list.off !== true" in storage, "the lists that ship switched on stay selected"
     assert "autoUpdate: false" in (tmp_path / "js" / "background.js").read_text(encoding="utf-8")
+
+
+def test_freezing_registers_the_request_listener_once_the_lists_are_compiled(tmp_path):
+    """#431: a listener registered at load held every request of a fresh profile while ten lists compiled."""
+    _ubo(tmp_path)
+    fetch_ubo.freeze_lists(str(tmp_path))
+    net = (tmp_path / "js" / "vapi-background.js").read_text(encoding="utf-8")
+    constructor, _, rest = net.partition("    startBeforeRequest() {\n")
+    assert "addListener" not in constructor, "the constructor registers nothing"
+    assert rest.startswith("        browser.webRequest.onBeforeRequest.addListener(")
+    assert "    setSuspendableListener(listener) {\n        this.startBeforeRequest();\n" in net
+
+
+def test_a_ubo_whose_request_holder_moved_is_refused(tmp_path):
+    _ubo(tmp_path)
+    (tmp_path / "js" / "vapi-background.js").write_text("// reworked\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="freeze_lists"):
+        fetch_ubo.freeze_lists(str(tmp_path))
 
 
 def test_a_ubo_whose_regional_selection_moved_is_refused(tmp_path):

@@ -360,6 +360,7 @@ rules:
       - "uBO src/js/storage.js: loadFilterLists() calls vAPI.net.suspend() whenever vAPI.Net.canSuspend(), true on Firefox"
       - "uBO src/js/background.js: assetFetchTimeout 30"
       - "issue #403; uBO 1.75.4 js/traffic.js:1349, js/start.js:456, js/storage.js:909 and :961; hold measured on hosted ubuntu-24.04 in runs 41748394329 and 41750523526, browser of Tests run 41739273709"
+      - "issue #431; uBO 1.76.0 js/vapi-background.js:1221 (listener registered in the Net constructor) and :1279 (setSuspendableListener), js/start.js:417 (webRequest.start() after the lists load); e2e.yml dispatches 43041843386 and 43048541138 (browser of Tests run 43011230804); audio numbers from 43038459124, hold arms from 43041843386 and 43048541138"
     rationale: >-
       On Firefox uBO holds every page request while it loads its filter lists.
       Every Camoufox launch is a first run, and on a first run uBO auto-selects
@@ -381,10 +382,11 @@ rules:
       de-DE e2e (test_a_hanging_filter_list_download_does_not_hold_pages) that
       a page is not held.
 
-      The lists are also why every launch holds page requests for seconds.
+      The lists are also why a launch's requests were held for seconds.
       A launch has a fresh profile and so no saved filter state, and uBO
-      parks every tab request from when it registers its listener until all
-      pinned lists are compiled. On a hosted two-vCPU Linux runner all 45
+      compiles every pinned list while its blocking onBeforeRequest
+      listener, registered when traffic.js loads, holds the requests it is
+      given. On a hosted two-vCPU Linux runner all 45
       default launches had that hold: it began a median 2.3 s after launch
       (1.6 to 5.9 s), ended a median 9.2 s after launch (6.7 to 12.0 s) and
       lasted 2.4 to 7.5 s; with the addon excluded none of 45 did (worst
@@ -394,8 +396,23 @@ rules:
       one (user-filters) 1 of 36. The lists stay at ten: fewer would end
       blocking for badware, privacy, unbreak, quick-fixes, easyprivacy,
       urlhaus and plowe-0, which is a coverage choice and not a fix, and a
-      saved filter state helps only a persistent profile. The hold was
-      measured on Linux only. Users who do not want uBO, and its hold, pass
+      saved filter state helps only a persistent profile.
+
+      The hold is not the Camoufox patches' and not only uBO's suspend():
+      release Firefox with the same uBO installed held 24 of 24 launches
+      (6.7 to 7.3 s), and the bundled uBO with canSuspend() false, which
+      stops suspend() from parking requests, still held 44 of 44 (4.5 to
+      5.9 s), so the registered listener is what holds, not only the
+      suspend() call (how it holds without suspend() was inferred from
+      that, not read in uBO's code). It cost an e2e audio load 7.6 and
+      7.8 s in 2 of 40 launches, against an 8 s bound (#431).
+      freeze_lists therefore registers the listener when the lists are
+      compiled (setSuspendableListener), and none of 20 launches was held
+      (worst request latency 387 ms). The cost: a request made before the
+      lists are compiled passes unfiltered, as one made before uBO's
+      listener existed always did. ubo-lists-frozen.py fails when a page load
+      before uBO first blocks takes 1.5 s or longer. The hold was
+      measured on Linux only. Users who do not want uBO pass
       exclude_addons=[DefaultAddons.UBO] (TypeScript: exclude_addons:
       ["UBO"]).
 

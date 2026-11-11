@@ -319,7 +319,7 @@ passed to Playwright's `firefox.launch()` (or `launch_persistent_context()`).
 | `fonts` | `list[str]` | none | Extra font families on top of the OS's own. |
 | `custom_fonts_only` | `bool` | `False` | Use only `fonts`, not the OS fonts. Warns: the font set no longer matches the OS. |
 | `addons` | `list[str]` | none | Paths to extracted Firefox addons (folders with a `manifest.json`). |
-| `exclude_addons` | `list[DefaultAddons]` | none | Default addons to leave out, e.g. `[DefaultAddons.UBO]`. A default launch holds every page request until uBlock Origin has compiled its filter lists, which takes seconds and longer on a small machine; leaving uBO out removes the wait. |
+| `exclude_addons` | `list[DefaultAddons]` | none | Default addons to leave out, e.g. `[DefaultAddons.UBO]`. A default launch compiles uBlock Origin's filter lists, which takes seconds and longer on a small machine; a request made before then is not filtered by uBO. Leaving uBO out removes it. |
 | `block_images` | `bool` | `False` | Block image loading. Warns: some WAFs detect it. |
 | `block_webrtc` | `bool` | `False` | Disable WebRTC entirely. |
 | `block_webgl` | `bool` | `False` | Disable WebGL. Warns: many WAFs check for it. |
