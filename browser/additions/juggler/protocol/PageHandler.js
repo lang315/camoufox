@@ -672,8 +672,11 @@ export class PageHandler {
   // a 125 Hz mouse's reports, the common rate, so a path given as steps
   // reaches the page as a real mouse's motion does: about two moves per frame
   // in getCoalescedEvents(), one pointerrawupdate each. The page has seen the
-  // last move before any other command of this page runs (beforeDispatch).
+  // last move before any other command of this page runs (beforeDispatch), except
+  // a press sent right behind it, which waits in _clickPacing.
   async _sendMove(dispatch, watcher, x, y) {
+    this._arrivedAt = undefined;
+    this._arrival = undefined;
     const wait = this._lastMoveAt + kMoveIntervalMs - Date.now();
     if (wait > 0)
       await new Promise(resolve => setTimeout(resolve, wait));
@@ -688,6 +691,15 @@ export class PageHandler {
     // The newest move is the one the coalesced dispatch acks.
     this._moveDelivery?.dispose();
     this._moveDelivery = pending;
+    // When the page got the move is when its event reached this process, not
+    // when the queue ack did: the ack comes 9 to 11 ms before the page's tick for
+    // a driven locator and can come 225 ms after it on a cold page, so a dwell
+    // counted from the ack read that much short or long in the page.
+    this._arrival = pending?.delivered().then(() => {
+      const arrivedAt = pending.arrivedAt();
+      if (arrivedAt !== undefined && this._moveDelivery === pending)
+        this._arrivedAt = arrivedAt;
+    });
     return pending;
   }
 
@@ -941,11 +953,16 @@ export class PageHandler {
     } else if (this._movedAt !== undefined) {
       // A press comes a person's dwell after the move that brought the pointer
       // to its target: a page read under 10 ms where stock reads under 250.
-      wait = this._movedAt + hoverDwell() - ChromeUtils.now();
+      // A press can come before the page has the move (a client sends them
+      // back to back), and beforeDispatch has then found nothing to wait for.
+      // With no arrival (the event never came), the queue ack's stamp stands.
+      await this._arrival;
+      wait = (this._arrivedAt ?? this._movedAt) + hoverDwell() - ChromeUtils.now();
     }
     if (type === 'mousedown') {
       this._buttonUpAt = undefined;
       this._movedAt = undefined;
+      this._arrivedAt = undefined;
     }
     if (wait > 0)
       await new Promise(resolve => setTimeout(resolve, wait));

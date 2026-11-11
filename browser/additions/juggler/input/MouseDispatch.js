@@ -268,6 +268,9 @@ export class MouseDispatch {
           dump(`[juggler] WARN a queued mousemove at (${x}, ${y}) had not reached the page after ${kAckDeadlineMs}ms; going on\n`);
         return ack;
       },
+      // When the move's event reached this process (undefined until it has).
+      arrivedAt: () => deliveryWatcher.receivedAt(
+        'mousemove', eventObject => eventObject.jugglerEventId === queued.jugglerEventId),
       dispose: () => deliveryWatcher.dispose(),
     };
   }

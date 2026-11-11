@@ -234,6 +234,9 @@ with the figures its caller cites: a normal draw for a key or modifier hold
 (`normalDelay(mean, sd, min, max)`) and a right-skewed log-normal for a click
 hold, hover dwell or double-click gap (`logNormalDelay(median, sigma, min, max)`),
 as human timing is.
+A hover dwell counts from when the page got the move (the `mousemove` event reaching
+the parent, `PageHandler._arrivedAt`), not from the renderer's queue ack, which comes
+before the page's refresh tick; a press that finds no arrival waits for it.
 
 A page that cancels the paste, or the shortcut's `keydown`, and leaves the field
 as it was gets the text typed instead, as a person types what they cannot paste:

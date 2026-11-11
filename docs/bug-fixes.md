@@ -14,6 +14,22 @@ later change should read first.
 
 
 
+## #419: a driven click's first press came 10 ms short, or up to 225 ms long, after the move: the dwell counted from the queue ack, not from the page
+
+**Fixed by:** the PR that fixes #419. **Found by:** `driven-dblclick-gap` in the Linux Tests run on the sync branch (head 8823db63): "first press N ms after the pointer reached the button, want 50-250".
+
+**Symptom.** `hoverDwell()` draws 60 to 240 ms, and the guard reads the page's mouseover to first mousedown. On the old code 18 of 300 samples read under 60 ms (diag-63, Tests run 42932070267), and the "again" arm read about 10 ms under the dwell when the dwell was forced to a constant (150 ms: medians -9 to -11 for a warm `locator.dblclick`, about 0 for `mouse.dblclick`; diag-70, Tests run 42942601332). The first double click after launch read up to 225 ms over it (diag-71, run 42944916941).
+
+**Root cause.** `PageHandler._clickPacing` counted the dwell from `_movedAt`, stamped when the renderer's queue ack (`mousequeued`) reached the parent. The page does not get the move then but at the next refresh tick: 9 to 11 ms later for a driven locator (its move lands right after Playwright's actionability steps), and on a cold page the parent could see the ack up to 225 ms after the page had the move. Press and move also arrive back to back from the client, so `beforeDispatch` found no move to wait for and the pacing started before the page had it. Measured per sample in diag-71: the parent's wait was exact (p3 minus p1 = 149 to 150), the page's mouseover came 9 to 11 ms after the stamp, the press reached the page 2 ms after it left; the offset is the press lag minus the move lag.
+
+**Fix.** `EventWatcher` records when each event reached this process (`receivedAt`, `Helper.js`), the queued-move handle gives `arrivedAt()` (`MouseDispatch.js`), `_sendMove` keeps the move's `_arrival` promise and `_arrivedAt`, and the hover branch of `_clickPacing` awaits `_arrival`, then counts the dwell from `_arrivedAt ?? _movedAt`. The queue-ack stamp is the fallback when no arrival event comes, and the wait is the one `delivered()` already bounds. A press with no move, a move outside the window, and a move followed by a navigation were measured for a stall (diag-74, run 42948979732: 2 to 5 ms, 127 to 138 ms and, for no move at all, no arrival to wait for; nothing near the 5 s deadline).
+
+**Tried and failed.** Stamping `_movedAt` when `_moveDelivered` resolves (diag-64) stamped at the press's arrival, not the page's, and added late outliers (319 ms natural, 447 forced). Stamping the event's receipt without awaiting it (diag-72, run 42946715927) fixed the cold tail but left the warm -11 ms: the press read `_arrivedAt` before the event existed.
+
+**Evidence.** Dwell forced to 60, 150 and 240, orders L M L and L L L L, 10 launches per cell (diag-75, run 42950463501): every warm cell reads 0 to 2 ms over the dwell and nothing reads under it (before: -9 to -11). The first-double-click tail that remains is the parent's `setTimeout` firing 70 to 210 ms late (p3 minus the arrival stamp 220 to 285 ms for a 150 ms wait, the wait itself computed correctly) in some runs and not in others (present in diag-63, 70, 71, 75, absent in 66, 72, 77); the old and the fixed code overshoot identically (diag-77, run 42953609503: median -1 ms, max 0, 0 of 80 samples above 50). `driven-dblclick-gap` launches without uBlock Origin for that reason (below).
+
+**What misled the investigation.** `_moveDelivered` looked like the delivery time and was not: it runs when the next command asks for it, so its stamp was the press's arrival. `beforeDispatch`'s comment says the page has seen the move before any other command runs, which is false for a press sent behind a move. A diag that added page-side `mousemove` recording moved timing enough to hide the offset (diag-66).
+
 ## #419: five patch guards were red on a hosted Windows runner after the upstream sync, for five different reasons
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Windows patch-guard probe (`e2e.yml`, `probe=patch_guard.py`) on the sync's Windows build: run 42888796068, job 130084161444, head `be03d4d8`. The browser was not the cause of any of them.
