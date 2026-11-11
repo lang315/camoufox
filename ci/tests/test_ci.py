@@ -3248,7 +3248,7 @@ def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_
     for platform, guards_ in NOT_ON.items():
         for stem, why in guards_.items():
             assert not_applicable_reason(stem, platform) == why
-            others = {"darwin", "win32", "linux"} - {platform}
+            others = {"darwin", "win32", "linux"} - {listed for listed, named in NOT_ON.items() if stem in named}
             assert all(not_applicable_reason(stem, other) is None for other in others)
     code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["system-font-alias-stall"])
     assert ran == []

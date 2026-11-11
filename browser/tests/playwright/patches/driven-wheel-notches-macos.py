@@ -8,9 +8,9 @@ A line is the scroller's line height, so the 16 and 48 follow the page's font.
 
 Juggler turns 100 px into one notch, rounding, at least one; on a macOS identity it sends lines, which the
 OS accelerates in a faster turn. This is the macOS arm of driven-wheel-notches.py, apart from it because a
-macOS identity cannot be drawn on every host: a hosted Windows runner's 1366x768 display fits none
-(fpgen: RestrictiveConstraints, run 42902541346). The runner counts it not applicable there, and it runs on
-Linux (Xvfb) and on macOS.
+macOS identity cannot be drawn on every host: a hosted Windows runner's 1366x768 display fits none and neither
+does a hosted macOS runner's 1280x720 (fpgen: RestrictiveConstraints, runs 42902541346 and 42923629488). The runner
+counts it not applicable on both, so it runs on Linux, on Xvfb at 1920x1080.
 
 The scroller is 600 px tall. Gecko limits one wheel scroll to a page of the scroller unless the
 user allows more (dom/events/EventStateManager.cpp:3779-3797), and the longest turn here sends events

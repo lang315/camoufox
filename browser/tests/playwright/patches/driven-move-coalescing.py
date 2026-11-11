@@ -18,10 +18,12 @@ that the page has the destination as soon as move() returns.
 
 Coalescing needs moves that outrun a refresh tick, so the guard reads the tick from
 requestAnimationFrame and the pace from the arrival times of the raw moves, and fails with
-SETUP-INVALID when the sweep is not faster. On a hosted Windows runner Juggler's moves arrive
-16.0 ms apart (median, max 32.0; performance.now() resolves 1 ms) against a 15.6 ms tick, and stock's
-real input at 25 ms a move gives one pointermove each (run 42909452571), so no sweep there can
-show coalescing and the runner does not run the guard on Windows (NOT_ON).
+SETUP-INVALID when the sweep is not faster. Juggler paces its moves at 8 ms (PageHandler.js
+kMoveIntervalMs). On Linux they arrive 8.0 ms apart against a 17.1 ms tick (Tests run 42914357955). On a hosted
+Windows runner they arrive 16.0 ms apart (median, max 32.0; performance.now() resolves 1 ms) against a 15.6 ms tick
+(run 42909452571) and on a hosted macOS runner 17.0 ms apart against a 16.7 ms tick (run 42923629488); stock's real
+input at 25 ms a move gives one pointermove each on Windows. No sweep there can show coalescing, so the runner does
+not run the guard on Windows or macOS (NOT_ON).
 
     python browser/tests/playwright/patches/driven-move-coalescing.py
 """

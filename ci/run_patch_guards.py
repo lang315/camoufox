@@ -170,20 +170,29 @@ LINUX_ONLY = frozenset({
 # apart from the passes with the reason in the log. windows-keyboard compares a
 # Windows identity with Windows' keyboard, which a Windows host has natively, and
 # on a macOS host runs its caret arm alone (the rest is GTK); driven-wheel-notches-macos
-# needs a macOS identity, and a hosted Windows display (1366x768) fits none;
-# driven-move-coalescing needs moves that outrun a refresh tick, which Juggler's do not on Windows.
+# needs a macOS identity, and a hosted Windows (1366x768) or macOS (1280x720) display fits none;
+# driven-move-coalescing needs moves that outrun a refresh tick (Juggler paces a driven move at 8 ms,
+# PageHandler.js kMoveIntervalMs): measured on hosted runners they land 8.0 ms apart on Linux and a tick apart on
+# Windows and macOS.
+_PACED_AT_A_TICK = (
+    "Juggler's driven moves land one refresh tick apart on a hosted Windows or macOS runner (16.0 ms against 15.6 ms; "
+    "17.0 ms against 16.7 ms; Linux 8.0 ms), so a sweep cannot outrun the tick; stock real input at 25 ms/move is "
+    "one pointermove each as well"
+)
+
 NOT_ON = {
     "darwin": {
         "system-font-alias-stall":
             "its count reads the host's font universe, and its ratio alone cannot go red on this host",
+        "driven-wheel-notches-macos":
+            "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
+        "driven-move-coalescing": _PACED_AT_A_TICK,
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
         "driven-wheel-notches-macos":
             "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
-        "driven-move-coalescing":
-            "Juggler's driven moves arrive one refresh tick apart on hosted Windows (median 16.0 ms, max 32.0 ms), "
-            "so a sweep cannot outrun the tick; stock real input at 25 ms/move is one pointermove each as well",
+        "driven-move-coalescing": _PACED_AT_A_TICK,
     },
 }
 
