@@ -24,7 +24,7 @@ def xpi(version="1.76.0", guid=GUID, extra=()):
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("manifest.json", json.dumps(
             {"version": version, "browser_specific_settings": {"gecko": {"id": guid}}}))
-        z.writestr("js/background.js", "const userSettingsDefault = {\n    autoUpdate: true,\n};\n")
+        z.writestr("js/background.js", "const userSettingsDefault = {\n    autoUpdate: true,\n    prefetchingDisabled: true,\n};\n")
         z.writestr("js/storage.js", "µb.autoSelectRegionalFilterLists = function(lists) {\n"
                    + fetch_ubo.REGIONAL_SELECTION + "};\n")
         z.writestr("js/vapi-background.js", "class Net {\n    constructor() {\n" + fetch_ubo.NET_LISTENER + "        );\n    }\n" + fetch_ubo.SET_SUSPENDABLE_LISTENER + "    }\n};\n")
@@ -71,6 +71,8 @@ def test_stage_extracts_the_pinned_release_beside_the_binary(tmp_path, monkeypat
     # Its request listener exists only once the lists are compiled: registered
     # earlier it holds every page, media and fetch load for seconds (#431).
     assert "startBeforeRequest() {" in (ubo / "js" / "vapi-background.js").read_text()
+    # Its startup would otherwise switch Firefox's prefetch and preconnect off (#427).
+    assert "    prefetchingDisabled: false,\n" in (ubo / "js" / "background.js").read_text()
     assert [p.name for p in (tmp_path / "addons").iterdir()] == ["UBO"], "no staging directory is left"
 
 
@@ -137,7 +139,7 @@ def test_a_ubo_whose_default_moved_is_refused(tmp_path):
 def _ubo(tmp_path):
     (tmp_path / "js").mkdir()
     (tmp_path / "js" / "background.js").write_text(
-        "const userSettingsDefault = {\n" + fetch_ubo.AUTO_UPDATE_DEFAULT + "};\n", encoding="utf-8")
+        "const userSettingsDefault = {\n" + fetch_ubo.AUTO_UPDATE_DEFAULT + fetch_ubo.PREFETCHING_DEFAULT + "};\n", encoding="utf-8")
     (tmp_path / "js" / "storage.js").write_text(
         "µb.autoSelectRegionalFilterLists = function(lists) {\n"
         "        if ( list.off !== true ) {\n            selectedListKeys.push(key);\n            continue;\n        }\n"

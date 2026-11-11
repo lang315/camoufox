@@ -25,6 +25,10 @@ import argparse, hashlib, io, json, os, shutil, sys, tempfile, time, urllib.requ
 
 # uBO's userSettingsDefault entry, as js/background.js writes it.
 AUTO_UPDATE_DEFAULT = "    autoUpdate: true,\n"
+# The same entry for prefetchingDisabled, which js/start.js applies at startup as
+# privacy.network.networkPredictionEnabled.set(false). Enabled, uBO calls clear()
+# instead, so Firefox's prefetch, DNS prefetch and speculative connection prefs stay at stock.
+PREFETCHING_DEFAULT = "    prefetchingDisabled: true,\n"
 # js/storage.js autoSelectRegionalFilterLists: on a first run it switches on
 # every list that matches the UI language.
 REGIONAL_SELECTION = """        if ( this.listMatchesEnvironment(list) ) {
@@ -88,10 +92,11 @@ def pin_from_env():
 
 
 def freeze_lists(addon_dir):
-    """Make the extracted uBO default to autoUpdate: false and to the lists that
-    ship switched on, and register its request listener once they are compiled.
-    Each fails if uBO's source no longer has the text it edits, rather than
-    shipping a uBO that downloads lists or holds pages.
+    """Make the extracted uBO default to autoUpdate: false, to the lists that
+    ship switched on and to prefetchingDisabled: false (#427), and register its
+    request listener once the lists are compiled. Each fails if uBO's source no
+    longer has the text it edits, rather than shipping a uBO that downloads lists
+    or holds pages.
 
     Every launch is a first run, and a first run switches on the regional list of
     the UI language, which uBO does not package: a de-DE launch held every page
@@ -105,6 +110,7 @@ def freeze_lists(addon_dir):
     as one made before uBO's listener exists always did."""
     for name, old, new in (
         (os.path.join("js", "background.js"), AUTO_UPDATE_DEFAULT, "    autoUpdate: false,\n"),
+        (os.path.join("js", "background.js"), PREFETCHING_DEFAULT, "    prefetchingDisabled: false,\n"),
         (os.path.join("js", "storage.js"), REGIONAL_SELECTION, ""),
         (os.path.join("js", "vapi-background.js"), NET_LISTENER,
          "        this.unprocessedTabs = new Map();\n    }\n    startBeforeRequest() {\n"

@@ -49,6 +49,22 @@ Red to green for the guard `ubo-lists-frozen.py`, which now fails when a plain p
 - **The truncated file.** A full-file rewrite of `fetch-ubo.py` dropped `main()`; its unit tests import the module and never run the CLI, so a diag that called `stage` ran nothing and its green meant nothing until the log's `startBeforeRequest` count read 0.
 - **Tests runs 43054454767 and 43057920514** died in `apt-get` (`Temporary failure resolving 'azure.archive.ubuntu.com'`) before any guard ran; they are not red evidence.
 
+## #427: the bundled uBlock Origin switched Firefox's prefetch and preconnect off after startup
+
+**Fixed by:** the PR that fixes #427. **Found by:** e2e probe runs 42927033470, 42928752915 and 42930286175 (Windows), which read the prefs and the server's view in stock, with and without uBO.
+
+**Symptom.** A page added after the first seconds of a default launch with `<link rel=prefetch>` saw no prefetch request and no `PerformanceResourceTiming` entry, and `<link rel=preconnect>` opened no connection; stock 159.0 does both. Prefs read through Marionette: `network.prefetch-next` false, `network.dns.disablePrefetch` true, `network.http.speculative-parallel-limit` 0 (stock: true, false, 20). Launches without uBO matched stock, and a page loaded in the first seconds was still prefetched, so the state was also timing dependent.
+
+**Root cause.** uBO's default `prefetchingDisabled: true` (`js/background.js:123`, uBO 1.76.0) is applied by `js/start.js:195-198`, `vAPI.browserSettings.set({'prefetching': !µb.userSettings.prefetchingDisabled, ...})`, which `js/vapi-background.js:199` turns into `privacy.network.networkPredictionEnabled.set({value: false, scope: 'regular'})`. Firefox 159's `ext-privacy.js` maps that to `speculative-parallel-limit: 0`, `disablePrefetch: true`, `prefetch-next: false`. When prefetching is enabled uBO calls `clear()` instead (`vapi-background.js:195`), which sets nothing.
+
+**Fix.** `browser/scripts/fetch-ubo.py` `freeze_lists` edits the extracted uBO's default to `prefetchingDisabled: false`, so start-up calls `clear()` and the three prefs are never touched (stock values, not extension-controlled). Managed storage, the route the issue suggested, does not exist here: Camoufox ships no policy file (`no-enterprise-policies`, and a policy file puts Firefox in enterprise mode); it is the same reason `autoUpdate` is edited at extract time (`ubo-lists-pinned-to-bundled`).
+
+**Evidence.** `ubo-speculative-loading` guard, Tests run 43026669175 (head 2e2600c3, before the fix): control arm (same proxy and pages, uBO excluded) requests `['/links.html', '/prefetch-me.txt', '/favicon.ico']`, 1 preconnect connection; uBO arm requests `['/links.html']`, 0 connections, after uBO had blocked the ad script. Only the uBO arm failed.
+
+After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 failed in apt with `Temporary failure resolving 'azure.archive.ubuntu.com'` before any test ran): `ubo-speculative-loading.py` passed in the Patch guards: automation job 130686084718, and every job of the run passed. The guard docstring says why a pass is not vacuous: it fails when uBO never blocks the ad script, and its control arm must see both requests.
+
+**What misled.** A read taken before uBO applies its setting is stock, so the guard waits for uBO to block an ad (its lists compile after `start.js:195`). The first guard had no control and ran behind a proxy, on which the fork changes prefs itself, so its red could not have been attributed to uBO.
+
 ## #419: `driven-dblclick-gap` failed in some runs when the first double click after launch was paced late
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch and the diag runs that followed (diag-63, 70, 71, 75).
