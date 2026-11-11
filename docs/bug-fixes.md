@@ -26,6 +26,20 @@ later change should read first.
 
 **Evidence.** The guard without uBO: 20 of 20 on the fixed Juggler (diag-77); with uBO 8 of 10 (diag-75). If the tail ever shows without uBO, the ceiling's design is the next question.
 
+## #419: `identity-golden` "reproduces 800 voice lists" timed out on a hosted runner
+
+**Fixed by:** the PR that fixes #419. **Found by:** Tests run 42976257299 on the sync branch (job 130376551923, `typescript`).
+
+**Symptom.** `FAIL tests/identity-golden.test.ts > voice draws > reproduces 800 voice lists: Test timed out in 30000ms` (the test took 35345 ms). The branch's earlier green runs had it at 25495 ms (42956004271) and 26639 ms (42926922611); on `main` it took 586 ms (42627294779).
+
+**Root cause.** Since upstream #997 a Linux voice draw is the Ubuntu release's whole speech-dispatcher grid, about 14000 voice objects (14805 or 13362), and the fixture holds 200 Linux cases. The test hashed each list (`canon`, `orjsonDumps`, sha256): measured locally per list, the draw 5.7 ms, `canon` 9 ms, `orjsonDumps` 25 ms. The 200 Linux cases have only 2 distinct lists, so 198 hashes re-proved a list already proved. The draw itself is cheap (1.4 s for the 200 on a laptop) and the launchers do not pay for the list: they ship the grid (`voices:speechd`). The `ENOSPC` line in that job's log is `download-stream.test.ts`'s own fixture and prints in every run.
+
+**Fix.** The test draws every case and checks its length and the 8 fixture cases that carry the full list, but hashes a Linux list once per grid (`drawVoiceConfig(...)["voices:speechd"]`, the one object per release), since the Linux draw reads nothing else. The timeout is unchanged. Locally the test takes 1.55 s (6167 ms before).
+
+**Red-to-green.** Negative control: changing the Linux `voiceUri` separator fails the test (`linux null seed 0: expected [ …(14805) ] to deeply equal [ …(14805) ]`). Pending: Tests on the PR's head.
+
+**What misled.** The `ENOSPC` line a few lines above the failure, and reading the red as a slow runner: the test had used 85% of its budget since the sync.
+
 ## #419: `gfx-probes-packaged` read a hosted macOS VM's refused GL as a missing gfxtest
 
 **Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42966475660, parity group).
