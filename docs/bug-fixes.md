@@ -26,6 +26,8 @@ later change should read first.
 
 **Evidence.** `ubo-speculative-loading` guard, Tests run 43026669175 (head 2e2600c3, before the fix): control arm (same proxy and pages, uBO excluded) requests `['/links.html', '/prefetch-me.txt', '/favicon.ico']`, 1 preconnect connection; uBO arm requests `['/links.html']`, 0 connections, after uBO had blocked the ad script. Only the uBO arm failed.
 
+After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 failed in apt with `Temporary failure resolving 'azure.archive.ubuntu.com'` before any test ran): `ubo-speculative-loading.py` passed in the Patch guards: automation job 130686084718, and every job of the run passed. The guard docstring says why a pass is not vacuous: it fails when uBO never blocks the ad script, and its control arm must see both requests.
+
 **What misled.** A read taken before uBO applies its setting is stock, so the guard waits for uBO to block an ad (its lists compile after `start.js:195`). The first guard had no control and ran behind a proxy, on which the fork changes prefs itself, so its red could not have been attributed to uBO.
 
 ## #419: `driven-dblclick-gap` failed in some runs when the first double click after launch was paced late
