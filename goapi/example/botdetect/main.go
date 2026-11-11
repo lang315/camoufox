@@ -166,10 +166,6 @@ func main() {
 		}
 		if disp := os.Getenv("CF_DISPLAY"); disp != "" {
 			lopts = append(lopts, camoufox.WithVirtualDisplay(disp))
-			// Force WebGL on so llvmpipe (Xvfb software GL) isn't
-			// blocklisted; lets Camoufox spoof a coherent GPU rather
-			// than leaking "no webgl context". See creepjs example.
-			lopts = append(lopts, camoufox.WithFirefoxUserPref("webgl.force-enabled", true))
 		} else {
 			lopts = append(lopts, camoufox.WithHeadless(true))
 		}

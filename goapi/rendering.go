@@ -64,6 +64,17 @@ func addCanvasPlaceholder(prefs map[string]any) {
 	prefs[baselineOverridesPref] = strings.Join(append(overrides, canvasPlaceholderTargets...), ",")
 }
 
+// setWebGL forces the WebGL context on for an identity that names a GPU, as
+// pythonlib and the TypeScript launcher do for every launch that merges a WebGL
+// identity: without it a host whose native GL is refused has no context at all
+// (a bot tell), once camoufox.cfg no longer falls back to software. A pref the
+// caller set is kept.
+func setWebGL(prefs map[string]any, webglVendor string) {
+	if _, set := prefs["webgl.force-enabled"]; !set && webglVendor != "" {
+		prefs["webgl.force-enabled"] = true
+	}
+}
+
 // setWebGPU is set_webgpu with no host GPU: Firefox enables WebGPU on Windows
 // and on Apple Silicon Macs only, and the host's adapter belongs to the host's
 // GPU, which a preset's GPU is not known to be, so requestAdapter() resolves

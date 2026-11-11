@@ -271,6 +271,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	if coversCanvas(lc.canvasPlaceholder) {
 		addCanvasPlaceholder(prefs)
 	}
+	setWebGL(prefs, cfg.WebGLVendor)
 	setWebGPU(prefs, uaOSDir(cfg.NavigatorUserAgent, config.HostOS()), cfg.WebGLVendor)
 	if err := b.enable(ctx, prefs); err != nil {
 		_ = b.Close()

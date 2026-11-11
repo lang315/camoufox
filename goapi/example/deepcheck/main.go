@@ -243,8 +243,7 @@ func main() {
 			camoufox.WithRand(rng),
 		}
 		if disp := os.Getenv("CF_DISPLAY"); disp != "" {
-			opts = append(opts, camoufox.WithVirtualDisplay(disp),
-				camoufox.WithFirefoxUserPref("webgl.force-enabled", true))
+			opts = append(opts, camoufox.WithVirtualDisplay(disp))
 		} else {
 			opts = append(opts, camoufox.WithHeadless(true))
 		}

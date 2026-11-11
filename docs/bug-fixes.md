@@ -14,6 +14,20 @@ later change should read first.
 
 
 
+## #419: `test_web_apis_behave_like_the_reference[go]` had no WebGL context on a hosted macOS runner: goapi never set `webgl.force-enabled`
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS e2e control on the sync build (run 42934464186): only the `[go]` parameter failed; `[pkg]` and `[pw]` printed "ok a WebGL context exists".
+
+**Symptom.** The Go library's browser had no WebGL context on the hosted macOS VM, whose native GL is refused (`FEATURE_FAILURE_CGL_FBO`, "Exhausted GL driver options" in the gfx probe). A page reading `getContext('webgl')` got null, itself a bot tell.
+
+**Root cause.** The Python launcher (`utils.py`, where the WebGL fingerprint is merged) and the TypeScript one (`utils.ts`) set `webgl.force-enabled: true` with every WebGL identity. `goapi` never did; only three examples (`botdetect`, `creepjs`, `deepcheck`) added the pref by hand. On `main` the library got by because `camoufox.cfg` had `webgl.forbid-software false`, a software fallback once native GL is refused; upstream's #997 removed that line, which exposed the divergence. diag-65 (run 42938834546) showed the sync browser has a WebGL context on that VM headless in every arm and with a launcher that sets the pref, and stock has one, so the browser was not the cause.
+
+**Fix.** `setWebGL` (`goapi/rendering.go`), called in `Launch` beside `setWebGPU`, sets `webgl.force-enabled` for an identity that names a GPU and keeps a pref the caller set. The three examples no longer set it by hand. `camoufox.cfg` is unchanged.
+
+**Evidence.** `TestWebGLIsForcedOnForAnIdentityThatNamesAGPU` (identity, no identity, caller's value kept). e2e run 42942482321 on the same macOS build (`-f k=web_apis`): `6 passed, 149 deselected`, `[go]` included; the control run 42934464186 failed `[go]` on the same build.
+
+**What misled the investigation.** The first reading was a browser regression from the sync (a context on fork.1, none on the sync build), and `webgl.forbid-software` looked like the cause; a launcher that sets `webgl.force-enabled` showed a context with or without it.
+
 ## #419: a driven click's first press came 10 ms short, or up to 225 ms long, after the move: the dwell counted from the queue ack, not from the page
 
 **Fixed by:** the PR that fixes #419. **Found by:** `driven-dblclick-gap` in the Linux Tests run on the sync branch (head 8823db63): "first press N ms after the pointer reached the button, want 50-250".
