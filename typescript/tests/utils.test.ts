@@ -286,6 +286,18 @@ describe("validateConfig with removed keys (#835)", () => {
 		);
 	});
 
+	it("names only the key of an unknown key, never its value (#428)", () => {
+		const printed: string[] = [];
+		vi.spyOn(utilsDeps, "print").mockImplementation((msg: string) => {
+			printed.push(msg);
+		});
+		const binary = browserWith([
+			{ property: "navigator.userAgent", type: "str" },
+		]);
+		validateConfig({ "some:unknown": "ā" }, binary);
+		expect(printed).toEqual(["Skipping unknown patch some:unknown"]);
+	});
+
 	it("warns and launches on a build without the voice grid (#835), where a Linux identity has no voices", () => {
 		const warn = vi
 			.spyOn(process, "emitWarning")
