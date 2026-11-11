@@ -43,7 +43,6 @@ holds its negative controls.
 
 import contextlib
 import http.server
-import importlib.util
 import json
 import os
 import shutil
@@ -58,11 +57,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-from helpers import hidden_display, resolve_binary  # noqa: E402
-
-REPO_ROOT = HERE.parents[3]
-sys.path.insert(0, str(REPO_ROOT))
-from ci._util import read_upstream_sh  # noqa: E402
+from helpers import hidden_display, resolve_binary, stock_firefox, stock_gpu_parity  # noqa: E402
 
 LAUNCHES = 6
 SLOWER_FACTOR = 2.0
@@ -195,20 +190,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.server.results.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
         self.send_response(204)
         self.end_headers()
-
-
-def stock_gpu_parity():
-    spec = importlib.util.spec_from_file_location("stock_gpu_parity", HERE / "stock-gpu-parity.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def stock_firefox():
-    """Stock Firefox of the version Camoufox is built from: --stock, else the
-    release stock-gpu-parity downloads and checks against Mozilla's signed
-    SHA256SUMS."""
-    return stock_gpu_parity().stock_firefox("--stock", read_upstream_sh()["version"])
 
 
 def prepare_stock(binary):

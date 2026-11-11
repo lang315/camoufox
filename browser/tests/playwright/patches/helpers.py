@@ -38,6 +38,7 @@ async def launch_camoufox(os: str = "macos", headless: bool = True):
 # Xvfb display -- never on a real screen.
 
 import contextlib
+import importlib.util
 import json
 import os
 import shutil
@@ -47,6 +48,24 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
+
+
+def stock_gpu_parity():
+    """The stock-gpu-parity guard as a module: it owns the stock Firefox download."""
+    spec = importlib.util.spec_from_file_location(
+        "stock_gpu_parity", Path(__file__).resolve().parent / "stock-gpu-parity.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def stock_firefox() -> Path:
+    """Stock Firefox of the version Camoufox is built from: --stock, else the
+    release stock-gpu-parity downloads and checks against Mozilla's signed
+    SHA256SUMS."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+    from ci._util import read_upstream_sh
+    return stock_gpu_parity().stock_firefox("--stock", read_upstream_sh()["version"])
 
 
 def resolve_binary() -> Path:

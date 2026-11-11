@@ -26,6 +26,20 @@ later change should read first.
 
 **Evidence.** The guard without uBO: 20 of 20 on the fixed Juggler (diag-77); with uBO 8 of 10 (diag-75). If the tail ever shows without uBO, the ceiling's design is the next question.
 
+## #419: `gfx-probes-packaged` read a hosted macOS VM's refused GL as a missing gfxtest
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42966475660, parity group).
+
+**Symptom.** `FAIL: a bare launch was refused a WebGL context by the blocklist ... tryNativeGL (FEATURE_FAILURE_CGL_FBO) ... EXHAUSTED`. The Windows probe passed the same guard.
+
+**Root cause.** The guard matches "Exhausted GL driver options" as the signature of an empty gfxInfo (missing `gfxtest`). On macOS there is no `gfxtest`; the hosted VM refuses native GL to every browser, and the refusal prints the same words. On `main` the launch got software GL because `camoufox.cfg` set `webgl.forbid-software false`, which upstream #997 removed, so the guard stopped being a control on macOS (lesson 4).
+
+**Fix.** On macOS a refused bare launch is compared with stock Firefox's bare launch on the same host. When stock is refused too the guard exits red as `SETUP-INVALID` naming the host. It stays red there by design, like `stock-gpu-parity`; it is not marked not applicable, because the check holds on a host with a GPU. `stock_firefox` and its loader moved to `helpers.py`, shared with `getter-cost-parity`.
+
+**Red-to-green.** Pending: the macOS probe on the PR's head.
+
+**What misled.** The guard passed on macOS before the sync for a reason that was not its subject.
+
 ## #419: `getter-cost-parity` failed on a hosted macOS runner with "stock Firefox's page failed: worker died before it reported"
 
 **Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42923629488, job 130204462226, parity group).

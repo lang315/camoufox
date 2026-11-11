@@ -40,7 +40,8 @@ starts no build (#203). Before creating it, run the patch guards on each build
 (`gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=patch_guard.py`,
 #416): `tests.yml` runs them on Linux only. On a hosted macOS runner
 `stock-gpu-parity` stays red by design, because the runner's GPU reads `Apple Inc.`
-where fpgen recorded `Apple`. A macOS job that gets no `macos-26` runner is
+where fpgen recorded `Apple`, and `gfx-probes-packaged` stays red as SETUP-INVALID when the
+runner's native GL is refused to stock Firefox's bare launch too (`FEATURE_FAILURE_CGL_FBO`). A macOS job that gets no `macos-26` runner is
 cancelled after 15 minutes with no step run; dispatch it again, it is not a code
 failure.
 

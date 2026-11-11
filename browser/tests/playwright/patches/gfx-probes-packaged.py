@@ -32,6 +32,12 @@ the binary (Linux only: gfxtest is built for the GTK toolkit alone), and a bare
 display-less headless launch -- no pythonlib, so no `webgl.force-enabled` -- must
 still get a context.
 
+On macOS a refused bare launch is compared with stock Firefox's bare launch on
+the same host (the version stock-gpu-parity downloads): a hosted macOS VM refuses
+native GL to every browser (`FEATURE_FAILURE_CGL_FBO`), and when stock is refused
+too the guard exits red as SETUP-INVALID naming the host, not as a missing probe.
+Not measured: a macOS host with a GPU.
+
     python browser/tests/playwright/patches/gfx-probes-packaged.py
 """
 
@@ -47,7 +53,7 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+from helpers import resolve_binary, stock_firefox  # noqa: E402
 
 BROWSER_ROOT = Path(__file__).resolve().parents[3]
 PROBES = ("gfxtest",)
@@ -178,6 +184,15 @@ def main() -> int:
         if not blocklisted or attempt == ATTEMPTS:
             break
         print(f"NOTE: launch {attempt} refused by the blocklist, launching again: {error}")
+    if blocklisted and sys.platform == "darwin":
+        # A hosted macOS VM refuses native GL (FEATURE_FAILURE_CGL_FBO) to every
+        # browser, so a refusal there says nothing about gfxInfo unless stock,
+        # launched the same way on the same host, got a context.
+        stock = webgl_report(stock_firefox())
+        if stock.get("context") is not True:
+            print(f"FAIL: SETUP-INVALID, stock Firefox's bare launch on this host was refused a WebGL "
+                  f"context too, so the refusal below is the host's: {stock.get('error') or stock.get('note') or stock}")
+            return 1
     if report.get("context") is not True:
         if blocklisted:
             failures.append(f"a bare launch was refused a WebGL context by the blocklist: {error}")
