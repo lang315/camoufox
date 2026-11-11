@@ -34,9 +34,9 @@ later change should read first.
 
 **Root cause.** Since upstream #997 a Linux voice draw is the Ubuntu release's whole speech-dispatcher grid, about 14000 voice objects (14805 or 13362), and the fixture holds 200 Linux cases. The test hashed each list (`canon`, `orjsonDumps`, sha256): measured locally per list, the draw 5.7 ms, `canon` 9 ms, `orjsonDumps` 25 ms. The 200 Linux cases have only 2 distinct lists, so 198 hashes re-proved a list already proved. The draw itself is cheap (1.4 s for the 200 on a laptop) and the launchers do not pay for the list: they ship the grid (`voices:speechd`). The `ENOSPC` line in that job's log is `download-stream.test.ts`'s own fixture and prints in every run.
 
-**Fix.** The test draws every case and checks its length and the 8 fixture cases that carry the full list, but hashes a Linux list once per grid (`drawVoiceConfig(...)["voices:speechd"]`, the one object per release), since the Linux draw reads nothing else. The timeout is unchanged. Locally the test takes 1.55 s (6167 ms before).
+**Fix.** The test draws every case and checks its length and the 8 fixture cases that carry the full list. It hashes a Linux list once per grid (`drawVoiceConfig(...)["voices:speechd"]`, the one object per release) and compares every other case's whole list against that grid's first, as `JSON.stringify` lines joined. The Map is keyed on the grid object: if `drawVoiceConfig` returns fresh objects the test only gets slower, never weaker. The timeout is unchanged. Locally the test takes 2.5 s (6167 ms before).
 
-**Red-to-green.** Negative control: changing the Linux `voiceUri` separator fails the test (`linux null seed 0: expected [ …(14805) ] to deeply equal [ …(14805) ]`). Pending: Tests on the PR's head.
+**Red-to-green.** Two negative controls: changing the Linux `voiceUri` separator fails the test (`linux null seed 0: expected [ …(14805) ] to deeply equal [ …(14805) ]`), and a Linux draw that swaps one voice from its 41st call on, keeping the length, fails the per-case check (`linux en-GB seed 0: list differs`). Pending: Tests on the PR's head.
 
 **What misled.** The `ENOSPC` line a few lines above the failure, and reading the red as a slow runner: the test had used 85% of its budget since the sync.
 

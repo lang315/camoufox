@@ -231,9 +231,14 @@ describe("voice draws", () => {
 	it(`reproduces ${fx.cases.length} voice lists`, () => {
 		// A Linux list is its Ubuntu release's speech-dispatcher grid expanded
 		// to about 14000 voices, and the draw reads nothing else, so it is
-		// hashed once per grid. Hashing every one took 25 s of the 30 s budget
-		// on a hosted runner (586 ms before the grid existed, #419).
-		const hashOfGrid = new Map<unknown, string>();
+		// hashed once per grid; every case's list is still compared in full
+		// against that grid's first. Hashing all 200 took 25 s of the 30 s
+		// budget on a hosted runner (586 ms before the grid existed, #419).
+		// The Map is keyed on the grid object: if drawVoiceConfig ever returns
+		// fresh objects the test only gets slower, never weaker.
+		const flat = (list: Array<Record<string, unknown>>) =>
+			list.map((v) => JSON.stringify(v)).join("\n");
+		const ofGrid = new Map<unknown, { hash: string; flat: string }>();
 		for (const c of fx.cases) {
 			const voices = fp.generateRandomVoiceSubset(c.os, c.locale, c.seed);
 			const label = `${c.os} ${c.locale} seed ${c.seed}`;
@@ -247,8 +252,11 @@ describe("voice draws", () => {
 				expect(h(voices), label).toBe(c.hash);
 				continue;
 			}
-			if (!hashOfGrid.has(grid)) hashOfGrid.set(grid, h(voices));
-			expect(hashOfGrid.get(grid), label).toBe(c.hash);
+			if (!ofGrid.has(grid))
+				ofGrid.set(grid, { hash: h(voices), flat: flat(voices) });
+			const first = ofGrid.get(grid)!;
+			expect(first.hash, label).toBe(c.hash);
+			expect(flat(voices) === first.flat, `${label}: list differs`).toBe(true);
 		}
 	});
 	it("voice URIs", () => {
