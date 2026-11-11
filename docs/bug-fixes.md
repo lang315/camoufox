@@ -14,6 +14,41 @@ later change should read first.
 
 
 
+## #431: the e2e audio probe timed out at `loadstart` because uBlock Origin held the media request
+
+**Fixed by:** the PR that fixes #431. **Found by:** Tests runs 42956004271 (job 130318498018) and 43012099185 (job 130548452535).
+
+**Symptom.** `test_web_apis_behave_like_the_reference[pkg]`: audio `camoufox='error: Error'`, `{'ms': 8000, 'step': 'loadstart'}`, reference `{'ms': 11, 'step': 'loadedmetadata'}`. A diag over 120 launches (run 42961736067) saw no timeout but a tail of 6.2 to 6.4 s on three builds, against the probe's 8 s bound.
+
+**Root cause.** The page loads about 2 s after launch and its probes run at once; `/tone.wav` is requested at about 2.2 s. uBlock Origin's blocking `webRequest.onBeforeRequest` listener is registered when its `traffic.js` loads (`js/vapi-background.js:1221`, in the `Net` constructor, uBO 1.76.0), which is also about 2 s after launch, and it holds every request it is given until the ten lists of a fresh profile are compiled (`js/start.js:417`, `webRequest.start()` after the lists load; #403 documents the hold). A request that lands inside the hold waits for it: audio 7604 and 7809 ms in 2 of 40 launches (run 43038459124; `tone_hold_ms` 7551 and 7654, the request reached the local server that long after the page sent it) and 7843 ms in 1 of 40 (run 43062379383); the other 77 launches of that arm sent the request before the listener existed. The hold is not Camoufox's: release Firefox with the same uBO installed as a temporary addon held 24 of 24 launches (6.7 to 7.3 s, run 43041843386, a different launch flow: Marionette, `AddonManager.installTemporaryAddon`). The page and the e2e bound are not at fault, and the product is: every default launch holds the page requests of its first 4 to 8 s on a hosted runner.
+
+**Fix.** `browser/scripts/fetch-ubo.py` `freeze_lists` moves the listener's registration from the constructor to `setSuspendableListener`, which `webRequest.start()` calls once the lists are compiled, so no request waits for them. A request made before then is not filtered, as one made before uBO's listener existed never was. The cost and the decision are in `ubo-lists-pinned-to-bundled`.
+
+**Tried and failed.** `canSuspend()` false (`js/vapi-background-ext.js:347`), which stops `suspend()` from parking requests: the bundled uBO with it still held 44 of 44 launches (4.5 to 5.9 s, runs 43041843386 and 43048541138). `suspendUntilListsAreLoaded=false` was already ruled out in #211. Fewer lists (3 held 1.0 s, #403) is a coverage choice. Loosening the 8 s bound or excluding uBO from the probe would hide a delay every user has.
+
+**Evidence.** On the browser of Tests run 43011230804 (main d9469128) with uBO 1.76.0, interleaved arms, one job each, headful under xvfb on `ubuntu-24.04`:
+
+| Run | Arm | Launches | Held more than 0.5 s | Slowest |
+|---|---|---|---|---|
+| 43048541138 (a request every 50 ms) | shipped uBO | 20 | 20 | 6.4 s |
+| | registration moved | 20 | 0 | 387 ms |
+| | no uBO | 20 | 0 | 287 ms |
+| 43066193431 (a local page loaded every 300 ms) | shipped uBO | 10 | 10 | 6.25 s |
+| | fixed uBO, staged by `fetch-ubo.py` | 10 | 0 | 250 ms |
+| | no uBO | 10 | 1 | 540 ms |
+| 43062379383 (the audio probe) | shipped uBO | 40 | 1 | 7843 ms |
+| | fixed uBO | 40 | 0 | 352 ms |
+
+Red to green for the guard `ubo-lists-frozen.py`, which now fails when a plain page load takes 1.5 s or longer before uBO first blocks (run 43069498593, shipped then fixed uBO, three and six launches): shipped uBO FAIL 3 of 3 (5.05, 5.69 and 5.62 s), fixed uBO PASS 6 of 6 (slowest plain load 0.21 s). Tests on the PR's head: see the PR.
+
+**What misled the investigation.**
+
+- **A wait on a thread is not only `suspend()`.** The first guess, `canSuspend()` false, was measured, held 44 of 44, and would have shipped as the fix if the arm had not been compared with a hold-free one.
+- **A guard that times an ad page times uBO's first block.** With the fix, the one page load in each launch that carries an ad script took 3.9 to 5.7 s in each of 23 launches (runs 43062379383, 43066193431, 43069498593 and 43071636223), while a plain page and a cross-site page without an ad stayed under 0.25 s at the same moment (run 43071636223). That cost is the ad's, not a hold: the guard times the plain page. Its cause (uBO's first redirect of an ad script) is a guess and was not shown.
+- **A reference that does not run the addon is not a control.** The first stock-Firefox arm side-loaded uBO through the profile and read `extensions.json` back: uBO was not installed, and its zero holds would have read as "stock Firefox is fine". The second used a temporary addon and read `isActive`.
+- **The truncated file.** A full-file rewrite of `fetch-ubo.py` dropped `main()`; its unit tests import the module and never run the CLI, so a diag that called `stage` ran nothing and its green meant nothing until the log's `startBeforeRequest` count read 0.
+- **Tests runs 43054454767 and 43057920514** died in `apt-get` (`Temporary failure resolving 'azure.archive.ubuntu.com'`) before any guard ran; they are not red evidence.
+
 ## #419: `driven-dblclick-gap` failed in some runs when the first double click after launch was paced late
 
 **Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch and the diag runs that followed (diag-63, 70, 71, 75).

@@ -410,8 +410,8 @@ rules:
       compiled (setSuspendableListener), and none of 20 launches was held
       (worst request latency 387 ms). The cost: a request made before the
       lists are compiled passes unfiltered, as one made before uBO's
-      listener existed always did. ubo-lists-frozen.py fails when a page load
-      before uBO first blocks takes 1.5 s or longer. The hold was
+      listener existed always did. ubo-lists-frozen.py fails when a plain page
+      load before uBO first blocks takes 1.5 s or longer. The hold was
       measured on Linux only. Users who do not want uBO pass
       exclude_addons=[DefaultAddons.UBO] (TypeScript: exclude_addons:
       ["UBO"]).
