@@ -78,7 +78,7 @@ What differs is how the groups are gated:
   fontconfig scans `<dir>` **recursively** — naming it would put every other
   OS's faces on the search path.
   The browser holds the same line: `gfxFcPlatformFontList::ActivateBundledFonts`
-  (`linux-bundled-fonts-toplevel.patch`) adds only the files directly in
+  (`font-hijacker.patch`) adds only the files directly in
   `fonts/`, Firefox's own, and never the directory. Upstream added the directory
   as an application font directory, which put every group on the search path
   past this conf (#329). A raw launch of the Linux binary with no
@@ -176,6 +176,16 @@ Deliberate choices:
   Typewriter Semibold`, `Futura Bold`, `STIX Two Math Regular`, ... to their base
   family. A real Mac registers those as families but `fc-scan` cannot see them,
   so the ones whose target is bundled are forced in.
+- **An alias name is essential only where its target is in every base.** A
+  name fonts.conf rewrites renders only through its target, so it joins a base
+  only with it. On Linux, `Calibri` and `Cambria` resolve to Carlito and
+  Caladea, which come with LibreOffice (the `libreoffice` addition) and are in
+  neither Ubuntu base: a draw without that bundle does not have them, as a
+  stock Ubuntu without it does not. Every Linux identity used to claim both,
+  and they rendered only because the bundled-font activation leaked Windows'
+  own Calibri and Cambria to every OS. macOS's `Noto Sans Canadian Aboriginal
+  Regular` left the floor for the same reason (its family is not in every
+  macOS base).
 - **`Twemoji Mozilla` is reportable on Linux** (a CreepJS Linux marker, and
   Firefox exposes its bundled font to content). Not reported on macOS.
 - One name renders for every Linux identity but is not always reported

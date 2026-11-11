@@ -45,8 +45,10 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "canvas-spoofing",
         "context-app-version",
         "context-list-every-process",
+        "context-http-user-agent",
         "context-lists-across-processes",
         "context-os-system-font",
+        "detached-window-stock-values",
         "display-scale-resolution",
         "fingerprint-setter-seal",
         "generic-monospace-launch-mask",
@@ -56,6 +58,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "ipv4-only-network",
         "locale-explicit-names",
         "media-devices-coherence",
+        "navigation-preconnect-proxied",
         "spoofed-voice-speaks",
         "startup-prefs",
         "system-font-alias-stall",
@@ -64,6 +67,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "touchscreen-digitizer",
         "webgl-live-state",
         "webgl-renderer-pair",
+        "webgl-spoofed-limit-cost",
         "webrtc-context-ip",
         "webrtc-port-range",
         "worker-config-reads",
@@ -73,6 +77,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
     "automation": (
         "addons-install-once",
         "debug-logging-off",
+        "fonts-ready-driver",
         "force-scope-access",
         "humanize-edge-deadlock",
         "humanize-mouse-trajectory",
@@ -81,6 +86,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "isolated-evaluate",
         "long-press-no-link-preview",
         "main-world-eval",
+        "main-world-eval-globals",
         "main-world-init-script",
         "mouse-boundary-sweep",
         "near-edge-mouse-deadlock",
@@ -88,6 +94,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "occluded-window-active",
         "pointer-lock-offscreen",
         "screenshot-canvas-release",
+        "socks5-proxy-auth",
         "trusted-events",
         "ubo-lists-frozen",
         "visible-automation-cues",
@@ -96,16 +103,41 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
     "parity": (
         "certificate-revocations",
         "contentaccessible-parity",
+        "css-device-size-fractional",
+        "driven-click-hold",
+        "driven-click-throughput",
+        "driven-dblclick-gap",
+        "driven-drag-gtk",
+        "driven-evaluate-globals",
+        "driven-fill-paste",
+        "driven-global-order",
+        "driven-move-coalescing",
+        "driven-page-real-focus",
+        "driven-wheel-notches",
+        "driven-wheel-notches-macos",
+        "enterprise-policies",
         "firefox-version-pin",
         "getter-cost-parity",
         "gfx-probes-packaged",
-        "hardware-acceleration-policy",
+        "headless-software-webgl",
+        "juggler-initial-blank-context",
+        "juggler-input-gate",
+        "nimbus-without-normandy",
+        "no-background-traffic",
+        "playwright-window-size",
         "popup-blocker-parity",
+        "popup-covered-click",
         "popup-window-size",
+        "release-rollouts",
+        "screenshot-leaves-page",
         "search-service-init",
+        "startup-size-hold-yields",
         "stock-gpu-parity",
         "stock-parity-probes",
+        "system-font-size-windows",
+        "tracking-protection-lists",
         "viewport-no-rdm",
+        "virtual-display-window-visible",
         "windows-crt-math",
         "windows-exe-manifest",
         "windows-keyboard",
@@ -117,7 +149,11 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 # A guard is Linux-only when its subject is: ipv4-only-network builds a
 # network namespace (unshare, ip), the two WebGL guards start headless="virtual"
 # (Xvfb), occluded-window-active is X11 window occlusion, pointer-lock-offscreen
-# is nsWindowX11.cpp (GTK/X11 only) and windows-keyboard drives GTK with xdotool.
+# is nsWindowX11.cpp (GTK/X11 only), windows-keyboard drives GTK with xdotool,
+# virtual-display-window-visible is the virtual display (Xvfb, Linux only),
+# driven-drag-gtk is a GTK drag session, headless-software-webgl is Mesa's
+# EGL rasterizer and css-device-size-fractional needs two Xvfb displays of fixed
+# sizes (a hosted Windows monitor is 1024 px wide).
 # A guard that needs Xvfb only for a display is not here: it runs on the host's
 # display elsewhere. On any other platform the runner does not run a Linux-only
 # guard and counts it apart from the passes; on Linux a missing prerequisite
@@ -126,19 +162,37 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 LINUX_ONLY = frozenset({
     "ipv4-only-network", "webgl-live-state", "webgl-renderer-pair",
     "occluded-window-active", "pointer-lock-offscreen",
+    "virtual-display-window-visible", "driven-drag-gtk", "headless-software-webgl",
+    "css-device-size-fractional",
 })
 
 # Guards that do not run on one platform for a reason of that platform, counted
 # apart from the passes with the reason in the log. windows-keyboard compares a
 # Windows identity with Windows' keyboard, which a Windows host has natively, and
-# on a macOS host runs its caret arm alone (the rest is GTK).
+# on a macOS host runs its caret arm alone (the rest is GTK); driven-wheel-notches-macos
+# needs a macOS identity, and a hosted Windows (1366x768) or macOS (1280x720) display fits none;
+# driven-move-coalescing needs moves that outrun a refresh tick (Juggler paces a driven move at 8 ms,
+# PageHandler.js kMoveIntervalMs): measured on hosted runners they land 8.0 ms apart on Linux and a tick apart on
+# Windows and macOS.
+_PACED_AT_A_TICK = (
+    "Juggler's driven moves land one refresh tick apart on a hosted Windows or macOS runner (16.0 ms against 15.6 ms; "
+    "17.0 ms against 16.7 ms; Linux 8.0 ms), so a sweep cannot outrun the tick; stock real input at 25 ms/move is "
+    "one pointermove each as well"
+)
+
 NOT_ON = {
     "darwin": {
         "system-font-alias-stall":
             "its count reads the host's font universe, and its ratio alone cannot go red on this host",
+        "driven-wheel-notches-macos":
+            "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
+        "driven-move-coalescing": _PACED_AT_A_TICK,
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
+        "driven-wheel-notches-macos":
+            "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
+        "driven-move-coalescing": _PACED_AT_A_TICK,
     },
 }
 

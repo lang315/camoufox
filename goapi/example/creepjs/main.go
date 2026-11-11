@@ -38,11 +38,6 @@ func main() {
 	}
 	if disp := os.Getenv("CF_DISPLAY"); disp != "" {
 		opts = append(opts, camoufox.WithVirtualDisplay(disp))
-		// llvmpipe (Xvfb software GL) is blocklisted for WebGL by
-		// default; force it on so Camoufox can attach its coherent
-		// WebGL vendor/renderer spoof. Without this, detectors see
-		// "no webgl context" — itself a bot tell.
-		opts = append(opts, camoufox.WithFirefoxUserPref("webgl.force-enabled", true))
 	} else {
 		opts = append(opts, camoufox.WithHeadless(true))
 	}

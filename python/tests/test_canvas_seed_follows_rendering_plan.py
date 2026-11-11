@@ -8,6 +8,7 @@ CanvasSeedManager::GetSeed returns 0 without a launch-level `canvas:seed` or a
 `setCanvasSeed` call, which leaves the patch inert.
 """
 
+from types import SimpleNamespace
 import asyncio
 import re
 from unittest import mock
@@ -37,6 +38,9 @@ class FakeBrowser:
 
     def __init__(self, options):
         self.options = options
+        # The Playwright implementation object the launcher's wrappers sit on;
+        # without a new_context of its own it has nothing to wrap.
+        self._impl_obj = SimpleNamespace()
         self.contexts = []
 
     def new_context(self, **kwargs):

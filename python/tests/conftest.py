@@ -21,6 +21,7 @@ os.environ["XDG_CACHE_HOME"] = str(CACHE_ROOT / ".cache")
 from camoufox import pkgman, utils  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+SETTINGS = REPO_ROOT / 'browser' / 'settings'
 PACKAGE_DIR = Path(pkgman.__file__).resolve().parent
 
 
@@ -162,3 +163,16 @@ def no_host_gpu_probe(monkeypatch):
     from camoufox import utils
 
     monkeypatch.setattr(utils, 'host_gpu', lambda *args: None)
+
+
+@pytest.fixture(autouse=True)
+def properties_of_this_checkout(monkeypatch):
+    """launch_options reads properties.json from the installed build, and CI
+    installs the last published one. This suite tests the checkout, whose
+    launcher may draw a key that build predates, so it reads the checkout's."""
+    from camoufox import utils
+
+    load = utils._load_properties
+    monkeypatch.setattr(
+        utils, '_load_properties', lambda path=None: load(path or SETTINGS / 'camoufox-bin')
+    )

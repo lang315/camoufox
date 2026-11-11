@@ -63,6 +63,27 @@ func TestWebGPUFollowsTheClaimedDeviceAndBlocksTheHostAdapter(t *testing.T) {
 	}
 }
 
+// pythonlib and the TypeScript launcher set webgl.force-enabled with every WebGL
+// identity; goapi did not, and a hosted macOS runner whose native GL is refused
+// then had no WebGL context.
+func TestWebGLIsForcedOnForAnIdentityThatNamesAGPU(t *testing.T) {
+	prefs := map[string]any{}
+	setWebGL(prefs, "Apple")
+	if prefs["webgl.force-enabled"] != true {
+		t.Fatalf("an identity naming a GPU: webgl.force-enabled = %v, want true", prefs["webgl.force-enabled"])
+	}
+	prefs = map[string]any{}
+	setWebGL(prefs, "")
+	if _, set := prefs["webgl.force-enabled"]; set {
+		t.Fatalf("no WebGL identity: webgl.force-enabled set to %v", prefs["webgl.force-enabled"])
+	}
+	prefs = map[string]any{"webgl.force-enabled": false}
+	setWebGL(prefs, "Apple")
+	if prefs["webgl.force-enabled"] != false {
+		t.Fatalf("the caller's pref was overwritten: %v", prefs["webgl.force-enabled"])
+	}
+}
+
 func TestCoveredCanvasWarns(t *testing.T) {
 	if w := leakWarnings(&config.Config{}, false, false, true); len(w) != 1 || !strings.Contains(w[0], "WithCanvasPlaceholder(false)") {
 		t.Fatalf("covered canvas warnings = %q", w)

@@ -17,16 +17,33 @@ launch that did not go through pythonlib -- measured 2026-09-18: stock Firefox
 152.0.4 on this machine returned a full WebGL 2.0 context from the real GPU and
 camoufox returned `null` from `canvas.getContext('webgl')`.
 
+That 09-18 stock measurement had the session's WAYLAND_DISPLAY in its
+environment, which runs the probe through EGL. With no display at all, stock
+-headless gets the same refusal (measured on 158.0.1, 2026-11-03): the X11 probe
+cannot connect. headless-software-webgl.patch probes through EGL with Mesa's
+software GL when headless and there is no display, so that launch has llvmpipe
+WebGL, as a headed browser on Xvfb does. The launch below therefore runs with
+no DISPLAY / WAYLAND_DISPLAY: whatever session the guard runs in, it checks
+that display-less fallback, and a missing gfxtest still shows as the refusal.
+
 Three checks, because each alone can pass while the others are broken: the
 packaging list must not name them, the build under test must have them beside
-the binary (Linux only: gfxtest is built for the GTK toolkit alone), and a bare launch -- no pythonlib, so no `webgl.force-enabled` --
-must still get a context.
+the binary (Linux only: gfxtest is built for the GTK toolkit alone), and a bare
+display-less headless launch -- no pythonlib, so no `webgl.force-enabled` -- must
+still get a context.
+
+On macOS a refused bare launch is compared with stock Firefox's bare launch on
+the same host (the version stock-gpu-parity downloads): a hosted macOS VM refuses
+native GL to every browser (`FEATURE_FAILURE_CGL_FBO`), and when stock is refused
+too the guard exits red as SETUP-INVALID naming the host, not as a missing probe.
+Not measured: a macOS host with a GPU.
 
     python browser/tests/playwright/patches/gfx-probes-packaged.py
 """
 
 import http.server
 import json
+import os
 import shutil
 import socketserver
 import subprocess
@@ -36,7 +53,7 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+from helpers import resolve_binary, stock_firefox  # noqa: E402
 
 BROWSER_ROOT = Path(__file__).resolve().parents[3]
 PROBES = ("gfxtest",)
@@ -111,6 +128,10 @@ def webgl_report(binary: Path) -> dict:
             [str(binary), "-headless", "-no-remote", "-profile", profile,
              f"http://127.0.0.1:{port}/"],
             stdout=subprocess.DEVNULL, stderr=err,
+            # Display-less: a session's WAYLAND_DISPLAY / DISPLAY would hand the
+            # probe a window system and hide the headless fallback this checks.
+            env={k: v for k, v in os.environ.items()
+                 if k not in ("DISPLAY", "WAYLAND_DISPLAY", "WAYLAND_SOCKET")},
         )
     try:
         if done.wait(LOAD_TIMEOUT_S):
@@ -163,6 +184,15 @@ def main() -> int:
         if not blocklisted or attempt == ATTEMPTS:
             break
         print(f"NOTE: launch {attempt} refused by the blocklist, launching again: {error}")
+    if blocklisted and sys.platform == "darwin":
+        # A hosted macOS VM refuses native GL (FEATURE_FAILURE_CGL_FBO) to every
+        # browser, so a refusal there says nothing about gfxInfo unless stock,
+        # launched the same way on the same host, got a context.
+        stock = webgl_report(stock_firefox())
+        if stock.get("context") is not True:
+            print(f"FAIL: SETUP-INVALID, stock Firefox's bare launch on this host was refused a WebGL "
+                  f"context too, so the refusal below is the host's: {stock.get('error') or stock.get('note') or stock}")
+            return 1
     if report.get("context") is not True:
         if blocklisted:
             failures.append(f"a bare launch was refused a WebGL context by the blocklist: {error}")

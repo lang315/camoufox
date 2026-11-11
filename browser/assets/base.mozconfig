@@ -50,3 +50,13 @@ mk_add_options MOZ_INSTALLER=0
 mk_add_options MOZ_AUTOMATION_INSTALLER=0
 
 # ac_add_options --enable-lto=cross
+
+# Stock Linux Firefox is built against the old libstdc++ ABI (Mozilla's
+# build/unix/mozconfig.unix -> mozconfig.stdcxx: MOZ_STDCXX_COMPAT=1, so
+# -D_GLIBCXX_USE_CXX11_ABI=0). Its std::string has no small-string buffer, so
+# every string a getter builds (WebGL VENDOR/VERSION, and many more) allocates;
+# without the flag Camoufox answered those at half stock's cost
+# (getter-cost-parity.py).
+case "$CAMOUFOX_TARGET" in
+  *-linux-gnu) ac_add_options --enable-stdcxx-compat ;;
+esac

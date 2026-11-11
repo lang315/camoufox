@@ -12,6 +12,7 @@ from typing_extensions import Literal
 
 from camoufox.virtdisplay import VirtualDisplay
 
+from . import driver_defaults
 from .fingerprints import generate_context_fingerprint
 from .ip import Proxy, proxy_exit_geo
 from .utils import (
@@ -21,6 +22,7 @@ from .utils import (
     attach_launch_fonts,
     attach_launch_window,
     context_canvas_seed,
+    attach_socks5_auth,
     context_identity,
     host_identity,
     launch_options,
@@ -198,6 +200,7 @@ async def _launch(
         context = await playwright.firefox.launch_persistent_context(
             **persistent_context_options(from_options, no_viewport_default)
         )
+        driver_defaults.mark(context)
         return await async_attach_vd(context, virtual_display)
 
     identity = await asyncio.get_running_loop().run_in_executor(None, host_identity, from_options, canvas_noise)
@@ -271,6 +274,8 @@ async def AsyncNewContext(
 
     warn_fonts_excluded_by_launch(browser, fp['config'].get('fonts'))
 
+    # A browser launched elsewhere takes SOCKS5 credentials too.
+    attach_socks5_auth(browser)
     context = await browser.new_context(**new_context_options(fp, context_kwargs, proxy, geolocation))
     await context.add_init_script(fp['init_script'])
     return context

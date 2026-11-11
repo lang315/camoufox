@@ -206,7 +206,7 @@ export class EventWatcher {
   }
 
   _onEvent(eventName, eventObject) {
-    this._events.push({eventName, eventObject});
+    this._events.push({eventName, eventObject, receivedAt: ChromeUtils.now()});
     for (const promise of this._pendingPromises)
       promise.resolve();
     this._pendingPromises = [];
@@ -284,6 +284,11 @@ export class EventWatcher {
 
   getEvent(aEventName, predicate = (eventObject) => true) {
     return this._events.find(({eventName, eventObject}) => eventName === aEventName && predicate(eventObject))?.eventObject;
+  }
+
+  // When this process got the event (ChromeUtils.now()), not when a caller asked.
+  receivedAt(aEventName, predicate = (eventObject) => true) {
+    return this._events.find(({eventName, eventObject}) => eventName === aEventName && predicate(eventObject))?.receivedAt;
   }
 
   hasEvent(aEventName, predicate) {

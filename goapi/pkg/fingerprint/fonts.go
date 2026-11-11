@@ -17,6 +17,13 @@ import (
 // renders the real system fonts, so only the OS's essential fonts are claimed:
 // an addition the host does not have would render as a fallback a page can see.
 func RandomFontSubset(targetOS string, native bool, rng *rand.Rand) ([]string, error) {
+	var releaseID string
+	return randomFontSubset(targetOS, native, rng, &releaseID)
+}
+
+// randomFontSubset is RandomFontSubset that also reports the id of the OS
+// release it drew, which a Linux identity's voices must share.
+func randomFontSubset(targetOS string, native bool, rng *rand.Rand, releaseID *string) ([]string, error) {
 	fonts, err := loadFonts()
 	if err != nil {
 		return nil, err
@@ -50,7 +57,11 @@ func RandomFontSubset(targetOS string, native bool, rng *rand.Rand) ([]string, e
 		return result, nil
 	}
 
-	result := pickBase(key, rng)
+	var result []string
+	if release := pickRelease(key, rng); release != nil {
+		result = slices.Clone(release.Fonts)
+		*releaseID = release.ID
+	}
 	if len(result) == 0 {
 		for _, f := range full {
 			if essential[f] {
@@ -74,20 +85,22 @@ func RandomFontSubset(targetOS string, native bool, rng *rand.Rand) ([]string, e
 	return appendMissing(result, launcher.MarkerFonts[key]), nil
 }
 
-// pickBase draws one OS-version base by its weight (_pick_base).
-func pickBase(key string, rng *rand.Rand) []string {
+// pickRelease draws the OS version a machine runs (_pick_release) by its
+// weight: the identity's first draw, so its fonts and its Linux voices come
+// from the same release. nil when the OS has no measured version.
+func pickRelease(key string, rng *rand.Rand) *fontBase {
 	bases := fontBases[key]
 	if len(bases) == 0 {
 		return nil
 	}
 	roll, cumulative := rngFloat(rng), 0.0
-	for _, b := range bases {
-		cumulative += b.Weight
+	for i := range bases {
+		cumulative += bases[i].Weight
 		if roll < cumulative {
-			return slices.Clone(b.Fonts)
+			return &bases[i]
 		}
 	}
-	return slices.Clone(bases[len(bases)-1].Fonts)
+	return &bases[len(bases)-1]
 }
 
 // drawUnits returns the additions one machine has (_draw_units): a "bundle"

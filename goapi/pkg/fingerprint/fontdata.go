@@ -20,6 +20,7 @@ var (
 
 // fontBase is one OS version's whole default font set, drawn by weight.
 type fontBase struct {
+	ID     string   `json:"id"`
 	Weight float64  `json:"weight"`
 	Fonts  []string `json:"fonts"`
 }

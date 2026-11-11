@@ -52,13 +52,14 @@ be listed there.
 | `system-ui-font-spoofing.patch` | `navigator.platform` |
 | `timezone-spoofing.patch` | `timezone` |
 | `touchscreen-fingerprint-spoofing.patch` | `navigator.maxTouchPoints` |
-| `voice-spoofing.patch` | `voices`, `voices:blockIfNotDefined` |
+| `virtual-display-claimed-screen.patch` | `screen.width`, `screen.height`, `screen.avail*` (the X screen reports the claimed screen when it is smaller) |
+| `voice-spoofing.patch` | `voices`, `voices:speechd`, `voices:blockIfNotDefined` |
 | `webgl-spoofing.patch` | `webGl:*`, `webGl2:*` |
 | `webrtc-ip-spoofing.patch` | `navigator.platform` (the host socket's port range). The per-context addresses are `webrtc_ipv4_<ctx>` and `webrtc_ipv6_<ctx>` in `RoverfoxStorageManager`, set by `setWebRTCIPv4`/`setWebRTCIPv6` |
 | `webrtc-ip-spoofing2.patch` | `webrtc:localipv4`, `webrtc:localipv6` |
 | `webrtc-launch-ip-fallback.patch` | `webrtc:ipv4`, `webrtc:ipv6`, read when a context set no address of its own (#163) |
 | `windows-keyboard.patch` | `input:windowsKeyboard` (launch-wide: the shortcut tables and GTK's key handling are process-level) |
-| `zz-stock-cost-parity.patch` | `navigator.hardwareConcurrency`, `navigator.maxTouchPoints`, `screen.*`, `window.screenX`, `window.screenY` (re-orders the getters above so stock's work runs first) |
+| `zz-stock-cost-parity.patch` | `navigator.hardwareConcurrency`, `navigator.maxTouchPoints`, `screen.*` (re-orders the getters above so stock's work runs first) |
 
 To regenerate the list: `grep -l 'MaskConfig::' patches/*.patch`.
 
@@ -78,9 +79,10 @@ already set up, and do not add the include or `LOCAL_INCLUDES` themselves:
 | `cross-process-storage.patch` | `font-list-spoofing.patch` for `FontListManager::OnFontListStored()`, which its storage-pref callback calls |
 | `font-substitutes-gate.patch` | `font-hijacker.patch` for `MaskConfig.hpp` in `gfx/thebes/gfxDWriteFontList.cpp`; `font-list-spoofing.patch` for `gfxPlatformFontList::CamouIsFamilyAllowed()` and `FontListManager::ContextIdFor()`; `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
 | `font-system-fonts-css2.patch`, `system-ui-font-spoofing.patch`, `webrtc-ip-spoofing.patch`, `zz-stock-cost-parity.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()` |
+| `per-context-http-user-agent.patch` | `navigator-spoofing.patch` for `NavigatorManager::GetUserAgent()` (exported as `mozilla/dom/NavigatorManager.h`); `cross-process-storage.patch` for reading the context's value in the parent and worker processes |
+| `virtual-display-claimed-screen.patch` | `windows-keyboard.patch` for `/camoucfg` in `widget/gtk/moz.build` |
 | `windows-keyboard.patch` | `touchscreen-fingerprint-spoofing.patch` for `/camoucfg` in `dom/events/moz.build` |
 | `zz-stock-cost-parity.patch` | `cross-process-storage.patch` for `RoverfoxStorageManager::Generation()`; `screen-spoofing.patch` for `ScreenDimensionManager` in `dom/base/nsScreen.cpp` |
-| `linux-bundled-fonts-toplevel.patch` | `font-list-spoofing.patch`, which edits the same file (`gfx/thebes/gfxFcPlatformFontList.cpp`) earlier in the order; it only needs the pristine `ActivateBundledFonts()` body and the `nsIConsoleService.h` include line, which that patch leaves alone |
 | `zzz-font-face-log.patch` | `anti-font-fingerprinting.patch` for `gfxFontGroup::mUserContextId`; `font-list-spoofing.patch` for `CAMOU_LOG_FONTLIST()` in `gfx/thebes/gfxTextRun.cpp`. It sorts after every other patch, so it applies last |
 | `zzz-linux-font-aliases.patch` | `font-hijacker.patch` for `MaskConfig.hpp` and `/camoucfg` in `gfx/thebes/` (the generated `FontAliasesLinux.hpp` is found through that include path); `font-list-spoofing.patch` for `CamouIsFamilyAllowed()`, `CamouGenericCandidate()` (which it edits to walk the Linux chains, #333, and gives a lang-group argument, #389, declared in `gfxPlatformFontList.h`), the `AddGenericFonts` table step in `gfxPlatformFontList.cpp` and the `FindGenericFamilies` table step in `gfxFcPlatformFontList.cpp`, which pass that group and, in the second, map `cursive`, and `FontListManager::ContextIdFor()`; `navigator-spoofing.patch` for `NavigatorManager::GetSpoofedOS()`; `system-ui-font-spoofing.patch` for `SystemUISpoofedOS()`, which this patch forward-declares above `CamouGenericCandidate`; `font-substitutes-gate.patch` for the `gfxDWriteFontList::FindAndAddFamiliesLocked` region it edits. It sorts after every other patch, so it applies last |
 
@@ -104,6 +106,23 @@ at hand. A browsing context is not used, because a document created by
 `document.implementation.createHTMLDocument()` or `DOMParser` has none, while it
 shares its creator's principal. A value is stored only under its own context;
 nothing writes a fallback copy under context 0.
+
+## Driver input and the page's globals
+
+- `input-coalescing-parity.patch` uses `mJugglerEventId` and the
+  `juggler-mouse-event-hit-renderer` ack from `playwright/0-playwright.patch`.
+  Its JS half is in `additions/juggler` (`MouseDispatch.sendQueuedMove`,
+  `PageHandler.beforeDispatch`), and either half without the other wedges
+  every move until the ack deadline.
+- `drag-source-events.patch` extends the drag branch that
+  `playwright/0-playwright.patch` adds to `nsContentUtils::SynthesizeMouseEvent`.
+- `isolated-world-global-order.patch` stands alone. It recognises Juggler as
+  the scripted caller (its `resource://gre/modules/juggler/` modules, and the
+  sandboxes those modules create, whose location names them) and leaves the
+  interfaces it creates undefined on the page's window until the page uses
+  them. It edits `Codegen.py` (the window Xray's resolve on the window), so
+  every generated binding rebuilds, and `BindingUtils.h`
+  (`DoGetOrCreateDOMReflector`), which most of `dom/` includes.
 
 ## Backports
 

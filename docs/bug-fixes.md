@@ -12,6 +12,193 @@ from the diff:
 The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
+
+
+## #419: `driven-dblclick-gap` failed in some runs when the first double click after launch was paced late
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch and the diag runs that followed (diag-63, 70, 71, 75).
+
+**Symptom.** `first press 272 ms after the pointer reached the button, want 50-250` (and 276), always the first double click after launch.
+
+**Root cause.** In those runs the parent's `setTimeout` for the dwell fired 70 to 210 ms late (diag-75, run 42950463501: a 150 ms wait took 220 to 285 ms; the wait itself was computed correctly at the page's arrival and the press left within 1 to 8 ms of it). The old and the fixed Juggler overshoot the same (diag-77, run 42953609503). The bundled uBlock Origin's startup work is the one documented load on the parent seconds after launch; the tail was seen with it in diag-75 and not in diag-72 or diag-77, so the runner's load matters too, and the cause is not proven (diag-77's arms with uBO were clean as well).
+
+**Fix.** The guard launches without uBlock Origin (`exclude_addons`), as `navigation-preconnect-proxied` does, and says so in its docstring with the numbers and what is not proven. The 50 to 250 ms window is unchanged: the old code's late ack (+225 ms) was a product defect that the ceiling caught (the entry above).
+
+**Evidence.** The guard without uBO: 20 of 20 on the fixed Juggler (diag-77); with uBO 8 of 10 (diag-75). If the tail ever shows without uBO, the ceiling's design is the next question.
+
+## #419: `identity-golden` "reproduces 800 voice lists" timed out on a hosted runner
+
+**Fixed by:** the PR that fixes #419. **Found by:** Tests run 42976257299 on the sync branch (job 130376551923, `typescript`).
+
+**Symptom.** `FAIL tests/identity-golden.test.ts > voice draws > reproduces 800 voice lists: Test timed out in 30000ms` (the test took 35345 ms). The branch's earlier green runs had it at 25495 ms (42956004271) and 26639 ms (42926922611); on `main` it took 586 ms (42627294779).
+
+**Root cause.** Since upstream #997 a Linux voice draw is the Ubuntu release's whole speech-dispatcher grid, about 14000 voice objects (14805 or 13362), and the fixture holds 200 Linux cases. The test hashed each list (`canon`, `orjsonDumps`, sha256): measured locally per list, the draw 5.7 ms, `canon` 9 ms, `orjsonDumps` 25 ms. The 200 Linux cases have only 2 distinct lists, so 198 hashes re-proved a list already proved. The draw itself is cheap (1.4 s for the 200 on a laptop) and the launchers do not pay for the list: they ship the grid (`voices:speechd`). The `ENOSPC` line in that job's log is `download-stream.test.ts`'s own fixture and prints in every run.
+
+**Fix.** The test draws every case and checks its length and the 8 fixture cases that carry the full list. It hashes a Linux list once per grid (`drawVoiceConfig(...)["voices:speechd"]`, the one object per release) and compares every other case's whole list against that grid's first, as `JSON.stringify` lines joined. The Map is keyed on the grid object: if `drawVoiceConfig` returns fresh objects the test only gets slower, never weaker. The timeout is unchanged. Locally the test takes 2.5 s (6167 ms before).
+
+**Red-to-green.** Two negative controls: changing the Linux `voiceUri` separator fails the test (`linux null seed 0: expected [ …(14805) ] to deeply equal [ …(14805) ]`), and a Linux draw that swaps one voice from its 41st call on, keeping the length, fails the per-case check (`linux en-GB seed 0: list differs`). Pending: Tests on the PR's head.
+
+**What misled.** The `ENOSPC` line a few lines above the failure, and reading the red as a slow runner: the test had used 85% of its budget since the sync.
+
+## #419: `gfx-probes-packaged` read a hosted macOS VM's refused GL as a missing gfxtest
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42966475660, parity group).
+
+**Symptom.** `FAIL: a bare launch was refused a WebGL context by the blocklist ... tryNativeGL (FEATURE_FAILURE_CGL_FBO) ... EXHAUSTED`. The Windows probe passed the same guard.
+
+**Root cause.** The guard matches "Exhausted GL driver options" as the signature of an empty gfxInfo (missing `gfxtest`). On macOS there is no `gfxtest`; the hosted VM refuses native GL to every browser, and the refusal prints the same words. On `main` the launch got software GL because `camoufox.cfg` set `webgl.forbid-software false`, which upstream #997 removed, so the guard stopped being a control on macOS (lesson 4).
+
+**Fix.** On macOS a refused bare launch is compared with stock Firefox's bare launch on the same host. When stock is refused too the guard exits red as `SETUP-INVALID` naming the host. It stays red there by design, like `stock-gpu-parity`; it is not marked not applicable, because the check holds on a host with a GPU. `stock_firefox` and its loader moved to `helpers.py`, shared with `getter-cost-parity`.
+
+**Red-to-green.** Pending: the macOS probe on the PR's head.
+
+**What misled.** The guard passed on macOS before the sync for a reason that was not its subject.
+
+## #419: `getter-cost-parity` failed on a hosted macOS runner with "stock Firefox's page failed: worker died before it reported"
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42923629488, job 130204462226, parity group).
+
+**Symptom.** The reference launch, not the subject, failed: `FAIL: stock Firefox's page failed: Error: worker died before it reported`.
+
+**Root cause (by reading; the macOS probe on the PR's head is the proof).** The sync added a WebGL getter bench to the worker (`new OffscreenCanvas(16, 16).getContext('webgl')`, then `G.getParameter`) and a `w.onerror` that prints that message. `run_stock` launches stock Firefox raw, with no `webgl.force-enabled`, which the Camoufox launcher sets on every launch. On the hosted macOS VM native GL is refused (`FEATURE_FAILURE_CGL_FBO`), so stock got a null context and the worker threw. `stock-gpu-parity` sets the pref for stock and got a context on the same VM. The reference was not launched on the same axis as the subject.
+
+**Fix.** The stock profile gets `webgl.force-enabled: true`. A stock page that still fails fails with `SETUP-INVALID`, and the worker's error message now names the thrown message, so the failing side is readable (a worker error is the worker's context, any other the window's). The bench is not skipped when stock has no context.
+
+## #419: `test_web_apis_behave_like_the_reference[go]` had no WebGL context on a hosted macOS runner: goapi never set `webgl.force-enabled`
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS e2e control on the sync build (run 42934464186): only the `[go]` parameter failed; `[pkg]` and `[pw]` printed "ok a WebGL context exists".
+
+**Symptom.** The Go library's browser had no WebGL context on the hosted macOS VM, whose native GL is refused (`FEATURE_FAILURE_CGL_FBO`, "Exhausted GL driver options" in the gfx probe). A page reading `getContext('webgl')` got null, itself a bot tell.
+
+**Root cause.** The Python launcher (`utils.py`, where the WebGL fingerprint is merged) and the TypeScript one (`utils.ts`) set `webgl.force-enabled: true` with every WebGL identity. `goapi` never did; only three examples (`botdetect`, `creepjs`, `deepcheck`) added the pref by hand. On `main` the library got by because `camoufox.cfg` had `webgl.forbid-software false`, a software fallback once native GL is refused; upstream's #997 removed that line, which exposed the divergence. diag-65 (run 42938834546) showed the sync browser has a WebGL context on that VM headless in every arm and with a launcher that sets the pref, and stock has one, so the browser was not the cause.
+
+**Fix.** `setWebGL` (`goapi/rendering.go`), called in `Launch` beside `setWebGPU`, sets `webgl.force-enabled` for an identity that names a GPU and keeps a pref the caller set. The three examples no longer set it by hand. `camoufox.cfg` is unchanged.
+
+**Evidence.** `TestWebGLIsForcedOnForAnIdentityThatNamesAGPU` (identity, no identity, caller's value kept). e2e run 42942482321 on the same macOS build (`-f k=web_apis`): `6 passed, 149 deselected`, `[go]` included; the control run 42934464186 failed `[go]` on the same build.
+
+**What misled the investigation.** The first reading was a browser regression from the sync (a context on fork.1, none on the sync build), and `webgl.forbid-software` looked like the cause; a launcher that sets `webgl.force-enabled` showed a context with or without it.
+
+## #419: a driven click's first press came 10 ms short, or up to 225 ms long, after the move: the dwell counted from the queue ack, not from the page
+
+**Fixed by:** the PR that fixes #419. **Found by:** `driven-dblclick-gap` in the Linux Tests run on the sync branch (head 8823db63): "first press N ms after the pointer reached the button, want 50-250".
+
+**Symptom.** `hoverDwell()` draws 60 to 240 ms, and the guard reads the page's mouseover to first mousedown. On the old code 18 of 300 samples read under 60 ms (diag-63, Tests run 42932070267), and the "again" arm read about 10 ms under the dwell when the dwell was forced to a constant (150 ms: medians -9 to -11 for a warm `locator.dblclick`, about 0 for `mouse.dblclick`; diag-70, Tests run 42942601332). The first double click after launch read up to 225 ms over it (diag-71, run 42944916941).
+
+**Root cause.** `PageHandler._clickPacing` counted the dwell from `_movedAt`, stamped when the renderer's queue ack (`mousequeued`) reached the parent. The page does not get the move then but at the next refresh tick: 9 to 11 ms later for a driven locator (its move lands right after Playwright's actionability steps), and on a cold page the parent could see the ack up to 225 ms after the page had the move. Press and move also arrive back to back from the client, so `beforeDispatch` found no move to wait for and the pacing started before the page had it. Measured per sample in diag-71: the parent's wait was exact (p3 minus p1 = 149 to 150), the page's mouseover came 9 to 11 ms after the stamp, the press reached the page 2 ms after it left; the offset is the press lag minus the move lag.
+
+**Fix.** `EventWatcher` records when each event reached this process (`receivedAt`, `Helper.js`), the queued-move handle gives `arrivedAt()` (`MouseDispatch.js`), `_sendMove` keeps the move's `_arrival` promise and `_arrivedAt`, and the hover branch of `_clickPacing` awaits `_arrival`, then counts the dwell from `_arrivedAt ?? _movedAt`. The queue-ack stamp is the fallback when no arrival event comes, and the wait is the one `delivered()` already bounds. A press with no move, a move outside the window, and a move followed by a navigation were measured for a stall (diag-74, run 42948979732: 2 to 5 ms, 127 to 138 ms and, for no move at all, no arrival to wait for; nothing near the 5 s deadline).
+
+**Tried and failed.** Stamping `_movedAt` when `_moveDelivered` resolves (diag-64) stamped at the press's arrival, not the page's, and added late outliers (319 ms natural, 447 forced). Stamping the event's receipt without awaiting it (diag-72, run 42946715927) fixed the cold tail but left the warm -11 ms: the press read `_arrivedAt` before the event existed.
+
+**Evidence.** Dwell forced to 60, 150 and 240, orders L M L and L L L L, 10 launches per cell (diag-75, run 42950463501): every warm cell reads 0 to 2 ms over the dwell and nothing reads under it (before: -9 to -11). The first-double-click tail that remains is the parent's `setTimeout` firing 70 to 210 ms late (p3 minus the arrival stamp 220 to 285 ms for a 150 ms wait, the wait itself computed correctly) in some runs and not in others (present in diag-63, 70, 71, 75, absent in 66, 72, 77); the old and the fixed code overshoot identically (diag-77, run 42953609503: median -1 ms, max 0, 0 of 80 samples above 50). `driven-dblclick-gap` launches without uBlock Origin for that reason (below).
+
+**What misled the investigation.** `_moveDelivered` looked like the delivery time and was not: it runs when the next command asks for it, so its stamp was the press's arrival. `beforeDispatch`'s comment says the page has seen the move before any other command runs, which is false for a press sent behind a move. A diag that added page-side `mousemove` recording moved timing enough to hide the offset (diag-66).
+
+## #419: five patch guards were red on a hosted Windows runner after the upstream sync, for five different reasons
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Windows patch-guard probe (`e2e.yml`, `probe=patch_guard.py`) on the sync's Windows build: run 42888796068, job 130084161444, head `be03d4d8`. The browser was not the cause of any of them.
+
+**Symptom.** Parity and spoofing groups red: `stock-gpu-parity`, `navigation-preconnect-proxied`, `css-device-size-fractional`, `driven-wheel-notches`, `driven-move-coalescing` (and `popup-window-size`, on `main` too, see below). Each was measured in a diag run on the same Windows artifact before it was changed.
+
+**Root causes and fixes.**
+
+- `stock-gpu-parity`: the runner's stock Firefox reads `Microsoft Basic Render Driver`, a software renderer fpgen never recorded (diag-47, run 42901810722, job 130129491408). Main's guard pinned `webGl:vendor` and `webGl:renderer` to the nearest device's pair in that case; the merge took upstream's guard, which dropped the pin because upstream's software renderer (llvmpipe) is recorded. The launcher drew a random GPU and the guard compared it with the device pair (`claimed GPU`). The pin is back for a host GPU that is not in `firefox_gpus(target_os)`, and on that branch the guard prints that the claimed GPU is not measured (reading back what it pinned would prove nothing) and checks what the launcher does decide there: the canvas is covered, read from a second launch with the tables alone (naming a GPU covers the canvas by itself, so the pinned launch cannot tell). The launcher is coherent: `plan_rendering` returned `(True, None)` for that host, canvas noise on.
+- `navigation-preconnect-proxied`: the direct arm waited a fixed second for `direct-prefetch.test` to reach the resolver's log, and it was there in about half of the Windows launches and never in the rest, also after a second load (diag-54, run 42920027480). Two guesses were refuted first: the socket process (diag-46, run 42900315227: the parent writes the log, the children's are empty) and a stuck loader count (a reload did not drain it). diag-56 (run 42925241398) read the browser's state in each launch: the system proxy answered `DIRECT`, nothing was recorded as proxied, and `network.dns.disablePrefetch` was false right after the load in 3 of 8 launches (the link was resolved in exactly those) and true by the end of all 8. uBlock Origin's default `prefetchingDisabled` (`js/background.js:123`, applied in `js/start.js:197`, uBO 1.76.0) switches prefetching off at a moment that depends on its startup, so the direct arm raced it and the proxied arms would have passed whatever the browser did. The guard launches without uBO (`exclude_addons`) and says why; it polls for the direct name (30 s, "never resolved" fails) and the proxied arms wait max(1 s, 3 x that latency). Firefox's HTMLDNSPrefetch has no skip log line to wait for (read in mainline, not the 159 tree), so the negative wait is a calibration, said so in the docstring.
+- `css-device-size-fractional`: it needs two Xvfb displays of fixed sizes, so it is Linux-only (`LINUX_ONLY`), with the reason in its docstring; not measured on Windows or macOS (the #415 form).
+- `driven-wheel-notches`: it hard-coded GTK's 20 px line (`MozMousePixelScroll` 60, 120 px a notch); Windows' line is 19 px, which `docs/input-dispatch.md` says of stock 159.0 ("same shape, pixels differ only because line height does"). The notch's pixels are now checked against what one arrow key press scrolls (three lines, a path the wheel does not take: 60 px on Linux, 57 on Windows, 51 under the macOS identity, diag-52, Tests run 42916968815 and e2e run 42916974040). `window.scrollByLines(1)` was tried first and reads 0 when read at once, instant or smooth, isolated world or main (stock 159.0 does the same and the page has scrolled 34 px a second later: diag-53, run 42919678949, so it is Firefox's behaviour, not a difference) (the guard's first Linux run, Tests 42910599847, caught it); an earlier arrow-key attempt assumed one press is one line. Its macOS-identity arm cannot be drawn on a 1366x768 display (nor on a hosted macOS runner's 1280x720, probe run 42923629488) (`RestrictiveConstraints`, diag-48, run 42902541346, not a crash: every browser exited 0) and moved into `driven-wheel-notches-macos.py`, not applicable on Windows or macOS (`NOT_ON`), so it runs on Linux.
+- `driven-move-coalescing`: coalescing needs moves that outrun the refresh tick. On this runner Juggler's moves arrive 16.0 ms apart (median, max 32.0) against a 15.6 ms rAF tick, with `performance.now()` resolving 1 ms; stock's real input (`SendInput`) coalesces at 8 ms a move and gives one pointermove each at 25 ms (diag-50, run 42909452571). The guard now fails with `SETUP-INVALID` on any OS where the sweep does not outrun the tick, prints the gap and the tick in its PASS line, and is not applicable on Windows or macOS (`NOT_ON`; macOS: 17.0 ms against a 16.7 ms tick, probe run 42923629488). Main has none of this pacing (no `kMoveIntervalMs`, no `input-coalescing-parity.patch`): it arrives with the sync. An earlier reading of the gap from `event.timeStamp` was a quantized OS clock and was not trusted until the handler clock agreed.
+
+**Not done.** `popup-window-size` (on `main`) is red for the same monitor reason as `css-device-size-fractional` (a 1366 px window on a 1024 px monitor); not part of this change. Whether Juggler's moves are slower per move on Windows than on Linux is not measured (the Linux gap now prints in the guard's PASS line).
+
+**Evidence.** The diag runs above, each on the sync's Windows artifact (run 42873288735). The fixed guards' own runs are in the PR.
+
+**What misled the investigation.** Two comparisons that compared a binary with itself: `util.unpack` names its directory after the zip, so the release and the build zip (same name) shared one (diag-45's first run, diag-47's browser column), which would have shown "no difference" for the browsers; fixed in the probes and not used. A pace read from `event.timeStamp` looked like a 16 ms tick. "GTK-only reference" for the wheel guard came from a code comment; the guard's own docstring points at a Windows measurement.
+
+## #419: `webrtc-context-ip` and `webrtc-port-range` saw no STUN Binding Request after the upstream sync
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head 08bccb9b, run 42807370183, the spoofing job).
+
+**Symptom.** Both guards failed with `SETUP-INVALID`: "no srflx candidate, the STUN responder was not reached" and "no STUN Binding Request reached the server". They were green on `main`.
+
+**Root cause.** `browser/tests/playwright/patches/helpers.py` defines `STUN_COOKIE = b"\x21\x12\xa4\x42"` (bytes) for `is_binding_request` and `binding_success`. The merge appended upstream's STUN block below it, including a second `STUN_COOKIE = 0x2112A442` (int). The later binding won, so `is_binding_request` compared `data[4:8]` with an int, never matched, and the guard's responder answered nothing.
+
+**Fix.** Upstream's STUN block (`own_address`, `stun_binding_response`, `AnsweringStun`, the int cookie) is deleted. This branch keeps the fork's WebRTC guards, so the block duplicated `is_binding_request` and `binding_success` and had one caller, `navigation-preconnect-proxied.py`, which now takes `default_route_ipv4` (both pick the default-route source address with a UDP connect). The imports the block orphaned are removed.
+
+**Evidence.** diag-44, run 42858339235, two launches per arm, both guards: main tree with main dist and main tree with the sync dist green 2/2; sync tree with either dist red 2/2; main tree with only the sync `helpers.py` and main dist red 2/2, which isolates the file. The fix's own Tests run is in the PR.
+
+**What misled the investigation.** The dist, the launcher, the AppArmor sysctl and the runner were each suspected first (diag-40 to diag-42) and each was cleared by measurement. The guards are byte-equal to main's, so the difference sat in a shared helper that nobody had read for a name collision.
+
+## #419: `popup-covered-click` clicked a second after `showPicker()` returned, before the picker was open
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head 08bccb9b, run 42807370183, the stock-parity job). The guard came with upstream's #997.
+
+**Symptom.** One red in about 25 launches: `FAIL: headless: the page got the clicks, so no popup covered #t: ['picker', 'mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click']`. The same dist and launcher passed 24 of 24 launches in run 42830763227 (8 each of three arms), and the guard had passed in runs 42488209417 and 42540349228.
+
+**Root cause, by reading.** `MouseDispatch.sendAcked` (`browser/additions/juggler/input/MouseDispatch.js`) hands a click to a popup only when `_popupAt` finds a `panel`, `menupopup` or `tooltip` whose `state` is `open` at that moment. The guard's page logs `picker` when `showPicker()` returns, which only asks the parent to open the picker, and the guard then waited a fixed 1000 ms before it clicked. A picker that had not reached state `open` by then let both clicks through to the page, which is the log above. No launch has been caught in the `showing` state, so the mechanism is a reading of the code, consistent with the red, not a measurement of a slow open.
+
+**Fix.** The guard waits for the condition `_popupAt` tests. After the picker click it reads the parent's popups through Marionette's chrome context (`helpers.Marionette`, as `long-press-no-link-preview.py` does) until one is `open` and takes mouse events, under a 10 s deadline. A miss fails with the states it last saw (`closed`, `showing`, or none), so a red names the half of the race it lost. The time from `picker` to `open` goes in the PASS line. Nothing is retried and no threshold changed.
+
+**Evidence.** Run 42840257675, the sync dist (42807370183), libegl1 installed as in the parity leg: 12 of 12 launches green in both arms (headless, and a private Xvfb display), and Marionette's chrome context worked in the headless arm. Milliseconds from `picker` to an open popup (an upper bound: it includes the Marionette connection made after the click, the 20 ms poll and one round trip): headless 1397, 110, 321, 315, 412, 297, 478, 221, 695, 492, 113, 349 (median 335); display 346, 473, 480, 356, 479, 341, 289, 114, 463, 451, 318, 432 (median 394). One of 24 readings, the first launch of the job, is above the old 1000 ms; it includes the connection setup, so it is not proof that the panel itself took longer. Red capability: three launches with no picker open, two clicks on `#t`, and the page log held `mousedown`, `mouseup`, `click` twice each in 3 of 3; with run 42807370183's red, that is the evidence that the page log sees an uncovered click. There is no red-to-green: the red does not reproduce on demand.
+
+**What misled the investigation.** The guard is not on `main` (it came with #997), so the red looked like a regression of the sync; the compiled inputs and the launcher of the red run and of a green run were the same. A 24-launch rerun that passed was read as "not reproduced", not as "fixed": the diag job was the automation leg, without the parity leg's setup.
+
+## #419: `main-world-eval-globals` failed whenever uBlock Origin was loaded: the guard compared a first tab with a later one
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head c12894fa, run 42540349228). The bundled uBlock Origin is not part of the build's inputs, see #425.
+
+**Symptom.** The guard, which arrived with upstream's #997, failed with `global order moved by one mw: evaluate: [['RegExp'], ['RegExp']]`: `RegExp` stood at index 22 of the watched names in the `mw:` tab and index 2 in the plain tab. Runs whose staged uBO was 1.75.4 passed it; runs after uBO 1.76.0 was published (2026-11-08 17:02 UTC) failed it. The variable was the uBO the run staged, not the build: the bb24 tree with 1.76.0 failed 12 of 12.
+
+**Root cause.** The guard compares the window's property order in a plain tab with the order in a tab that got `mw:() => 1`. With uBlock Origin loaded, the second tab of a browser lists the standard classes in a different order from the first even when no `mw:` evaluate runs. Measured on the browser of run 42744962270 (uBO 1.76.0), 12 launches per arm, one job, interleaved (run 42794433294): two plain tabs differed in 12 of 12 launches (`RegExp` at index 7 in the first tab and 925 in the second in 11; the twelfth stayed at 7 but the full orders differed); plain then mw differed 12 of 12; mw then plain differed 12 of 12 with the first (mw) tab canonical, so it follows the tab's position, not the evaluate; plain then mw with uBO excluded was identical in 12 of 12. What decided it: swapping `addons/UBO` between the failing browser and the passing one flipped the result both ways, 12 of 12 each (run 42786962179), and swapping `libxul.so`, the three Juggler files that differ, or every other file changed nothing. The two bundled different uBO releases, 1.75.4 and 1.76.0 (published 2026-11-08 17:02 UTC). In the failing tab `Boolean`, `String`, `RegExp` and `JSON` left the front group of the order and stand near its end. A control with uBO off and a script that touched `String` and `Boolean` before the enumeration put exactly those two at the end in the order they were touched (run 42802030765), so that pattern is what a touch looks like, and it is consistent with a main-world script having run in the failing tab. Which uBO script it is has not been shown. The control did not settle `RegExp`: the page source held a regex literal that the first tab never ran, and `RegExp` stood at the end in both tabs, so it resolves when the script compiles.
+
+**Fix.** The guard launches the browser with `exclude_addons=[DefaultAddons.UBO]`, as `driven-evaluate-globals.py` does for the same reason, and its docstring states what that gives up: it no longer covers an `mw:` evaluate in a browser that has uBO loaded. It watches `RegExp` among the classes a script touches, not `String` or `Boolean`. `driven-global-order.py` also loads uBO, but it compares one driven page with one undriven page, not a first tab with a later one; it passed in run 42540349228 with uBO 1.76.0 (one run).
+
+**Evidence.** Red to green, one job, on the browser of run 42744962270, 12 launches each (run 42802030765): the guard as it was, with uBO loaded, failed 11 and passed 1 (the same race as the rest); the fixed guard passed 12; the fixed guard with an `mw:` evaluate that touches `RegExp`, `String` and `Boolean` failed 12, so it can still go red. Not measured: pages uBO has scriptlets for, Windows, macOS.
+
+**What misled the investigation.** Four reads were wrong before a file diff of the two browsers: the voice-spoofing registration order, `stdcxx-compat`, bb24's whole WebRTC patch set, and an exact rebuild of bb24's compiled inputs (digest equal to bb24's, still failing). Each changed only compiled inputs, and uBO is not one: `tests.yml` stages it per run after a cache hit. No identity line printed the uBO version until diag-31, so the bb24 browser (1.75.4, staged 14:09 UTC on 2026-11-08) looked like the same inputs. A hybrid that swapped config, defaults and the Juggler files but not `addons/UBO` gave a mixed result that looked like a race.
+
+## #419: `driven-wheel-notches` scrolled short on a 200 px scroller: Gecko limits one wheel scroll to a page
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch (head c12894fa, run 42540349228, the stock-parity job).
+
+**Symptom.** `FAIL: macOS mouse.wheel (long) scrolled 999 px, expected 1071`: the 63-line turn scrolled short of 63 times the 17 px line. Later launches read 1016 to 1040.
+
+**Root cause.** The guard's scroller was 200 px tall. Gecko limits one wheel scroll to a page of the scroller unless the user allows more (`dom/events/EventStateManager.cpp:3779-3797`), and the long turn sends events of up to 12 lines, 204 px at a 17 px line. It is not the browser's input path: the same scroll on a 600 px scroller was exact.
+
+**Fix.** The scroller is 600 px tall; the docstring gives the clamp and the arithmetic (a 15 px line makes 180 px, under 200).
+
+**Evidence.** Five launches each, one job (run 42674949930, the stock-parity job): 600 px scroller 1071 in 5 of 5; 200 px scroller 1016 to 1040 with this build and 999 to 1057 with a 16 px font page.
+
+**What misled the investigation.** The guard passes at upstream with a 200 px scroller, which looked like a regression in the sync. A 15 px line would keep the largest event under the page; whether upstream's runs had that line was not measured.
+
+## #419: the merge of upstream's #997 undid two fixes: the spoofed voices came after the speech services, and `--enable-stdcxx-compat` never applied
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Windows patch-guard probe 42487841636 (`spoofed-voice-speaks.py`, `context-lists-across-processes.py`) and Tests run 42488209417 (`getter-cost-parity.py`).
+
+**Symptom.** On the Windows build the page read `{'voices': 0}` and "the launch level has 0 voices". On Linux, `getter-cost-parity.py` read WebGL `VENDOR` and `VERSION` at 24 ns against stock's 51 ns (0.58x), the case the faster-than-stock check exists for.
+
+**Root cause.** Two separate merge conflicts resolved to the wrong side. Upstream's `voice-spoofing.patch` calls `AddSpoofedVoices()` after `NS_CreateServicesFromCategory`, which is the order #313 fixed: SAPI registers voices synchronously and notifies content as soon as it runs. Upstream's `base.mozconfig` selects `--enable-stdcxx-compat` from `$CAMOUFOX_TARGET`, which upstream's `patch.py` sets. This fork's `patch.py` never wrote it (it came with #886's LTO/PGO, which this fork keeps reverted), so the flag was dead and `std::string` kept its small-string buffer, which stock Linux's old-ABI build lacks.
+
+**Fix.** `AddSpoofedVoices()` runs before the services start, with the #313 comment. `patch.py` prepends `CAMOUFOX_TARGET=<moz_target>` to the mozconfig; base.mozconfig takes only the stdcxx `case` and none of #886.
+
+**Evidence.** See the PR: the Windows rebuild's `spoofed-voice-speaks.py` and `context-lists-across-processes.py`, and the Linux build's configure line and `getter-cost-parity.py`.
+
+**What misled the investigation.** The stricter `FASTER_MIN_GAP_NS` upstream added to the same guard made it look like a new, over-tight check. It is the check doing its job.
+
+## #419: every launch of the Firefox 159 macOS build timed out: `usesSystemProxy()` read `PACURI` outside a try
+
+**Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe 42487844362 on build 42465077569. The defect is in upstream's #997 (`browser/additions/juggler/TargetRegistry.js`); it never reached `main` or a release of this fork.
+
+**Symptom.** Nearly every guard of the probe died with `BrowserType.launch: Timeout 180000ms exceeded`, and the job hit its limit. The browser's own stderr in the call log read `JavaScript error: resource://gre/modules/juggler/TargetRegistry.js, line 119: NS_ERROR_FAILURE ... [nsISystemProxySettings.PACURI]`.
+
+**Root cause.** `usesSystemProxy()` read `settings.PACURI` before its `try`, and only the `getProxyForURI` call after it handled `NS_ERROR_FAILURE`. On macOS the getter fails with exactly that code whenever no autoconfig URL is set: `toolkit/system/osxproxy/nsOSXSystemProxySettings.mm`, `GetPACURI` (lines 327-338 in Firefox 159.0) returns `NS_ERROR_FAILURE` when `IsAutoconfigEnabled()` is false. The exception left `TargetRegistry`'s startup unfinished, so Juggler never answered Playwright's launch.
+
+**Fix.** `PACURI` has its own `try`, and `NS_ERROR_FAILURE` there means "no PAC file". It must not share a `try` with `getProxyForURI`, which would also skip that call: a macOS host with a manual system proxy and no PAC file would then read as direct. `getProxyForURI` keeps its own handling.
+
+**Evidence.** Red: probe 42487844362 (above). Green: see the PR for the rebuilt macOS binary's probe and e2e run.
+
+**What misled the investigation.** Only macOS throws there. The Linux and Windows builds launched (the Windows probe 42487841636 ran its guards), so the Linux and Windows builds and tests stayed green and the failure looked like a slow runner.
+
+
 ## #423: `test_sign_in_and_shop` read the account page before it was parsed
 
 **Fixed by:** the PR that fixes #423. **Found by:** Tests run 42574217947 (job 129024553516, `pw-humanize`) and Tests run 42581191693 (job 129045079910, `pkg-humanize`), both on PR #422, whose diff does not reach the journey.

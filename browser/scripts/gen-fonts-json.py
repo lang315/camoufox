@@ -254,10 +254,16 @@ def main():
             for tag, data in (('union', sorted(union)), ('unreported', unreported), ('unbundled', unbundled)):
                 with open(os.path.join(args.dump_union, f'{os_key}-{tag}.txt'), 'w', encoding='utf-8') as fh:
                     fh.write('\n'.join(data) + '\n')
+        # A base "has" an alias name fonts.conf rewrites only when it has the
+        # target: the alias renders only through it. Calibri and Cambria
+        # (Carlito, Caladea) are LibreOffice's on Linux, not a stock Ubuntu's;
+        # every Linux identity claimed them, and only Windows' own files, which
+        # the bundled-font activation leaked to every OS, rendered them.
         bases_out[os_key] = {
             key: sorted(set(base['fonts']) & reportable)
             for key, base in man[os_key]['bases'].items()
             if base['fonts'] and not base.get('deferred')
+            for fonts in [set(base['fonts']) & reportable]
         }
 
     with open(args.out, 'w', encoding='utf-8') as fh:
@@ -293,8 +299,8 @@ def main():
         # is the INTERSECTION of the bases, not any one of them. Making it a
         # superset of one base silently forces that base's exclusive families
         # onto every identity -- which is what made a macOS 26 identity keep
-        # claiming 131 Sonoma-only families -- and it must still carry the alias
-        # names fonts.conf rewrites unconditionally, which always render.
+        # claiming 131 Sonoma-only families. The alias names come with each
+        # base (bases_out) where their target is in it.
         essential = {}
         for os_key in OSDIRS:
             bases = list(bases_out[os_key].values())

@@ -63,7 +63,7 @@ from ci._util import WORK_DIR, read_upstream_sh  # noqa: E402
 from camoufox import webgl  # noqa: E402
 from camoufox.fingerprints import _FPGEN_OS  # noqa: E402
 from camoufox.fpgen_model import load_fpgen  # noqa: E402
-from camoufox.host_rendering import renders_on_hardware  # noqa: E402
+from camoufox.host_rendering import has_canvas_placeholder, renders_on_hardware  # noqa: E402
 from camoufox.utils import launch_options, resolve_verstr  # noqa: E402
 
 ARCHIVE = "https://archive.mozilla.org/pub/firefox/releases/{version}/"
@@ -193,6 +193,21 @@ def stock_firefox(flag: str, version: str) -> Path:
     return binary
 
 
+# Stock Firefox updates itself in place: the app.update.* prefs no longer stop
+# it, so a cached 158.0.1 that a guard launched became 159.0 within minutes
+# (2026-10-31, .ci-work/stock-firefox/158.0.1 read 159.0 two minutes after its
+# download). Only the enterprise policy does.
+NO_UPDATE_POLICY = {"policies": {"DisableAppUpdate": True}}
+
+
+def pin_stock(binary: Path) -> None:
+    """Keep the downloaded release at its version: no app update, ever."""
+    root = binary.parent.parent / "Resources" if platform.system() == "Darwin" else binary.parent
+    policies = root / "distribution" / "policies.json"
+    policies.parent.mkdir(exist_ok=True)
+    policies.write_text(json.dumps(NO_UPDATE_POLICY), encoding="utf-8")
+
+
 def download_stock(version: str) -> Path:
     package, unpacked, inside = STOCK_PACKAGES[platform.system()]
     machine = platform.machine()
@@ -201,7 +216,13 @@ def download_stock(version: str) -> Path:
         windows="win64-aarch64" if machine.lower() in ("arm64", "aarch64") else "win64")
     binary = WORK_DIR / "stock-firefox" / version / machine / inside
     if binary.exists():
-        return binary
+        if ini_version(binary) == version:
+            pin_stock(binary)
+            return binary
+        # A cache that updated itself is not the release: fetch it again.
+        stale = binary.parent.with_name(f"firefox.stale-{os.getpid()}")
+        binary.parent.rename(stale)
+        shutil.rmtree(stale, ignore_errors=True)
     base = ARCHIVE.format(version=version)
     sums = {name: digest for digest, name in (line.split("  ", 1) for line in signed_sums(base).splitlines())}
     if package not in sums:
@@ -221,6 +242,7 @@ def download_stock(version: str) -> Path:
         unpack(archive, Path(tmp))
         # Renamed into place last, so an interrupted run leaves nothing cached.
         Path(tmp, unpacked).rename(root / unpacked)
+    pin_stock(binary)
     return binary
 
 
@@ -328,16 +350,19 @@ def main() -> int:
         print(f"      Recorded for {host_os}: {sorted(map(tuple, webgl.firefox_gpus(target_os)))}")
         return 1
     stock_flat = flatten(stock_out)
-    # Without webGl:vendor/renderer the launcher claims a hardware GPU of the
-    # host itself, through the path a real launch takes, and keeps the
-    # device's tables. A software renderer it leaves to the draw, so that one
-    # is named.
+    # Without webGl:vendor/renderer the launcher claims the host's own GPU or
+    # software renderer, through the path a real launch takes, and keeps the
+    # device's tables.
     device = nearest_device(target_os, gpu, stock_flat)
-    named = () if renders_on_hardware(tuple(gpu)) else ("webGl:vendor", "webGl:renderer")
-    pinned = {
+    claims_host = tuple(gpu) in webgl.firefox_gpus(target_os)
+    # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
+    # device's pair is named, and the launcher covers the canvas for a named GPU.
+    tables = {
         k: v for k, v in device.items()
-        if k in named or k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
+        if k.startswith(("webGl:", "webGl2:")) and not k.endswith(("vendor", "renderer"))
     }
+    named = () if claims_host else ("webGl:vendor", "webGl:renderer")
+    pinned = {**tables, **{k: v for k, v in device.items() if k in named}}
     options = launch_options(
         os=host_os, headless=True, executable_path=str(camoufox), config=pinned, i_know_what_im_doing=True
     )
@@ -345,13 +370,23 @@ def main() -> int:
 
     failures: List[str] = []
     camoufox_gpu = (camoufox_out["webgl"] or {}).get("gpu")
-    # A software renderer fpgen never recorded cannot be claimed (webgl_for_gpu refuses it), so the
-    # identity is the chosen device's GPU and its renderer string is not stock's to compare.
-    claims_host = tuple(gpu) in webgl.firefox_gpus(target_os) or renders_on_hardware(tuple(gpu))
-    expected = gpu if claims_host else [device["webGl:vendor"], device["webGl:renderer"]]
-    if camoufox_gpu != expected:
-        print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {expected}")
-        failures.append("claimed GPU")
+    if claims_host:
+        if camoufox_gpu != gpu:
+            print(f"    [FAIL] Camoufox claims {camoufox_gpu}, not {gpu}")
+            failures.append("claimed GPU")
+    else:
+        # Reading back the pair just pinned would prove nothing, and naming a GPU covers the canvas by itself
+        # (plan_rendering skips the host for a named one), so `options` cannot say what the launcher decides
+        # here. A launch with the tables alone, which is what a real launch on this host is, can: it probes
+        # the host and covers the canvas for a renderer fpgen never recorded.
+        print(f"    claimed GPU: not measured, host renderer {gpu[1]} is not recorded for {target_os}; "
+              "vendor/renderer pinned to the device pair")
+        real = launch_options(
+            os=host_os, headless=True, executable_path=str(camoufox), config=tables, i_know_what_im_doing=True
+        )
+        if not has_canvas_placeholder(real["firefox_user_prefs"]):
+            print("    [FAIL] the launcher left the canvas uncovered for an unrecorded host renderer")
+            failures.append("canvas cover")
     recorded_flat, camoufox_flat = flatten(recorded_out), flatten(camoufox_out)
     for key in sorted(set(stock_flat) | set(recorded_flat)):
         new, old, got = stock_flat.get(key), recorded_flat.get(key), camoufox_flat.get(key)

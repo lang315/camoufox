@@ -155,6 +155,9 @@ class Patcher:
         with open(mozconfig_backup, 'r', encoding='utf-8') as f:
             content = f.read()
 
+        # Set first: base.mozconfig picks the target's stdcxx-compat flag from it.
+        content = f"CAMOUFOX_TARGET={self.moz_target}\n" + content
+
         # Add target option
         content += f"\nac_add_options --target={self.moz_target}\n"
 

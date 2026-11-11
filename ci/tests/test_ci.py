@@ -1814,6 +1814,19 @@ def test_the_audit_can_name_a_target_for_every_entry_it_claims_to_check():
     assert unresolved == ["[chromium]"]
 
 
+def test_skiplist_checked_by_names_a_patch_guard():
+    """An entry the audit leaves out must still have its reason checked."""
+    from ci._util import REPO_ROOT
+    from ci.run_patch_guards import GROUPS
+    from ci.run_skiplist_audit import targets
+
+    guards = {guard for group in GROUPS.values() for guard in group}
+    entries = [e for e in load_skiplist(REPO_ROOT / "ci" / "skiplist.yml") if "checked_by" in e]
+    assert entries
+    assert targets(entries) == ([], [])
+    assert {e["checked_by"] for e in entries} <= guards
+
+
 def test_every_shipped_skiplist_entry_is_auditable():
     """Nothing currently in the file escapes the audit.
 
@@ -3235,7 +3248,7 @@ def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_
     for platform, guards_ in NOT_ON.items():
         for stem, why in guards_.items():
             assert not_applicable_reason(stem, platform) == why
-            others = {"darwin", "win32", "linux"} - {platform}
+            others = {"darwin", "win32", "linux"} - {listed for listed, named in NOT_ON.items() if stem in named}
             assert all(not_applicable_reason(stem, other) is None for other in others)
     code, ran, record = _run_guards_as("darwin", tmp_path, monkeypatch, ["system-font-alias-stall"])
     assert ran == []

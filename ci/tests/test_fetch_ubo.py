@@ -24,7 +24,9 @@ def xpi(version="1.76.0", guid=GUID, extra=()):
     with zipfile.ZipFile(buf, "w") as z:
         z.writestr("manifest.json", json.dumps(
             {"version": version, "browser_specific_settings": {"gecko": {"id": guid}}}))
-        z.writestr("js/background.js", "")
+        z.writestr("js/background.js", "const userSettingsDefault = {\n    autoUpdate: true,\n};\n")
+        z.writestr("js/storage.js", "µb.autoSelectRegionalFilterLists = function(lists) {\n"
+                   + fetch_ubo.REGIONAL_SELECTION + "};\n")
         for name in extra:
             z.writestr(name, "")
     return buf.getvalue()
@@ -62,6 +64,9 @@ def test_stage_extracts_the_pinned_release_beside_the_binary(tmp_path, monkeypat
     ubo = tmp_path / "addons" / "UBO"
     assert json.loads((ubo / "manifest.json").read_text())["version"] == "1.76.0"
     assert sorted(p.name for p in ubo.iterdir()) == ["js", "manifest.json"], "the previous copy is replaced"
+    # Its filter lists stay the packaged ones: uBO's own default downloads them
+    # within a minute of every launch.
+    assert "    autoUpdate: false,\n" in (ubo / "js" / "background.js").read_text()
     assert [p.name for p in (tmp_path / "addons").iterdir()] == ["UBO"], "no staging directory is left"
 
 
@@ -115,3 +120,38 @@ def test_the_manifest_names_the_bundled_ubo():
     pin = {"version": "1.76.0", "url": "u", "sha256": "0" * 64}
     assert release.manifest("v1", "d", "0" * 40, pin)["ubo"] == pin
     assert "ubo" not in release.manifest("v1", "d", "0" * 40)
+
+
+def test_a_ubo_whose_default_moved_is_refused(tmp_path):
+    """Shipping a uBO that downloads its lists is worse than failing the build."""
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "background.js").write_text("const userSettingsDefault = {};\n")
+    with pytest.raises(SystemExit, match="freeze_lists"):
+        fetch_ubo.freeze_lists(str(tmp_path))
+
+
+def _ubo(tmp_path):
+    (tmp_path / "js").mkdir()
+    (tmp_path / "js" / "background.js").write_text(
+        "const userSettingsDefault = {\n" + fetch_ubo.AUTO_UPDATE_DEFAULT + "};\n", encoding="utf-8")
+    (tmp_path / "js" / "storage.js").write_text(
+        "µb.autoSelectRegionalFilterLists = function(lists) {\n"
+        "        if ( list.off !== true ) {\n            selectedListKeys.push(key);\n            continue;\n        }\n"
+        + fetch_ubo.REGIONAL_SELECTION + "};\n", encoding="utf-8")
+
+
+def test_freezing_keeps_ubo_off_the_regional_list_of_the_ui_language(tmp_path):
+    """#211: a de-DE first run switched on a list uBO does not package, and downloaded it."""
+    _ubo(tmp_path)
+    fetch_ubo.freeze_lists(str(tmp_path))
+    storage = (tmp_path / "js" / "storage.js").read_text(encoding="utf-8")
+    assert "listMatchesEnvironment" not in storage
+    assert "list.off !== true" in storage, "the lists that ship switched on stay selected"
+    assert "autoUpdate: false" in (tmp_path / "js" / "background.js").read_text(encoding="utf-8")
+
+
+def test_a_ubo_whose_regional_selection_moved_is_refused(tmp_path):
+    _ubo(tmp_path)
+    (tmp_path / "js" / "storage.js").write_text("// reworked\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="freeze_lists"):
+        fetch_ubo.freeze_lists(str(tmp_path))

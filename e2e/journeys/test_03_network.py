@@ -43,7 +43,7 @@ def test_a_hanging_filter_list_download_does_not_hold_pages(drv, site, check):
     """#211: uBO holds every page while it loads its filter lists. A de-DE first run
     used to select a regional list that must be downloaded, so a hanging download
     held pages for uBO's 30 s timeout per mirror. The lists are now the packaged
-    ones and uBO updates none (policies.json), so a first run starts no download
+    ones and uBO updates none (fetch-ubo.py freeze_lists), so a first run starts no download
     and, with every outside host hanging, a page still loads. That uBO is active
     is ubo-lists-frozen.py's question; this one is what a first run waits for."""
     from web.proxy import Proxy

@@ -38,6 +38,7 @@ async def launch_camoufox(os: str = "macos", headless: bool = True):
 # Xvfb display -- never on a real screen.
 
 import contextlib
+import importlib.util
 import json
 import os
 import shutil
@@ -47,6 +48,24 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterator, List
+
+
+def stock_gpu_parity():
+    """The stock-gpu-parity guard as a module: it owns the stock Firefox download."""
+    spec = importlib.util.spec_from_file_location(
+        "stock_gpu_parity", Path(__file__).resolve().parent / "stock-gpu-parity.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def stock_firefox() -> Path:
+    """Stock Firefox of the version Camoufox is built from: --stock, else the
+    release stock-gpu-parity downloads and checks against Mozilla's signed
+    SHA256SUMS."""
+    sys.path.insert(0, str(Path(__file__).resolve().parents[4]))
+    from ci._util import read_upstream_sh
+    return stock_gpu_parity().stock_firefox("--stock", read_upstream_sh()["version"])
 
 
 def resolve_binary() -> Path:
@@ -114,13 +133,20 @@ def hidden_display(screen: str = "1400x900") -> Iterator[str]:
         return
     if not shutil.which("Xvfb"):
         raise SystemExit("Xvfb is required for this guard")
-    for n in range(140, 160):
-        if not os.path.exists(f"/tmp/.X11-unix/X{n}"):
-            break
-    display = f":{n}"
-    proc = subprocess.Popen(["Xvfb", display, "-screen", "0", f"{screen}x24", "-nolisten", "tcp"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    time.sleep(1.5)
+    # Xvfb picks a free display itself and names it on the pipe once it serves it. Picking the first
+    # number without a socket and starting Xvfb there raced other jobs starting servers: the guard's
+    # Xvfb lost the number and died, and the browser opened the winner's display (a 3840-wide screen
+    # in a 3456x2160 guard).
+    read_fd, write_fd = os.pipe()
+    proc = subprocess.Popen(["Xvfb", "-displayfd", str(write_fd), "-screen", "0", f"{screen}x24", "-nolisten", "tcp"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, pass_fds=(write_fd,))
+    os.close(write_fd)
+    with os.fdopen(read_fd) as pipe:
+        number = pipe.readline().strip()
+    if not number.isdigit() or proc.poll() is not None:
+        proc.kill()
+        raise SystemExit(f"Xvfb did not start a {screen} display")
+    display = f":{number}"
     saved = dict(os.environ)
     os.environ.update(DISPLAY=display, MOZ_ENABLE_WAYLAND="0", GDK_BACKEND="x11")
     os.environ.pop("WAYLAND_DISPLAY", None)
@@ -233,3 +259,16 @@ def marionette_env() -> Dict[str, str]:
     dropped the --remote-allow-system-access flag. A launch given env= gets
     nothing else, so the display hidden_display() set is carried along."""
     return {**os.environ, "MOZ_REMOTE_ALLOW_SYSTEM_ACCESS": "1"}
+
+
+def kill_by_profile(profile: str) -> None:
+    """End every process whose command line names `profile`, on any OS: each
+    process of one browser carries its throwaway profile path."""
+    import psutil
+
+    for process in psutil.process_iter(["cmdline"]):
+        if any(profile in arg for arg in process.info["cmdline"] or []):
+            try:
+                process.kill()
+            except psutil.NoSuchProcess:
+                pass

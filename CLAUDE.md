@@ -40,7 +40,8 @@ starts no build (#203). Before creating it, run the patch guards on each build
 (`gh workflow run e2e.yml --repo <fork> -f run_id=<build> -f probe=patch_guard.py`,
 #416): `tests.yml` runs them on Linux only. On a hosted macOS runner
 `stock-gpu-parity` stays red by design, because the runner's GPU reads `Apple Inc.`
-where fpgen recorded `Apple`. A macOS job that gets no `macos-26` runner is
+where fpgen recorded `Apple`, and `gfx-probes-packaged` stays red as SETUP-INVALID when the
+runner's native GL is refused to stock Firefox's bare launch too (`FEATURE_FAILURE_CGL_FBO`). A macOS job that gets no `macos-26` runner is
 cancelled after 15 minutes with no step run; dispatch it again, it is not a code
 failure.
 
@@ -101,9 +102,10 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   ```bash
   python3 -m ci.run_patch_guards --binary /path/to/camoufox-bin
   ```
-  The runner works on Linux, macOS and Windows. Five guards are Linux-only by
+  The runner works on Linux, macOS and Windows. Nine guards are Linux-only by
   subject (`ipv4-only-network`, `webgl-live-state`, `webgl-renderer-pair`,
-  `occluded-window-active`, `pointer-lock-offscreen`); `system-font-alias-stall`
+  `occluded-window-active`, `pointer-lock-offscreen`,
+  `virtual-display-window-visible`, `driven-drag-gtk`, `headless-software-webgl`, `css-device-size-fractional`); `system-font-alias-stall`
   does not run on macOS and `windows-keyboard` not on Windows. On those platforms
   they are reported as "not applicable" with the reason, never as passes. On Linux a
   missing prerequisite fails. `stock-gpu-parity` fails on a host whose hardware GPU
