@@ -53,7 +53,6 @@ def test_web_apis_behave_like_the_reference(drv, site, reference, check):
     # outlasts the audio probe's 8 s bound in ~4% of launches (#431). Same axis: no addon on either side.
     from camoufox import DefaultAddons
 
-    print("camoufox addons: default addons excluded: UBO (the reference runs none)")
     got, reads, covered, errors, timings = run_apps(drv, site, exclude_addons=[DefaultAddons.UBO])
     want, plain, _, ref_errors, ref_timings = reference
     print(f"probe errors: camoufox={errors} reference={ref_errors}")
