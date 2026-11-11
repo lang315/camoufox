@@ -20,11 +20,12 @@ returns.
     control  the page's ordinary image host is requested (the proxy sees traffic)
     frozen   no host uBO fetches lists from (its assets.json) is contacted
              from launch until WAIT_S after uBO first blocks
-    unheld   no page load before uBO first blocks takes HOLD_S or longer. uBO
-             parks every tab request from its listener's registration until
-             its ten lists are compiled, which stalled every launch's page,
-             media and fetch loads for seconds (#403, #431); freeze_lists
-             makes it pass them instead (canSuspend() false)
+    unheld   no load of a plain local page before uBO first blocks takes HOLD_S
+             or longer. uBO's blocking listener held every request of every
+             launch for the seconds its ten lists took to compile (#403, #431);
+             freeze_lists registers it once they are compiled. The ad page is not
+             timed: uBO's first redirect of an ad script loads its resources, and
+             that took 4 to 5 s on a hosted runner in a launch with no hold
 
     python browser/tests/playwright/patches/ubo-lists-frozen.py
 """
@@ -53,6 +54,7 @@ READY_S = 60
 HOLD_S = 1.5
 AD_HOST = "pagead2.googlesyndication.com"
 CONTROL_HOST = "example.com"
+PLAIN_PAGE = "<!doctype html><title>plain</title>"
 AD_PAGE = (f'<!doctype html><script src="https://{AD_HOST}/pagead/js/adsbygoogle.js"></script>'
            f'<img src="https://{CONTROL_HOST}/">')
 
@@ -73,12 +75,16 @@ def list_hosts(addon_path: str) -> set:
     return {urlparse(u).hostname for u in urls if u.startswith("http")}
 
 
-def blocks_ad(page, url: str, hosts: list, loads: list) -> bool:
+def blocks_ad(page, url: str, hosts: list) -> bool:
     before = hosts.count(AD_HOST)
+    page.goto(url)
+    return hosts.count(AD_HOST) == before
+
+
+def timed_load(page, url: str, loads: list) -> None:
     began = time.monotonic()
     page.goto(url)
     loads.append(time.monotonic() - began)
-    return hosts.count(AD_HOST) == before
 
 
 def recording_proxy(hosts: list) -> socket.socket:
@@ -115,6 +121,7 @@ def main() -> int:
 
     site = tempfile.mkdtemp()
     Path(site, "ad.html").write_text(AD_PAGE, encoding="utf-8")
+    Path(site, "plain.html").write_text(PLAIN_PAGE, encoding="utf-8")
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=site))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"
@@ -129,7 +136,10 @@ def main() -> int:
                       proxy={"server": f"http://127.0.0.1:{proxy.getsockname()[1]}"}) as browser:
             page = browser.new_page()
             deadline = time.monotonic() + READY_S
-            while not blocks_ad(page, f"{base}/ad.html", hosts, loads):
+            while True:
+                timed_load(page, f"{base}/plain.html", loads)
+                if blocks_ad(page, f"{base}/ad.html", hosts):
+                    break
                 if time.monotonic() > deadline:
                     print(f"FAIL: uBO did not block {AD_HOST} within {READY_S}s -- check is vacuous")
                     return 1
@@ -144,10 +154,10 @@ def main() -> int:
     fetched = sorted(set(contacted) & ubo_hosts)
     print(f"hosts contacted until {WAIT_S}s after uBO first blocked: {', '.join(contacted) or 'none'}")
     print()
-    print(f"page loads until uBO first blocked: {len(loads)}, slowest {max(loads):.2f}s")
+    print(f"plain page loads until uBO first blocked: {len(loads)}, slowest {max(loads):.2f}s")
     failures = []
     if max(loads) >= HOLD_S:
-        failures.append(f"a page load took {max(loads):.2f}s: uBO held it while its lists compiled")
+        failures.append(f"a plain page load took {max(loads):.2f}s: uBO held it while its lists compiled")
     if CONTROL_HOST not in contacted:
         failures.append(f"{CONTROL_HOST} was never requested -- the proxy saw no traffic, check is vacuous")
     if fetched:
