@@ -14,6 +14,18 @@ later change should read first.
 
 
 
+## #419: `driven-dblclick-gap` failed in some runs when the first double click after launch was paced late
+
+**Fixed by:** the PR that fixes #419. **Found by:** the Linux Tests run on the sync branch and the diag runs that followed (diag-63, 70, 71, 75).
+
+**Symptom.** `first press 272 ms after the pointer reached the button, want 50-250` (and 276), always the first double click after launch.
+
+**Root cause.** In those runs the parent's `setTimeout` for the dwell fired 70 to 210 ms late (diag-75, run 42950463501: a 150 ms wait took 220 to 285 ms; the wait itself was computed correctly at the page's arrival and the press left within 1 to 8 ms of it). The old and the fixed Juggler overshoot the same (diag-77, run 42953609503). The bundled uBlock Origin's startup work is the one documented load on the parent seconds after launch; the tail was seen with it in diag-75 and not in diag-72 or diag-77, so the runner's load matters too, and the cause is not proven (diag-77's arms with uBO were clean as well).
+
+**Fix.** The guard launches without uBlock Origin (`exclude_addons`), as `navigation-preconnect-proxied` does, and says so in its docstring with the numbers and what is not proven. The 50 to 250 ms window is unchanged: the old code's late ack (+225 ms) was a product defect that the ceiling caught (the entry above).
+
+**Evidence.** The guard without uBO: 20 of 20 on the fixed Juggler (diag-77); with uBO 8 of 10 (diag-75). If the tail ever shows without uBO, the ceiling's design is the next question.
+
 ## #419: `getter-cost-parity` failed on a hosted macOS runner with "stock Firefox's page failed: worker died before it reported"
 
 **Fixed by:** the PR that fixes #419. **Found by:** the macOS patch-guard probe on the sync build (run 42923629488, job 130204462226, parity group).
