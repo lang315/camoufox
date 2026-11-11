@@ -399,6 +399,14 @@ rules:
       exclude_addons=[DefaultAddons.UBO] (TypeScript: exclude_addons:
       ["UBO"]).
 
+      freeze_lists also sets uBO's prefetchingDisabled default to false
+      (#427). Left true, uBO's startup sets network.prefetch-next=false,
+      network.dns.disablePrefetch=true and
+      network.http.speculative-parallel-limit=0 (networkPredictionEnabled.set
+      in vapi-background.js; false takes clear() instead), which a page reads as
+      a missing rel=prefetch request and rel=preconnect connection.
+      ubo-speculative-loading.py guards it.
+
   - id: canvas-noise-entropy-is-lower-than-audio
     title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)
     check: manual   # an open finding, not a settled decision
