@@ -45,6 +45,7 @@ resolution were measured only by the #420/#441 probe runs.
 """
 
 import asyncio
+import json
 import socket
 import sys
 import threading
@@ -99,7 +100,9 @@ def answer_binding_requests(server: socket.socket, stop: threading.Event) -> Non
 async def gather(context, stun: str) -> dict:
     page = await context.new_page()
     await page.goto("about:blank")
-    return await page.evaluate(PROBE, stun)
+    # In the page's own world: the isolated one cannot read the RTCStatsReport objects
+    # getStats() returns ("Permission denied to access object").
+    return await page.evaluate(f"mw:({PROBE})({json.dumps(stun)})")
 
 
 def literals(addresses) -> list:
@@ -125,11 +128,11 @@ async def main() -> int:
     stun = f"stun:{host_ip}:{server.getsockname()[1]}"
 
     try:
-        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True)) as browser:
+        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True, main_world_eval=True)) as browser:
             control = await gather(await browser.new_context(), stun)
             contexts = [await AsyncNewContext(browser, os="linux", webrtc_ip=ip) for ip in CONTEXT_IPS]
             results = [await gather(context, stun) for context in contexts]
-        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True, firefox_user_prefs={
+        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True, main_world_eval=True, firefox_user_prefs={
                 "media.peerconnection.ice.obfuscate_host_addresses": False})) as browser:
             unobfuscated = await gather(await browser.new_context(), stun)
     finally:
