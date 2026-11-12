@@ -30,8 +30,7 @@ type launchConfig struct {
 	skipFingerprint   bool
 	cfg               *config.Config
 
-	keepMDNSObfuscation bool // opt out of Phase-5 mDNS disable
-	canvasPlaceholder   *bool // nil: the rendering plan's default (rendering.go)
+	canvasPlaceholder *bool // nil: the rendering plan's default (rendering.go)
 
 	proxy        *proxy.Proxy
 	geoIPEnabled bool
@@ -184,19 +183,6 @@ func WithCanvasNoise(density float64, strengthLSB uint32) Option {
 // (pythonlib's canvas_noise=False).
 func WithCanvasPlaceholder(on bool) Option {
 	return func(c *launchConfig) { c.canvasPlaceholder = &on }
-}
-
-// WithMDNSObfuscation re-enables Firefox's mDNS host-address
-// obfuscation (`media.peerconnection.ice.obfuscate_host_addresses`).
-//
-// Default since Phase 5 is **false** — Camoufox disables this pref so
-// the C++ regex in webrtc-ip-spoofing.patch catches every host
-// candidate uniformly instead of letting them pass as `<uuid>.local`
-// hostnames. Real-WebRTC callers that negotiate against peers expecting
-// mDNS connectivity should call this with `true` to restore Firefox's
-// native behavior.
-func WithMDNSObfuscation(enable bool) Option {
-	return func(c *launchConfig) { c.keepMDNSObfuscation = enable }
 }
 
 // WithMainWorldEval allows Page.Evaluate expressions prefixed with "mw:" to
