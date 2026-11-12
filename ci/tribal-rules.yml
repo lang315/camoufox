@@ -407,6 +407,22 @@ rules:
       a missing rel=prefetch request and rel=preconnect connection.
       ubo-speculative-loading.py guards it.
 
+  - id: tests-run-with-a-pinned-ubo
+    title: Tests runs load the uBlock Origin pinned in ci/ubo-pin.json, never AMO's newest
+    check: manual   # ci/tests/test_fetch_ubo.py::test_tests_run_with_the_uBO_pinned_in_the_repo
+    evidence:
+      - "issue #425; uBO 1.76.0 reached AMO on 2026-11-08 and flipped main-world-eval-globals from green to red with no commit (diagnosis in #419, run 42786962179)"
+    rationale: >-
+      The browser cache is keyed on compiled inputs, uBO is restaged after a
+      cache hit, and AMO's newest was resolved on every run, so a uBO release
+      changed what guards loading it ran against, on a branch nobody touched,
+      and bisecting by commit could not find it. The pin (version, AMO file
+      url, sha256) lives in ci/ubo-pin.json, outside the compiled digest, so a
+      bump is a reviewed PR that costs no cold build; a sha256 mismatch or a
+      changed default in freeze_lists fails loudly. A dispatch input or a
+      release still passes its own pin: a release resolves AMO's newest once
+      and ships what its tests ran with.
+
   - id: canvas-noise-entropy-is-lower-than-audio
     title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)
     check: manual   # an open finding, not a settled decision
