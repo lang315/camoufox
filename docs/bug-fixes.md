@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #438: the TypeScript test `accepts a list of OSes` failed when 20 unseeded draws landed on one OS
+
+**Fixed by:** PR #439. **Found by:** Tests run 43124756186 (job 130874671135), on a PR that only deleted a docs file.
+
+**Symptom.** `AssertionError: expected 1 to be 2` at `fingerprints.test.ts:957`; the same test passed on the PR's previous head.
+
+**Root cause.** The test drew 20 fingerprints with `generateFingerprint({ os: ["linux", "windows"] })` and required both platforms. fpgen-js 1.3.0 takes no seed: its only randomness is `Math.random()` in `sampleValueFromDistribution`. With the pinned model P(Linux) is 0.2843 (`trace("os", ...)`; 555 Linux of 2000 sampled draws), so P(all 20 on one OS) is 0.7157^20 + 0.2843^20, about 0.00125.
+
+**Fix.** The test replaces `Math.random` with a seeded mulberry32 for its 20 draws (restored in `finally`), so the draws are identical every run. The per-draw platform check stays. Rejected: raising 20 (still a lottery), pinning `Math.random` to a constant (the OS also depends on the beam's other nodes: anchors 0 to 0.5 all drew Windows, 0.7 and 0.9 Linux, 0.999 Windows). The Python twin has no such test: Python raises `InvalidConstraints` for an OS list.
+
+**Evidence.** The old body with `Math.random` forced to 0.001 (every draw Windows) fails with the same `expected 1 to be 2`. The new test passes 60 runs of `tests/fingerprints.test.ts`.
+
+**What misled.** Nothing; the failure message already named the cause. The trap is that the test depends on the pinned model: a model bump re-rolls the seeded sequence, and the test then fails deterministically at about 0.125% per bump, to be fixed by choosing another seed.
+
 ## #428: a launch crashed with `UnicodeEncodeError` when the browser did not know a config key
 
 **Fixed by:** the PR that fixes #428. **Found by:** reading the sync PR (#426): an unpinned launcher fetches a release whose `properties.json` lacks `voices:speechd`.
