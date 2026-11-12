@@ -219,6 +219,15 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	// Default hardening prefs. Caller-supplied prefs override these via
 	// the lc.firefoxUserPrefs map (last-write-wins below).
 	prefs := map[string]any{}
+	if !lc.keepMDNSObfuscation {
+		// Phase 5 — disable Firefox's mDNS host-address obfuscation so
+		// the existing webrtc-ip-spoofing.patch IP regex catches every
+		// host candidate uniformly. Without this, host candidates emit
+		// as <uuid>.local hostnames that pass through unmasked.
+		// Opt out via camoufox.WithMDNSObfuscation(true) when running
+		// real WebRTC calls that need mDNS connectivity.
+		prefs["media.peerconnection.ice.obfuscate_host_addresses"] = false
+	}
 	// The bundled browser/settings/camoufox.cfg ships these at 0, which disables
 	// session history and leaves Page.GoBack/GoForward inert. Restore the
 	// Firefox defaults so navigation works (matches donutbrowser). A

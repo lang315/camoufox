@@ -982,34 +982,29 @@ rules:
       Those tests are skiplisted rather than passed by changing the browser.
 
   - id: webrtc-fork-model
-    title: WebRTC keeps the fork's per-context IP with no srflx fabrication, on Firefox's own ICE prefs (no_host off, mDNS on), and its guards measure that model
+    title: WebRTC keeps the fork's model, per-context IP with no srflx fabrication and no_host on, and its guards measure that model
     check: manual
     evidence:
       - "#178 D1: keep the per-context WebRTCIPManager (browser/patches/webrtc-ip-spoofing.patch, webrtc-ip-spoofing2.patch); do not take upstream's srflx fabrication"
-      - "#441 (reopening #178 D1 for the ICE prefs): camoufox.cfg no longer sets media.peerconnection.ice.no_host, so Firefox's no_host=false and obfuscate_host_addresses=true apply. Probe runs of e2e/probes/webrtc_no_host.py (branch probe/420-no-host, 8 launches per arm) on Linux 43215314488, Windows 43215309058 and macOS 43215304050: with no_host true every onicecandidate string was empty, yet getStats() returned the interface address (10.1.5.65, 10.1.0.130, 192.168.64.11) as a host local-candidate; no_host false with mDNS on gave only <uuid>.local names, as Playwright's own Firefox does"
-      - "2a806e5a reverted to no_host=true because build-tester run 29670370793 leaked a LAN IP with mDNS \"not engaging\". build-tester's FIREFOX_WEBGL_PREFS has set obfuscate_host_addresses false since b41fe84e (2026-07-08), before that run, and runner.py passes it as firefox_user_prefs; so that run measured a pref the product does not ship. The pref is removed from constants.py and the observer harness in #441"
+      - "browser/settings/camoufox.cfg: defaultPref(\"media.peerconnection.ice.no_host\", true)"
       - "CI run 38299426185: upstream's webrtc-context-ip and webrtc-port-range read the srflx candidate upstream fabricates against a silent STUN server, and saw no candidates on the fork"
       - "browser/tests/playwright/patches/webrtc-context-ip.py, browser/tests/playwright/patches/webrtc-port-range.py"
       - "CI run 38310314782 (head 7e03c7e): both adapted guards passed, patch guards spoofing 22/22"
       - "CI run 38992109773 (head a4236f8): upstream's ipv4-only-network guard read no host candidate with network:ipv4Only off or on, because of no_host; it now sets no_host false for its own probe"
-      - "#419, #420: upstream's webrtc-socks5-udp, webrtc-proxy-local-network and zz-webrtc-proxied-context patches and their guards (webrtc-socks5-udp.py, webrtc-proxy-local-network.py, webrtc-proxy-no-udp-around.py) are left out. The guards need host candidates and a connecting loopback pair, which no_host ruled out (run 42494604689 on main's build: a page's two RTCPeerConnections end `failed`, and `connected` with no_host false); on the merged stack the unmasked control's srflx timed out with the request sent and no response processed (run 42532435441, nICEr log), and no line of the new code was named. #420 reopens the model and takes them with it"
+      - "#419, #420: upstream's webrtc-socks5-udp, webrtc-proxy-local-network and zz-webrtc-proxied-context patches and their guards (webrtc-socks5-udp.py, webrtc-proxy-local-network.py, webrtc-proxy-no-udp-around.py) are left out. The guards need host candidates and a connecting loopback pair, which no_host rules out (run 42494604689 on main's build: a page's two RTCPeerConnections end `failed`, and `connected` with no_host false); on the merged stack the unmasked control's srflx timed out with the request sent and no response processed (run 42532435441, nICEr log), and no line of the new code was named. #420 reopens the model and takes them with it"
     rationale: >-
       The fork's WebRTC model diverges from upstream's. A context's IP masks the
       srflx candidate a real STUN answer produces, no srflx candidate is made up,
-      and host candidates reach the page only as mDNS names, never as an address (no_host
-      stays off: it empties onicecandidate and leaves the address in getStats(), and
-      a page's own two peer connections fail to connect). So the two upstream guards
+      and no_host keeps host candidates off the page. So the two upstream guards
       were adapted, not dropped. webrtc-port-range reads each socket's bound port
       as the source port of its Binding Request at the STUN socket.
       webrtc-context-ip runs an answering STUN server and reads each context's
       srflx candidate, with an unmasked context as the control. Both serve STUN
       on the default-route address, because nICEr skips a loopback STUN server
-      under the shipped prefs. webrtc-context-ip also reads getStats()'s host
-      local-candidates, with a second launch whose mDNS obfuscation is off as the
-      control that must show the address. The launch-level
+      under the shipped prefs. The launch-level
       webrtc:ipv4 key is not asserted, because no browser code reads it (#163).
-      ipv4-only-network turns mDNS obfuscation off for its probe, since the page
-      cannot see which addresses were gathered otherwise.
+      ipv4-only-network turns no_host off for its probe, since the page cannot
+      see which addresses were gathered otherwise.
 
   - id: legacy-family-names-read-on-masked-lookup
     title: A legacy font family name is resolved by a patch on the lookup, not by gfx.font_loader.delay=0

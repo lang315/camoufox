@@ -99,9 +99,9 @@ def test_webrtc_does_not_reveal_lan_address(drv, site, stun, check):
     page.goto(site.url(f"/webrtc?stun={sorted(lan)[0]}:{stun.port}"))
     got = wait_out(page, 20)
     b.close()
-    text = " ".join(got["candidates"] + got["stats"]) + got["sdp"]
+    text = " ".join(got["candidates"]) + got["sdp"]
     check(stun.seen, f"the STUN server was asked (non-vacuous); {len(got['candidates'])} candidates")
-    check(not [ip for ip in lan if ip in text], f"no LAN address {sorted(lan)} in candidates, getStats or SDP")
+    check(not [ip for ip in lan if ip in text], f"no LAN address {sorted(lan)} in candidates or SDP")
     check(SPOOFED_WEBRTC_IP in text, f"the configured WebRTC IP appears: {got['candidates']}")
     check.done()
 
@@ -117,8 +117,8 @@ def test_getstats_does_not_reveal_lan_address_by_default(drv, site, check):
     for arm, prefs in (("shipped", None), ("control", {"media.peerconnection.ice.obfuscate_host_addresses": False})):
         b = drv.launch(os="windows", prefs=prefs)
         page = b.new_context().new_page()
-        page.goto(site.url("/webrtc"))
-        seen[arm] = wait_out(page, 20)["stats"]
+        page.goto(site.url("/webrtc?pair"))
+        seen[arm] = wait_out(page, 40)["stats"]
         b.close()
     check([ip for ip in lan if ip in seen["control"]], f"control (mDNS off) shows a LAN address of {sorted(lan)}: {seen['control']}")
     check(not [ip for ip in lan if ip in seen["shipped"]], f"shipped getStats shows no LAN address {sorted(lan)}: {seen['shipped']}")
@@ -135,7 +135,7 @@ def test_context_webrtc_ip_overrides_the_launch_one(drv, site, stun, check):
     page.goto(site.url(f"/webrtc?stun={sorted(lan)[0]}:{stun.port}"))
     got = wait_out(page, 20)
     b.close()
-    text = " ".join(got["candidates"] + got["stats"]) + got["sdp"]
+    text = " ".join(got["candidates"]) + got["sdp"]
     check(stun.seen, f"the STUN server was asked (non-vacuous); {len(got['candidates'])} candidates")
     check(CONTEXT_WEBRTC_IP in text, f"the context's WebRTC IP appears: {got['candidates']}")
     check(SPOOFED_WEBRTC_IP not in text, "the launch-level WebRTC IP does not")

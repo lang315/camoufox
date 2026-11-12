@@ -58,7 +58,7 @@ CONTEXT_IPS = ("203.0.113.7", "203.0.113.8")
 
 PROBE = """async (stun) => {
   const pc = new RTCPeerConnection({iceServers: [{urls: stun}]});
-  const out = {srflx: [], candidates: [], late: [], hostStats: [], sdp: ''};
+  const out = {srflx: [], candidates: [], late: [], sdp: ''};
   let ended = false;
   const done = new Promise(resolve => {
     setTimeout(resolve, 30000);
@@ -78,13 +78,37 @@ PROBE = """async (stun) => {
   pc.createDataChannel('probe');
   await pc.setLocalDescription(await pc.createOffer());
   await done;
-  (await pc.getStats()).forEach(r => {
-    if (r.type === 'local-candidate' && r.candidateType === 'host') out.hostStats.push(r.address);
-  });
   out.sdp = pc.localDescription.sdp;
   pc.close();
   return out;
 }"""
+
+# The shape that measured the #420/#441 leak: two peer connections of one page, connected
+# to each other with no STUN server. getStats() is read on both after they settle.
+PAIR = """(async () => {
+  const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+  const relay = (to) => (e) => { if (e.candidate) to.addIceCandidate(e.candidate); };
+  a.onicecandidate = relay(b); b.onicecandidate = relay(a);
+  const dc = a.createDataChannel('x');
+  const settled = new Promise(r => {
+    dc.onopen = () => r();
+    a.oniceconnectionstatechange = () => { if (['connected', 'completed', 'failed'].includes(a.iceConnectionState)) r(); };
+  });
+  await a.setLocalDescription(await a.createOffer());
+  await b.setRemoteDescription(a.localDescription);
+  await b.setLocalDescription(await b.createAnswer());
+  await a.setRemoteDescription(b.localDescription);
+  await Promise.race([settled, new Promise(r => setTimeout(r, 15000))]);
+  await new Promise(r => setTimeout(r, 1500));
+  const hostStats = [];
+  for (const pc of [a, b]) {
+    (await pc.getStats()).forEach(r => {
+      if (r.type === 'local-candidate' && r.candidateType === 'host') hostStats.push(r.address || '');
+    });
+  }
+  a.close(); b.close();
+  return hostStats;
+})()"""
 
 
 def answer_binding_requests(server: socket.socket, stop: threading.Event) -> None:
@@ -102,7 +126,9 @@ async def gather(context, stun: str) -> dict:
     await page.goto("about:blank")
     # In the page's own world: the isolated one cannot read the RTCStatsReport objects
     # getStats() returns ("Permission denied to access object").
-    return await page.evaluate(f"mw:({PROBE})({json.dumps(stun)})")
+    got = await page.evaluate(f"mw:({PROBE})({json.dumps(stun)})")
+    got["hostStats"] = await page.evaluate("mw:" + PAIR)
+    return got
 
 
 def literals(addresses) -> list:

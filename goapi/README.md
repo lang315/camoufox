@@ -7,8 +7,9 @@ patched Firefox build. No Python, no Node, no `playwright-go` dependency.
 
 **v0.1 — smoke-tested end-to-end** against Camoufox 150.0.2-beta.25 on
 macOS arm64. v0.1 adds the WebRTC + canvas patch-companion options
-(`WithCanvasNoise`, `WithWebRTCLocalIP`). The C++ patches that consume these
-options live in `browser/patches/canvas-spoofing.patch` and `browser/patches/webrtc-ip-spoofing2.patch`
+(`WithCanvasNoise`, `WithWebRTCLocalIP`, default mDNS-obfuscation
+disable). The C++ patches that consume these options live in
+`browser/patches/canvas-spoofing.patch` and `browser/patches/webrtc-ip-spoofing2.patch`
 and require a Firefox source rebuild via `make -C browser dir && make -C browser build`.
 
 The bare `WithExecutablePath(...)` flow still works against the stock

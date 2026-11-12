@@ -21,9 +21,9 @@ on, the IPv6 literal and v6only.test must fail at once, as an unreachable
 network does, dual.test must arrive over IPv4, and WebRTC must offer no IPv6
 host candidate.
 
-A shipped browser shows the page host candidates only as mDNS names, so the
-gathering cannot be read from the page. The probe turns mDNS obfuscation off to
-see which addresses nICEr gathered.
+camoufox.cfg sets media.peerconnection.ice.no_host, so a shipped browser shows
+the page no host candidate of either family and the gathering cannot be read
+from the page. The probe turns it off to see which addresses nICEr gathered.
 
     python browser/tests/playwright/patches/ipv4-only-network.py
 """
@@ -134,7 +134,8 @@ async def probe(port: int, ipv4_only: bool) -> dict:
 
     config = {"network:ipv4Only": True} if ipv4_only else {}
     async with AsyncCamoufox(headless=True, config=config, i_know_what_im_doing=True,
-                             firefox_user_prefs={"media.peerconnection.ice.obfuscate_host_addresses": False},
+                             firefox_user_prefs={"media.peerconnection.ice.obfuscate_host_addresses": False,
+                                                "media.peerconnection.ice.no_host": False},
                              executable_path=str(resolve_binary())) as browser:
         page = await browser.new_page()
         await page.goto(f"http://{V4}:{port}/page")

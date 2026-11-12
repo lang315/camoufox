@@ -25,6 +25,7 @@ CANVAS_SEED_INIT_SCRIPT = "try { window.__canvasSeedSet__ = true; } catch (e) {}
 FIREFOX_WEBGL_PREFS = {
     "webgl.force-enabled": True,
     "webgl.enable-webgl2": True,
+    "media.peerconnection.ice.obfuscate_host_addresses": False,
 }
 
 CATEGORY_LABELS = {

@@ -8,11 +8,11 @@ Linux ports, which reach the page in every candidate that carries them: ports
 the claimed OS could not have used. NrSocketBase::CreateSocket now picks the
 port from the spoofed OS's range.
 
-The port is read at the STUN server, not from candidates. camoufox.cfg leaves
-media.peerconnection.ice.no_host off and mDNS obfuscation on, so host
-candidates reach the page only as .local names, and the fork fabricates no srflx
-candidate; but nICEr opens a UDP socket per local address and sends a STUN
-Binding Request from it. The probe owns that server: a socket that never answers, so
+The port is read at the STUN server, not from candidates. camoufox.cfg sets
+media.peerconnection.ice.no_host, so host candidates never reach the page, and
+the fork fabricates no srflx candidate; but nICEr still opens a UDP socket per
+local address and sends a STUN Binding Request from it (no_host only hides the
+host candidate). The probe owns that server: a socket that never answers, so
 the run needs no network, and whose recvfrom source port is the bound port.
 It listens on the host's default-route address, because nICEr skips a loopback
 STUN server unless media.peerconnection.ice.loopback is set, and the browser is
