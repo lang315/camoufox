@@ -5,10 +5,12 @@
   const pc = new RTCPeerConnection({iceServers: stun ? [{urls: `stun:${stun}`}] : []});
   const cands = [], gathering = [pc.iceGatheringState];
   let finished = false;
-  function finish() {
+  async function finish() {
     if (finished) return; finished = true;
+    const stats = [];
+    (await pc.getStats()).forEach(r => { if (r.type === "local-candidate") stats.push(r.address); });
     const out = document.getElementById("out");
-    out.textContent = JSON.stringify({candidates: cands, gathering, sdp: pc.localDescription ? pc.localDescription.sdp : ""});
+    out.textContent = JSON.stringify({candidates: cands, stats, gathering, sdp: pc.localDescription ? pc.localDescription.sdp : ""});
     out.dataset.done = "1";
   }
   pc.createDataChannel("d");
