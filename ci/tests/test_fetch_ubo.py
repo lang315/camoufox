@@ -157,3 +157,23 @@ def test_a_ubo_whose_regional_selection_moved_is_refused(tmp_path):
     (tmp_path / "js" / "storage.js").write_text("// reworked\n", encoding="utf-8")
     with pytest.raises(SystemExit, match="freeze_lists"):
         fetch_ubo.freeze_lists(str(tmp_path))
+
+
+UBO_PIN = REPO_ROOT / "ci" / "ubo-pin.json"
+
+
+def test_tests_run_with_the_uBO_pinned_in_the_repo():
+    """A uBO release on AMO must not change what a Tests run loads (#425)."""
+    pin = json.loads(UBO_PIN.read_text(encoding="utf-8"))
+    assert set(pin) == {"version", "url", "sha256"}
+    assert len(pin["sha256"]) == 64 and pin["version"] in pin["url"]
+    tests = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
+    step = next(s for s in tests["jobs"]["resolve"]["steps"] if s.get("id") == "ubo")
+    assert "ci/ubo-pin.json" in step["run"] and "fetch-ubo.py resolve" not in step["run"]
+
+
+def test_a_pin_whose_xpi_changed_is_refused(tmp_path):
+    data = xpi()
+    pin = fetch_ubo.pin_from_amo(amo(data))
+    with pytest.raises(SystemExit, match="expected"):
+        fetch_ubo.extract(data + b"x", pin, str(tmp_path / "addons" / "UBO"))

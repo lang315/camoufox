@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #425: Tests runs followed AMO's newest uBlock Origin, so a uBO release turned a guard red with no commit
+
+**Fixed by:** PR #440. **Found by:** `main-world-eval-globals` going from 12 of 12 to 0 of 12 launches between two browsers with the same compiled-inputs digest (#419).
+
+**Symptom.** A guard that loads uBO passed on a browser staged at 14:09 UTC on 2026-11-08 and failed on ones staged after uBO 1.76.0 reached AMO at 17:02 UTC.
+
+**Root cause.** The `resolve` job ran `fetch-ubo.py resolve` (AMO's newest) every run, and the build job restaged it over a cache hit. uBO is in no commit and not in the cache digest, so nothing in the repo changed.
+
+**Fix.** `ci/ubo-pin.json` holds the version, AMO file url and sha256; `resolve` emits it unless the `ubo` input is set. The file sits outside `ci/browser_inputs.py`'s digest, so a bump costs no cold build. Settled in `ci/tribal-rules.yml` (`tests-run-with-a-pinned-ubo`). Rejected: logging the version only (a red still moves without a commit), keying the cache on it (a cold build per uBO release).
+
+**Evidence.** `test_tests_run_with_the_uBO_pinned_in_the_repo` fails before (no pin file, `resolve` step calls AMO) and passes after.
+
+**What misled.** The digest and the cache key were identical across the green and red browsers, which read as "same browser".
+
 ## #438: the TypeScript test `accepts a list of OSes` failed when 20 unseeded draws landed on one OS
 
 **Fixed by:** PR #439. **Found by:** Tests run 43124756186 (job 130874671135), on a PR that only deleted a docs file.

@@ -83,7 +83,7 @@ on:
         required: false
         type: string
       ubo:
-        description: "The uBlock Origin release to bundle, as browser/scripts/fetch-ubo.py resolves it; default AMO's newest"
+        description: "The uBlock Origin release to bundle, as browser/scripts/fetch-ubo.py resolves it; default the pin in ci/ubo-pin.json"
         required: false
         type: string
     secrets:
@@ -155,15 +155,16 @@ jobs:
 
       - name: The uBlock Origin release to bundle
         id: ubo
-        # Once per run, so every job tests the same one. A release resolves it
-        # itself and passes it in, so the browser it ships bundles what was tested.
+        # Once per run, so every job tests the same one: the pin in ci/ubo-pin.json
+        # unless a dispatch or a release passes one in (#425). A release resolves
+        # AMO's newest itself, so the browser it ships bundles what was tested.
         env:
           CAMOUFOX_UBO: ${{ inputs.ubo }}
         run: |
           if [ -n "$CAMOUFOX_UBO" ]; then
             echo "pin=$CAMOUFOX_UBO" >> "$GITHUB_OUTPUT"
           else
-            python3 browser/scripts/fetch-ubo.py resolve
+            echo "pin=$(python3 -c 'import json; print(json.dumps(json.load(open("ci/ubo-pin.json")), separators=(",", ":")))')" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Does this change the browser?
