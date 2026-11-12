@@ -15,7 +15,7 @@ later change should read first.
 
 ## #438: the TypeScript test `accepts a list of OSes` failed when 20 unseeded draws landed on one OS
 
-**Fixed by:** the PR that fixes #438. **Found by:** Tests run 43124756186 (job 130874671135), on a PR that only deleted a docs file.
+**Fixed by:** PR #439. **Found by:** Tests run 43124756186 (job 130874671135), on a PR that only deleted a docs file.
 
 **Symptom.** `AssertionError: expected 1 to be 2` at `fingerprints.test.ts:957`; the same test passed on the PR's previous head.
 
