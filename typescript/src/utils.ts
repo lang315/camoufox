@@ -628,7 +628,7 @@ export function validateConfig(
 			if (key === "voices:speechd") {
 				LeakWarning.warn("voices_unread");
 			}
-			utilsDeps.print(`Skipping unknown patch ${key} : ${pyStr(value)}`);
+			utilsDeps.print(`Skipping unknown patch ${key}`);
 			continue; // Property not supported by this browser version; skip silently
 		}
 		if (entry.removed !== undefined) {
