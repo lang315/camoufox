@@ -134,7 +134,7 @@ behind P0/P1; browser-verification-gated.
 **T9. goapi platform coverage.**  *(staged — infra, build-gated)*
 goapi is v0.1, smoke-tested **macOS-arm64 only** — no Windows Juggler pipe transport, Linux
 untested, WebGL/Network RPC domains unexercised. Patch-companion knobs (`WithCanvasNoise`,
-`WithWebRTCLocalIP`, `WithMDNSObfuscation`) silently no-op on a stock binary. Next step: add
+`WithWebRTCLocalIP`) silently no-op on a stock binary. Next step: add
 Windows-pipe transport + a Linux smoke leg once T1's build artifact exists.
 
 **T10. Producer↔schema drift guard.**  *(DONE — `go test`-verified)*
