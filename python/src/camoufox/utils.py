@@ -443,7 +443,7 @@ def validate_config(config_map: Dict[str, str], path: Optional[Path] = None) -> 
         if not entry:
             if key == 'voices:speechd':
                 LeakWarning.warn('voices_unread')
-            print(f'Skipping unknown patch {key} : {value}')
+            print(f'Skipping unknown patch {key}')
             continue  # Not supported by this browser version: reported, then skipped
         if 'removed' in entry:
             print(f'Skipping {key}: removed in {entry["removed"]}, it has no effect')

@@ -9,7 +9,9 @@ them. Keeping the entries fixes those libraries; this library must in turn not
 validate a removed key as a live one, and must say that it has no effect.
 """
 
+import io
 import json
+import sys
 
 import pytest
 
@@ -44,3 +46,14 @@ def test_a_build_without_the_voice_grid_warns_and_launches(tmp_path):
     binary = _browser_with(tmp_path, [{"property": "navigator.userAgent", "type": "str"}])
     with pytest.warns(LeakWarning, match="voices:speechd"):
         validate_config({"voices:speechd": {"languages": [], "variants": []}}, path=binary)
+
+
+def test_an_unknown_key_prints_only_its_name_so_a_console_cannot_choke_on_the_value(tmp_path, monkeypatch):
+    """The value of a skipped key may not encode on the console (U+0101 under cp1252, #428)."""
+    binary = _browser_with(tmp_path, [{"property": "navigator.userAgent", "type": "str"}])
+    raw = io.BytesIO()
+    console = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", console)
+    validate_config({"some:unknown": "ā"}, path=binary)
+    console.flush()
+    assert raw.getvalue() == b"Skipping unknown patch some:unknown\n"

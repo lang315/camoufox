@@ -13,6 +13,19 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #428: a launch crashed with `UnicodeEncodeError` when the browser did not know a config key
+
+**Fixed by:** the PR that fixes #428. **Found by:** reading the sync PR (#426): an unpinned launcher fetches a release whose `properties.json` lacks `voices:speechd`.
+
+**Symptom.** On Windows with stdout under cp1252, `launch_options()` raised `UnicodeEncodeError: 'charmap' codec can't encode character 'ā'` from `validate_config`.
+
+**Root cause.** `validate_config` printed the skipped key together with its value: `print(f'Skipping unknown patch {key} : {value}')`. The value of `voices:speechd` is the voice grid, which holds U+0101, and the console cannot encode it. The TypeScript launcher printed the same line with `pyStr(value)`.
+
+**Fix.** Both launchers print the key only: `Skipping unknown patch {key}`. A reader needs the name, not a value that can be huge. Rejected: `errors="replace"` on stdout, which treats the symptom for one stream and leaves the value in the line.
+
+**Evidence.** `test_an_unknown_key_prints_only_its_name_so_a_console_cannot_choke_on_the_value` writes to a cp1252 stream: red with the `UnicodeEncodeError` above before the fix, green after. The TypeScript test asserts the exact line.
+
+**What misled.** The existing voice-grid test passes a grid with empty lists, which encodes anywhere; only a real grid holds the non-ASCII voice names.
 
 ## #431: `test_web_apis_behave_like_the_reference[pkg]` reported an audio difference when uBlock Origin held the probe's request
 
