@@ -15,7 +15,7 @@ later change should read first.
 
 ## #425: Tests runs followed AMO's newest uBlock Origin, so a uBO release turned a guard red with no commit
 
-**Fixed by:** the PR that fixes #425. **Found by:** `main-world-eval-globals` going from 12 of 12 to 0 of 12 launches between two browsers with the same compiled-inputs digest (#419).
+**Fixed by:** PR #440. **Found by:** `main-world-eval-globals` going from 12 of 12 to 0 of 12 launches between two browsers with the same compiled-inputs digest (#419).
 
 **Symptom.** A guard that loads uBO passed on a browser staged at 14:09 UTC on 2026-11-08 and failed on ones staged after uBO 1.76.0 reached AMO at 17:02 UTC.
 
