@@ -139,14 +139,12 @@ A context of another OS on a browser launched as the host's OS draws only the
 host's fonts that its list admits
 ([docs/fonts-gating.md](../docs/fonts-gating.md#a-context-of-another-os-in-a-host-os-launch-320)).
 
-On an arm64 host (measured on Apple silicon; Linux arm64 uses the same instruction
-set but was not measured), a Windows identity shows arm64's NaN sign for a NaN made at
-run time: `0x7ff8...` for the square root of a negative number, `0 / 0`,
-`Infinity - Infinity`, `Math.log` of a negative number and similar, where Windows
-Firefox on x64 shows `0xfff8...`. A page reads it through a `Float64Array` and an
-integer view of the same buffer. It is not emulated
-([docs/HOST-PARITY.md](../docs/HOST-PARITY.md)); use an x64 host for a Windows
-identity when that matters.
+On an arm64 host, a Windows identity claims an Intel or AMD CPU, and a NaN made at run
+time reads x86's `0xfff8...` as on Windows Firefox on x64, for most operations (measured
+on Apple silicon; Linux arm64 uses the same instruction set but was not measured). This
+is narrowed, not closed: `Math.sqrt` of a negative number after the JIT still reads
+arm64's `0x7ff8...`, and `Infinity % 2` reads `0xfff8...` unverified against stock
+([docs/HOST-PARITY.md](../docs/HOST-PARITY.md), #453).
 
 ### The canvas on another OS
 

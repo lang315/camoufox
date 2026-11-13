@@ -23,16 +23,20 @@ behaviour; on a browser launched as Linux, a Windows context has Linux's.
 from fpgen's mix, and a refusal would then come and go with the draw. Launch
 with the `os` whose behaviour the contexts need, or one browser per OS.
 
-## Not closed: the sign of a NaN made at run time
+## Narrowed, not closed: the sign of a NaN made at run time
 
 A NaN that the CPU makes, rather than one the engine writes as a constant, has the sign
 that CPU gives it: x86-64 returns `0xfff8...` (the "real indefinite"), arm64 `0x7ff8...`.
 Stock Windows Firefox runs on x86-64, so a Windows identity on an arm64 host
-reads `0x7ff8...` where Windows reads `0xfff8...`. A page sees it by storing the number
-in a `Float64Array` and reading the same buffer through a `Uint32Array`. This is not
-emulated; #381 holds the measurements and the design notes. It was measured on Apple
-silicon only; Linux arm64 (also a build target) uses the same instruction set and was not
-measured.
+read `0x7ff8...` where Windows reads `0xfff8...`. A page sees it by storing the number
+in a `Float64Array` and reading the same buffer through a `Uint32Array`. #381 holds the
+first measurements and the design notes. It was measured on Apple silicon only; Linux arm64
+(also a build target) uses the same instruction set and was not measured.
+
+Since the CPU emulation (`cpu-vendor-estimates.patch`, upstream #1034), a Windows identity
+claims an Intel or AMD CPU (`general.cpu_identity` 1 or 2), and the JIT and the
+interpreter make x86's negative NaN. That closes most of the rows below but not all;
+the two left are #453.
 
 **What was measured** (the probe is a list of expressions with run-time operands, read
 interpreted and after a 30,000-iteration loop; high 16 bits of each result):
@@ -47,6 +51,17 @@ interpreted and after a 30,000-iteration loop; high 16 bits of each result):
   `Math.pow(-2, ±0.5)`. The `%` rows and the controls are canonical NaNs by
   construction, so they agree on every host. `Math.pow(-2, ±0.5)` was fixed after this
   build by #317 (#382): the square-root shortcut now leaves a negative base to `ucrt_pow`.
+- macOS arm64 app of this sync (build run 43456661774, head `403757cd`), launched through
+  the Python launcher with `os="windows"`, once with the default CPU draw and once with
+  `cpu={"manufacturer": "intel"}` (Intel/AMD `cpu_identity`); both read the same. The
+  probe was a local scratch probe, not #381's, and was not run on stock Windows: the stock
+  values compared here are the ones below, measured with #381's probe. `Infinity - Infinity`,
+  `Infinity * 0`, `Math.log`, `log2`, `log10`, `log1p`, `acos`, `asin`, `acosh`, `atanh` and
+  `Math.pow(-2, ±0.5)` read `fff8` interpreted and after the loop, and `0 / 0` reads `7ff8`
+  interpreted and `fff8` after the loop, as stock Windows does. The two left (#453):
+  `Math.sqrt(-1)` reads `fff8` interpreted and `7ff8` after the loop, where stock 159.0 reads
+  `fff8`; `Infinity % 2` reads `fff8` both ways, where the earlier build and an `os="macos"`
+  control read `7ff8`. It is unverified against stock and may be a new mismatch from #1034.
 - Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
   `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
 
@@ -81,7 +96,9 @@ needs a patch to the JIT back end, which is carried across every Firefox upgrade
 would not reach WebAssembly or SIMD, float32 (x86's default is `0xffc00000`, arm64's
 `0x7fc00000`), NaNs made inside Gecko's native code (Web Audio, WebGL), or the NaN a
 NaN operand propagates (x86 and arm64 pick different operands). Its cost in speed was not
-measured. The limit is documented instead.
+measured. The limit was documented instead; upstream's CPU emulation (#1034) later took
+this direction for the JIT and the interpreter, keyed on the claimed CPU rather than on the
+identity's OS (see above).
 
 **Windows on ARM.** fpgen draws no Windows-on-ARM identity: in 3,000 draws with
 `os="windows"` no GPU, platform or `oscpu` value named Adreno, Qualcomm, Snapdragon,
