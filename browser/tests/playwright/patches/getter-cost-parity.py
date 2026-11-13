@@ -210,8 +210,8 @@ def no_proxy_env():
     return {k: v for k, v in os.environ.items() if "proxy" not in k.lower()}
 
 
-def run_stock(binary, url):
-    """Starts stock Firefox on the page; returns (profile, process, output file)."""
+def run_stock(binary, *urls):
+    """Starts stock Firefox on the pages, one tab each; returns (profile, process, output file)."""
     prepare_stock(binary)
     profile = tempfile.mkdtemp(prefix="getter-cost-parity-")
     Path(profile, "user.js").write_text(
@@ -224,7 +224,7 @@ def run_stock(binary, url):
         # (a hosted macOS runner) gives stock a null WebGL context and the reference fails, not the subject.
         'user_pref("webgl.force-enabled", true);\n', encoding="utf-8")
     with tempfile.NamedTemporaryFile(prefix="getter-cost-parity-", suffix=".log", delete=False) as out:
-        proc = subprocess.Popen([str(binary), "--headless", "--no-remote", "--profile", profile, url],
+        proc = subprocess.Popen([str(binary), "--headless", "--no-remote", "--profile", profile, *urls],
                                 env=no_proxy_env(), stdout=out, stderr=subprocess.STDOUT)
     return profile, proc, out.name
 

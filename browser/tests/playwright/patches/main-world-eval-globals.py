@@ -27,24 +27,31 @@ them. It is compared with an untouched tab opened just before it, not the
 first: the first tab of a browser places HTMLCollection differently from every
 later one with no evaluate at all (measured 2026-11-04: 415 vs ~944).
 
-The browser runs without uBlock Origin, as driven-evaluate-globals.py does. With it loaded, two
-untouched tabs opened one after the other list the standard classes differently: with uBO 1.76.0
-RegExp stood at index 7 in the first tab and 925 in the second in 11 of 12 launches (the full
-orders differed in all 12), with no `mw:` evaluate at all, and with uBO excluded the two orders were
-identical in 12 of 12. No tab is a fair reference for an evaluated one while uBO is loaded, so this
-guard does not cover an `mw:` evaluate in a browser that has it. Of the classes a script touches it
-watches RegExp, not String or Boolean. docs/bug-fixes.md has the measurements.
+Last, the tell of a page's own view with uBlock Origin loaded: in every tab after the first, RegExp
+stands right after Number in the global order, as in stock Firefox. uBO 1.76.0 moved it after URL (#447).
+The comparisons above leave that out: the first tab is not compared, and the tabs after it shift together.
+Stock Firefox, launched on the same page in several tabs, is the control: it must hold one order of those
+three names in every tab with RegExp right after Number, else the check is SETUP-INVALID.
 
     python browser/tests/playwright/patches/main-world-eval-globals.py
 """
 
 import http.server
+import importlib.util
+import json
 import sys
 import threading
+import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+from helpers import resolve_binary, stock_firefox, stock_gpu_parity  # noqa: E402
+
+TABS = 4
+LAUNCHES = 3
+TELL = ("Number", "RegExp", "URL")
 
 PAGE = b"""<!doctype html><title>g</title><pre id="o"></pre><script>
 setTimeout(() => {
@@ -53,6 +60,14 @@ setTimeout(() => {
     order: keys,
     int16: Object.getOwnPropertyNames(Int16Array).join(','),
   });
+}, 1500);
+</script>"""
+
+# The page's own view, sent to the server so a browser nobody drives can report it too.
+ORDER_PAGE = b"""<!doctype html><title>o</title><script>
+setTimeout(() => {
+  const keys = Object.getOwnPropertyNames(window);
+  fetch('/order' + location.search, {method: 'POST', body: JSON.stringify(keys)});
 }, 1500);
 </script>"""
 
@@ -65,21 +80,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("content-type", "text/html")
         self.end_headers()
-        self.wfile.write(PAGE)
+        self.wfile.write(ORDER_PAGE if self.path.startswith("/orders") else PAGE)
+
+    def do_POST(self):
+        tab = int(parse_qs(urlparse(self.path).query)["tab"][0])
+        self.server.orders[tab] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        self.send_response(204)
+        self.end_headers()
+
+
+def serve():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    srv.orders = {}
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, f"http://127.0.0.1:{srv.server_port}/"
 
 
 def probe(binary):
-    import json
-    from camoufox import DefaultAddons
     from camoufox.sync_api import Camoufox
 
-    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-    threading.Thread(target=srv.serve_forever, daemon=True).start()
-    url = f"http://127.0.0.1:{srv.server_port}/"
+    srv, url = serve()
     out = {}
     try:
         with Camoufox(executable_path=str(binary), headless=True, os="linux", main_world_eval=True,
-                      i_know_what_im_doing=True, exclude_addons=[DefaultAddons.UBO]) as browser:
+                      i_know_what_im_doing=True) as browser:
             for name in ("plain", "mw", "plain2", "scrape"):
                 page = browser.new_page()
                 page.goto(url, wait_until="load")
@@ -91,6 +115,49 @@ def probe(binary):
     finally:
         srv.shutdown()
     return out
+
+
+def wait_for_tabs(srv, count, timeout=60):
+    deadline = time.time() + timeout
+    while len(srv.orders) < count and time.time() < deadline:
+        time.sleep(0.5)
+    return dict(srv.orders)
+
+
+def camoufox_tab_orders(binary):
+    """The page's global order in each of TABS tabs of one launch, opened one after the other."""
+    from camoufox.sync_api import Camoufox
+
+    srv, url = serve()
+    try:
+        with Camoufox(executable_path=str(binary), headless=True, os="linux", main_world_eval=True,
+                      i_know_what_im_doing=True) as browser:
+            for tab in range(TABS):
+                browser.new_page().goto(f"{url}orders?tab={tab}", wait_until="load")
+                wait_for_tabs(srv, tab + 1)
+        return dict(srv.orders)
+    finally:
+        srv.shutdown()
+
+
+def stock_tab_orders(stock):
+    """The same page in TABS tabs of one stock Firefox, given as arguments, so no driver is involved."""
+    spec = importlib.util.spec_from_file_location("getter_cost_parity", HERE / "getter-cost-parity.py")
+    parity = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(parity)
+    srv, url = serve()
+    profile, proc, log = parity.run_stock(stock, *[f"{url}orders?tab={tab}" for tab in range(TABS)])
+    try:
+        return wait_for_tabs(srv, TABS)
+    finally:
+        stock_gpu_parity().stop_browser(proc, profile)
+        Path(log).unlink(missing_ok=True)
+        srv.shutdown()
+
+
+def tell(order):
+    """The order of the names the uBO release moved, those the page lists."""
+    return [n for n in order if n in TELL]
 
 
 # What mainWorldEvaluate and its result path could resolve in the page, minus JSON
@@ -116,6 +183,28 @@ def moved(a, b):
     return [b[j1:j2] or a[i1:i2] for op, i1, i2, j1, j2 in sm.get_opcodes() if op != "equal"]
 
 
+def tell_failures(stock, binary):
+    """Failures of the RegExp-after-Number check; a control that does not hold is one too."""
+    failures = []
+    controls = [tell(order) for _ in range(LAUNCHES) for order in stock_tab_orders(stock).values()]
+    reference = controls[0] if controls else None
+    if (len(controls) != LAUNCHES * TABS or any(c != reference for c in controls)
+            or sorted(reference) != sorted(TELL) or reference.index("RegExp") != reference.index("Number") + 1):
+        failures.append(f"SETUP-INVALID: stock Firefox does not hold one order of {TELL} with RegExp right "
+                        f"after Number in all {LAUNCHES * TABS} tabs: {controls}")
+        return failures
+    for launch in range(LAUNCHES):
+        orders = camoufox_tab_orders(binary)
+        if len(orders) != TABS:
+            failures.append(f"SETUP-INVALID: launch {launch} reported {len(orders)} of {TABS} tabs")
+            continue
+        for tab in range(1, TABS):
+            if tell(orders[tab]) != reference:
+                failures.append(f"launch {launch} tab {tab}: {tell(orders[tab])}, stock {reference} "
+                                f"(RegExp at index {orders[tab].index('RegExp')}, URL at {orders[tab].index('URL')})")
+    return failures
+
+
 def main() -> int:
     r = probe(resolve_binary())
     failures = []
@@ -131,6 +220,7 @@ def main() -> int:
                         f"interfaces on the window): {diff}")
     if r["plain"]["int16"] != r["mw"]["int16"]:
         failures.append(f"Int16Array own keys {r['mw']['int16']!r}, untouched page {r['plain']['int16']!r}")
+    failures += tell_failures(stock_firefox(), resolve_binary())
     for f in failures:
         print(f"FAIL: {f}")
     if failures:

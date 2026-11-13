@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #447: fork.2 shipped uBlock Origin 1.76.0, which moves RegExp in the global order of later tabs
+
+**Fixed by:** PR #448. **Found by:** upstream's measurement for daijro/camoufox#1012, read during the sync (#444).
+
+**Symptom.** With uBO 1.76.0 loaded, `RegExp` stands after `URL` in the global order of every tab after the first; stock Firefox 158 and 159, no uBO and uBO 1.75.4 keep it after `Number`. v159.0-beta.35-fork.2 bundles 1.76.0.
+
+**Root cause.** Two gaps. #425 pinned AMO's newest release at the time, 1.76.0, in `ci/ubo-pin.json`, but only `tests.yml` read it: `build.yml` and `release.yml` set no `CAMOUFOX_UBO`, so `fetch-ubo.py stage` took AMO's newest for every package. And no guard could see the tell: `main-world-eval-globals.py` compares tabs with each other, and with uBO loaded they all shift together (run 43436015756 passed with 1.76.0 staged).
+
+**Fix.** `browser/scripts/data/ubo.json` holds the one pin, 1.75.4, which `fetch-ubo.py resolve` and `stage` read when `CAMOUFOX_UBO` is unset (`newest` prints AMO's latest as a candidate); `ci/ubo-pin.json` is gone. `main-world-eval-globals.py` loads uBO and checks directly that RegExp stands right after Number in tabs 2 to 4 of three launches, against stock Firefox's order in the same tabs; a stock that does not show that order is SETUP-INVALID. Settled in `ci/tribal-rules.yml` (`ubo-release-pinned`). Rejected: leaving the guard as it was, which passed with 1.76.0.
+
+**Evidence.** Red: run 43447225045, job 131966312655 (`Patch guards: automation`), 9 of 9 later tabs `['Number', 'URL', 'RegExp']` against stock `['Number', 'RegExp', 'URL']` (RegExp at index 924, URL at 600), with 1.76.0 staged. `test_resolve_is_the_committed_pin_and_needs_no_network` failed before in Static checks (run 43434413993, job 131915974344). Green: this PR's last Tests run, with 1.75.4 staged.
+
+**What misled.** A green guard read as "no tell": it compared later tabs only with each other, so a shift they share was invisible. The first run of the guard that loaded uBO passed for that reason.
+
 ## #441: getStats() gave a page the machine's interface address under `no_host`
 
 **Fixed by:** PR #442. **Found by:** the #420 probe (`e2e/probes/webrtc_no_host.py`, 8 launches per arm on Linux, macOS and Windows).
