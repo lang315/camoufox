@@ -112,7 +112,7 @@ jobs:
           python3 ci/apt_install.py xvfb libgtk-3-0 libasound2t64 libdbus-glib-1-2 \
             libx11-xcb1 libxcb-shm0 libxcomposite1 libxcursor1 libxdamage1 libxfixes3 libxi6 libxrandr2 libxtst6 libpci3
       - run: pip install -r ci/requirements.txt -e "python[geoip]"
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
         with:
           # setup-python on Windows provides `python`, not `python3`.
           python: python

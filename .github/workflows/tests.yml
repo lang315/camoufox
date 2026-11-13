@@ -83,7 +83,7 @@ on:
         required: false
         type: string
       ubo:
-        description: "The uBlock Origin release to bundle, as browser/scripts/fetch-ubo.py resolves it; default the pin in ci/ubo-pin.json"
+        description: "The uBlock Origin release to bundle, as browser/scripts/fetch-ubo.py resolves it; default the committed pin (browser/scripts/data/ubo.json)"
         required: false
         type: string
     secrets:
@@ -155,16 +155,16 @@ jobs:
 
       - name: The uBlock Origin release to bundle
         id: ubo
-        # Once per run, so every job tests the same one: the pin in ci/ubo-pin.json
-        # unless a dispatch or a release passes one in (#425). A release resolves
-        # AMO's newest itself, so the browser it ships bundles what was tested.
+        # Once per run, so every job tests the same one: the pin in
+        # browser/scripts/data/ubo.json unless a dispatch or a release passes
+        # one in, so the browser a release ships bundles what was tested (#425).
         env:
           CAMOUFOX_UBO: ${{ inputs.ubo }}
         run: |
           if [ -n "$CAMOUFOX_UBO" ]; then
             echo "pin=$CAMOUFOX_UBO" >> "$GITHUB_OUTPUT"
           else
-            echo "pin=$(python3 -c 'import json; print(json.dumps(json.load(open("ci/ubo-pin.json")), separators=(",", ":")))')" >> "$GITHUB_OUTPUT"
+            python3 browser/scripts/fetch-ubo.py resolve
           fi
 
       - name: Does this change the browser?
@@ -285,7 +285,7 @@ jobs:
       # assert against it. It is a pure-Python install; no browser involved.
       - run: |
           pip install -r ci/requirements.txt pytest -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
 
       - name: Synthesized input goes through one chokepoint
         run: python3 browser/scripts/check-input-dispatch.py
@@ -364,7 +364,7 @@ jobs:
           # The geoip extra: python/tests/test_geoip_sources.py downloads every GeoIP
           # source and fails when one stops publishing, which gates releases.
           pip install -r ci/requirements.txt pytest -e 'python[geoip]'
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       - name: Run
         # pythonlib resolves the published release through the GitHub API
         # (pkgman.py honours GITHUB_TOKEN). Unauthenticated, a runner shares the
@@ -412,7 +412,7 @@ jobs:
           # fixtures from its pythonlib before the suite runs.
           python3 -m venv .venv
           .venv/bin/pip install -r ci/requirements.txt -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
         with:
           python: .venv/bin/python
       - name: Test prerequisites
@@ -788,7 +788,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -r ci/requirements.txt -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
 
       - name: Download
         # Same GitHub API path as the pythonlib job above, and the same anonymous
@@ -933,7 +933,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       # Fonts and properties.json are staged into the artifact by the build job;
       # `make stage-fonts` here would find no source tree and do nothing.
       # ipv4-only-network.py builds its test network in an unprivileged user
@@ -989,12 +989,16 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           cd browser/tests/build-tester && npm install && pip install -r requirements.txt
-      # build-tester pulls pythonlib -- and so fpgen -- through its own
-      # requirements.txt (`-e ../../../python`) rather than `pip install -e
-      # python`, so the pin has to be spelled out here. Without it this job was
-      # still downloading fpgen's model itself: TLS verification off, no
-      # checksum, and only ever the April-2025 release (observed in run 36050915401).
-      - uses: ./.github/actions/pin-fpgen-model
+      # build-tester installs pythonlib through its own requirements.txt
+      # (`-e ../../../python`), and still needs the pin before fpgen loads
+      # (observed downloading the April-2025 model in run 36050915401).
+      - uses: ./.github/actions/fpgen-model
+      - name: Verify the bundled fonts match fonts.json
+        # The release runs the full check before it builds. This quick one, on
+        # the fonts the artifact carries, fails the pull request that breaks it.
+        run: |
+          pip install -e python
+          python3 browser/scripts/verify-fonts.py --quick --bundle "$(dirname "$CAMOUFOX_BINARY")"
       # The suite is headful, so the Xvfb screen is observable: give it the
       # one run_tests.sh gives it, so the two entrypoints measure the same thing.
       - run: xvfb-run -a --server-args="-screen 0 1920x1080x24" python3 -m ci.run_build_tester --binary "$CAMOUFOX_BINARY"
@@ -1036,7 +1040,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       - name: Run
         # Launches browsers, kills them, and proves nothing survived -- the
         # failure a long-running scraper hits after six hours and no Playwright
@@ -1181,7 +1185,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           cd browser/tests/build-tester && pip install -r requirements.txt
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       - name: Run
         run: xvfb-run -a python3 -m ci.run_observer --binary "$CAMOUFOX_BINARY"
       - uses: actions/upload-artifact@v4
@@ -1224,7 +1228,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: typescript/package.json
@@ -1281,7 +1285,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       - run: xvfb-run -a python3 -m ci.run_native --subset growth --shard "${{ matrix.shard }}" --binary "$CAMOUFOX_BINARY"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -1310,7 +1314,7 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
       - run: |
           pip install -e python
-      - uses: ./.github/actions/pin-fpgen-model
+      - uses: ./.github/actions/fpgen-model
       - name: Run
         # Exits 0 with a SKIP result if sundial itself is unreachable -- the
         # browser was never measured, so neither a pass nor a failure would be

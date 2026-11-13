@@ -14,7 +14,10 @@ of length 1, as many pointermoves as pointerrawupdates. No mouse does that.
 
 The guard moves along a 64-point path the way a script does
 (page.mouse.move(x, y, steps=63)) and checks the page's counts. It also checks
-that the page has the destination as soon as move() returns.
+that the page has the destination as soon as move() returns. The display
+scale is pinned at 1.25: a pointer sits on whole device pixels, so at a
+fractional scale the page reads the nearest one (415 CSS px is 518.75 device
+px, read back as 519 / 1.25 = 415.2), as it does from a real mouse.
 
 Coalescing needs moves that outrun a refresh tick, so the guard reads the tick from
 requestAnimationFrame and the pace from the arrival times of the raw moves, and fails with
@@ -29,6 +32,7 @@ not run the guard on Windows or macOS (NOT_ON).
 """
 
 import http.server
+import math
 import sys
 import threading
 from pathlib import Path
@@ -58,6 +62,7 @@ TICK = """() => new Promise((resolve) => {
   requestAnimationFrame(frame);
 })"""
 STEPS = 63
+DPR = 1.25
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -77,7 +82,8 @@ def probe(binary):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        with Camoufox(executable_path=str(binary), headless=False, os="linux", window=(1280, 900)) as browser:
+        with Camoufox(executable_path=str(binary), headless=False, os="linux", window=(1000, 700),
+                      config={"window.devicePixelRatio": DPR}, i_know_what_im_doing=True) as browser:
             page = browser.new_page()
             page.goto(f"http://127.0.0.1:{server.server_address[1]}/")
             tick = page.evaluate(TICK)
@@ -91,6 +97,15 @@ def probe(binary):
             return sweep, last, tick
     finally:
         server.shutdown()
+
+
+def lands(x, y):
+    """The CSS point a pointer moved to (x, y) reports: the nearest device pixel."""
+    return [math.floor(v * DPR + 0.5) / DPR for v in (x, y)]
+
+
+def at(move, point):
+    return bool(move) and all(abs(a - b) < 1e-3 for a, b in zip(move[1:], point))
 
 
 def main() -> int:
@@ -114,9 +129,9 @@ def main() -> int:
         failures.append(f"{len(moves)} pointermoves for {STEPS} moves at 125 Hz: stock dispatches one per frame")
     if outran and sorted(lens)[len(lens) // 2] < 2:
         failures.append(f"coalesced lengths {lens}: stock carries 2 to 4 per frame")
-    if not moves or moves[-1][1:] != [100 + STEPS * 5, 100 + STEPS * 2]:
+    if not moves or not at(moves[-1], lands(100 + STEPS * 5, 100 + STEPS * 2)):
         failures.append(f"the page's last move is {moves[-1] if moves else None} when move() returned")
-    if last[1:] != [700, 500]:
+    if not at(last, lands(700, 500)):
         failures.append(f"after move(700, 500) returned, the page's last move is {last}")
     for failure in failures:
         print(f"FAIL: {failure}")
