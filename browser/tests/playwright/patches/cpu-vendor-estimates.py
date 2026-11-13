@@ -36,7 +36,7 @@ container, and an i7-12700H on Ubuntu (browser/tests/cpu-probe/README.md).
 
 What PASS means: each launch matches its CPU in every value. Without the
 patch a launch naming another CPU gives the host's values and fails. The host
-must be Linux on Intel or AMD x86-64, or on ARM64, with a display whose GPU
+must be Intel or AMD x86-64, or ARM64, on any OS, with a display whose GPU
 the other architecture's machines can have, such as Xvfb's llvmpipe
 (LIBGL_ALWAYS_SOFTWARE=1 on a host with a GPU), and a core count an AMD CPU
 reports (not 10, 14, 18, 22 or 28; hardwareConcurrency is the host's).
@@ -46,7 +46,9 @@ reports (not 10, 14, 18, 22 or 28; hardwareConcurrency is the host's).
 
 import json
 import mimetypes
+import os
 import platform
+import subprocess
 import sys
 from pathlib import Path
 
@@ -112,19 +114,25 @@ OPUS_PROBE = """async () => {
 
 
 def host_vendor() -> str:
-    try:
-        for line in Path("/proc/cpuinfo").read_text(encoding="utf-8").splitlines():
-            if line.startswith("vendor_id"):
-                return {"GenuineIntel": "intel", "AuthenticAMD": "amd"}.get(line.split(":", 1)[1].strip(), "")
-    except OSError:
-        pass
-    return ""
+    """The x86-64 host's CPU vendor, from the vendor string each OS reports."""
+    if sys.platform == "win32":
+        vendor = os.environ.get("PROCESSOR_IDENTIFIER", "")
+    elif sys.platform == "darwin":
+        vendor = subprocess.run(["sysctl", "-n", "machdep.cpu.vendor"], capture_output=True, text=True).stdout
+    else:
+        try:
+            vendor = Path("/proc/cpuinfo").read_text(encoding="utf-8")
+        except OSError:
+            vendor = ""
+    return "intel" if "GenuineIntel" in vendor else "amd" if "AuthenticAMD" in vendor else ""
 
 
 # A Linux launch on a Linux host carries the fork's canvas noise
-# (canvas-spoofing.patch), which perturbs every readback, so no canvas value could
-# equal stock. Seed 0 leaves that patch inert; the CPU's arithmetic is what is compared.
-UNSEEDED = {"config": {"canvas:seed": 0}, "i_know_what_im_doing": True}
+# (canvas-spoofing.patch), and on any other host the random readback that covers
+# another OS's canvas; either perturbs every readback, so no canvas value could
+# equal stock. canvas_noise=False drops the cover and seed 0 leaves the patch
+# inert; the CPU's arithmetic is what is compared.
+UNSEEDED = {"config": {"canvas:seed": 0}, "canvas_noise": False, "i_know_what_im_doing": True}
 
 
 def render(**kwargs) -> dict:

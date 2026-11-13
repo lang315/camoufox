@@ -3242,6 +3242,26 @@ def test_a_linux_only_guard_still_runs_on_linux(tmp_path, monkeypatch):
     assert record["tests"] == {"patches/ipv4-only-network.py": results.PASS}
 
 
+@pytest.mark.parametrize("platform,identifier,vendor", [
+    ("win32", "AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD", "amd"),
+    ("win32", "Intel64 Family 6 Model 85 Stepping 7, GenuineIntel", "intel"),
+    ("darwin", "GenuineIntel\n", "intel"),
+])
+def test_cpu_vendor_guard_reads_the_host_vendor_off_linux(monkeypatch, platform, identifier, vendor):
+    """cpu-vendor-estimates read only /proc/cpuinfo, so an x86-64 Windows host failed (probe run 43469379888)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "cpu_vendor_guard", CI_ROOT.parent / "browser/tests/playwright/patches/cpu-vendor-estimates.py")
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.setattr(guard.sys, "platform", platform)
+    monkeypatch.setenv("PROCESSOR_IDENTIFIER", identifier)
+    monkeypatch.setattr(guard.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=identifier))
+    assert guard.host_vendor() == vendor
+
+
 def test_every_linux_only_guard_is_a_guard():
     from ci.run_patch_guards import LINUX_ONLY, guards
 

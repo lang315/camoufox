@@ -13,6 +13,30 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #444: three of the sync's guards could not run off Linux
+
+**Fixed by:** PR #445. **Found by:** e2e probe run 43469379888 (`probe=patch_guard.py`, Windows build 43456656106, head 2f5d9b5e), job 132037002566.
+
+**Symptom.** On the Windows patch-guard probe, three guards that arrived from upstream failed before measuring anything:
+- `cpu-vendor-estimates`: `FAIL: needs an Intel, AMD or ARM64 host, not AMD64 'AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD'`;
+- `startup-size-frame-extents`: `FileNotFoundError: Could not find module 'libX11.so.6'`;
+- `context-process-isolation`: `FileNotFoundError: [WinError 3] ... '/proc'`.
+
+**Root cause.**
+- `cpu-vendor-estimates.py`'s `host_vendor()` read the vendor from `/proc/cpuinfo` only, so every x86-64 host that is not Linux read as no vendor.
+- Its launches claim Linux. On another host that identity is another OS, so the launcher covers the canvas with random readback (`plan_rendering`), which `canvas:seed` 0 does not turn off.
+- The other two guards are about Linux: an X11 window manager's `_NET_FRAME_EXTENTS`, and a process count read from `/proc`. `ci/run_patch_guards.py` never classified them, because upstream runs its guards on Linux only.
+
+**Fix.**
+- `host_vendor()` reads the vendor string each OS reports: `PROCESSOR_IDENTIFIER` on Windows, `sysctl -n machdep.cpu.vendor` on macOS, `/proc/cpuinfo` on Linux.
+- The guard launches with `canvas_noise=False` as well as seed 0.
+- `startup-size-frame-extents` is in `LINUX_ONLY`.
+- `context-process-isolation` is in `NOT_ON` for Windows and macOS, with the `/proc` reason. #450 is the port to psutil that would measure it there.
+
+**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one.
+
+**What misled.** `cpu-vendor-estimates` printed the processor string it could not classify, `AuthenticAMD` included, which read as an unsupported CPU rather than a vendor the guard never looked for.
+
 ## #444: the sync's CPU-vendor guard read the fork's canvas noise as the wrong CPU
 
 **Fixed by:** PR #445. **Found by:** Tests run 43433801675 (head 88f17baf), Patch guards: spoofing, job 131935845574.
