@@ -34,7 +34,11 @@ later change should read first.
 - `startup-size-frame-extents` is in `LINUX_ONLY`.
 - `context-process-isolation` is in `NOT_ON` for Windows and macOS, with the `/proc` reason. #450 is the port to psutil that would measure it there.
 
-**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one. `test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere` pins the arch arm: run on Linux, not applicable on Windows and macOS.
+**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one. `test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere` pins the arch arm: run on Linux, not applicable on Windows and macOS. On the same Windows build:
+- **Red:** probe run 43469379888 (job 132037002566). All three guards fail.
+- **Partial:** run 43481814285 (job 132079996522). `startup-size-frame-extents` and `context-process-isolation` are reported not applicable with their reasons. `cpu-vendor-estimates` matches stock for Intel and AMD, then stops at the arch arm.
+- **Green:** run 43492226035 (job 132116145127, head 3fa4515a). `✓ cpu-vendor-estimates.py`, spoofing 32/32.
+- **Linux:** the guard stays green in Tests 43494883739 (head 7e50ca6c, spoofing job 132142290566).
 
 **What misled.** `cpu-vendor-estimates` printed the processor string it could not classify, `AuthenticAMD` included, which read as an unsupported CPU rather than a vendor the guard never looked for.
 
