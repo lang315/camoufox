@@ -17,7 +17,7 @@ The release is pinned in data/ubo.json (version, AMO URL, sha256), so a new uBO
 reaches the browser only as a reviewed commit. uBO's code runs in every page
 and can change what a page observes: 1.76.0 moved RegExp in the global order
 of every tab after the first (main-world-eval-globals.py), where stock and
-1.75.4 keep it in place; this fork pins 1.76.0, the release it shipped. A release hands the same pin to its tests and to every
+1.75.4 keep it in place. A release hands the same pin to its tests and to every
 build through CAMOUFOX_UBO; without it, `stage` uses data/ubo.json.
 
     scripts/fetch-ubo.py resolve      # print the committed pin (JSON); `pin` step output

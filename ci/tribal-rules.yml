@@ -284,18 +284,19 @@ rules:
     evidence:
       - "2026-11-09: uBO 1.76.0 (AMO's newest mid-sync) put RegExp after URL in the global order of every tab after the first; stock 158, no uBO and uBO 1.75.4 keep it after Number in every tab and window"
       - "issue #425; uBO 1.76.0 reached AMO on 2026-11-08 and flipped main-world-eval-globals from green to red with no commit (diagnosis in #419, run 42786962179)"
-      - "#444: the fork's ci/ubo-pin.json is retired for upstream's browser/scripts/data/ubo.json (daijro/camoufox#1012), set to the fork's 1.76.0, which v159.0-beta.35-fork.2 ships, rather than upstream's 1.75.4"
+      - "#447: the fork's #425 pinned 1.76.0 in ci/ubo-pin.json without measuring the global order with it loaded, and v159.0-beta.35-fork.2 shipped it, with the tell above"
+      - "#444: the sync with daijro/camoufox df9ca115 retires ci/ubo-pin.json for browser/scripts/data/ubo.json (daijro/camoufox#1012) and restores 1.75.4"
     rationale: >-
       uBO runs in every page, so a uBO release can change what a page observes,
       and resolving AMO's newest on every run moved guards on branches nobody
       touched. fetch-ubo.py resolve reads browser/scripts/data/ubo.json with no
       network, for Tests and releases alike; `newest` prints AMO's latest as a
       candidate. A bump is a commit, made after the stock parity and
-      automation guards pass with it. The pin is a compiled input
-      (ci/browser_inputs.py), on purpose: uBO ships inside the package, so a
-      bump costs a cold build. This fork keeps 1.76.0, the release it shipped,
-      over a downgrade; main-world-eval-globals.py runs without uBO, so the
-      RegExp order above is not guarded with uBO loaded.
+      automation guards pass with it. main-world-eval-globals.py runs with uBO
+      loaded: the fork's copy had excluded it, so it could not see a
+      uBO-driven order change, and that is how 1.76.0 shipped. The pin is a
+      compiled input (ci/browser_inputs.py), on purpose: uBO ships inside the
+      package, so a bump costs a cold build.
 
   # -------------------------------------------------------------------------
   # Measurement

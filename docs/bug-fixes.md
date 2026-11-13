@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #447: fork.2 shipped uBlock Origin 1.76.0, which moves RegExp in the global order of later tabs
+
+**Fixed by:** PR #445 (the sync with upstream df9ca115, #444). **Found by:** upstream's measurement for daijro/camoufox#1012, read during the sync.
+
+**Symptom.** With uBO 1.76.0 loaded, `RegExp` stands after `URL` in the global order of every tab after the first; stock Firefox 158 and 159, no uBO and uBO 1.75.4 keep it after `Number`. v159.0-beta.35-fork.2 bundles 1.76.0 (796 files under `addons/UBO/`).
+
+**Root cause.** #425 pinned AMO's newest release at the time, 1.76.0, in `ci/ubo-pin.json`. The guard that measures the global order, `main-world-eval-globals.py`, had been changed to launch with `exclude_addons=[DefaultAddons.UBO]`, because with uBO loaded its two untouched reference tabs differed (RegExp at index 7 in the first and 925 in the second, 11 of 12 launches). That difference was the tell, so the guard stopped seeing the thing it existed for.
+
+**Fix.** The pin moves to upstream's `browser/scripts/data/ubo.json` at 1.75.4, and `main-world-eval-globals.py` is upstream's again, launching with uBO loaded, so a uBO release that reorders the globals fails it. Settled in `ci/tribal-rules.yml` (`ubo-release-pinned`). The sync first kept 1.76.0 to avoid a "downgrade"; that was reverted once the measurement was weighed.
+
+**Evidence.** Red: the guard with uBO 1.76.0 loaded, run 42786962179 (#419). Green: the guard with uBO 1.75.4 loaded, in PR #445's Tests run.
+
+**What misled.** A newer uBO looked strictly better, and the guard's red read as a flaw in the guard rather than a finding about uBO.
+
 ## #441: getStats() gave a page the machine's interface address under `no_host`
 
 **Fixed by:** PR #442. **Found by:** the #420 probe (`e2e/probes/webrtc_no_host.py`, 8 launches per arm on Linux, macOS and Windows).
