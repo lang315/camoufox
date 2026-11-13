@@ -30,10 +30,11 @@ later change should read first.
 **Fix.**
 - `host_vendor()` reads the vendor string each OS reports: `PROCESSOR_IDENTIFIER` on Windows, `sysctl -n machdep.cpu.vendor` on macOS, `/proc/cpuinfo` on Linux.
 - The guard launches with `canvas_noise=False` as well as seed 0.
+- With both fixed, the Windows probe matched stock for Intel and AMD (run 43481814285, job 132079996522), then stopped at the arch arm: `ValueError: No recorded lin GPU fits a 1024x768 screen`. Off a Linux host the identity's GPU is sampled, and no Linux GPU fpgen recorded passes the sampler beside an ARM64 CPU, at 1024x768 up to 2560x1440 and 4 to 12 cores. On a Linux host the launch claims the host's renderer instead. So off Linux the guard asks the launcher's sampler first and reports the arch arm as not applicable with its refusal. On Linux the arm always runs, so a launch that cannot be drawn there still fails.
 - `startup-size-frame-extents` is in `LINUX_ONLY`.
 - `context-process-isolation` is in `NOT_ON` for Windows and macOS, with the `/proc` reason. #450 is the port to psutil that would measure it there.
 
-**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one.
+**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one. `test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere` pins the arch arm: run on Linux, not applicable on Windows and macOS.
 
 **What misled.** `cpu-vendor-estimates` printed the processor string it could not classify, `AuthenticAMD` included, which read as an unsupported CPU rather than a vendor the guard never looked for.
 

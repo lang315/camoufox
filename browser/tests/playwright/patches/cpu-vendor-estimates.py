@@ -189,6 +189,27 @@ def host_cpu() -> str:
     return host_vendor() if machine in ("x86_64", "amd64") else ""
 
 
+def undrawable(cpu: str, platform: str):
+    """Why a Linux identity claiming `cpu` cannot be drawn on this host, or None.
+
+    On a Linux host the launch claims the host's own renderer (plan_rendering), so the
+    arm always runs and a launch that fails, fails the guard. On another host the GPU
+    is sampled; this asks the launcher's own sampler, with the display as the screen
+    and the host's core count, and returns its refusal."""
+    if platform.startswith("linux"):
+        return None
+    from camoufox.display import largest_display
+    from camoufox.webgl import sample_webgl_for_screen
+
+    size = largest_display()
+    claim = {"cpu:arch": "arm"} if cpu == "arm" else {"cpu:manufacturer": cpu}
+    try:
+        sample_webgl_for_screen("lin", size.width, size.height, cores=os.cpu_count(), cpu=claim)
+    except ValueError as refusal:
+        return str(refusal)
+    return None
+
+
 def main() -> int:
     host = host_cpu()
     if not host:
@@ -203,7 +224,13 @@ def main() -> int:
         if wrong:
             failures.append(f"cpu={vendor}: {', '.join(f'{k} {got.get(k)} (stock {EXPECTED[vendor][k]})' for k in wrong)}")
 
+    unmeasured = []
     for cpu in ("intel", "amd") if host == "arm" else ("arm",):
+        reason = undrawable(cpu, sys.platform)
+        if reason:
+            print(f"  arch arm cpu={cpu}: not applicable on {sys.platform}: {reason}")
+            unmeasured.append(cpu)
+            continue
         expected = arch_keys(cpu)
         expected_errors = {k for k in stock(STOCK[cpu]) if k.endswith(".error")}
         # Headless, Firefox names a software renderer "GeForce GTX 980", which no
@@ -225,6 +252,10 @@ def main() -> int:
         print(f"FAIL: {failure}")
     if failures:
         return 1
+    if unmeasured:
+        print(f"PASS: on this {host} host, a page computes as stock Firefox does on Intel and on AMD; "
+              f"the arch arm ({', '.join(unmeasured)}) could not be drawn on this host.")
+        return 0
     print(f"PASS: on this {host} host, a page computes as stock Firefox does on Intel, on AMD and on ARM64.")
     return 0
 

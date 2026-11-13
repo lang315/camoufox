@@ -3262,6 +3262,28 @@ def test_cpu_vendor_guard_reads_the_host_vendor_off_linux(monkeypatch, platform,
     assert guard.host_vendor() == vendor
 
 
+def test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere(monkeypatch):
+    """Off Linux the identity's GPU is sampled, and no recorded Linux GPU stands beside
+    an ARM64 CPU (probe run 43481814285: "No recorded lin GPU fits a 1024x768 screen"),
+    so the arm is not applicable there. On Linux it must never be skipped: the launch
+    claims the host's renderer, and a launch that fails fails the guard."""
+    import importlib.util
+
+    import camoufox.display
+    import camoufox.webgl
+
+    spec = importlib.util.spec_from_file_location(
+        "cpu_vendor_guard", CI_ROOT.parent / "browser/tests/playwright/patches/cpu-vendor-estimates.py")
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.setattr(camoufox.display, "largest_display", lambda: camoufox.display.DisplaySize(1024, 768))
+    assert guard.undrawable("arm", "linux") is None
+    for platform in ("win32", "darwin"):
+        assert guard.undrawable("arm", platform) == "No recorded lin GPU fits a 1024x768 screen"
+        assert guard.undrawable("intel", platform) is None
+        assert guard.undrawable("amd", platform) is None
+
+
 def test_every_linux_only_guard_is_a_guard():
     from ci.run_patch_guards import LINUX_ONLY, guards
 
