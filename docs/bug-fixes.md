@@ -23,7 +23,7 @@ later change should read first.
 
 **Fix.** The guard launches with `canvas:seed` 0, which `CanvasSeedManager::Perturb` treats as off; `browser.new_page()` gets no per-context seed, because `setCanvasSeed` comes only through `NewContext`.
 
-**Evidence.** Red: job 131935845574. Green: the same guard in this PR's next Tests run.
+**Evidence.** Red: job 131935845574 (Tests run 43433801675, head 88f17baf). Green: job 131964339263 (Tests run 43446332785, head 403757cd), `✓ cpu-vendor-estimates.py`, spoofing 36/36.
 
 **What misled.** The first suspect was `windows-crt-math.patch`, regenerated on top of `cpu-vendor-estimates.patch` in this sync. It only runs under `javascript.options.use_ucrt_math` (Windows identities), and Skia's pixels do not go through `Math.cpp`. The tell was that `multiply` and `source-over` failed: the guard's docstring says no estimate touches them, so no CPU could explain those.
 
@@ -37,23 +37,23 @@ later change should read first.
 
 **Fix.** `config.go` gains `CPUArch` and `CPUManufacturer`, and the embedded `launcher-constants.json` is the Python one again. goapi does not draw a CPU yet: its identities leave `cpu:*` unset, so the browser computes as the host.
 
-**Evidence.** Both tests fail in job 131935845369 and pass locally after the change (`go test ./pkg/config ./pkg/fingerprint`).
+**Evidence.** Both tests fail in job 131935845369 (Tests run 43433801675) and pass in job 131964339236 (Tests run 43446332785, head 403757cd), and locally (`go test ./pkg/config ./pkg/fingerprint`).
 
 **What misled.** Nothing; the tests name the cause.
 
 ## #447: fork.2 shipped uBlock Origin 1.76.0, which moves RegExp in the global order of later tabs
 
-**Fixed by:** PR #445 (the sync with upstream df9ca115, #444). **Found by:** upstream's measurement for daijro/camoufox#1012, read during the sync.
+**Fixed by:** PR #448. **Found by:** upstream's measurement for daijro/camoufox#1012, read during the sync (#444).
 
-**Symptom.** With uBO 1.76.0 loaded, `RegExp` stands after `URL` in the global order of every tab after the first; stock Firefox 158 and 159, no uBO and uBO 1.75.4 keep it after `Number`. v159.0-beta.35-fork.2 bundles 1.76.0 (796 files under `addons/UBO/`).
+**Symptom.** With uBO 1.76.0 loaded, `RegExp` stands after `URL` in the global order of every tab after the first; stock Firefox 158 and 159, no uBO and uBO 1.75.4 keep it after `Number`. v159.0-beta.35-fork.2 bundles 1.76.0.
 
-**Root cause.** #425 pinned AMO's newest release at the time, 1.76.0, in `ci/ubo-pin.json`. The guard that measures the global order, `main-world-eval-globals.py`, had been changed to launch with `exclude_addons=[DefaultAddons.UBO]`, because with uBO loaded its two untouched reference tabs differed (RegExp at index 7 in the first and 925 in the second, 11 of 12 launches). That difference was the tell, so the guard stopped seeing the thing it existed for.
+**Root cause.** Two gaps. #425 pinned AMO's newest release at the time, 1.76.0, in `ci/ubo-pin.json`, but only `tests.yml` read it: `build.yml` and `release.yml` set no `CAMOUFOX_UBO`, so `fetch-ubo.py stage` took AMO's newest for every package. And no guard could see the tell: `main-world-eval-globals.py` compares tabs with each other, and with uBO loaded they all shift together (run 43436015756 passed with 1.76.0 staged).
 
-**Fix.** The pin moves to upstream's `browser/scripts/data/ubo.json` at 1.75.4, and `main-world-eval-globals.py` is upstream's again, launching with uBO loaded, so a uBO release that reorders the globals fails it. Settled in `ci/tribal-rules.yml` (`ubo-release-pinned`). The sync first kept 1.76.0 to avoid a "downgrade"; that was reverted once the measurement was weighed.
+**Fix.** `browser/scripts/data/ubo.json` holds the one pin, 1.75.4, which `fetch-ubo.py resolve` and `stage` read when `CAMOUFOX_UBO` is unset (`newest` prints AMO's latest as a candidate); `ci/ubo-pin.json` is gone. `main-world-eval-globals.py` loads uBO and checks directly that RegExp stands right after Number in tabs 2 to 4 of three launches, against stock Firefox's order in the same tabs; a stock that does not show that order is SETUP-INVALID. Settled in `ci/tribal-rules.yml` (`ubo-release-pinned`). Rejected: leaving the guard as it was, which passed with 1.76.0.
 
-**Evidence.** Red: the guard with uBO 1.76.0 loaded, run 42786962179 (#419). Green: the guard with uBO 1.75.4 loaded, in PR #445's Tests run.
+**Evidence.** Red: run 43447225045, job 131966312655 (`Patch guards: automation`), 9 of 9 later tabs `['Number', 'URL', 'RegExp']` against stock `['Number', 'RegExp', 'URL']` (RegExp at index 924, URL at 600), with 1.76.0 staged. `test_resolve_is_the_committed_pin_and_needs_no_network` failed before in Static checks (run 43434413993, job 131915974344). Green: this PR's last Tests run, with 1.75.4 staged.
 
-**What misled.** A newer uBO looked strictly better, and the guard's red read as a flaw in the guard rather than a finding about uBO.
+**What misled.** A green guard read as "no tell": it compared later tabs only with each other, so a shift they share was invisible. The first run of the guard that loaded uBO passed for that reason.
 
 ## #441: getStats() gave a page the machine's interface address under `no_host`
 

@@ -278,26 +278,6 @@ rules:
       except_paths: ["python/pyproject.toml"]
       allowed_forms: ["-e ../../../python", "-e ./python", "-e python"]
 
-  - id: ubo-release-pinned
-    title: The bundled uBlock Origin is a committed pin, never AMO's newest, and Tests runs load the same one
-    check: manual   # ci/tests/test_fetch_ubo.py::test_tests_run_with_the_uBO_pinned_in_the_repo, browser/tests/playwright/patches/main-world-eval-globals.py
-    evidence:
-      - "2026-11-09: uBO 1.76.0 (AMO's newest mid-sync) put RegExp after URL in the global order of every tab after the first; stock 158, no uBO and uBO 1.75.4 keep it after Number in every tab and window"
-      - "issue #425; uBO 1.76.0 reached AMO on 2026-11-08 and flipped main-world-eval-globals from green to red with no commit (diagnosis in #419, run 42786962179)"
-      - "#447: the fork's #425 pinned 1.76.0 in ci/ubo-pin.json without measuring the global order with it loaded, and v159.0-beta.35-fork.2 shipped it, with the tell above"
-      - "#444: the sync with daijro/camoufox df9ca115 retires ci/ubo-pin.json for browser/scripts/data/ubo.json (daijro/camoufox#1012) and restores 1.75.4"
-    rationale: >-
-      uBO runs in every page, so a uBO release can change what a page observes,
-      and resolving AMO's newest on every run moved guards on branches nobody
-      touched. fetch-ubo.py resolve reads browser/scripts/data/ubo.json with no
-      network, for Tests and releases alike; `newest` prints AMO's latest as a
-      candidate. A bump is a commit, made after the stock parity and
-      automation guards pass with it. main-world-eval-globals.py runs with uBO
-      loaded: the fork's copy had excluded it, so it could not see a
-      uBO-driven order change, and that is how 1.76.0 shipped. The pin is a
-      compiled input (ci/browser_inputs.py), on purpose: uBO ships inside the
-      package, so a bump costs a cold build.
-
   # -------------------------------------------------------------------------
   # Measurement
   # -------------------------------------------------------------------------
@@ -426,6 +406,29 @@ rules:
       in vapi-background.js; false takes clear() instead), which a page reads as
       a missing rel=prefetch request and rel=preconnect connection.
       ubo-speculative-loading.py guards it.
+
+  - id: ubo-release-pinned
+    title: The bundled uBlock Origin is a committed pin, never AMO's newest, and Tests runs load the same one
+    check: manual   # ci/tests/test_fetch_ubo.py::test_tests_run_with_the_uBO_pinned_in_the_repo, browser/tests/playwright/patches/main-world-eval-globals.py
+    evidence:
+      - "2026-11-09: uBO 1.76.0 (AMO's newest mid-sync) put RegExp after URL in the global order of every tab after the first; stock 158, no uBO and uBO 1.75.4 keep it after Number in every tab and window"
+      - "issue #425; uBO 1.76.0 reached AMO on 2026-11-08 and flipped main-world-eval-globals from green to red with no commit (diagnosis in #419, run 42786962179)"
+      - "#447: the fork's #425 pinned 1.76.0 in ci/ubo-pin.json without measuring the global order with it loaded, and v159.0-beta.35-fork.2 shipped it, with the tell above"
+      - "PR #448 retires ci/ubo-pin.json for browser/scripts/data/ubo.json (daijro/camoufox#1012), restores 1.75.4 and checks the later-tab RegExp order against stock; the sync (#444) brings the rest of upstream #1012"
+    rationale: >-
+      uBO runs in every page, so a uBO release can change what a page observes,
+      and resolving AMO's newest on every run moved guards on branches nobody
+      touched. fetch-ubo.py resolve reads browser/scripts/data/ubo.json with no
+      network, for Tests and releases alike; `newest` prints AMO's latest as a
+      candidate. A bump is a commit, made after the stock parity and
+      automation guards pass with it. main-world-eval-globals.py runs with uBO
+      loaded, but its tab-to-tab comparison cannot see this tell (later tabs
+      shift together; Tests 43436015756 stayed green with 1.76.0). The check
+      that does is its later-tab test that RegExp stands right after Number,
+      against stock Firefox in the same tabs (red with 1.76.0 in run
+      43447225045). The pin is a
+      compiled input (ci/browser_inputs.py), on purpose: uBO ships inside the
+      package, so a bump costs a cold build.
 
   - id: canvas-noise-entropy-is-lower-than-audio
     title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)
