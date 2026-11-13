@@ -2,6 +2,7 @@
 <script>
 (async () => {
   const stun = new URLSearchParams(location.search).get("stun");
+  if (location.search.includes("pair")) return pairStats();
   const pc = new RTCPeerConnection({iceServers: stun ? [{urls: `stun:${stun}`}] : []});
   const cands = [], gathering = [pc.iceGatheringState];
   let finished = false;
@@ -17,4 +18,28 @@
   await pc.setLocalDescription(await pc.createOffer());
   setTimeout(finish, 8000);
 })();
+
+// The shape that measured #441: two peer connections of one page connected to each
+// other with no STUN server, getStats() read on both once they settle.
+async function pairStats() {
+  const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+  const relay = (to) => (e) => { if (e.candidate) to.addIceCandidate(e.candidate); };
+  a.onicecandidate = relay(b); b.onicecandidate = relay(a);
+  const dc = a.createDataChannel("d");
+  const settled = new Promise(r => {
+    dc.onopen = () => r();
+    a.oniceconnectionstatechange = () => { if (["connected", "completed", "failed"].includes(a.iceConnectionState)) r(); };
+  });
+  await a.setLocalDescription(await a.createOffer());
+  await b.setRemoteDescription(a.localDescription);
+  await b.setLocalDescription(await b.createAnswer());
+  await a.setRemoteDescription(b.localDescription);
+  await Promise.race([settled, new Promise(r => setTimeout(r, 15000))]);
+  await new Promise(r => setTimeout(r, 1500));
+  const stats = [];
+  for (const pc of [a, b]) (await pc.getStats()).forEach(r => { if (r.type === "local-candidate") stats.push(r.address || ""); });
+  const out = document.getElementById("out");
+  out.textContent = JSON.stringify({stats, state: a.iceConnectionState});
+  out.dataset.done = "1";
+}
 </script>

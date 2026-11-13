@@ -22,8 +22,7 @@ SURFACE_NAMES = parse_surface_names(ACCESS_OBSERVER_HPP.read_text(encoding="utf-
 # Deliberately an independent copy of build-tester/scripts/constants.py's dict, NOT an
 # import: this harness produces committed evidence artifacts, so its browser config must
 # not shift when the main suite retunes its own prefs. Keep the values in sync by hand.
-FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True,
-                       "media.peerconnection.ice.obfuscate_host_addresses": False}
+FIREFOX_WEBGL_PREFS = {"webgl.force-enabled": True, "webgl.enable-webgl2": True}
 
 def default_binary():
     """The camoufox binary under test. No default: a stale path would test the wrong build."""
@@ -41,9 +40,7 @@ LAUNCH_DIFFERS_FROM_SHIPPED = [
     "Origin, addons.py:19) on the shipped launch path; a bare Marionette launch loads none",
     "no BrowserForge fingerprint (pythonlib path only)",
     "no generated fontconfig (pythonlib path only)",
-    "FIREFOX_WEBGL_PREFS forces webgl.force-enabled and webgl.enable-webgl2, and sets "
-    "media.peerconnection.ice.obfuscate_host_addresses=False, switching off a "
-    "privacy protection the product ships with",
+    "FIREFOX_WEBGL_PREFS forces webgl.force-enabled and webgl.enable-webgl2",
     "headless: Session.__enter__ passes headless=True unless $DISPLAY is set (CI runs "
     "under xvfb, headful, because headless Firefox on Linux has no GL). Headless Firefox has no GL "
     "context, which is why the two webgl prefs above are forced; a webgl entry here "

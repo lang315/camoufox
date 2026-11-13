@@ -5,10 +5,10 @@ This guards the fork's WebRTC model (#178, D1): NewContext(webrtc_ip=...) hands
 the IP to setWebRTCIPv4, WebRTCIPManager stores it for that context, and
 PeerConnectionImpl::SpoofCandidateIP masks every address in that context's
 candidates and SDP with it. The fork fabricates no srflx candidate, and
-camoufox.cfg sets media.peerconnection.ice.no_host, so the page sees only the
-srflx candidate a real STUN answer produces. Upstream's version of this guard
-read a srflx candidate its patch fabricated against a silent STUN server; that
-candidate does not exist here.
+camoufox.cfg leaves no_host off and mDNS obfuscation on (#441), so a host
+candidate reaches the page only as a <uuid>.local name, in onicecandidate and in
+getStats alike. Upstream's version of this guard read a srflx candidate its
+patch fabricated against a silent STUN server; that candidate does not exist here.
 
 The probe runs a minimal STUN server that answers each Binding Request with the
 request's own source address. With no NAT, that is the host's default-route
@@ -25,6 +25,11 @@ What PASS means, in one browser:
     * the host's real address appears in no candidate and no SDP of either
       context. An unmasked candidate, raddr or SDP line is red;
     * every candidate arrives before end-of-candidates;
+    * getStats() local candidates of type host carry no IP literal (#441), and a
+      context with a WebRTC IP carries at most that IP. The control for this
+      is a second launch with mDNS obfuscation off: its host candidates must
+      read the host's address, else SETUP-INVALID. A browser with no_host on
+      answers getStats with the interface address (#420, #441);
     * each context gets at least one srflx candidate. None is SETUP-INVALID: the
       responder was not reached and nothing was measured.
 
@@ -32,10 +37,15 @@ The launch-level `webrtc:ipv4` fallback (webrtc-launch-ip-fallback.patch, #163)
 is not asserted here; e2e's test_03_network covers it, and that a context's own
 IP still wins over it.
 
+This guard runs on Linux, so it is no evidence for macOS or Windows: the
+getStats path is shared C++, but those hosts' interface lists and mDNS
+resolution were measured only by the #420/#441 probe runs.
+
     python browser/tests/playwright/patches/webrtc-context-ip.py
 """
 
 import asyncio
+import json
 import socket
 import sys
 import threading
@@ -73,6 +83,33 @@ PROBE = """async (stun) => {
   return out;
 }"""
 
+# The shape that measured the #420/#441 leak: two peer connections of one page, connected
+# to each other with no STUN server. getStats() is read on both after they settle.
+PAIR = """(async () => {
+  const a = new RTCPeerConnection(), b = new RTCPeerConnection();
+  const relay = (to) => (e) => { if (e.candidate) to.addIceCandidate(e.candidate); };
+  a.onicecandidate = relay(b); b.onicecandidate = relay(a);
+  const dc = a.createDataChannel('x');
+  const settled = new Promise(r => {
+    dc.onopen = () => r();
+    a.oniceconnectionstatechange = () => { if (['connected', 'completed', 'failed'].includes(a.iceConnectionState)) r(); };
+  });
+  await a.setLocalDescription(await a.createOffer());
+  await b.setRemoteDescription(a.localDescription);
+  await b.setLocalDescription(await b.createAnswer());
+  await a.setRemoteDescription(b.localDescription);
+  await Promise.race([settled, new Promise(r => setTimeout(r, 15000))]);
+  await new Promise(r => setTimeout(r, 1500));
+  const hostStats = [];
+  for (const pc of [a, b]) {
+    (await pc.getStats()).forEach(r => {
+      if (r.type === 'local-candidate' && r.candidateType === 'host') hostStats.push(r.address || '');
+    });
+  }
+  a.close(); b.close();
+  return hostStats;
+})()"""
+
 
 def answer_binding_requests(server: socket.socket, stop: threading.Event) -> None:
     while not stop.is_set():
@@ -87,7 +124,16 @@ def answer_binding_requests(server: socket.socket, stop: threading.Event) -> Non
 async def gather(context, stun: str) -> dict:
     page = await context.new_page()
     await page.goto("about:blank")
-    return await page.evaluate(PROBE, stun)
+    # In the page's own world: the isolated one cannot read the RTCStatsReport objects
+    # getStats() returns ("Permission denied to access object").
+    got = await page.evaluate(f"mw:({PROBE})({json.dumps(stun)})")
+    got["hostStats"] = await page.evaluate("mw:" + PAIR)
+    return got
+
+
+def literals(addresses) -> list:
+    """The entries of a getStats address list that are IP literals, not mDNS names."""
+    return [a for a in addresses if a and not a.endswith(".local")]
 
 
 async def main() -> int:
@@ -108,10 +154,13 @@ async def main() -> int:
     stun = f"stun:{host_ip}:{server.getsockname()[1]}"
 
     try:
-        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True)) as browser:
+        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True, main_world_eval=True)) as browser:
             control = await gather(await browser.new_context(), stun)
             contexts = [await AsyncNewContext(browser, os="linux", webrtc_ip=ip) for ip in CONTEXT_IPS]
             results = [await gather(context, stun) for context in contexts]
+        async with AsyncCamoufox(**launch_kwargs(os="linux", i_know_what_im_doing=True, main_world_eval=True, firefox_user_prefs={
+                "media.peerconnection.ice.obfuscate_host_addresses": False})) as browser:
+            unobfuscated = await gather(await browser.new_context(), stun)
     finally:
         stop.set()
         responder.join()
@@ -121,6 +170,14 @@ async def main() -> int:
     if host_ip not in control["srflx"]:
         failures.append(f"SETUP-INVALID control: srflx {control['srflx']} does not carry the host "
                         f"address {host_ip}, so the leak check below cannot fail")
+
+    print(f"  control (mDNS off): host stats {unobfuscated['hostStats']}")
+    if host_ip not in unobfuscated["hostStats"]:
+        failures.append(f"SETUP-INVALID mDNS-off control: getStats host candidates {unobfuscated['hostStats']} "
+                        f"do not carry {host_ip}, so the check below cannot fail")
+    print(f"  control (no WebRTC IP): host stats {control['hostStats']}")
+    if literals(control["hostStats"]):
+        failures.append(f"context with no WebRTC IP: getStats host candidates {control['hostStats']} carry an IP literal")
 
     for ip, got in zip(CONTEXT_IPS, results):
         print(f"  context {ip}: srflx {got['srflx']}")
@@ -133,6 +190,8 @@ async def main() -> int:
             failures.append(f"context {ip}: host address {host_ip} in candidates {leaked}")
         if host_ip in got["sdp"].replace("\r\n", " ").split():
             failures.append(f"context {ip}: host address {host_ip} in the SDP")
+        if set(literals(got["hostStats"])) - {ip}:
+            failures.append(f"context {ip}: getStats host candidates {got['hostStats']}, expected no IP but {ip}")
         if got["late"]:
             failures.append(f"context {ip}: candidates after end-of-candidates: {got['late']}")
 

@@ -106,6 +106,25 @@ def test_webrtc_does_not_reveal_lan_address(drv, site, stun, check):
     check.done()
 
 
+def test_getstats_does_not_reveal_lan_address_by_default(drv, site, check):
+    """#441: with no webrtc_ip, getStats() local candidates must show mDNS names, as
+    stock Firefox does, not the machine's interface address. The control turns mDNS
+    obfuscation off, so the same page must then read the address (else nothing was measured)."""
+    lan = lan_ips()
+    if not lan:
+        pytest.skip("this host has no non-loopback IPv4 address to leak")
+    seen = {}
+    for arm, prefs in (("shipped", None), ("control", {"media.peerconnection.ice.obfuscate_host_addresses": False})):
+        b = drv.launch(os="windows", prefs=prefs)
+        page = b.new_context().new_page()
+        page.goto(site.url("/webrtc?pair"))
+        seen[arm] = wait_out(page, 40)["stats"]
+        b.close()
+    check([ip for ip in lan if ip in seen["control"]], f"control (mDNS off) shows a LAN address of {sorted(lan)}: {seen['control']}")
+    check(not [ip for ip in lan if ip in seen["shipped"]], f"shipped getStats shows no LAN address {sorted(lan)}: {seen['shipped']}")
+    check.done()
+
+
 def test_context_webrtc_ip_overrides_the_launch_one(drv, site, stun, check):
     # The launch-level IP is only a fallback (#163): a context's own IP must still win.
     lan = lan_ips()

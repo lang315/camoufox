@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #441: getStats() gave a page the machine's interface address under `no_host`
+
+**Fixed by:** PR #442. **Found by:** the #420 probe (`e2e/probes/webrtc_no_host.py`, 8 launches per arm on Linux, macOS and Windows).
+
+**Symptom.** With the shipped prefs a page's `onicecandidate` strings were empty and the SDP held no host address, but `RTCPeerConnection.getStats()` returned the runner's own address (`10.1.5.65`, `10.1.0.130`, `192.168.64.11`) as a host `local-candidate`; the page's own two peer connections ended `failed`.
+
+**Root cause.** `defaultPref("media.peerconnection.ice.no_host", true)` in `camoufox.cfg`. Firefox's `ToRTCIceCandidateStats` (`MediaTransportHandler.cpp`) puts the address in the stats of a candidate that has no `domain_name`, and `no_host` hides only the candidate events. Stock Firefox with `no_host` true does the same. The pref came from 2a806e5a, which reverted to it after a build-tester run leaked a LAN IP with mDNS "not engaging"; build-tester's own `FIREFOX_WEBGL_PREFS` had set `obfuscate_host_addresses` false since b41fe84e, so that run measured a pref the product does not ship.
+
+**Fix.** `camoufox.cfg` no longer sets `no_host`: Firefox's `no_host` false and `obfuscate_host_addresses` true apply, and a page sees only `<uuid>.local` names. Every place that assumed the old model changed with it: goapi stopped forcing obfuscation off (and `WithMDNSObfuscation`, which only undid that, is gone), build-tester and the observer harness stopped switching obfuscation off, `ipv4-only-network` turns only obfuscation off for its probe. Settled in `ci/tribal-rules.yml` (`webrtc-fork-model`). Rejected: keeping `no_host` and masking `getStats()`, which would fabricate a host candidate shape no browser shows.
+
+**Evidence.** Run 43246362403 (head 97071952, shipped cfg): `webrtc-context-ip.py` fails with "context with no WebRTC IP: getStats host candidates ['10.1.0.95', '10.1.0.95', '10.1.0.95', '10.1.0.95'] carry an IP literal", with the mDNS-off control reading the same address. It passes after the flip (PR #442). The guard runs on Linux only; macOS and Windows rest on the probe runs.
+
+**What misled.** The first reader used one peer connection and an isolated-world `evaluate`: the one crashed with "Permission denied to access object", and a single connection was never the measured shape (two connected connections, getStats read on both).
+
 ## #425: Tests runs followed AMO's newest uBlock Origin, so a uBO release turned a guard red with no commit
 
 **Fixed by:** PR #440. **Found by:** `main-world-eval-globals` going from 12 of 12 to 0 of 12 launches between two browsers with the same compiled-inputs digest (#419).
