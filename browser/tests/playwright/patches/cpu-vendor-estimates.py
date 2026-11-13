@@ -121,10 +121,16 @@ def host_vendor() -> str:
     return ""
 
 
+# A Linux launch on a Linux host carries the fork's canvas noise
+# (canvas-spoofing.patch), which perturbs every readback, so no canvas value could
+# equal stock. Seed 0 leaves that patch inert; the CPU's arithmetic is what is compared.
+UNSEEDED = {"config": {"canvas:seed": 0}, "i_know_what_im_doing": True}
+
+
 def render(**kwargs) -> dict:
     from camoufox.sync_api import Camoufox
 
-    with Camoufox(**launch_kwargs(os="linux", **kwargs)) as browser:
+    with Camoufox(**launch_kwargs(os="linux", **UNSEEDED, **kwargs)) as browser:
         page = browser.new_page()
         # WebCodecs needs a secure context; about:blank is not one.
         page.route(PAGE, lambda route: route.fulfill(body="<p>x</p>", content_type="text/html"))
@@ -160,7 +166,7 @@ def probe(**kwargs) -> dict:
         else:
             route.fulfill(status=404)
 
-    with Camoufox(**launch_kwargs(os="linux", **kwargs)) as browser:
+    with Camoufox(**launch_kwargs(os="linux", **UNSEEDED, **kwargs)) as browser:
         page = browser.new_page()
         page.route(PAGE + "**", serve)
         with page.expect_request(lambda r: r.method == "POST", timeout=240_000) as posted:

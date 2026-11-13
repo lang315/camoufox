@@ -13,6 +13,34 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #444: the sync's CPU-vendor guard read the fork's canvas noise as the wrong CPU
+
+**Fixed by:** PR #445. **Found by:** Tests run 43433801675 (head 88f17baf), Patch guards: spoofing, job 131935845574.
+
+**Symptom.** Upstream's `cpu-vendor-estimates.py` failed for every claimed CPU: `cpu=intel: color eb85f567 (stock b2e8412c)`, and `multiply`, `source-over`, `screen` and `soft-light` differed too. The Web Audio, Opus and NaN keys matched stock.
+
+**Root cause.** The guard launches a Linux identity on a Linux runner, which is the host's OS, so the launcher draws `canvas:seed` (utils.py) and `canvas-spoofing.patch` perturbs every readback. Upstream has no canvas noise, so its references are clean pixels.
+
+**Fix.** The guard launches with `canvas:seed` 0, which `CanvasSeedManager::Perturb` treats as off; `browser.new_page()` gets no per-context seed, because `setCanvasSeed` comes only through `NewContext`.
+
+**Evidence.** Red: job 131935845574. Green: the same guard in this PR's next Tests run.
+
+**What misled.** The first suspect was `windows-crt-math.patch`, regenerated on top of `cpu-vendor-estimates.patch` in this sync. It only runs under `javascript.options.use_ucrt_math` (Windows identities), and Skia's pixels do not go through `Math.cpp`. The tell was that `multiply` and `source-over` failed: the guard's docstring says no estimate touches them, so no CPU could explain those.
+
+## #444: goapi's schema and launcher data lagged upstream's CPU keys
+
+**Fixed by:** PR #445. **Found by:** Tests run 43433801675, goapi (browser), job 131935845369.
+
+**Symptom.** `TestProducerSchemaDrift`: `properties.json key "cpu:arch" has no config.go field (producer cannot emit it)`, the same for `cpu:manufacturer`. `TestEmbeddedLauncherDataMatchesPythonlib`: `data/launcher-constants.json differs from ../../../python/src/camoufox/launcher-constants.json`.
+
+**Root cause.** goapi is the fork's own; upstream's daijro/camoufox#1024 added the `cpu:*` keys and the CPU constants (`x86IntelShare`, `cpuIdentityPref`, `cpuManufacturers`, `intelOnlyCoreCounts`) to the Python side only.
+
+**Fix.** `config.go` gains `CPUArch` and `CPUManufacturer`, and the embedded `launcher-constants.json` is the Python one again. goapi does not draw a CPU yet: its identities leave `cpu:*` unset, so the browser computes as the host.
+
+**Evidence.** Both tests fail in job 131935845369 and pass locally after the change (`go test ./pkg/config ./pkg/fingerprint`).
+
+**What misled.** Nothing; the tests name the cause.
+
 ## #447: fork.2 shipped uBlock Origin 1.76.0, which moves RegExp in the global order of later tabs
 
 **Fixed by:** PR #445 (the sync with upstream df9ca115, #444). **Found by:** upstream's measurement for daijro/camoufox#1012, read during the sync.

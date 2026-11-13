@@ -101,6 +101,10 @@ type Config struct {
 	// input:*
 	InputWindowsKeyboard *bool `json:"input:windowsKeyboard,omitempty"`
 
+	// cpu:* (the CPU whose arithmetic canvas, Web Audio and Opus follow)
+	CPUArch         string `json:"cpu:arch,omitempty"`
+	CPUManufacturer string `json:"cpu:manufacturer,omitempty"`
+
 	// battery:*
 
 	// fonts / voices
