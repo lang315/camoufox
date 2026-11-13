@@ -1,12 +1,10 @@
-"""browser/scripts/fetch-ubo.py: every package bundles the uBlock Origin release
-committed in browser/scripts/data/ubo.json, checked, and a release bundles the one
-its tests ran with. AMO's newest is only a candidate for a reviewed bump."""
+"""browser/scripts/fetch-ubo.py: every package bundles AMO's newest uBlock Origin,
+checked, and a release bundles the one its tests ran with."""
 
 import hashlib
 import importlib.util
 import io
 import json
-import re
 import zipfile
 
 import pytest
@@ -46,41 +44,6 @@ def test_the_pin_is_amo_s_current_release():
     pin = fetch_ubo.pin_from_amo(amo(data))
     assert pin == {"version": "1.76.0", "sha256": hashlib.sha256(data).hexdigest(),
                    "url": "https://addons.mozilla.org/firefox/downloads/file/1/ublock_origin-1.76.0.xpi"}
-
-
-def test_resolve_is_the_committed_pin_and_needs_no_network(monkeypatch):
-    monkeypatch.setattr(fetch_ubo, "get", lambda url, timeout: pytest.fail(f"resolve fetched {url}"))
-    pin = fetch_ubo.resolve()
-    committed = json.loads((BROWSER_ROOT / "scripts" / "data" / "ubo.json").read_text())
-    assert pin == committed
-    assert re.fullmatch(r"[0-9a-f]{64}", pin["sha256"])
-    assert pin["url"].startswith("https://addons.mozilla.org/")
-
-
-def test_stage_without_a_release_pin_uses_the_committed_one(tmp_path, monkeypatch):
-    data = xpi(version="1.75.4")
-    pin = {"version": "1.75.4", "sha256": hashlib.sha256(data).hexdigest(),
-           "url": "https://addons.mozilla.org/firefox/downloads/file/1/ublock_origin-1.75.4.xpi"}
-    monkeypatch.delenv("CAMOUFOX_UBO", raising=False)
-    monkeypatch.setattr(fetch_ubo, "resolve", lambda: pin)
-    monkeypatch.setattr(fetch_ubo, "newest", lambda: pytest.fail("a build must not take AMO's newest"))
-    monkeypatch.setattr(fetch_ubo, "get", lambda url, timeout: data if url == pin["url"] else pytest.fail(url))
-    fetch_ubo.stage(str(tmp_path))
-    assert json.loads((tmp_path / "addons" / "UBO" / "manifest.json").read_text())["version"] == "1.75.4"
-
-
-def test_newest_reads_amo(monkeypatch):
-    data = xpi()
-    monkeypatch.setattr(fetch_ubo, "get", lambda url, timeout: json.dumps(amo(data)).encode()
-                        if url == fetch_ubo.AMO_ADDON else pytest.fail(url))
-    assert fetch_ubo.newest()["version"] == "1.76.0"
-
-
-@pytest.mark.parametrize("pin", [{"version": "1", "url": "https://addons.mozilla.org/x.xpi"},
-                                 {"version": "1", "sha256": "0" * 64, "url": "https://example.com/x.xpi"}])
-def test_an_incomplete_or_foreign_pin_is_refused(pin):
-    with pytest.raises(SystemExit):
-        fetch_ubo.check_pin(pin, "test")
 
 
 @pytest.mark.parametrize("record", [amo(b"", guid="evil@example.com"), amo(b"", algorithm="sha1")])
@@ -196,11 +159,17 @@ def test_a_ubo_whose_regional_selection_moved_is_refused(tmp_path):
         fetch_ubo.freeze_lists(str(tmp_path))
 
 
+UBO_PIN = REPO_ROOT / "ci" / "ubo-pin.json"
+
+
 def test_tests_run_with_the_uBO_pinned_in_the_repo():
     """A uBO release on AMO must not change what a Tests run loads (#425)."""
+    pin = json.loads(UBO_PIN.read_text(encoding="utf-8"))
+    assert set(pin) == {"version", "url", "sha256"}
+    assert len(pin["sha256"]) == 64 and pin["version"] in pin["url"]
     tests = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
     step = next(s for s in tests["jobs"]["resolve"]["steps"] if s.get("id") == "ubo")
-    assert "fetch-ubo.py resolve" in step["run"] and "newest" not in step["run"]
+    assert "ci/ubo-pin.json" in step["run"] and "fetch-ubo.py resolve" not in step["run"]
 
 
 def test_a_pin_whose_xpi_changed_is_refused(tmp_path):
