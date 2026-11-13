@@ -279,15 +279,23 @@ rules:
       allowed_forms: ["-e ../../../python", "-e ./python", "-e python"]
 
   - id: ubo-release-pinned
-    title: The bundled uBlock Origin is a committed pin, never AMO's newest
-    check: manual   # ci/tests/test_fetch_ubo.py, browser/tests/playwright/patches/main-world-eval-globals.py
+    title: The bundled uBlock Origin is a committed pin, never AMO's newest, and Tests runs load the same one
+    check: manual   # ci/tests/test_fetch_ubo.py::test_tests_run_with_the_uBO_pinned_in_the_repo, browser/tests/playwright/patches/main-world-eval-globals.py
     evidence:
       - "2026-11-09: uBO 1.76.0 (AMO's newest mid-sync) put RegExp after URL in the global order of every tab after the first; stock 158, no uBO and uBO 1.75.4 keep it after Number in every tab and window"
+      - "issue #425; uBO 1.76.0 reached AMO on 2026-11-08 and flipped main-world-eval-globals from green to red with no commit (diagnosis in #419, run 42786962179)"
+      - "#444: the fork's ci/ubo-pin.json is retired for upstream's browser/scripts/data/ubo.json (daijro/camoufox#1012), set to the fork's 1.76.0, which v159.0-beta.35-fork.2 ships, rather than upstream's 1.75.4"
     rationale: >-
-      uBO runs in every page, so a uBO release can change what a page observes.
-      fetch-ubo.py resolve reads browser/scripts/data/ubo.json; `newest` prints
-      AMO's latest as a candidate. A bump is a commit, made after the stock
-      parity and automation guards pass with it.
+      uBO runs in every page, so a uBO release can change what a page observes,
+      and resolving AMO's newest on every run moved guards on branches nobody
+      touched. fetch-ubo.py resolve reads browser/scripts/data/ubo.json with no
+      network, for Tests and releases alike; `newest` prints AMO's latest as a
+      candidate. A bump is a commit, made after the stock parity and
+      automation guards pass with it. The pin is a compiled input
+      (ci/browser_inputs.py), on purpose: uBO ships inside the package, so a
+      bump costs a cold build. This fork keeps 1.76.0, the release it shipped,
+      over a downgrade; main-world-eval-globals.py runs without uBO, so the
+      RegExp order above is not guarded with uBO loaded.
 
   # -------------------------------------------------------------------------
   # Measurement
@@ -417,24 +425,6 @@ rules:
       in vapi-background.js; false takes clear() instead), which a page reads as
       a missing rel=prefetch request and rel=preconnect connection.
       ubo-speculative-loading.py guards it.
-
-  - id: tests-run-with-a-pinned-ubo
-    title: Tests runs and releases load the uBlock Origin pinned in browser/scripts/data/ubo.json, never AMO's newest
-    check: manual   # ci/tests/test_fetch_ubo.py::test_tests_run_with_the_uBO_pinned_in_the_repo
-    evidence:
-      - "issue #425; uBO 1.76.0 reached AMO on 2026-11-08 and flipped main-world-eval-globals from green to red with no commit (diagnosis in #419, run 42786962179)"
-      - "upstream daijro/camoufox#1012: 1.76.0 moves RegExp after URL in the global order of every tab after the first, where stock 158 and 159, no uBO and 1.75.4 keep it after Number; upstream pins 1.75.4"
-      - "#444: the fork's ci/ubo-pin.json (1.76.0) is retired for upstream's pin, which covers Tests and releases alike"
-    rationale: >-
-      The browser cache is keyed on compiled inputs, uBO is restaged after a
-      cache hit, and AMO's newest was resolved on every run, so a uBO release
-      changed what guards loading it ran against, on a branch nobody touched,
-      and bisecting by commit could not find it. `fetch-ubo.py resolve` reads
-      the committed pin (version, AMO file url, sha256) with no network, and
-      `newest` only prints a candidate, so a bump is a reviewed PR; a sha256
-      mismatch or a changed default in freeze_lists fails loudly. The pin is a
-      compiled input, so a bump costs a cold build. A dispatch input or a
-      release still passes its own pin.
 
   - id: canvas-noise-entropy-is-lower-than-audio
     title: Two contexts shared a canvas fingerprint far more often than they should (beta.30; not reproduced since at small n)

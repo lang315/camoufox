@@ -35,7 +35,7 @@ later change should read first.
 
 **Root cause.** The `resolve` job ran `fetch-ubo.py resolve` (AMO's newest) every run, and the build job restaged it over a cache hit. uBO is in no commit and not in the cache digest, so nothing in the repo changed.
 
-**Fix.** `ci/ubo-pin.json` holds the version, AMO file url and sha256; `resolve` emits it unless the `ubo` input is set. The file sits outside `ci/browser_inputs.py`'s digest, so a bump costs no cold build. Settled in `ci/tribal-rules.yml` (`tests-run-with-a-pinned-ubo`). Rejected: logging the version only (a red still moves without a commit), keying the cache on it (a cold build per uBO release).
+**Fix.** `ci/ubo-pin.json` holds the version, AMO file url and sha256; `resolve` emits it unless the `ubo` input is set. The file sits outside `ci/browser_inputs.py`'s digest, so a bump costs no cold build. Settled in `ci/tribal-rules.yml` (`tests-run-with-a-pinned-ubo`, folded into `ubo-release-pinned` by #444, where the pin moved to `browser/scripts/data/ubo.json` and became a compiled input). Rejected: logging the version only (a red still moves without a commit), keying the cache on it (a cold build per uBO release).
 
 **Evidence.** `test_tests_run_with_the_uBO_pinned_in_the_repo` fails before (no pin file, `resolve` step calls AMO) and passes after.
 
