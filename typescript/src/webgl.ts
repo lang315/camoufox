@@ -10,7 +10,7 @@ import {
 	traceWithEvidence,
 } from "fpgen-js";
 import { Random, type Seed } from "python-random";
-import { gpuFitsMachine, gpuFitsOs } from "./coherence.js";
+import { gpuFitsCpu, gpuFitsMachine, gpuFitsOs } from "./coherence.js";
 import {
 	FPGEN_OS,
 	gpuScreenIsPlausible,
@@ -23,6 +23,7 @@ import {
 	parsePyJson,
 	pyStr,
 	pyStrRepr,
+	pyTruthy,
 	ValueError,
 } from "./pycompat.js";
 
@@ -75,7 +76,8 @@ const POLYGON_OFFSET_CLAMP = "EXT_polygon_offset_clamp";
 // CGL's GL 4.1 and Linux desktop GL. On Windows ANGLE sets it from the D3D11
 // caps of the R, RG, RGB and RGBA 16-bit UNORM and SNORM formats (texturable and
 // filterable) and R, RG and RGBA UNORM (renderable), which Direct3D feature
-// level 10_0, needed by WebGL2, requires (Caps.cpp DetermineTextureNorm16Support).
+// level 10_0, needed by WebGL2, requires (Caps.cpp DetermineTextureNorm16Support):
+// stock 159.0 on a GeForce GTX 980 (ANGLE D3D11) lists it on WebGL2 and not WebGL1.
 const TEXTURE_NORM16 = "EXT_texture_norm16";
 
 // Firefox 159 adds EXT_clip_control (core in GL 4.5) and
@@ -86,8 +88,6 @@ const TEXTURE_NORM16 = "EXT_texture_norm16";
 // GL 4.1 on macOS has neither.
 const CLIP_CONTROL = "EXT_clip_control";
 const TEXTURE_MIRROR_CLAMP_TO_EDGE = "EXT_texture_mirror_clamp_to_edge";
-
-const ALIASED_LINE_WIDTH_RANGE = "33902";
 
 // Firefox 159 caps this at 64 KiB (WebGL2ContextState.cpp, kMaxUniformBlockSize);
 // fpgen recorded the drivers' own limit, up to 4 GiB.
@@ -248,11 +248,16 @@ export function toConfig(
 			config,
 			contextConfig("webGl2", webgl2, targetOs, webgl2Backend),
 		);
-		// Firefox 156 creates WebGL1 on the same GL profile as WebGL2, so both
-		// report one line width range. 146 forced WebGL1 onto a compatibility
-		// profile, and fpgen recorded that profile's driver range.
-		config["webGl:parameters"][ALIASED_LINE_WIDTH_RANGE] =
-			config["webGl2:parameters"][ALIASED_LINE_WIDTH_RANGE];
+		// Firefox 156 creates WebGL1 on the same GL profile as WebGL2, so every
+		// parameter both report is one driver value (the line width range, the
+		// point size range...). 146 forced WebGL1 onto a compatibility profile,
+		// and fpgen recorded that profile's values. Only the version strings
+		// differ between the two.
+		const webgl1Parameters = config["webGl:parameters"];
+		for (const [key, value] of Object.entries(config["webGl2:parameters"])) {
+			if (key in webgl1Parameters && typeof value !== "string")
+				webgl1Parameters[key] = value;
+		}
 		const parameters = config["webGl2:parameters"];
 		if (MAX_UNIFORM_BLOCK_SIZE in parameters)
 			parameters[MAX_UNIFORM_BLOCK_SIZE] = Math.min(
@@ -308,6 +313,14 @@ export function webglForGpu(
 	);
 }
 
+/** The claimed CPU's [cpu:arch, cpu:manufacturer] (webgl._cpu_pair). */
+function cpuPair(
+	cpu: Record<string, any> | null | undefined,
+): [unknown, unknown] {
+	const c = cpu ?? {};
+	return [c["cpu:arch"] ?? null, c["cpu:manufacturer"] ?? null];
+}
+
 /**
  * Draw a GPU for a synthetic identity, weighted as fpgen records Firefox on
  * `targetOs`, and its WebGL config.
@@ -315,7 +328,9 @@ export function webglForGpu(
  * Only GPUs the rest of the identity can stand beside are drawn: never a
  * software rasteriser, a GPU the OS cannot report, the resistFingerprinting
  * mask, a discrete GPU behind a netbook panel, or an Intel Mac GPU beside
- * cores or a panel no Intel Mac has. The screen is left alone:
+ * cores or a panel no Intel Mac has, or a GPU the claimed CPU cannot sit
+ * beside (cpu: cpu:arch and cpu:manufacturer, coherence.gpuFitsCpu). The
+ * screen is left alone:
  * it has already been reconciled with the real display and the window (#499).
  *
  * @throws ValueError when no recorded GPU fits.
@@ -326,16 +341,34 @@ export function sampleWebglForScreen(
 	height?: number | null,
 	seed?: Seed,
 	cores?: number | null,
+	cpu?: Record<string, any> | null,
 ): WebGLData {
+	const [arch, maker] = cpuPair(cpu);
 	const candidates = trace("gpu", targetOs).filter(
 		(result) =>
 			!isSoftwareRenderer(result.value.renderer) &&
 			result.value.renderer !== RFP_RENDERER &&
 			gpuFitsOs(result.value.renderer, targetOs) &&
 			gpuFitsMachine(result.value.renderer, targetOs, cores, width, height) &&
-			gpuScreenIsPlausible(result.value.renderer, width, height),
+			gpuScreenIsPlausible(result.value.renderer, width, height) &&
+			gpuFitsCpu(result.value.renderer, targetOs, arch, maker),
 	);
 	if (!candidates.length) {
+		if (
+			cpu &&
+			Object.keys(cpu).length &&
+			!trace("gpu", targetOs).some((r) =>
+				gpuFitsCpu(r.value.renderer, targetOs, arch, maker),
+			)
+		) {
+			throw new ValueError(
+				`No GPU fpgen has recorded from Firefox on ${targetOs} sits beside a ` +
+					`${[maker, arch]
+						.filter((v) => pyTruthy(v))
+						.map(pyStr)
+						.join(" ")} CPU`,
+			);
+		}
 		throw new ValueError(
 			`No recorded ${targetOs} GPU fits a ${pyStr(width)}x${pyStr(height)} screen`,
 		);

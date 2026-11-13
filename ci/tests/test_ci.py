@@ -2904,6 +2904,7 @@ def test_packaged_font_names_are_ascii(tmp_path, monkeypatch):
     local filename and exits 1, which stops a consumer's `set -e` install.
     """
     import shlex
+    import zipfile
 
     package = _package_module()
     monkeypatch.chdir(tmp_path)
@@ -2923,6 +2924,11 @@ def test_packaged_font_names_are_ascii(tmp_path, monkeypatch):
         if args[:2] == ["7z", "u"]:
             fonts = pathlib.Path(args[3].removesuffix("/*"), "fonts")
             packaged.append({p.name: p.read_bytes() for p in fonts.iterdir()})
+            # Packaging reads the zip back to check its modes.
+            staged = pathlib.Path(args[3].removesuffix("/*"))
+            with zipfile.ZipFile(args[2], "w") as z:
+                for p in staged.rglob("*"):
+                    z.write(p, p.relative_to(staged))
 
     monkeypatch.setattr(package, "run", fake_run)
     monkeypatch.setattr(package, "inject_locales", lambda *args: None)
@@ -3236,6 +3242,48 @@ def test_a_linux_only_guard_still_runs_on_linux(tmp_path, monkeypatch):
     assert record["tests"] == {"patches/ipv4-only-network.py": results.PASS}
 
 
+@pytest.mark.parametrize("platform,identifier,vendor", [
+    ("win32", "AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD", "amd"),
+    ("win32", "Intel64 Family 6 Model 85 Stepping 7, GenuineIntel", "intel"),
+    ("darwin", "GenuineIntel\n", "intel"),
+])
+def test_cpu_vendor_guard_reads_the_host_vendor_off_linux(monkeypatch, platform, identifier, vendor):
+    """cpu-vendor-estimates read only /proc/cpuinfo, so an x86-64 Windows host failed (probe run 43469379888)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "cpu_vendor_guard", CI_ROOT.parent / "browser/tests/playwright/patches/cpu-vendor-estimates.py")
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.setattr(guard.sys, "platform", platform)
+    monkeypatch.setenv("PROCESSOR_IDENTIFIER", identifier)
+    monkeypatch.setattr(guard.subprocess, "run",
+                        lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=identifier))
+    assert guard.host_vendor() == vendor
+
+
+def test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere(monkeypatch):
+    """Off Linux the identity's GPU is sampled, and no recorded Linux GPU stands beside
+    an ARM64 CPU (probe run 43481814285: "No recorded lin GPU fits a 1024x768 screen"),
+    so the arm is not applicable there. On Linux it must never be skipped: the launch
+    claims the host's renderer, and a launch that fails fails the guard."""
+    import importlib.util
+
+    import camoufox.display
+    import camoufox.webgl
+
+    spec = importlib.util.spec_from_file_location(
+        "cpu_vendor_guard", CI_ROOT.parent / "browser/tests/playwright/patches/cpu-vendor-estimates.py")
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    monkeypatch.setattr(camoufox.display, "largest_display", lambda: camoufox.display.DisplaySize(1024, 768))
+    assert guard.undrawable("arm", "linux") is None
+    for platform in ("win32", "darwin"):
+        assert guard.undrawable("arm", platform) == "No recorded lin GPU fits a 1024x768 screen"
+        assert guard.undrawable("intel", platform) is None
+        assert guard.undrawable("amd", platform) is None
+
+
 def test_every_linux_only_guard_is_a_guard():
     from ci.run_patch_guards import LINUX_ONLY, guards
 
@@ -3314,6 +3362,17 @@ def test_every_workflow_step_running_verify_fonts_installs_the_package():
                     assert "pip install -e ../python" in run or "pip install -e python" in run, (
                         f"{workflow.name}:{name} runs verify-fonts.py without installing the camoufox package"
                     )
+
+
+def test_pull_requests_verify_the_fonts():
+    """verify-fonts.py ran only in the release, so a pull request that broke it
+    merged green and the next release failed before building."""
+    import yaml
+
+    workflow = yaml.safe_load((CI_ROOT.parent / ".github" / "workflows" / "tests.yml").read_text(encoding="utf-8"))
+    assert "pull_request" in workflow[True]
+    assert any("verify-fonts.py" in (step.get("run") or "")
+               for job in workflow["jobs"].values() for step in job.get("steps", []))
 
 
 # ---------------------------------------------------------------------------
@@ -3535,3 +3594,46 @@ def test_closing_a_pull_request_deletes_the_caches_it_saved():
     (step,) = job["steps"]
     assert step["env"]["REF"] == "refs/pull/${{ github.event.pull_request.number }}/merge"
     assert "github.event" not in step["run"], "the pull request number is the only event input, passed through env"
+
+
+def test_packaged_entries_are_readable_by_every_user(tmp_path):
+    """unzip restores each entry's stored mode: a 0700 dir in the zip (the
+    mkdtemp fetch-ubo staged addons/UBO in) hid uBO from a Docker image's
+    non-owner app user. Packaging opens up the staging tree, then refuses a zip
+    that still carries an entry other users can't read."""
+    import stat
+    import zipfile
+
+    package = _package_module()
+
+    root = tmp_path / "pkg"
+    (root / "addons" / "UBO").mkdir(parents=True)
+    (root / "addons" / "UBO" / "manifest.json").write_text("{}")
+    (root / "camoufox-bin").write_text("")
+    (root / "addons" / "UBO").chmod(0o700)
+    (root / "addons" / "UBO" / "manifest.json").chmod(0o600)
+    (root / "camoufox-bin").chmod(0o700)
+    package.readable_by_all(str(root))
+    assert stat.S_IMODE((root / "addons" / "UBO").stat().st_mode) == 0o755
+    assert stat.S_IMODE((root / "addons" / "UBO" / "manifest.json").stat().st_mode) == 0o644
+    assert stat.S_IMODE((root / "camoufox-bin").stat().st_mode) == 0o755, "executables stay executable"
+
+    def entry(name, mode):
+        info = zipfile.ZipInfo(name)
+        info.external_attr = mode << 16
+        return info
+
+    good, bad = tmp_path / "good.zip", tmp_path / "bad.zip"
+    with zipfile.ZipFile(good, "w") as z:
+        z.writestr(entry("camoufox/", stat.S_IFDIR | 0o755), "")
+        z.writestr(entry("camoufox/camoufox-bin", stat.S_IFREG | 0o755), "")
+        foreign = entry("camoufox/from-windows", stat.S_IFREG | 0o600)
+        foreign.create_system = 0
+        z.writestr(foreign, "")
+    with zipfile.ZipFile(bad, "w") as z:
+        z.writestr(entry("camoufox/addons/UBO/", stat.S_IFDIR | 0o700), "")
+        z.writestr(entry("camoufox/addons/UBO/manifest.json", stat.S_IFREG | 0o600), "")
+        z.writestr(entry("camoufox/addons/x/", stat.S_IFDIR | 0o744), "")
+    assert package.unreadable_entries(str(good)) == []
+    assert package.unreadable_entries(str(bad)) == [
+        "camoufox/addons/UBO/ 0o700", "camoufox/addons/UBO/manifest.json 0o600", "camoufox/addons/x/ 0o744"]

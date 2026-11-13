@@ -48,6 +48,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "context-http-user-agent",
         "context-lists-across-processes",
         "context-os-system-font",
+        "cpu-vendor-estimates",
         "detached-window-stock-values",
         "display-scale-resolution",
         "fingerprint-setter-seal",
@@ -59,8 +60,10 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "locale-explicit-names",
         "media-devices-coherence",
         "navigation-preconnect-proxied",
+        "offscreen-webgl2-follows-canvas",
         "spoofed-voice-speaks",
         "startup-prefs",
+        "startup-size-frame-extents",
         "system-font-alias-stall",
         "system-ui-font-spoofing",
         "timezone-stable",
@@ -76,6 +79,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
     ),
     "automation": (
         "addons-install-once",
+        "context-process-isolation",
         "debug-logging-off",
         "fonts-ready-driver",
         "force-scope-access",
@@ -153,8 +157,9 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
 # is nsWindowX11.cpp (GTK/X11 only), windows-keyboard drives GTK with xdotool,
 # virtual-display-window-visible is the virtual display (Xvfb, Linux only),
 # driven-drag-gtk is a GTK drag session, headless-software-webgl is Mesa's
-# EGL rasterizer and css-device-size-fractional needs two Xvfb displays of fixed
-# sizes (a hosted Windows monitor is 1024 px wide).
+# EGL rasterizer, css-device-size-fractional needs two Xvfb displays of fixed
+# sizes (a hosted Windows monitor is 1024 px wide) and startup-size-frame-extents
+# plays an X11 window manager setting _NET_FRAME_EXTENTS.
 # A guard that needs Xvfb only for a display is not here: it runs on the host's
 # display elsewhere. On any other platform the runner does not run a Linux-only
 # guard and counts it apart from the passes; on Linux a missing prerequisite
@@ -164,7 +169,7 @@ LINUX_ONLY = frozenset({
     "ipv4-only-network", "webgl-live-state", "webgl-renderer-pair",
     "occluded-window-active", "pointer-lock-offscreen",
     "virtual-display-window-visible", "driven-drag-gtk", "headless-software-webgl",
-    "css-device-size-fractional",
+    "css-device-size-fractional", "startup-size-frame-extents",
 })
 
 # Guards that do not run on one platform for a reason of that platform, counted
@@ -175,11 +180,13 @@ LINUX_ONLY = frozenset({
 # driven-move-coalescing needs moves that outrun a refresh tick (Juggler paces a driven move at 8 ms,
 # PageHandler.js kMoveIntervalMs): measured on hosted runners they land 8.0 ms apart on Linux and a tick apart on
 # Windows and macOS.
+# context-process-isolation counts web-content processes from /proc.
 _PACED_AT_A_TICK = (
     "Juggler's driven moves land one refresh tick apart on a hosted Windows or macOS runner (16.0 ms against 15.6 ms; "
     "17.0 ms against 16.7 ms; Linux 8.0 ms), so a sweep cannot outrun the tick; stock real input at 25 ms/move is "
     "one pointermove each as well"
 )
+_COUNTED_FROM_PROC = "it counts web-content processes from /proc, which this platform does not have"
 
 NOT_ON = {
     "darwin": {
@@ -188,12 +195,14 @@ NOT_ON = {
         "driven-wheel-notches-macos":
             "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
         "driven-move-coalescing": _PACED_AT_A_TICK,
+        "context-process-isolation": _COUNTED_FROM_PROC,
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
         "driven-wheel-notches-macos":
             "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
         "driven-move-coalescing": _PACED_AT_A_TICK,
+        "context-process-isolation": _COUNTED_FROM_PROC,
     },
 }
 

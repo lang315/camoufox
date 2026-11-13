@@ -13,6 +13,63 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #444: three of the sync's guards could not run off Linux
+
+**Fixed by:** PR #445. **Found by:** e2e probe run 43469379888 (`probe=patch_guard.py`, Windows build 43456656106, head 2f5d9b5e), job 132037002566.
+
+**Symptom.** On the Windows patch-guard probe, three guards that arrived from upstream failed before measuring anything:
+- `cpu-vendor-estimates`: `FAIL: needs an Intel, AMD or ARM64 host, not AMD64 'AMD64 Family 25 Model 17 Stepping 1, AuthenticAMD'`;
+- `startup-size-frame-extents`: `FileNotFoundError: Could not find module 'libX11.so.6'`;
+- `context-process-isolation`: `FileNotFoundError: [WinError 3] ... '/proc'`.
+
+**Root cause.**
+- `cpu-vendor-estimates.py`'s `host_vendor()` read the vendor from `/proc/cpuinfo` only, so every x86-64 host that is not Linux read as no vendor.
+- Its launches claim Linux. On another host that identity is another OS, so the launcher covers the canvas with random readback (`plan_rendering`), which `canvas:seed` 0 does not turn off.
+- The other two guards are about Linux: an X11 window manager's `_NET_FRAME_EXTENTS`, and a process count read from `/proc`. `ci/run_patch_guards.py` never classified them, because upstream runs its guards on Linux only.
+
+**Fix.**
+- `host_vendor()` reads the vendor string each OS reports: `PROCESSOR_IDENTIFIER` on Windows, `sysctl -n machdep.cpu.vendor` on macOS, `/proc/cpuinfo` on Linux.
+- The guard launches with `canvas_noise=False` as well as seed 0.
+- With both fixed, the Windows probe matched stock for Intel and AMD (run 43481814285, job 132079996522), then stopped at the arch arm: `ValueError: No recorded lin GPU fits a 1024x768 screen`. Off a Linux host the identity's GPU is sampled, and no Linux GPU fpgen recorded passes the sampler beside an ARM64 CPU, at 1024x768 up to 2560x1440 and 4 to 12 cores. On a Linux host the launch claims the host's renderer instead. So off Linux the guard asks the launcher's sampler first and reports the arch arm as not applicable with its refusal. On Linux the arm always runs, so a launch that cannot be drawn there still fails.
+- `startup-size-frame-extents` is in `LINUX_ONLY`.
+- `context-process-isolation` is in `NOT_ON` for Windows and macOS, with the `/proc` reason. #450 is the port to psutil that would measure it there.
+
+**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one. `test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere` pins the arch arm: run on Linux, not applicable on Windows and macOS. On the same Windows build:
+- **Red:** probe run 43469379888 (job 132037002566). All three guards fail.
+- **Partial:** run 43481814285 (job 132079996522). `startup-size-frame-extents` and `context-process-isolation` are reported not applicable with their reasons. `cpu-vendor-estimates` matches stock for Intel and AMD, then stops at the arch arm.
+- **Green:** run 43492226035 (job 132116145127, head 3fa4515a). `✓ cpu-vendor-estimates.py`, spoofing 32/32.
+- **Linux:** the guard stays green in Tests 43494883739 (head 7e50ca6c, spoofing job 132142290566).
+
+**What misled.** `cpu-vendor-estimates` printed the processor string it could not classify, `AuthenticAMD` included, which read as an unsupported CPU rather than a vendor the guard never looked for.
+
+## #444: the sync's CPU-vendor guard read the fork's canvas noise as the wrong CPU
+
+**Fixed by:** PR #445. **Found by:** Tests run 43433801675 (head 88f17baf), Patch guards: spoofing, job 131935845574.
+
+**Symptom.** Upstream's `cpu-vendor-estimates.py` failed for every claimed CPU: `cpu=intel: color eb85f567 (stock b2e8412c)`, and `multiply`, `source-over`, `screen` and `soft-light` differed too. The Web Audio, Opus and NaN keys matched stock.
+
+**Root cause.** The guard launches a Linux identity on a Linux runner, which is the host's OS, so the launcher draws `canvas:seed` (utils.py) and `canvas-spoofing.patch` perturbs every readback. Upstream has no canvas noise, so its references are clean pixels.
+
+**Fix.** The guard launches with `canvas:seed` 0, which `CanvasSeedManager::Perturb` treats as off; `browser.new_page()` gets no per-context seed, because `setCanvasSeed` comes only through `NewContext`.
+
+**Evidence.** Red: job 131935845574 (Tests run 43433801675, head 88f17baf). Green: job 131964339263 (Tests run 43446332785, head 403757cd), `✓ cpu-vendor-estimates.py`, spoofing 36/36.
+
+**What misled.** The first suspect was `windows-crt-math.patch`, regenerated on top of `cpu-vendor-estimates.patch` in this sync. It only runs under `javascript.options.use_ucrt_math` (Windows identities), and Skia's pixels do not go through `Math.cpp`. The tell was that `multiply` and `source-over` failed: the guard's docstring says no estimate touches them, so no CPU could explain those.
+
+## #444: goapi's schema and launcher data lagged upstream's CPU keys
+
+**Fixed by:** PR #445. **Found by:** Tests run 43433801675, goapi (browser), job 131935845369.
+
+**Symptom.** `TestProducerSchemaDrift`: `properties.json key "cpu:arch" has no config.go field (producer cannot emit it)`, the same for `cpu:manufacturer`. `TestEmbeddedLauncherDataMatchesPythonlib`: `data/launcher-constants.json differs from ../../../python/src/camoufox/launcher-constants.json`.
+
+**Root cause.** goapi is the fork's own; upstream's daijro/camoufox#1024 added the `cpu:*` keys and the CPU constants (`x86IntelShare`, `cpuIdentityPref`, `cpuManufacturers`, `intelOnlyCoreCounts`) to the Python side only.
+
+**Fix.** `config.go` gains `CPUArch` and `CPUManufacturer`, and the embedded `launcher-constants.json` is the Python one again. goapi does not draw a CPU yet: its identities leave `cpu:*` unset, so the browser computes as the host.
+
+**Evidence.** Both tests fail in job 131935845369 (Tests run 43433801675) and pass in job 131964339236 (Tests run 43446332785, head 403757cd), and locally (`go test ./pkg/config ./pkg/fingerprint`).
+
+**What misled.** Nothing; the tests name the cause.
+
 ## #447: fork.2 shipped uBlock Origin 1.76.0, which moves RegExp in the global order of later tabs
 
 **Fixed by:** PR #448. **Found by:** upstream's measurement for daijro/camoufox#1012, read during the sync (#444).
@@ -49,7 +106,7 @@ later change should read first.
 
 **Root cause.** The `resolve` job ran `fetch-ubo.py resolve` (AMO's newest) every run, and the build job restaged it over a cache hit. uBO is in no commit and not in the cache digest, so nothing in the repo changed.
 
-**Fix.** `ci/ubo-pin.json` holds the version, AMO file url and sha256; `resolve` emits it unless the `ubo` input is set. The file sits outside `ci/browser_inputs.py`'s digest, so a bump costs no cold build. Settled in `ci/tribal-rules.yml` (`tests-run-with-a-pinned-ubo`). Rejected: logging the version only (a red still moves without a commit), keying the cache on it (a cold build per uBO release).
+**Fix.** `ci/ubo-pin.json` holds the version, AMO file url and sha256; `resolve` emits it unless the `ubo` input is set. The file sits outside `ci/browser_inputs.py`'s digest, so a bump costs no cold build. Settled in `ci/tribal-rules.yml` (`tests-run-with-a-pinned-ubo`, folded into `ubo-release-pinned` by #444, where the pin moved to `browser/scripts/data/ubo.json` and became a compiled input). Rejected: logging the version only (a red still moves without a commit), keying the cache on it (a cold build per uBO release).
 
 **Evidence.** `test_tests_run_with_the_uBO_pinned_in_the_repo` fails before (no pin file, `resolve` step calls AMO) and passes after.
 
@@ -325,7 +382,7 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 
 **Fix.**
 - `DOWNLOAD_RETRY_DELAYS` is `(5, 10, 20, 40)`: five attempts over about 75 s. TypeScript's `NETWORK_RETRY_DELAYS_MS` matches it, as #242 kept the two equal. A 4xx other than 429 still fails at once. An outage longer than 75 s still fails, after 75 s rather than 3 s: the GeoIP liveness test failed that way on the second Tests run of the fix, during the same outage, and that is by design, since the test gates on the source publishing.
-- `.github/actions/pin-fpgen-model` caches fpgen's data directory with `actions/cache`, keyed on `fpgen-model.json`, and runs the pin script after the restore, so a cached pin makes no request to the model URL. Every pin site in `tests.yml` and `e2e.yml` uses it.
+- `.github/actions/pin-fpgen-model` caches fpgen's data directory with `actions/cache`, keyed on `fpgen-model.json`, and runs the pin script after the restore, so a cached pin makes no request to the model URL. Every pin site in `tests.yml` and `e2e.yml` uses it. Since #444 upstream's `.github/actions/fpgen-model` replaces it: it caches the model archive rather than fpgen's data directory, and checks the archive against the pin on a cache hit too.
 - Not done: pointing the Python jobs at `CAMOUFOX_FPGEN_DATA`. Python's fpgen reads its model only from its own package directory (`fpgen/pkgman.py`: `DATA_DIR = Path(__file__).parent / 'data'`); the variable moves only the TypeScript launcher's copy. Not done: caching the GeoIP databases, which would stop `test_geoip_sources.py` from noticing a source that no longer publishes. Not done: retrying a connection reset after the response headers, which no failure here showed.
 
 **Evidence.** `python/tests/test_webdl_retry.py`: 8 of 12 fail on `origin/main`, among them four 504 answers then a 200 (the three 4xx controls and the connection-error retry pass there); all 12 pass with the fix. `typescript/tests/pkgman.test.ts`: the four-504 outage and the spent-budget tests fail on `origin/main`; all 36 pass with the fix. The cache hit is in the pull request: the second Tests run's `static` and `pythonlib` restore the model and log no `Downloading fpgen model`.

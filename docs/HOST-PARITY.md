@@ -23,16 +23,20 @@ behaviour; on a browser launched as Linux, a Windows context has Linux's.
 from fpgen's mix, and a refusal would then come and go with the draw. Launch
 with the `os` whose behaviour the contexts need, or one browser per OS.
 
-## Not closed: the sign of a NaN made at run time
+## Narrowed, not closed: the sign of a NaN made at run time
 
 A NaN that the CPU makes, rather than one the engine writes as a constant, has the sign
 that CPU gives it: x86-64 returns `0xfff8...` (the "real indefinite"), arm64 `0x7ff8...`.
 Stock Windows Firefox runs on x86-64, so a Windows identity on an arm64 host
-reads `0x7ff8...` where Windows reads `0xfff8...`. A page sees it by storing the number
-in a `Float64Array` and reading the same buffer through a `Uint32Array`. This is not
-emulated; #381 holds the measurements and the design notes. It was measured on Apple
-silicon only; Linux arm64 (also a build target) uses the same instruction set and was not
-measured.
+read `0x7ff8...` where Windows reads `0xfff8...`. A page sees it by storing the number
+in a `Float64Array` and reading the same buffer through a `Uint32Array`. #381 holds the
+first measurements and the design notes. It was measured on Apple silicon only; Linux arm64
+(also a build target) uses the same instruction set and was not measured.
+
+Since the CPU emulation (`cpu-vendor-estimates.patch`, upstream #1034), a Windows identity
+claims an Intel or AMD CPU (`general.cpu_identity` 1 or 2), and the JIT and the
+interpreter make x86's negative NaN. That closes most of the rows below but not all;
+the two left are #453.
 
 **What was measured** (the probe is a list of expressions with run-time operands, read
 interpreted and after a 30,000-iteration loop; high 16 bits of each result):
@@ -47,6 +51,17 @@ interpreted and after a 30,000-iteration loop; high 16 bits of each result):
   `Math.pow(-2, ±0.5)`. The `%` rows and the controls are canonical NaNs by
   construction, so they agree on every host. `Math.pow(-2, ±0.5)` was fixed after this
   build by #317 (#382): the square-root shortcut now leaves a negative base to `ucrt_pow`.
+- macOS arm64 app of this sync (build run 43456661774, head `403757cd`), launched through
+  the Python launcher with `os="windows"`, once with the default CPU draw and once with
+  `cpu={"manufacturer": "intel"}` (Intel/AMD `cpu_identity`); both read the same. The
+  probe was a local scratch probe, not #381's, and was not run on stock Windows: the stock
+  values compared here are the ones below, measured with #381's probe. `Infinity - Infinity`,
+  `Infinity * 0`, `Math.log`, `log2`, `log10`, `log1p`, `acos`, `asin`, `acosh`, `atanh` and
+  `Math.pow(-2, ±0.5)` read `fff8` interpreted and after the loop, and `0 / 0` reads `7ff8`
+  interpreted and `fff8` after the loop, as stock Windows does. The two left (#453):
+  `Math.sqrt(-1)` reads `fff8` interpreted and `7ff8` after the loop, where stock 159.0 reads
+  `fff8`; `Infinity % 2` reads `fff8` both ways, where the earlier build and an `os="macos"`
+  control read `7ff8`. It is unverified against stock and may be a new mismatch from #1034.
 - Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
   `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
 
@@ -81,7 +96,9 @@ needs a patch to the JIT back end, which is carried across every Firefox upgrade
 would not reach WebAssembly or SIMD, float32 (x86's default is `0xffc00000`, arm64's
 `0x7fc00000`), NaNs made inside Gecko's native code (Web Audio, WebGL), or the NaN a
 NaN operand propagates (x86 and arm64 pick different operands). Its cost in speed was not
-measured. The limit is documented instead.
+measured. The limit was documented instead; upstream's CPU emulation (#1034) later took
+this direction for the JIT and the interpreter, keyed on the claimed CPU rather than on the
+identity's OS (see above).
 
 **Windows on ARM.** fpgen draws no Windows-on-ARM identity: in 3,000 draws with
 `os="windows"` no GPU, platform or `oscpu` value named Adreno, Qualcomm, Snapdragon,
@@ -140,3 +157,112 @@ are the newer Windows'. sin, cos and tan are the same in both.
 Re-record on the pinned Firefox version when an update touches SpiderMonkey's
 sin, cos, tan or `ecmaPow`, the JIT's paths to them, or constant folding, and
 on a new Windows build when its `ucrtbase.dll` changes.
+
+## CPU vendor: the estimate instructions in Skia and libopus
+
+Unlike the rows above, this one is about the CPU, not the OS, and applies on
+every host OS. Skia's raster pipeline uses RCPPS and RSQRTPS, x86's
+reciprocal and reciprocal-square-root estimates, for the non-separable and
+dodge/burn blend modes, perspective and matrix inversion. Both are specified
+only to a relative error of 1.5 * 2^-12, and Intel and AMD meet that with
+different tables, so a canvas drawn with those operations reads back
+differently on the two vendors.
+
+Measured over all 2^32 inputs (`browser/tests/cpu-estimates/`): an Intel Core
+i7-12700H (Linux) and an i9-11900H (Windows 11) give the same bits; a Ryzen 7
+9850X3D (Zen 5) and a Threadripper 7970X (Zen 4), both Linux, give the same
+bits; Intel and AMD differ. Intel's rcp depends on the top 11 mantissa bits and
+its rsqrt on the top 10, AMD's on 12 for both.
+
+Stock Firefox 159.0, a 96x64 canvas with a gradient over a gradient, hashed
+from `getImageData`: on the i9-11900H (Windows) and the Ryzen 9850X3D (Linux),
+`source-over`, `multiply`, `screen` and `soft-light` agree, while `color-dodge`,
+`color-burn`, `hue`, `saturation`, `color` and `luminosity` differ. The guard
+`browser/tests/playwright/patches/cpu-vendor-estimates.py` carries this probe
+and both vendors' values.
+
+libopus's PVQ search (`celt/x86/vq_sse2.c`, the encoder) uses the same two
+instructions, so an Opus stream encoded by the page also names the vendor:
+WebCodecs' `AudioEncoder` (Opus, 64 kbit/s, mono, one second of a fixed
+signal) gives one byte stream on the i7-12700H and the i9-11900H and another on
+the Ryzen 9850X3D and the Threadripper 7970X (Firefox 158). MediaRecorder and
+WebRTC encode with the same code. Decoding does not use the estimates.
+
+`cpu-vendor-estimates.patch` adds `general.cpu_identity` (0 host, 1 Intel,
+2 AMD, 3 ARM64). When it names the other x86 vendor, the two Skia functions compute
+the estimate from the recorded table (`SkCpuEstimates.h`,
+`SkCpuEstimateTables.h`, generated by `browser/scripts/gen-cpu-estimate-tables.py`)
+lane by lane instead of with the instruction. libopus is linked into
+libgkcodecs, which cannot read prefs, so Gecko hands it the same table
+(`opus_mozilla_set_cpu_estimates`, `media/libopus/include/opus_cpu_estimates.h`)
+just before it creates an encoder, in `OpusTrackEncoder` (MediaRecorder),
+`FFmpegAudioEncoder` (WebCodecs) and WebRTC's `opus_interface.cc`. The emulation gives the other
+vendor's bits for every input, special values included; `check.py` proves it
+against the native instruction on the host's vendor and against the recorded
+hashes for the other. When it names the host's
+vendor, or is 0, Skia runs unchanged.
+
+The launcher sets the pref from `cpu:arch` and `cpu:manufacturer`, which the
+`cpu` option sets and the identity otherwise draws: ARM for an Apple GPU,
+Intel for an Intel iGPU or any x86 Mac, AMD for a
+Radeon APU's graphics, Intel for a hardwareConcurrency of 10, 14, 18, 22 or 28
+(no AMD CPU reports those; Intel's hybrids do, e.g. the Core Ultra 5 125H's
+18), and otherwise 81.4% Intel, the Intel share among x86
+CPUs in Firefox's hardware report (data.firefox.com, week of 2026-11-02:
+Intel 76.86%, AMD 17.61%, Apple 5.04%). The report has no per-OS split;
+Steam's survey puts AMD far higher, so the share is a choice, kept in
+`launcher-constants.json` as `x86IntelShare`.
+
+On an Apple M4, stock Firefox 159 gives other values than x86-64 for every
+Web Audio node, every canvas composite operation (source-over included, not
+only the estimate-based ones), drawImage, filters and paths, the Opus and VP9
+streams, the default NaN's sign bit (ARM's is positive), and 9 of 11
+WebAssembly relaxed SIMD operations, under macOS and under Linux alike; Math,
+DOMMatrix and layout agree with x86 on the same OS. With
+`general.cpu_identity` 3 an x86-64 build computes what Firefox's aarch64 build
+computes:
+
+- Skia runs its NEON raster pipeline and blend kernels, executed lane for lane
+  in C++ (`SkOpts_neonemu.cpp`, `SkNeonEmu.h`, `SkArmEstimates.h`).
+- Web Audio mixes with the NEON engine (`AudioNodeEngineNeonEmu.cpp`), and its
+  FFT runs ffvpx's aarch64 transform codelets (`tx_float_neonemu.c`).
+- libopus runs its aarch64 CELT kernels and NEON inverse MDCT
+  (`celt_neonemu.c`, `celt_tx_neonemu.c`), for encoding and decoding.
+- The JIT and the interpreter make positive NaNs, and wasm relaxed SIMD gives
+  ARMv8's lanes (`JS::SetEmulateArm64`).
+- libvpx is built realtime-only for Linux and Windows arm64 (not macOS), which
+  gives VP9 another bitstream and rejects VP8 with lookahead.
+  `media.libvpx.realtime_only` makes that a runtime switch; the launcher sets
+  it for an ARM Windows or Linux identity. libvpx's NEON code is otherwise
+  bit-exact with x86.
+
+The two translated ARM sources are generated from Firefox's aarch64 assembly by
+`browser/scripts/a64toc.py`. The guard `cpu-vendor-estimates` runs the CPU probe
+(`browser/tests/cpu-probe/`) with an ARM identity and compares every key on
+which stock x86-64 and ARM64 Linux differ.
+
+With `general.cpu_identity` 1 or 2, an aarch64 build computes what the
+x86-64 build computes on an AVX2 and FMA core of that vendor:
+
+- The x86 code paths are compiled for aarch64 against
+  `third_party/simde/x86emu`, which stands in for `<immintrin.h>`: SIMDe's
+  SSE, AVX2 and FMA intrinsics, with x86's negative default NaN, its NaN
+  operand order and its out-of-range conversions (`x86emu.h`). Skia runs its
+  SSE2, SSSE3 and AVX2 raster pipeline and blend kernels
+  (`SkOpts_X86EmuTarget.h`, the `*_x86emu.cpp` files), with the vendor's
+  estimate tables as on x86-64.
+- Web Audio mixes as its SSE4.2 engine does, on NEON registers with the
+  product rounded before each add (`AudioNodeEngineX86Emu.cpp`); the speex
+  resampler runs its SSE path, and libopus its SSE CELT float kernels
+  (`celt_x86emu.c`).
+- ffvpx's FFT runs its x86-64 AVX2 and FMA3 assembly, translated to C
+  (`tx_float_x86emu.c`) by `browser/scripts/x86toc.py`.
+- The JIT and the interpreter make x86's negative default NaN (Math
+  functions and constant folding included), and wasm relaxed SIMD gives the
+  lanes SpiderMonkey's x64 backend gives (`JS::SetEmulateX86`).
+
+What this does not cover:
+
+- WebGL. Shaders run on the host's GPU or llvmpipe; an ARM identity on Linux
+  claims llvmpipe, since no Linux ARM GPU is recorded yet.
+- hardwareConcurrency and other CPU-shaped values do not yet follow the vendor.
