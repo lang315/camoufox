@@ -422,8 +422,9 @@ rules:
       network, for Tests and releases alike; `newest` prints AMO's latest as a
       candidate. A bump is a commit, made after the stock parity and
       automation guards pass with it. main-world-eval-globals.py runs with uBO
-      loaded: the fork's copy had excluded it, so it could not see a
-      uBO-driven order change, and that is how 1.76.0 shipped. The pin is a
+      loaded and checks RegExp's place against stock in later tabs: the fork's
+      copy had excluded uBO, and the tab-to-tab comparison cannot see a shift
+      all later tabs share, which is how 1.76.0 shipped. The pin is a
       compiled input (ci/browser_inputs.py), on purpose: uBO ships inside the
       package, so a bump costs a cold build.
 
