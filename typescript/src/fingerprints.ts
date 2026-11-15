@@ -2123,6 +2123,8 @@ export interface GenerateFingerprintOptions {
 	screen?: Screen | null;
 	/** Camoufox OS name(s): 'linux', 'macos', 'windows' (or lin/mac/win). */
 	os?: string | readonly string[] | null;
+	/** fpgen conditions keyed by node, such as coherence.intelMacConditions(). */
+	machine?: Record<string, (value: any) => boolean> | null;
 	/** Any other fpgen conditions. */
 	[condition: string]: any;
 }
@@ -2139,8 +2141,10 @@ export function generateFingerprint({
 	window,
 	screen,
 	os,
+	machine,
 	...conditions
 }: GenerateFingerprintOptions = {}): Record<string, any> {
+	Object.assign(conditions, machine ?? {});
 	if (os?.length) {
 		const names = typeof os === "string" ? [os] : [...os];
 		const resolved = names.map((n) => {
@@ -2160,7 +2164,22 @@ export function generateFingerprint({
 				? resolved[0]
 				: (v: unknown) => allowed.has(String(v).toLowerCase());
 	}
-	const screenConditions = screen ? screen.asConditions() : {};
+	let screenConditions: Record<string, (value: any) => boolean> = screen
+		? screen.asConditions()
+		: {};
+	const machineScreen = conditions.screen;
+	if (machineScreen && Object.keys(screenConditions).length) {
+		// fpgen ignores a predicate on the screen node beside ones on its fields
+		// (#463), so the bound joins the machine's predicate.
+		const width = screenConditions["screen.width"];
+		const height = screenConditions["screen.height"];
+		screenConditions = {
+			screen: (s) =>
+				machineScreen(s) &&
+				(!width || width(s?.width)) &&
+				(!height || height(s?.height)),
+		};
+	}
 	let fingerprint: Record<string, any>;
 	try {
 		fingerprint = generate({

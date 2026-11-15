@@ -1987,6 +1987,7 @@ def generate_fingerprint(
     window: Optional[Tuple[int, int]] = None,
     screen: Optional[Screen] = None,
     os: Optional[Any] = None,
+    machine: Optional[Dict[str, Any]] = None,
     **conditions: Any,
 ) -> Dict[str, Any]:
     """
@@ -1994,8 +1995,11 @@ def generate_fingerprint(
 
     `screen` bounds the generated screen; `window` overrides the outer window
     size afterwards. `os` is Camoufox's name for the platform ('linux', 'macos',
-    'windows', or several); anything else is passed to fpgen as a condition.
+    'windows', or several); `machine` holds fpgen conditions keyed by node, such
+    as coherence.intel_mac_conditions(); anything else is passed to fpgen as a
+    condition.
     """
+    conditions.update(machine or {})
     if os:
         names = [os] if isinstance(os, str) else list(os)
         try:
@@ -2005,8 +2009,16 @@ def generate_fingerprint(
         # fpgen takes one value or a predicate, not a list of alternatives.
         conditions['os'] = resolved[0] if len(resolved) == 1 else (lambda v: v in set(resolved))
     screen_conditions = screen.as_conditions() if screen is not None else {}
+    machine_screen = conditions.get('screen')
+    if machine_screen and screen_conditions:
+        # fpgen ignores a predicate on the screen node beside ones on its fields
+        # (#463), so the bound joins the machine's predicate.
+        width, height = screen_conditions.get('screen.width'), screen_conditions.get('screen.height')
+        screen_conditions = {'screen': lambda s: (
+            machine_screen(s) and (width is None or width(s.get('width'))) and (height is None or height(s.get('height')))
+        )}
     try:
-        fingerprint = _generator().generate(browser='Firefox', **conditions, **screen_conditions)
+        fingerprint = _generator().generate(browser='Firefox', **{**conditions, **screen_conditions})
     except Exception as exc:  # fpgen.exceptions.InvalidConstraints
         if not screen_conditions or type(exc).__name__ != 'InvalidConstraints':
             raise
