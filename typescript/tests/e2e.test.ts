@@ -472,11 +472,12 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 				// A different identity from the launch one, so a context that
 				// inherited the browser's identity would be caught. Another
 				// device's contexts need the canvas covered: an uncovered browser
-				// binds its contexts to the host's OS and GPU.
-				const preset =
+				// binds its contexts to the host's OS and GPU. Both launches claim
+				// an x86 CPU, so the presets are x86 machines too (#458).
+				const [preset, otherPreset] =
 					identity === "fpgen_linux_de"
-						? INPUTS.presets.windows
-						: INPUTS.presets.macos;
+						? [INPUTS.presets.windows, INPUTS.presets.linux]
+						: [INPUTS.presets.linux, INPUTS.presets.windows];
 				const kwargs = { ...kwargsFor(identity), canvas_noise: true };
 				const { result: browser } = await mods.warnings.recordWarnings(() =>
 					mods.sync.Camoufox(kwargs),
@@ -494,7 +495,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 					expect(lastRequestUserAgent).toBe(probe.navigator.userAgent);
 					// Contexts are isolated: another preset, another device.
 					const other = await mods.sync.NewContext(browser as any, {
-						preset: INPUTS.presets.linux,
+						preset: otherPreset,
 					});
 					second = await probePage(await other.newPage());
 				} finally {

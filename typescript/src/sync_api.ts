@@ -24,6 +24,7 @@ import { SELECTOR } from "./locales.js";
 import {
 	applyNoViewport,
 	attachCanvasCover,
+	attachCpuIdentity,
 	attachDesktopOnlyWarning,
 	attachLaunchWindow,
 	attachNoViewportDefault,
@@ -37,6 +38,7 @@ import {
 	type Headless,
 	hostIdentity,
 	type LaunchOptions,
+	launchCpuArch,
 	launchOptions,
 	pinnedCoreCount,
 	STOCK_MEDIA_DEFAULTS,
@@ -218,6 +220,7 @@ async function launchWith(
 	attachDriverDefaults(browser);
 	(browser as any)._camoufoxHostIdentity = identity;
 	attachCanvasCover(browser, fromOptions);
+	attachCpuIdentity(browser, fromOptions);
 	attachLaunchWindow(browser, fromOptions);
 	return attachVirtualDisplay(browser, virtualDisplay);
 }
@@ -314,6 +317,7 @@ export async function NewContext(
 		webgl_config: webglConfig,
 		canvas_seed: contextCanvasSeed(browser),
 		launch_window: (browser as any)._camoufoxLaunchWindow,
+		cpu_arch: launchCpuArch(browser),
 	});
 
 	// Merge the generated context options with user overrides (user wins). They

@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { generate, InvalidConstraints } from "fpgen-js";
 import * as random from "python-random";
-import { hardwareCpu } from "./coherence.js";
+import { hardwareCpu, intelMacConditions } from "./coherence.js";
 import {
 	supported as cpuAffinitySupported,
 	hostCoreCount,
@@ -38,7 +38,12 @@ import {
 	ValueError,
 } from "./pycompat.js";
 import { FallbackWarning, loadWarnings, warn } from "./warnings.js";
-import { sampleWebglForScreen, type TargetOS, webglForGpu } from "./webgl.js";
+import {
+	drawOsForCpu,
+	sampleWebglForScreen,
+	type TargetOS,
+	webglForGpu,
+} from "./webgl.js";
 
 export type { TargetOS } from "./webgl.js";
 
@@ -1240,17 +1245,29 @@ export const X86_INTEL_SHARE: number = LAUNCHER_CONSTANTS.x86IntelShare;
  * manufacturer unset: every ARM64 CPU computes alike. Run after the GPU and
  * navigator.hardwareConcurrency are final. Keys the caller set are kept.
  */
+/** The CPU architecture the identity claims: its cpu:arch, else the one its GPU or core count implies, else x86. */
+export function claimedCpuArch(config: Config, targetOs: string): string {
+	return (
+		(pyTruthy(config["cpu:arch"]) ? config["cpu:arch"] : null) ||
+		hardwareCpu(config, targetOs)[0] ||
+		"x86"
+	);
+}
+
+function cpuMismatch(cpuArch: string, why: string): ValueError {
+	return new ValueError(
+		`This browser computes as an ${cpuArch} CPU (its launch's general.cpu_identity), so its contexts ` +
+			`must claim one, and ${why}. Launch a separate browser for an identity with another CPU.`,
+	);
+}
+
 export function setCpuDefault(
 	config: Config,
 	targetOs: string,
 	salt: number | bigint = 0,
 ): void {
-	let [arch, maker]: [string | null, string | null] = hardwareCpu(
-		config,
-		targetOs,
-	);
-	arch =
-		(pyTruthy(config["cpu:arch"]) ? config["cpu:arch"] : null) || arch || "x86";
+	let maker: string | null = hardwareCpu(config, targetOs)[1];
+	const arch = claimedCpuArch(config, targetOs);
 	if (!("cpu:arch" in config)) config["cpu:arch"] = arch;
 	if ("cpu:manufacturer" in config || arch !== config["cpu:arch"]) return;
 	if (!maker && arch === "x86") {
@@ -1720,6 +1737,9 @@ export function targetOsFromPlatform(plat: string): SupportedOS {
  *   of drawing one.
  * @param canvas_seed Draw a canvas noise seed for setCanvasSeed(). NewContext
  *   passes false on a browser whose canvas the RFP placeholder covers.
+ * @param cpu_arch The CPU architecture the browser computes as
+ *   (utils.launchCpuArch). A drawn GPU is one that sits beside it; an identity
+ *   that claims another throws ValueError.
  */
 /** The launch window and screen NewBrowser records on a browser (#164). */
 export interface LaunchWindow {
@@ -1749,6 +1769,7 @@ export function generateContextFingerprint({
 	webgl_config,
 	canvas_seed = true,
 	launch_window,
+	cpu_arch,
 }: {
 	preset?: Preset | null;
 	os?: string | null;
@@ -1764,6 +1785,7 @@ export function generateContextFingerprint({
 	 * (or, when the launch set none, the preset viewport clamped inside the
 	 * launch outer window) and its screen is made to hold the window (#164). */
 	launch_window?: LaunchWindow | null;
+	cpu_arch?: string | null;
 } = {}): ContextFingerprint {
 	// Only a well-formed record counts; anything else is no record.
 	const lw = isLaunchWindow(launch_window) ? launch_window : null;
@@ -1781,7 +1803,13 @@ export function generateContextFingerprint({
 		webgl = p.webgl ?? {};
 		resolvedPreset = p;
 	} else {
-		const fp = generateFingerprint({ os: os ?? undefined });
+		if (!os && cpu_arch) os = drawOsForCpu(cpu_arch);
+		// An Intel Mac's GPU fits only a screen and cores an Intel Mac has (#463).
+		const intelMac = cpu_arch === "x86" && os === "macos";
+		const fp = generateFingerprint({
+			os: os ?? undefined,
+			machine: intelMac ? intelMacConditions() : null,
+		});
 		config = fromFpgen(fp, ff_version);
 		// fpgen's Linux pool now and then pairs the Linux UA with a Windows
 		// platform and oscpu. launchOptions() corrects that; this path did not,
@@ -1858,15 +1886,26 @@ export function generateContextFingerprint({
 			// Same coherence treatment launchOptions applies (#729): lift netbook
 			// geometry, then keep the GPU consistent with the resulting screen.
 			raiseScreenToModernFloor(config);
-			const webglFp = webgl_config
-				? webglForGpu(targetOs, ...webgl_config)
-				: sampleWebglForScreen(
+			let webglFp: ReturnType<typeof webglForGpu>;
+			if (webgl_config) webglFp = webglForGpu(targetOs, ...webgl_config);
+			else {
+				try {
+					webglFp = sampleWebglForScreen(
 						targetOs,
 						config["screen.width"],
 						config["screen.height"],
 						undefined,
 						config["navigator.hardwareConcurrency"],
+						cpu_arch ? { "cpu:arch": cpu_arch } : null,
 					);
+				} catch (e) {
+					if (!cpu_arch || !isPyError(e, "ValueError")) throw e;
+					throw cpuMismatch(
+						cpu_arch,
+						`no ${targetOs} GPU fpgen recorded can stand beside it (${(e as Error).message})`,
+					);
+				}
+			}
 			delete webglFp.webGl2Enabled;
 			Object.assign(config, webglFp);
 		}
@@ -1923,6 +1962,15 @@ export function generateContextFingerprint({
 		const overrides = { ...config_overrides };
 		dropAudioSeed(overrides);
 		Object.assign(config, overrides);
+	}
+
+	if (cpu_arch) {
+		const claimed = claimedCpuArch(
+			config,
+			targetOsFromPlatform(pyStr(get(config, "navigator.platform", ""))),
+		);
+		if (claimed !== cpu_arch)
+			throw cpuMismatch(cpu_arch, `this identity claims an ${claimed} CPU`);
 	}
 
 	const initValues: InitValues = {

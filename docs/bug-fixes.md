@@ -13,6 +13,33 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
+
+**Found by:** measuring #456 on an arm64 Mac (M1 Pro) with the `v159.0-beta.35-fork.3` macOS release. Each pairing below gave the same result in 3 of 3 rounds:
+- an `os="macos"` launch (`general.cpu_identity` 3) gave a `NewContext(os="windows")` (`Win32`, `Win64; x64`, ANGLE AMD/NVIDIA/Intel) and a `NewContext(os="linux")` arm64 Web Audio, `fpjs_sum` 35.74996626004577;
+- an `os="windows"` launch gave a `NewContext(os="macos")` (`Apple M1`) x86-64 audio, 35.749972093850374.
+
+**Root cause.** `general.cpu_identity` is a launch pref (`utils.cpu_identity_pref`), so every context computes canvas, audio, Opus, wasm and NaNs as the launch's CPU. `NewContext` drew its identity without regard to it: a context config carries no `cpu:arch`, and nothing compared the GPU's implied CPU with the launch's. Only a `canvas_noise=True` browser reaches this, since `NewContext` refuses another OS otherwise.
+
+**Fix.**
+- `NewBrowser` records the launch's `general.cpu_identity` (`attach_cpu_identity`). `launch_cpu_arch` reads it back: 3 is arm, 1 or 2 is x86, and 0 or no record means unconstrained.
+- `generate_context_fingerprint(cpu_arch=)` draws the GPU through `sample_webgl_for_screen(cpu=)`. With no `os`, it draws the OS among those with a recorded GPU for the CPU (`webgl.draw_os_for_cpu`, fpgen's own OS weights). It passes #463's Intel Mac conditions for an x86 Mac. It raises `ValueError` when no recorded GPU fits, or when a preset or `webgl_config` claims the other architecture.
+- The same in Python and TypeScript.
+- `typescript/tests/e2e.test.ts` gave the Windows launch's context the Apple M1 macOS preset, the very pairing this refuses (its first Tests run, 43702099697, failed there). Its contexts now take the Linux and Windows presets.
+
+Tried and dropped:
+- Raising whenever the drawn context's arch differs. It is draw-dependent: a Windows launch with a macOS context would raise about 98% of the time, because macOS draws are 196 of 200 ARM.
+- The sampler alone. An x86 macOS context then raised 48 of 100, because of the Apple-silicon panel draw (#463, fixed first), and a context with no `os` raised 9 of 100 on x86 and 82 of 100 on ARM. Hence the OS draw.
+
+**Evidence.** Red then green: `python/tests/test_context_cpu_arch.py` and `typescript/tests/context-cpu-arch.test.ts`. Before the fix, 6 Python and 4 TS cases failed with `DID NOT RAISE ValueError` and `assert 'arm' == 'x86'`. After it, 14 of 14 pass in both, 3 runs each. Without the OS draw, the ARM no-`os` case fails again with `No GPU fpgen has recorded from Firefox on win sits beside a arm CPU`. Measured with `generate_context_fingerprint`, 100 draws each:
+- arm + macos: 100 Apple M1;
+- arm + windows or linux: 100 `ValueError`;
+- x86 + macos: 100 Intel Mac;
+- no `os`: x86 drew Windows 67, Linux 18, macOS 15; arm drew macOS 100. No errors.
+
+**What misled.** `audio-matches-stock` keyed its expected values on the host (#456), which hid that the same guard never put a context of one architecture on a launch of the other.
+
+
 ## #456: audio-matches-stock expected the host's audio, not the claimed CPU's
 
 **Fixed by:** PR #459. **Found by:** e2e run 43556377935, macOS arm64 leg (job 132330070472), on build 43538465225 (`main` at 30bef255).

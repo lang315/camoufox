@@ -1387,6 +1387,28 @@ export function contextIdentity(
 	return [hostName, gpu];
 }
 
+/** Record the launch's general.cpu_identity: every context of the browser computes as that CPU. */
+export function attachCpuIdentity(
+	browser: any,
+	fromOptions: Record<string, any>,
+): void {
+	browser._camoufoxCpuIdentity =
+		fromOptions.firefoxUserPrefs?.["general.cpu_identity"];
+}
+
+/**
+ * The CPU architecture `browser` computes as, from its launch's
+ * general.cpu_identity, or null: a browser the launcher did not start, or one
+ * that computes as the host (0).
+ */
+export function launchCpuArch(browser: any): string | null {
+	const pref = browser._camoufoxCpuIdentity;
+	if (!pref) return null;
+	const table: Record<string, number> = LAUNCHER_CONSTANTS.cpuIdentityPref;
+	const key = Object.keys(table).find((k) => table[k] === pref);
+	return key ? key.split("/")[0] : null;
+}
+
 /** Record whether the launch prefs carry the canvas placeholder, the pref
  * launchOptions() writes when planRendering covers the canvas. */
 export function attachCanvasCover(

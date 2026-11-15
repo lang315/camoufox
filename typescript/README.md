@@ -100,7 +100,7 @@ fonts, voices, timezone, WebRTC IP), applied through
 ```javascript
 import { Camoufox, NewContext } from "camoufox";
 
-const browser = await Camoufox({ headless: true, canvas_noise: true });
+const browser = await Camoufox({ headless: true, canvas_noise: true, os: "windows" });
 const alice = await NewContext(browser, { os: "windows" });
 const bob = await NewContext(browser, {
     os: "macos",
@@ -125,6 +125,17 @@ Canvas noise belongs to the browser, not the context (see
 [The canvas on another OS](#the-canvas-on-another-os)). On a browser without it,
 every context claims the host's OS and GPU too, since its canvas renders there.
 Contexts with other OSes, like the ones above, need `canvas_noise: true`.
+
+The CPU belongs to the browser too. Every context computes canvas, Web Audio,
+Opus, wasm and NaNs as the launch's CPU (its `general.cpu_identity`), so a
+context claims that CPU's architecture: its GPU is drawn to fit it, a context
+with no `os` gets an OS that CPU runs, and a `preset` claiming the other
+architecture throws `ValueError`. A browser with an x86 CPU gives a macOS context
+an Intel Mac. fpgen records no ARM GPU for Windows (0 of 11) or Linux (0 of 15),
+so a browser launched as an Apple Silicon Mac throws `ValueError` for a Windows
+or Linux context, and its contexts with no `os` are Macs. A `canvas_noise: true`
+launch without `os` can draw an ARM Mac (10 of 60 on an arm64 Mac host), so
+pass `os` at launch to mix OSes.
 
 The browser's own OS also decides some things for all its contexts. A browser
 launched as Windows on a Linux or macOS host (`os: "windows"`, or drawn so)

@@ -619,6 +619,19 @@ def cpu_identity_pref(config: Dict[str, Any]) -> int:
     return table.get(f'x86/{maker}', 0) if arch in ('x86', None) else 0
 
 
+def attach_cpu_identity(browser: Any, from_options: Dict[str, Any]) -> None:
+    """Record the launch's general.cpu_identity: every context of the browser computes as that CPU."""
+    browser._camoufox_cpu_identity = from_options.get('firefox_user_prefs', {}).get('general.cpu_identity')
+
+
+def launch_cpu_arch(browser: Any) -> Optional[str]:
+    """The CPU architecture `browser` computes as, from its launch's general.cpu_identity,
+    or None: a browser the launcher did not start, or one that computes as the host (0)."""
+    pref = vars(browser).get('_camoufox_cpu_identity')
+    return next((key.split('/')[0] for key, value in LAUNCHER_CONSTANTS['cpuIdentityPref'].items()
+                 if pref and value == pref), None)
+
+
 def vpx_realtime_only(config: Dict[str, Any], target_os: str) -> bool:
     """media.libvpx.realtime_only: Firefox builds libvpx realtime-only for
     Windows and Linux on ARM64 (not macOS), which changes the WebCodecs VP8/VP9

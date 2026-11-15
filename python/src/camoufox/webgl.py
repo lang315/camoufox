@@ -17,7 +17,7 @@ from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 import orjson
 
 from .coherence import gpu_fits_cpu, gpu_fits_machine, gpu_fits_os
-from .fingerprints import _FPGEN_OS, gpu_screen_is_plausible, is_software_renderer
+from .fingerprints import _FPGEN_OS, _generator, gpu_screen_is_plausible, is_software_renderer
 from .fpgen_model import load_fpgen
 
 # Extensions a release Firefox never exposes (draft extensions behind
@@ -139,6 +139,16 @@ def firefox_gpus(target_os: str) -> FrozenSet[Tuple[str, str]]:
         (result.value['vendor'], result.value['renderer'])
         for result in _trace('gpu', target_os.lower())
     )
+
+
+def draw_os_for_cpu(cpu_arch: str) -> str:
+    """An OS for an identity with this CPU architecture, drawn as fpgen weighs
+    Firefox's OSes, among those with a recorded GPU that can stand beside it."""
+    fits = {
+        name for name, key in (('macos', 'mac'), ('windows', 'win'), ('linux', 'lin'))
+        if any(not is_software_renderer(r) and gpu_fits_cpu(r, key, cpu_arch, None) for _, r in firefox_gpus(key))
+    }
+    return str(_generator().generate(browser='Firefox', target='os', os=lambda v: v in fits)).lower()
 
 
 def _backend_extensions(target_os: str, webgl: Dict[str, Any], webgl2: Any) -> Tuple[str, ...]:
