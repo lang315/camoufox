@@ -18,10 +18,12 @@ from .ip import ExitGeo, Proxy, proxy_exit_geo
 from .utils import (
     async_attach_vd,
     attach_canvas_cover,
+    attach_cpu_identity,
     attach_context_defaults,
     attach_launch_fonts,
     attach_launch_window,
     context_canvas_seed,
+    launch_cpu_arch,
     attach_socks5_auth,
     context_identity,
     host_identity,
@@ -212,6 +214,7 @@ async def _launch(
     attach_launch_window(browser, from_options)
     browser._camoufox_host_identity = identity
     attach_canvas_cover(browser, from_options)
+    attach_cpu_identity(browser, from_options)
     return await async_attach_vd(browser, virtual_display)
 
 
@@ -271,6 +274,7 @@ async def AsyncNewContext(
             preset=preset, os=os, ff_version=ff_version, webrtc_ip=webrtc_ip, webgl_config=webgl_config,
             canvas_seed=context_canvas_seed(browser),
             launch_window=getattr(browser, '_camoufox_launch_window', None),
+            cpu_arch=launch_cpu_arch(browser),
         ),
     )
 

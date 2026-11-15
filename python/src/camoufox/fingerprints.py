@@ -859,6 +859,18 @@ def fix_navigator_arch(config: Dict[str, Any], target_os: str) -> None:
 X86_INTEL_SHARE: float = LAUNCHER_CONSTANTS['x86IntelShare']
 
 
+def claimed_cpu_arch(config: Dict[str, Any], target_os: str) -> str:
+    """The CPU architecture the identity claims: its cpu:arch, else the one its GPU or core count implies, else x86."""
+    return config.get('cpu:arch') or hardware_cpu(config, target_os)[0] or 'x86'
+
+
+def cpu_mismatch(cpu_arch: str, why: str) -> ValueError:
+    return ValueError(
+        f'This browser computes as an {cpu_arch} CPU (its launch\'s general.cpu_identity), so its contexts '
+        f'must claim one, and {why}. Launch a separate browser for an identity with another CPU.'
+    )
+
+
 def set_cpu_default(config: Dict[str, Any], target_os: str, salt: int = 0) -> None:
     """Fill in the identity's CPU (cpu:arch, cpu:manufacturer).
 
@@ -873,8 +885,8 @@ def set_cpu_default(config: Dict[str, Any], target_os: str, salt: int = 0) -> No
     manufacturer unset: every ARM64 CPU computes alike. Run after the GPU and
     navigator.hardwareConcurrency are final. Keys the caller set are kept.
     """
-    arch, maker = hardware_cpu(config, target_os)
-    arch = config.get('cpu:arch') or arch or 'x86'
+    maker = hardware_cpu(config, target_os)[1]
+    arch = claimed_cpu_arch(config, target_os)
     config.setdefault('cpu:arch', arch)
     if 'cpu:manufacturer' in config or arch != config['cpu:arch']:
         return
@@ -1650,6 +1662,7 @@ def generate_context_fingerprint(
     webgl_config: Optional[Tuple[str, str]] = None,
     canvas_seed: bool = True,
     launch_window: Optional[Dict[str, Any]] = None,
+    cpu_arch: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Generate fingerprint values for a single per-context identity.
@@ -1676,6 +1689,8 @@ def generate_context_fingerprint(
             process-wide, so the context's viewport becomes the launch inner size (or, when
             the launch set none, the preset viewport clamped inside the launch outer window)
             and its screen is made to hold the window.
+        cpu_arch: The CPU architecture the browser computes as (utils.launch_cpu_arch). A drawn
+            GPU is one that sits beside it; an identity that claims another raises ValueError.
     """
     # Only a well-formed record counts; anything else (a mock, a half-built dict) is no record.
     if not (
@@ -1741,10 +1756,16 @@ def generate_context_fingerprint(
             if webgl_config:
                 webgl_fp = webgl_for_gpu(_target_os, *webgl_config)
             else:
-                webgl_fp = sample_webgl_for_screen(
-                    _target_os, config.get('screen.width'), config.get('screen.height'),
-                    cores=config.get('navigator.hardwareConcurrency'),
-                )
+                try:
+                    webgl_fp = sample_webgl_for_screen(
+                        _target_os, config.get('screen.width'), config.get('screen.height'),
+                        cores=config.get('navigator.hardwareConcurrency'),
+                        cpu={'cpu:arch': cpu_arch} if cpu_arch else None,
+                    )
+                except ValueError as exc:
+                    if not cpu_arch:
+                        raise
+                    raise cpu_mismatch(cpu_arch, f'no {_target_os} GPU fpgen recorded can stand beside it ({exc})') from exc
             webgl_fp.pop('webGl2Enabled')
             config.update(webgl_fp)
 
@@ -1797,6 +1818,11 @@ def generate_context_fingerprint(
         config_overrides = dict(config_overrides)
         drop_audio_seed(config_overrides)
         config.update(config_overrides)
+
+    if cpu_arch:
+        claimed = claimed_cpu_arch(config, platform_to_os(config.get('navigator.platform', '')))
+        if claimed != cpu_arch:
+            raise cpu_mismatch(cpu_arch, f'this identity claims an {claimed} CPU')
 
     # Build the values dict for the init script (works for both paths)
     init_values: Dict[str, Any] = {
