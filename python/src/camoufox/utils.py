@@ -1665,10 +1665,14 @@ def launch_options(
 
     if not _used_preset and fingerprint is None:
         # Default: synthetic generation via fpgen (infinite unique fingerprints)
+        # The GPU is drawn after the screen and must fit it, so an Intel Mac
+        # needs a screen and core count an Intel Mac has (#463).
+        intel_mac = cpu is not None and os == 'macos' and coherence.resolve_cpu(cpu, 'mac').get('cpu:arch') == 'x86'
         fingerprint = generate_fingerprint(
             screen=screen_cons,
             window=window,
             os=os,
+            machine=coherence.intel_mac_conditions() if intel_mac else None,
         )
 
     if not _used_preset and fingerprint is not None:

@@ -190,6 +190,15 @@ def _intel_mac_misfit(renderer: Optional[str], cores: Any, width: Any, height: A
     return None
 
 
+def intel_mac_conditions() -> Dict[str, Any]:
+    """fpgen conditions for a Mac with an Intel CPU: a screen and core count
+    some Intel Mac has, so an Intel Mac GPU can be drawn beside them."""
+    return {
+        'screen': lambda s: (s.get('width'), s.get('height')) not in APPLE_SILICON_PANELS,
+        'navigator.hardwareConcurrency': lambda cores: cores in INTEL_MAC_DGPU_CORES,
+    }
+
+
 def gpu_fits_machine(
     renderer: Optional[str], target_os: str, cores: Any = None, width: Any = None, height: Any = None
 ) -> bool:

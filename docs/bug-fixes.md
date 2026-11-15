@@ -13,6 +13,26 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #463: an Intel Mac identity failed to draw about half the time
+
+**Found by:** measuring #458's NewContext fix: `launch_options(os="macos", cpu={"arch": "x86"}, canvas_noise=True)` failed 21 of 40 times on `main` d2ff7880.
+
+**Symptom.** `ValueError: No recorded mac GPU fits a 1728x1117 screen`, and the same for 1512x982, 1800x1169, 1470x956, 1710x1112 and 2056x1329. Each is a panel only Apple-silicon Macs ship.
+
+**Root cause.** fpgen drew the macOS screen and core count without regard to the claimed CPU. Then `webgl.sample_webgl_for_screen` kept only GPUs that fit both the x86 CPU (`coherence.gpu_fits_cpu`) and that screen (`gpu_fits_machine`, `_intel_mac_misfit`). Beside an Apple-silicon panel no recorded GPU is left.
+
+**Fix.** When `os` is macOS and the `cpu` option resolves to x86, `launch_options` passes `coherence.intel_mac_conditions()` to fpgen: a `screen` predicate that refuses the Apple-silicon panels, and a core count some Intel Mac has. Both are fpgen's own conditions, so no new sampler is needed.
+
+A first version passed the screen predicate beside the display bound (`Screen.as_conditions()`, predicates on `screen.width` and `screen.height`). fpgen called the node predicate but ignored its answer beside the field predicates. Headful on a 1512x982 display, it still failed 24 of 40. So `generate_fingerprint` now folds the bound into the one `screen` predicate. fpgen-js behaves the same way, and the TypeScript launcher does the same.
+
+**Evidence.**
+- Red then green: `python/tests/test_intel_mac_draw.py` and `typescript/tests/intel-mac-draw.test.ts`, 30 launches per case. Both fail on `main` with `No recorded mac GPU fits a 1512x982 screen`, and pass 3 runs of 3.
+- The display-bound case goes red again with the bound merge disabled, in both languages.
+- Measured with the fork.3 macOS binary on an arm64 Mac: 100 of 100 headless and 40 of 40 headful launches drew, against 21 of 40 failing before.
+
+**What misled.** The error names the GPU draw, but the GPU draw was right: the screen was drawn first, for a machine the CPU rules out.
+
+
 ## #452: stock Firefox's log could not be deleted while its children exited
 
 **Fixed by:** the PR that refs #452. **Found by:** e2e probe run 43481814285 (`probe=patch_guard.py`, Windows build 43456656106), job 132079996522; again in fork.3's Windows probe 43550832485.
