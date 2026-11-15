@@ -60,7 +60,30 @@ def mac_failures(got):
     return failures
 
 
+def diag():
+    from camoufox.sync_api import Camoufox
+    for i in range(12):
+        with Camoufox(executable_path=str(resolve_binary()), headless=False, os="macos", window=(1280, 900)) as browser:
+            page = browser.new_page()
+            page.set_content(notches.PAGE)
+            page.evaluate(notches.ARROW)
+            page.focus("#s")
+            page.keyboard.press("ArrowDown")
+            step = page.evaluate("() => window.__arrow")
+            info = page.evaluate("""() => {
+              const c = document.createElement('canvas').getContext('2d');
+              const w = (f) => { c.font = '14px ' + f; return c.measureText('Hamburgefonstiv 0123').width; };
+              const s = document.getElementById('s');
+              const fm = (f) => { const d = document.createElement('div'); d.style.cssText = 'position:absolute;font:14px ' + f; d.textContent = 'Hg'; document.body.appendChild(d); const h = d.getBoundingClientRect().height; d.remove(); return h; };
+              return {dpr: window.devicePixelRatio, fam: getComputedStyle(s).fontFamily, size: getComputedStyle(s).fontSize,
+                w: {sans: w('sans-serif'), Helvetica: w('Helvetica'), Arial: w('Arial'), Arimo: w('Arimo'), HN: w('Helvetica Neue'), serif: w('serif')},
+                h: {sans: fm('sans-serif'), Helvetica: fm('Helvetica'), Arial: fm('Arial'), HN: fm('Helvetica Neue')}};
+            }""")
+            print(f"DIAG-461 launch {i}: step {step} line {step / 3 if step else None} {info}", flush=True)
+
+
 def main() -> int:
+    diag()
     with hidden_display("1920x1080"):
         mac = notches.probe(resolve_binary(), "macos", (("slow", 16), ("turn", 100), ("long", 1000)))
     failures = mac_failures(mac)
