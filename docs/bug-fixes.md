@@ -25,6 +25,7 @@ later change should read first.
 - `NewBrowser` records the launch's `general.cpu_identity` (`attach_cpu_identity`). `launch_cpu_arch` reads it back: 3 is arm, 1 or 2 is x86, and 0 or no record means unconstrained.
 - `generate_context_fingerprint(cpu_arch=)` draws the GPU through `sample_webgl_for_screen(cpu=)`. With no `os`, it draws the OS among those with a recorded GPU for the CPU (`webgl.draw_os_for_cpu`, fpgen's own OS weights). It passes #463's Intel Mac conditions for an x86 Mac. It raises `ValueError` when no recorded GPU fits, or when a preset or `webgl_config` claims the other architecture.
 - The same in Python and TypeScript.
+- `typescript/tests/e2e.test.ts` gave the Windows launch's context the Apple M1 macOS preset, the very pairing this refuses (its first Tests run, 43702099697, failed there). Its contexts now take the Linux and Windows presets.
 
 Tried and dropped:
 - Raising whenever the drawn context's arch differs. It is draw-dependent: a Windows launch with a macOS context would raise about 98% of the time, because macOS draws are 196 of 200 ARM.
@@ -37,6 +38,23 @@ Tried and dropped:
 - no `os`: x86 drew Windows 67, Linux 18, macOS 15; arm drew macOS 100. No errors.
 
 **What misled.** `audio-matches-stock` keyed its expected values on the host (#456), which hid that the same guard never put a context of one architecture on a launch of the other.
+
+
+## #461: the macOS wheel guard assumed a whole-pixel line height
+
+**Fixed by:** the PR that refs #461. **Found by:** Tests run 43681967153 (head 67ae1665, PR #459), `Patch guards: stock parity`, job 132718067021.
+
+**Symptom.** `driven-wheel-notches-macos` failed every arm in one launch: `an arrow key scrolled the scroller 49.5 px`, events of `wheelDeltaY -51` and `MozMousePixelScroll 17` against an expected `-48.0` and `16.0`, and `scrolled 1039.5 px, expected 1008.0`. It had passed on the previous head, with nothing it runs changed.
+
+**Root cause.** The page's line read 16.5 px. `mac_failures` took `line = step // 3`, which floors 49.5 to 16, and required `step % 3 == 0`. Gecko rounds the line to whole pixels for the wheel, `DOMMouseScroll` and `MozMousePixelScroll` values (17) and scrolls its exact height (16.5 px a line: 99 px for six, 1039.5 for 63), so a fractional line failed all three arms against a 16 px expectation.
+
+**Fix.** The expectation follows the line the page reports: `line = step / 3` is the scroll amount, and the events carry `int(line + 0.5)`, the rounding the red readings show (16.5 gives 17). An arrow key's three lines must be a whole number of half pixels. No tolerance, no retry.
+
+**Not shown: why one launch had a 16.5 px line.** Twelve launches of the guard's own identity (`os="macos"`, Tests run 43699379065, job 132768186557) all gave a 17 px line at a device pixel ratio of 1, with identical `sans-serif` and `Helvetica` widths, so the 16.5 px launch did not recur. A half-pixel line is what a device pixel ratio of 2 gives, which a Retina macOS has, but nothing here measured that ratio in the red launch. The guard now follows the line either way, and a launch whose font resolved differently is the fonts guards' to catch.
+
+**Evidence.** `ci/tests/test_wheel_guard_line_height.py` feeds `mac_failures` the red job's readings (a 16.5 px line, events of 17): red on the old code (2 of 4 tests fail, the 16.5 px case and the exact-scroll check), green on the new one. Two negative controls give the same verdict on both: a 17 px line passes, and events that fail to round a 16.5 px line fail.
+
+**What misled the investigation.** The font draw looked like the cause, and every launch drew the same font.
 
 
 ## #463: an Intel Mac identity failed to draw about half the time
