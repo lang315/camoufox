@@ -84,6 +84,7 @@ def diag():
 
 def main() -> int:
     diag()
+    return 1
     with hidden_display("1920x1080"):
         mac = notches.probe(resolve_binary(), "macos", (("slow", 16), ("turn", 100), ("long", 1000)))
     failures = mac_failures(mac)
