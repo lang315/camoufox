@@ -14,7 +14,8 @@ guard sends both, as they do, and checks that nothing moves the render:
   * the fingerprintjs render (sum of samples 4500..5000, and the SHA-256 of the
     whole buffer), the CreepJS AnalyserNode reads (getFloatFrequencyData and
     getFloatTimeDomainData), a biquad filter and a plain sine all equal the
-    recorded stock values for this host's architecture;
+    recorded stock values for the architecture the identity claims (an aarch64
+    build claiming an x86 CPU renders as that x86 CPU, cpu-vendor-estimates.patch);
   * in the default context, in a NewContext identity claiming another OS, in a
     context whose init script calls the old per-context setter, and in a
     second launch.
@@ -30,12 +31,11 @@ the same graphs as PROBE below), 103 runs of stock Firefox 152-158.
 Every run of an architecture gave the same values, to the bit.
 
 What PASS means: every probe in every context and launch equals EXPECTED for
-this architecture. On v158.0-beta.40 (noised) it fails.
+the launch's claimed architecture. On v158.0-beta.40 (noised) it fails.
 
     python browser/tests/playwright/patches/audio-matches-stock.py
 """
 
-import platform
 import sys
 from pathlib import Path
 
@@ -64,7 +64,7 @@ EXPECTED = {
         "sine_sha": "b8c3978e7f5ea1c767066b9e7fda85ad011aa6e4e69de6aa0ca2f117c121102f",
     },
 }
-ARCH = {"x86_64": "x86_64", "amd64": "x86_64", "aarch64": "arm64", "arm64": "arm64"}
+CLAIMED = {"x86": "x86_64", "arm": "arm64"}
 
 # What a released library sends: any non-zero seed noised the old build.
 OLD_SEED = 424242
@@ -161,10 +161,9 @@ def released_library_options() -> dict:
     from camoufox.utils import get_env_vars, launch_options
 
     options = launch_options(**launch_kwargs(os="linux", i_know_what_im_doing=True))
-    env = options["env"]
-    chunks = sorted((int(k.rsplit("_", 1)[1]), k) for k in env if k.startswith("CAMOU_CONFIG_"))
-    config = orjson.loads("".join(env.pop(k) for _, k in chunks))
+    config = launch_config(options)
     config["audio:seed"] = OLD_SEED
+    env = options["env"] = {k: v for k, v in options["env"].items() if not k.startswith("CAMOU_CONFIG_")}
     # The binary under test's bundle, as launch_options passes it. Without a
     # path, get_env_vars finds its fontconfig in the installed release, and on
     # a runner with none it fetched one from the GitHub API (rate-limited, 403).
@@ -172,6 +171,20 @@ def released_library_options() -> dict:
     env.update({k: v for k, v in get_env_vars(config, "lin", path=binary).items()
                 if k.startswith("CAMOU_CONFIG_")})
     return options
+
+
+def launch_config(options: dict) -> dict:
+    env = options["env"]
+    chunks = sorted((int(k.rsplit("_", 1)[1]), k) for k in env if k.startswith("CAMOU_CONFIG_"))
+    return orjson.loads("".join(env[k] for _, k in chunks))
+
+
+def expected_arch(config: dict):
+    """The EXPECTED key for the launch's claimed CPU, or None when it claims none.
+
+    general.cpu_identity is a launch pref, so every context of the launch
+    renders as the launch's CPU, whatever the host is."""
+    return CLAIMED.get(config.get("cpu:arch"))
 
 
 def render(context) -> dict:
@@ -183,35 +196,39 @@ def render(context) -> dict:
 def main() -> int:
     from camoufox.sync_api import Camoufox, NewContext
 
-    arch = ARCH.get(platform.machine().lower())
-    if arch is None:
-        print(f"FAIL: no stock audio values recorded for {platform.machine()}")
-        return 1
-    expected = EXPECTED[arch]
-
     seen = {}
-    with Camoufox(from_options=released_library_options()) as browser:
-        seen["default context"] = render(browser.new_context())
-        seen["NewContext claiming Windows"] = render(NewContext(browser, os="windows"))
-        old = browser.new_context()
-        old.add_init_script(OLD_SETTER)
-        seen["context calling setAudioFingerprintSeed"] = render(old)
-    with Camoufox(from_options=released_library_options()) as browser:
-        seen["second launch"] = render(browser.new_context())
+    for launch in ("first", "second"):
+        options = released_library_options()
+        config = launch_config(options)
+        cpu, arch = config.get("cpu:arch"), expected_arch(config)
+        if arch is None:
+            print(f"FAIL: {launch} launch claims cpu:arch {cpu!r}, which has no recorded stock audio")
+            return 1
+        print(f"  {launch} launch claims cpu:arch {cpu!r}: expecting stock {arch}")
+        with Camoufox(from_options=options) as browser:
+            if launch == "second":
+                seen["second launch"] = arch, render(browser.new_context())
+                continue
+            seen["default context"] = arch, render(browser.new_context())
+            seen["NewContext claiming Windows"] = arch, render(NewContext(browser, os="windows"))
+            old = browser.new_context()
+            old.add_init_script(OLD_SETTER)
+            seen["context calling setAudioFingerprintSeed"] = arch, render(old)
 
     failures = []
-    for name, got in seen.items():
+    for name, (arch, got) in seen.items():
+        expected = EXPECTED[arch]
         wrong = {k: got.get(k) for k, v in expected.items() if got.get(k) != v}
         print(f"  {name}: fpjs {got.get('fpjs_sum')!r}, buffer {str(got.get('fpjs_sha'))[:12]}"
               f"{'' if not wrong else ', differs in ' + ', '.join(sorted(wrong))}")
         if wrong:
-            failures.append(f"{name}: {wrong}")
+            failures.append(f"{name}: {wrong} (stock {arch}: {expected})")
 
     for failure in failures:
-        print(f"FAIL: {failure} (stock {arch}: {expected})")
+        print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"PASS: every context and launch renders stock {arch} audio, seed or no seed.")
+    print("PASS: every context and launch renders the stock audio of its claimed CPU, seed or no seed.")
     return 0
 
 

@@ -13,6 +13,23 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #456: audio-matches-stock expected the host's audio, not the claimed CPU's
+
+**Fixed by:** PR #459. **Found by:** e2e run 43556377935, macOS arm64 leg (job 132330070472), on build 43538465225 (`main` at 30bef255).
+
+**Symptom.** `audio-matches-stock.py` failed all four arms on macOS arm64: `FAIL: default context: {'fpjs_sum': 35.749972093850374, ...} (stock arm64: {'fpjs_sum': 35.74996626004577, ...})`. It passed in fork.2, before the #445 sync.
+
+**Root cause.** The guard keyed `EXPECTED` on the host, `ARCH.get(platform.machine().lower())`. Its launch is `os="linux"`, which always claims an x86 CPU (`general.cpu_identity` 1 or 2), and since #445 `cpu-vendor-estimates.patch` makes an aarch64 build compute as the claimed x86 CPU. So the browser rendered x86-64 audio, as it should, against arm64 expectations. Linux CI hid it, because the host's arch is the claimed one there.
+
+**Fix.** The guard keys `EXPECTED` on each launch's `cpu:arch`, read from the `CAMOU_CONFIG` of the options it builds (`x86` selects `x86_64`, `arm` selects `arm64`). Every context of a launch uses the launch's value, because `general.cpu_identity` is a launch pref. A launch that claims no `cpu:arch` fails. It still goes red: a pref the browser ignores, or emulation turned off, renders arm64 audio against `EXPECTED["x86_64"]` on an arm64 host, and the reverse on an x86 host with an arm claim.
+
+**Evidence.** Red then green: `ci/tests/test_audio_guard_arch.py`. Run against the old selection (`ARCH.get(platform.machine().lower())`), it failed 4 of 8 cases, every host whose arch differs from the claim (`assert 'arm64' == 'x86_64'`). It passes 10 of 10 on the new guard. The arm64 measurement is in the PR.
+
+**What misled.** The observed `fpjs_sum` was exactly `EXPECTED["x86_64"]`, which read like the wrong table was loaded rather than a correct render.
+
+**Not covered.** A `canvas_noise=True` `NewContext` whose CPU architecture differs from its launch's renders the launch's audio: #458.
+
+
 ## #461: the macOS wheel guard assumed a whole-pixel line height
 
 **Fixed by:** the PR that refs #461. **Found by:** Tests run 43681967153 (head 67ae1665, PR #459), `Patch guards: stock parity`, job 132718067021.
