@@ -4,7 +4,8 @@ mouse.wheel() reaches the page as a mouse wheel does in stock macOS Firefox.
 macOS differs. A person's notched mouse on stock 159.0 gives one line a slow
 notch: deltaY 1, wheelDeltaY -48, DOMMouseScroll detail 1, MozMousePixelScroll
 16. A faster turn starts at one line and grows, with those values in proportion.
-A line is the scroller's line height, so the 16 and 48 follow the page's font.
+A line is the scroller's line height, so the 16 and 48 follow the page's font, and the guard reads the line from
+what an arrow key scrolls: a fractional line (16.5 px) gives events of the rounded line (17) and a scroll of its own height.
 
 Juggler turns 100 px into one notch, rounding, at least one; on a macOS identity it sends lines, which the
 OS accelerates in a faster turn. This is the macOS arm of driven-wheel-notches.py, apart from it because a
@@ -39,16 +40,19 @@ def mac_failures(got):
     step = got["step"]
     if not step:
         failures.append(f"ArrowDown did not finish scrolling ({got['arrow']})")
-    elif step % 3 or not 24 <= step <= 120:
-        failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px were expected")
-    line = step // 3
+    elif step * 2 % 3 or not 24 <= step <= 120:
+        failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px, in half pixels, were expected")
+    # The page's line may be fractional (16.5 px, #461). Gecko rounds it to whole pixels for the events and
+    # scrolls its exact height.
+    line = step / 3
+    rounded = int(line + 0.5)
     for name, lines in (("slow", 1), ("turn", 6), ("long", 63)):
         events, scrolled = got[name]
         wheels = [e[3] for e in events if e[0] == "wheel"]
         expected = [
             part
             for dy in wheels
-            for part in (["wheel", 1, 0, dy, -3 * line * dy], ["DOMMouseScroll", dy], ["MozMousePixelScroll", line * dy])
+            for part in (["wheel", 1, 0, dy, -3 * rounded * dy], ["DOMMouseScroll", dy], ["MozMousePixelScroll", rounded * dy])
         ]
         shape = [e[:5] if e[0] == "wheel" else e for e in events]
         if shape != expected:
