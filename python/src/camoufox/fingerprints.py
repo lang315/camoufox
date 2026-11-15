@@ -10,7 +10,7 @@ from random import Random, choice, randint, randrange
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from camoufox._warnings import WARNINGS_DATA, FallbackWarning, _warn_from_caller
-from camoufox.coherence import hardware_cpu
+from camoufox.coherence import hardware_cpu, intel_mac_conditions
 from camoufox.ip import valid_ipv4, validate_ip
 from camoufox.pkgman import LAUNCHER_CONSTANTS, load_yaml
 
@@ -1707,7 +1707,14 @@ def generate_context_fingerprint(
         webgl = preset.get('webgl', {})
     else:
         # Fall back to synthetic generation
-        fp = generate_fingerprint(os=os)
+        if os is None and cpu_arch:
+            # Not at the top: camoufox.webgl imports this module.
+            from .webgl import draw_os_for_cpu
+
+            os = draw_os_for_cpu(cpu_arch)
+        # An Intel Mac's GPU fits only a screen and cores an Intel Mac has (#463).
+        intel_mac = cpu_arch == 'x86' and os == 'macos'
+        fp = generate_fingerprint(os=os, machine=intel_mac_conditions() if intel_mac else None)
         config = from_fpgen(fp, ff_version)
         # fpgen's Linux pool now and then pairs the Linux UA with a Windows
         # platform and oscpu. launch_options() corrects that; this path did

@@ -5,6 +5,7 @@
  */
 
 import {
+	generate,
 	lookupPossibilities,
 	type TraceResult,
 	traceWithEvidence,
@@ -163,6 +164,38 @@ export function firefoxGpus(targetOs: string): Array<[string, string]> {
 		result.value.vendor,
 		result.value.renderer,
 	]);
+}
+
+/**
+ * An OS for an identity with this CPU architecture, drawn as fpgen weighs
+ * Firefox's OSes, among those with a recorded GPU that can stand beside it.
+ */
+export function drawOsForCpu(cpuArch: string): string {
+	const fits = new Set<string>(
+		(
+			[
+				["macos", "mac"],
+				["windows", "win"],
+				["linux", "lin"],
+			] as const
+		)
+			.filter(([, key]) =>
+				firefoxGpus(key).some(
+					([, r]) =>
+						!isSoftwareRenderer(r) && gpuFitsCpu(r, key, cpuArch, null),
+				),
+			)
+			.map(([name]) => name),
+	);
+	return String(
+		generate(
+			{
+				browser: "Firefox",
+				os: (v: unknown) => fits.has(String(v).toLowerCase()),
+			},
+			{ target: "os" },
+		),
+	).toLowerCase();
 }
 
 /** The extensions the shipped Firefox adds on this device's backend. */

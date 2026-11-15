@@ -58,19 +58,27 @@ describe.skipIf(!MODEL.ok)("a context of a browser", () => {
 		}
 	});
 
-	it("an x86 browser never gives a macOS context an Apple GPU", async () => {
-		// fpgen draws the screen before the GPU, and an Apple-silicon panel fits
-		// no Intel Mac GPU (#463), so the draw either claims an Intel Mac or refuses.
+	it("an x86 browser gives a macOS context an Intel Mac", async () => {
 		for (let i = 0; i < DRAWS; i++) {
 			const { browser, calls } = launchedWith(INTEL);
-			try {
-				await NewContext(browser, { os: "macos" });
-			} catch (e: any) {
-				expect(e.message).toContain("computes as an x86 CPU");
-				expect(e.message).toContain("no mac GPU fpgen recorded");
-				continue;
-			}
+			await NewContext(browser, { os: "macos" });
 			expect(archOf(calls.script, "mac")).toBe("x86");
+		}
+	});
+
+	it.each([
+		[INTEL, "x86"],
+		[ARM, "arm"],
+	])("a context with no os draws one its browser's CPU runs (cpu_identity %i)", async (cpuIdentity, arch) => {
+		for (let i = 0; i < DRAWS; i++) {
+			const { browser, calls } = launchedWith(cpuIdentity);
+			await NewContext(browser);
+			const platform = /setNavigatorPlatform\("([^"]+)"\)/.exec(
+				calls.script ?? "",
+			)?.[1];
+			const targetOs =
+				platform === "Win32" ? "win" : platform === "MacIntel" ? "mac" : "lin";
+			expect(archOf(calls.script, targetOs)).toBe(arch);
 		}
 	});
 

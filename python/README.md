@@ -115,7 +115,7 @@ with Camoufox(headless=True, canvas_noise=True, os="windows") as browser:
     alice = NewContext(browser, os="windows")
     bob = NewContext(
         browser,
-        os="linux",
+        os="macos",
         proxy={"server": "http://proxy.example.com:8080", "username": "user", "password": "pass"},
     )
     alice.new_page().goto("https://example.com")
@@ -141,15 +141,14 @@ Contexts with other OSes, like the ones above, need `canvas_noise=True`.
 
 The CPU belongs to the browser too. Every context computes canvas, Web Audio,
 Opus, wasm and NaNs as the launch's CPU (its `general.cpu_identity`), so a
-context claims that CPU's architecture. A drawn context gets a GPU that fits it,
-and an identity that cannot (a drawn one, or a `preset` claiming the other
-architecture) raises `ValueError`. fpgen records no ARM GPU for Windows (0 of
-11) or Linux (0 of 15), so a browser launched as an Apple Silicon Mac refuses
-Windows and Linux contexts. A browser with an x86 CPU gives a macOS context an
-Intel Mac, which fails to draw about half the time
-([#463](https://github.com/lang315/camoufox/issues/463)). A launch without `os` draws its CPU
-too (on an arm64 Mac host, 10 of 60 drew ARM), so pass `os` at launch when the
-contexts need one. To mix architectures, use one browser per architecture.
+context claims that CPU's architecture: its GPU is drawn to fit it, a context
+with no `os` gets an OS that CPU runs, and a `preset` claiming the other
+architecture raises `ValueError`. A browser with an x86 CPU gives a macOS context
+an Intel Mac. fpgen records no ARM GPU for Windows (0 of 11) or Linux (0 of 15),
+so a browser launched as an Apple Silicon Mac raises `ValueError` for a Windows
+or Linux context, and its contexts with no `os` are Macs. A `canvas_noise=True`
+launch without `os` can draw an ARM Mac (10 of 60 on an arm64 Mac host), so
+pass `os` at launch to mix OSes.
 
 The browser's own OS also decides some things for all its contexts. A browser
 launched as Windows on a Linux or macOS host (`os="windows"`, or drawn so)

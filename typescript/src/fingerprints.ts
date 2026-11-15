@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { generate, InvalidConstraints } from "fpgen-js";
 import * as random from "python-random";
-import { hardwareCpu } from "./coherence.js";
+import { hardwareCpu, intelMacConditions } from "./coherence.js";
 import {
 	supported as cpuAffinitySupported,
 	hostCoreCount,
@@ -38,7 +38,12 @@ import {
 	ValueError,
 } from "./pycompat.js";
 import { FallbackWarning, loadWarnings, warn } from "./warnings.js";
-import { sampleWebglForScreen, type TargetOS, webglForGpu } from "./webgl.js";
+import {
+	drawOsForCpu,
+	sampleWebglForScreen,
+	type TargetOS,
+	webglForGpu,
+} from "./webgl.js";
 
 export type { TargetOS } from "./webgl.js";
 
@@ -1798,7 +1803,13 @@ export function generateContextFingerprint({
 		webgl = p.webgl ?? {};
 		resolvedPreset = p;
 	} else {
-		const fp = generateFingerprint({ os: os ?? undefined });
+		if (!os && cpu_arch) os = drawOsForCpu(cpu_arch);
+		// An Intel Mac's GPU fits only a screen and cores an Intel Mac has (#463).
+		const intelMac = cpu_arch === "x86" && os === "macos";
+		const fp = generateFingerprint({
+			os: os ?? undefined,
+			machine: intelMac ? intelMacConditions() : null,
+		});
 		config = fromFpgen(fp, ff_version);
 		// fpgen's Linux pool now and then pairs the Linux UA with a Windows
 		// platform and oscpu. launchOptions() corrects that; this path did not,

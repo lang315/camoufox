@@ -29,9 +29,11 @@ def launched_with(cpu_identity):
     return browser
 
 
-def context_arch(browser, target_os):
+def context_arch(browser, target_os=None):
     script = browser.new_context.return_value.add_init_script.call_args.args[0]
     renderer = re.search(r'setWebGLRenderer\("([^"]+)"\)', script).group(1)
+    platform = re.search(r'setNavigatorPlatform\("([^"]+)"\)', script).group(1)
+    target_os = target_os or {"Win32": "win", "MacIntel": "mac"}.get(platform, "lin")
     return gpu_cpu(renderer, target_os)[0] or "x86"
 
 
@@ -48,17 +50,19 @@ def test_an_arm_browser_gives_a_macos_context_an_apple_gpu():
         assert context_arch(browser, "mac") == "arm"
 
 
-def test_an_x86_browser_never_gives_a_macos_context_an_apple_gpu():
-    # fpgen draws the screen before the GPU, and an Apple-silicon panel fits no
-    # Intel Mac GPU (#463), so the draw either claims an Intel Mac or refuses.
+def test_an_x86_browser_gives_a_macos_context_an_intel_mac():
     for _ in range(DRAWS):
         browser = launched_with(INTEL)
-        try:
-            sync_api.NewContext(browser, os="macos")
-        except ValueError as exc:
-            assert "computes as an x86 CPU" in str(exc) and "no mac GPU fpgen recorded" in str(exc)
-        else:
-            assert context_arch(browser, "mac") == "x86"
+        sync_api.NewContext(browser, os="macos")
+        assert context_arch(browser, "mac") == "x86"
+
+
+@pytest.mark.parametrize("cpu_identity, arch", [(INTEL, "x86"), (ARM, "arm")])
+def test_a_context_with_no_os_draws_one_its_browsers_cpu_runs(cpu_identity, arch):
+    for _ in range(DRAWS):
+        browser = launched_with(cpu_identity)
+        sync_api.NewContext(browser)
+        assert context_arch(browser) == arch
 
 
 def test_a_preset_claiming_another_cpu_raises():
