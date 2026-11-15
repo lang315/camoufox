@@ -30,6 +30,43 @@ later change should read first.
 **Not covered.** A `canvas_noise=True` `NewContext` whose CPU architecture differs from its launch's renders the launch's audio: #458.
 
 
+## #461: the macOS wheel guard assumed a whole-pixel line height
+
+**Fixed by:** the PR that refs #461. **Found by:** Tests run 43681967153 (head 67ae1665, PR #459), `Patch guards: stock parity`, job 132718067021.
+
+**Symptom.** `driven-wheel-notches-macos` failed every arm in one launch: `an arrow key scrolled the scroller 49.5 px`, events of `wheelDeltaY -51` and `MozMousePixelScroll 17` against an expected `-48.0` and `16.0`, and `scrolled 1039.5 px, expected 1008.0`. It had passed on the previous head, with nothing it runs changed.
+
+**Root cause.** The page's line read 16.5 px. `mac_failures` took `line = step // 3`, which floors 49.5 to 16, and required `step % 3 == 0`. Gecko rounds the line to whole pixels for the wheel, `DOMMouseScroll` and `MozMousePixelScroll` values (17) and scrolls its exact height (16.5 px a line: 99 px for six, 1039.5 for 63), so a fractional line failed all three arms against a 16 px expectation.
+
+**Fix.** The expectation follows the line the page reports: `line = step / 3` is the scroll amount, and the events carry `int(line + 0.5)`, the rounding the red readings show (16.5 gives 17). An arrow key's three lines must be a whole number of half pixels. No tolerance, no retry.
+
+**Not shown: why one launch had a 16.5 px line.** Twelve launches of the guard's own identity (`os="macos"`, Tests run 43699379065, job 132768186557) all gave a 17 px line at a device pixel ratio of 1, with identical `sans-serif` and `Helvetica` widths, so the 16.5 px launch did not recur. A half-pixel line is what a device pixel ratio of 2 gives, which a Retina macOS has, but nothing here measured that ratio in the red launch. The guard now follows the line either way, and a launch whose font resolved differently is the fonts guards' to catch.
+
+**Evidence.** `ci/tests/test_wheel_guard_line_height.py` feeds `mac_failures` the red job's readings (a 16.5 px line, events of 17): red on the old code (2 of 4 tests fail, the 16.5 px case and the exact-scroll check), green on the new one. Two negative controls give the same verdict on both: a 17 px line passes, and events that fail to round a 16.5 px line fail.
+
+**What misled the investigation.** The font draw looked like the cause, and every launch drew the same font.
+
+
+## #463: an Intel Mac identity failed to draw about half the time
+
+**Found by:** measuring #458's NewContext fix: `launch_options(os="macos", cpu={"arch": "x86"}, canvas_noise=True)` failed 21 of 40 times on `main` d2ff7880.
+
+**Symptom.** `ValueError: No recorded mac GPU fits a 1728x1117 screen`, and the same for 1512x982, 1800x1169, 1470x956, 1710x1112 and 2056x1329. Each is a panel only Apple-silicon Macs ship.
+
+**Root cause.** fpgen drew the macOS screen and core count without regard to the claimed CPU. Then `webgl.sample_webgl_for_screen` kept only GPUs that fit both the x86 CPU (`coherence.gpu_fits_cpu`) and that screen (`gpu_fits_machine`, `_intel_mac_misfit`). Beside an Apple-silicon panel no recorded GPU is left.
+
+**Fix.** When `os` is macOS and the `cpu` option resolves to x86, `launch_options` passes `coherence.intel_mac_conditions()` to fpgen: a `screen` predicate that refuses the Apple-silicon panels, and a core count some Intel Mac has. Both are fpgen's own conditions, so no new sampler is needed.
+
+A first version passed the screen predicate beside the display bound (`Screen.as_conditions()`, predicates on `screen.width` and `screen.height`). fpgen called the node predicate but ignored its answer beside the field predicates. Headful on a 1512x982 display, it still failed 24 of 40. So `generate_fingerprint` now folds the bound into the one `screen` predicate. fpgen-js behaves the same way, and the TypeScript launcher does the same.
+
+**Evidence.**
+- Red then green: `python/tests/test_intel_mac_draw.py` and `typescript/tests/intel-mac-draw.test.ts`, 30 launches per case. Both fail on `main` with `No recorded mac GPU fits a 1512x982 screen`, and pass 3 runs of 3.
+- The display-bound case goes red again with the bound merge disabled, in both languages.
+- Measured with the fork.3 macOS binary on an arm64 Mac: 100 of 100 headless and 40 of 40 headful launches drew, against 21 of 40 failing before.
+
+**What misled.** The error names the GPU draw, but the GPU draw was right: the screen was drawn first, for a machine the CPU rules out.
+
+
 ## #452: stock Firefox's log could not be deleted while its children exited
 
 **Fixed by:** the PR that refs #452. **Found by:** e2e probe run 43481814285 (`probe=patch_guard.py`, Windows build 43456656106), job 132079996522; again in fork.3's Windows probe 43550832485.

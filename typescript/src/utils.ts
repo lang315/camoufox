@@ -1923,10 +1923,17 @@ export async function launchOptions({
 
 	if (!usedPreset && fingerprint == null) {
 		// Default: synthetic generation via fpgen (infinite unique fingerprints)
+		// The GPU is drawn after the screen and must fit it, so an Intel Mac
+		// needs a screen and core count an Intel Mac has (#463).
+		const intelMac =
+			targetOsOption === "macos" &&
+			cpu != null &&
+			coherence.resolveCpu(cpu, "mac")["cpu:arch"] === "x86";
 		fingerprint = await utilsDeps.generateFingerprint({
 			screen: screenCons ?? undefined,
 			window,
 			os: targetOsOption,
+			machine: intelMac ? coherence.intelMacConditions() : null,
 		});
 	}
 

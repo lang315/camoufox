@@ -180,6 +180,18 @@ function intelMacMisfit(
 }
 
 /**
+ * fpgen conditions for a Mac with an Intel CPU: a screen and core count some
+ * Intel Mac has, so an Intel Mac GPU can be drawn beside them.
+ */
+export function intelMacConditions(): Record<string, (value: any) => boolean> {
+	return {
+		screen: (s) => !isAppleSiliconPanel(s?.width, s?.height),
+		"navigator.hardwareConcurrency": (cores) =>
+			INTEL_MAC_DGPU_CORES.has(Number(cores)),
+	};
+}
+
+/**
  * Whether a machine with this GPU has these cores and this screen. Only Intel
  * Macs are modelled; serves the WebGL draw and the finished-identity check.
  */
