@@ -15,7 +15,7 @@ later change should read first.
 
 ## #456: audio-matches-stock expected the host's audio, not the claimed CPU's
 
-**Found by:** e2e run 43556377935, macOS arm64 leg (job 132330070472), on build 43538465225 (`main` at 30bef255).
+**Fixed by:** PR #459. **Found by:** e2e run 43556377935, macOS arm64 leg (job 132330070472), on build 43538465225 (`main` at 30bef255).
 
 **Symptom.** `audio-matches-stock.py` failed all four arms on macOS arm64: `FAIL: default context: {'fpjs_sum': 35.749972093850374, ...} (stock arm64: {'fpjs_sum': 35.74996626004577, ...})`. It passed in fork.2, before the #445 sync.
 
@@ -28,6 +28,22 @@ later change should read first.
 **What misled.** The observed `fpjs_sum` was exactly `EXPECTED["x86_64"]`, which read like the wrong table was loaded rather than a correct render.
 
 **Not covered.** A `canvas_noise=True` `NewContext` whose CPU architecture differs from its launch's renders the launch's audio: #458.
+
+
+## #452: stock Firefox's log could not be deleted while its children exited
+
+**Fixed by:** the PR that refs #452. **Found by:** e2e probe run 43481814285 (`probe=patch_guard.py`, Windows build 43456656106), job 132079996522; again in fork.3's Windows probe 43550832485.
+
+**Symptom.** `main-world-eval-globals` failed on Windows before comparing anything: `PermissionError: [WinError 32] The process cannot access the file because it is being used by another process: '...\\getter-cost-parity-p5opac_a.log'`. The same build and guard file had passed in run 43469379888.
+
+**Root cause.** `stock-gpu-parity.stop_browser` ran `taskkill /F /T` and then `proc.wait()`, which waits for the parent only. Stock Firefox's stdout and stderr point at the log, so every child inherited its handle, and a child still exiting kept the file locked when the guard unlinked it. Whether the delete worked depended on timing. `getter-cost-parity.py` tolerates the failed delete behind `contextlib.suppress(OSError)`, which `test_a_log_that_cannot_be_deleted_does_not_hide_the_result` pins.
+
+**Fix.** `stop_browser` collects the browser's processes before killing (the parent's descendants, plus any process whose command line carries the throwaway profile, which finds orphans a parent walk misses), kills them through psutil and waits on every pid. It raises if one is alive after 30 s. `taskkill` and `pkill` are gone. No sleep-and-retry around `unlink`.
+
+**Evidence.** `ci/tests/test_stop_browser_waits_tree.py` replaces the kill command with one that ends only the parent, for a live parent and for one that has already exited. It failed 2 of 2 on the old helper (`child ... outlived stop_browser`) and passes on the new one. The race itself exists only on Windows and one run proves little about a timing race, so that test is the contract evidence.
+
+**What misled the investigation.** The old helper looked complete: `/T` reads as "the whole tree". It ends the tree, and `proc.wait()` waits for one process, so nothing waited for the tree to be gone.
+
 
 ## #444: three of the sync's guards could not run off Linux
 

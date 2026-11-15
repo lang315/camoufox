@@ -35,6 +35,7 @@ signing key, and cached under .ci-work, on Linux, macOS (hdiutil) and Windows
     python browser/tests/playwright/patches/stock-gpu-parity.py --stock FIREFOX --recorded-stock FIREFOX
 """
 
+import contextlib
 import hashlib
 import http.server
 import json
@@ -52,6 +53,8 @@ import urllib.request
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List
+
+import psutil
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from helpers import resolve_binary  # noqa: E402
@@ -159,13 +162,25 @@ def probe(binary: Path, env: Dict[str, str]) -> Dict[str, Any]:
 
 
 def stop_browser(proc: subprocess.Popen, profile: str) -> None:
-    """End `proc` and its children, then delete its profile."""
-    # Every process of this browser carries the throwaway profile path.
-    if os.name == "nt":
-        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True)
-    else:
-        subprocess.run(["pkill", "-9", "-f", profile], capture_output=True)
+    """End `proc` and every process of its browser, wait until all are gone, then delete its profile."""
+    # Every process of this browser carries the throwaway profile path. The kill is
+    # asynchronous, and on Windows a file stays locked while any process that
+    # inherited its handle lives, so waiting for `proc` alone is not enough (#452).
+    tree = {}
+    with contextlib.suppress(psutil.NoSuchProcess):
+        tree.update((c.pid, c) for c in psutil.Process(proc.pid).children(recursive=True))
+    for other in psutil.process_iter(["cmdline"]):
+        if profile in " ".join(other.info["cmdline"] or ()):
+            tree[other.pid] = other
+    tree.pop(os.getpid(), None)
+    for victim in tree.values():
+        with contextlib.suppress(psutil.NoSuchProcess):
+            victim.kill()
+    proc.kill()
     proc.wait()
+    _, alive = psutil.wait_procs(tree.values(), timeout=30)
+    if alive:
+        raise SystemExit(f"still running 30s after kill: {[p.pid for p in alive]}")
     shutil.rmtree(profile, ignore_errors=True)
 
 
