@@ -41,7 +41,6 @@ holds its negative controls.
     python browser/tests/playwright/patches/getter-cost-parity.py --stock FIREFOX
 """
 
-import contextlib
 import http.server
 import json
 import os
@@ -252,9 +251,7 @@ def stock_launch(binary, url, server, timeout=PAGE_TIMEOUT_S):
     status = proc.poll()
     stop_stock(profile, proc)
     output = Path(log).read_text(encoding="utf-8", errors="replace")
-    # Windows refuses to delete a file a surviving process still has open.
-    with contextlib.suppress(OSError):
-        Path(log).unlink()
+    Path(log).unlink()
     if server.results:
         return server.results[0], ""
     print(f"stock Firefox output ({len(output)} bytes, last 3000):\n{output[-3000:]}")
