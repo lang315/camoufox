@@ -199,15 +199,29 @@ def intel_mac_conditions() -> Dict[str, Any]:
     }
 
 
+def _gpu_cores_misfit(renderer: Optional[str], target_os: str, cores: Any) -> Optional[str]:
+    """Why no machine with this GPU's CPU vendor reports this core count.
+
+    An AMD iGPU means an AMD CPU, and fpgen records none of them at a count only
+    Intel's hybrids report (INTEL_ONLY_CORE_COUNTS).
+    """
+    vendor = gpu_cpu_vendor(renderer, target_os)
+    if vendor and cores_cpu_vendor(cores) not in (None, vendor):
+        return f'{str(renderer)!r} with hardwareConcurrency {cores}, which only an Intel CPU reports'
+    return None
+
+
 def gpu_fits_machine(
     renderer: Optional[str], target_os: str, cores: Any = None, width: Any = None, height: Any = None
 ) -> bool:
     """Whether a machine with this GPU has these cores and this screen.
 
-    Only Intel Macs are modelled. Like gpu_fits_os, which it does not repeat,
-    it serves both the WebGL draw and the finished-identity check.
+    The screen is modelled for Intel Macs only. Like gpu_fits_os, which it does
+    not repeat, it serves both the WebGL draw and the finished-identity check.
     """
-    return target_os != 'mac' or _intel_mac_misfit(renderer, cores, width, height) is None
+    return _gpu_cores_misfit(renderer, target_os, cores) is None and (
+        target_os != 'mac' or _intel_mac_misfit(renderer, cores, width, height) is None
+    )
 
 
 def _check_intel_mac_hardware(config: Dict[str, Any], target_os: str) -> Optional[str]:
@@ -582,12 +596,15 @@ def cpu_conflict(config: Dict[str, Any], target_os: str) -> Optional[str]:
 
 
 def _check_cpu(config: Dict[str, Any], target_os: str) -> Optional[str]:
-    return cpu_conflict(config, target_os)
+    return cpu_conflict(config, target_os) or _gpu_cores_misfit(
+        _renderer(config), target_os, config.get('navigator.hardwareConcurrency')
+    )
 
 
 def _repair_cpu(config: Dict[str, Any], target_os: str) -> None:
     # The GPU decides. An AMD APU's GPU beside an Intel-only core count stays
-    # reported: no vendor matches both.
+    # reported: no vendor matches both. A drawn identity never has the pair
+    # (gpu_fits_machine); a caller's own GPU or cores can.
     arch, maker = hardware_cpu(config, target_os)
     if arch is None:
         arch = 'x86'
@@ -676,6 +693,8 @@ def drop_incoherent_source_values(
         rule = 'gpu-matches-os'
     elif _check_intel_mac_hardware(config, target_os):
         rule = 'intel-mac-hardware'
+    elif _gpu_cores_misfit(renderer, target_os, config.get('navigator.hardwareConcurrency')):
+        rule = 'cpu-matches-hardware'
     else:
         return []
     kept = _changed(config, {}, keep & {'webGl:renderer', 'webGl:vendor'})
