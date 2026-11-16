@@ -31,7 +31,9 @@ a macOS host, content top 84.95: relative y == 0 went out at CSS 85, device
 row 89 against an edge at 89.42, and the page got a mouseout at y == 0 after
 a 5s ack wait. The chrome's scale is the identity's devicePixelRatio times the
 text scale, so that arm pins the ratio: a drawn 1.5 gives 38 app units, where
-the same snap happened to land inside.
+the same snap happened to land inside. It runs without humanize only: a
+humanized move's own points reach the page before its destination, so the
+count below cannot see a dropped destination.
 
 Each point must be *delivered*, not merely survived: the page has to observe a
 mousemove. A point that is dropped without hanging is still a bug -- it is the
@@ -46,7 +48,7 @@ Run against a specific build:
     CAMOUFOX_EXECUTABLE_PATH=/path/to/camoufox-bin python3 browser/tests/playwright/patches/mouse-boundary-sweep.py
 
 What PASS means: every ring coordinate, on every spoofed OS, humanized and not,
-at both text scales, was acked and seen by the page; and input is still live at
+and at 105% text, was acked and seen by the page; and input is still live at
 the end of each run.
 """
 
@@ -57,8 +59,9 @@ from camoufox.async_api import AsyncCamoufox
 from helpers import launch_kwargs
 
 SPOOFED_OSES = ["windows", "macos", "linux"]
-SCALES = ({}, {"firefox_user_prefs": {"ui.textScaleFactor": 105},
-               "config": {"window.devicePixelRatio": 1}, "i_know_what_im_doing": True})
+TEXT_105 = {"firefox_user_prefs": {"ui.textScaleFactor": 105},
+            "config": {"window.devicePixelRatio": 1}, "i_know_what_im_doing": True}
+ARMS = ((False, {}), (True, {}), (False, TEXT_105))
 # Well inside the viewport, so every dispatched point is a real displacement.
 INTERIOR = (0.34, 0.34)
 # Per-point ceiling. Comfortably above the 5s ack deadline, so a dropped point
@@ -116,14 +119,13 @@ async def main() -> int:
     print("\n=== viewport boundary sweep ===")
     failures = []
     for spoofed_os in SPOOFED_OSES:
-        for humanize in (False, True):
-            for scale in SCALES:
-                bad = await _sweep(spoofed_os, humanize, scale)
-                for point, why in bad:
-                    failures.append((spoofed_os, humanize, scale, point, why))
-                    print(f"    FAIL {point}  {why}", flush=True)
-                if not bad:
-                    print("    ok", flush=True)
+        for humanize, scale in ARMS:
+            bad = await _sweep(spoofed_os, humanize, scale)
+            for point, why in bad:
+                failures.append((spoofed_os, humanize, scale, point, why))
+                print(f"    FAIL {point}  {why}", flush=True)
+            if not bad:
+                print("    ok", flush=True)
 
     if failures:
         print(f"\n  {len(failures)} coordinate(s) did not reach the renderer.\n"

@@ -28,12 +28,12 @@ Why the arm passed on Linux and at the default prefs: the chrome's scale is the 
 
 **Fix.** `MouseDispatch._devicePixelsIn` snaps in device pixels, from the chrome's app units per device pixel (`toTopLevelWidgetRect(0, 0, 1, 1)`). The snap applies to the viewport bounds, to `_isShown`'s clip, and to `leaveContent`, which now goes at least one device pixel past the snapped edge. At a whole scale the bounds are unchanged.
 
-**Evidence.** `mouse-boundary-sweep.py` gained an arm at text 105% with the ratio pinned to 1. Measured on an arm64 Mac with the `v159.0-beta.35-fork.3` macOS build, whose browser inputs are main's, and the same build with only `MouseDispatch.js` replaced in `omni.ja`:
-- Before: all three non-humanized 105% arms failed, 20 coordinates: `y = 0` in each, and `h - 1` where the bottom fell on a pixel boundary. All read `dispatched, but the page saw no mousemove`.
-- After: every arm passed, 12 of 12.
+**Evidence.** `mouse-boundary-sweep.py` gained a non-humanized arm at text 105% with the ratio pinned to 1, per spoofed OS. Measured on an arm64 Mac with the `v159.0-beta.35-fork.3` macOS build, whose browser inputs are main's, and the same build with only `MouseDispatch.js` replaced in `omni.ja`:
+- Before, in two runs: 20 coordinates each time, all reading `dispatched, but the page saw no mousemove`. The first run failed all three arms. The second failed the windows and macos arms (`y = 0` and `h - 1`) and passed a linux draw at 1344x633, whose geometry was not logged.
+- After: every arm passed, 9 of 9. An earlier version of the sweep, which also had humanized 105% arms, passed 12 of 12.
 - Without the ratio pin, 2 of 3 non-humanized arms failed in each of two runs, 15 coordinates each. In the run that logged the scale, the failing draws were at 57 app units and the passing one, a linux draw at ratio 1.5, at 38.
-- The humanized arms pass either way: they count any mousemove, and the trajectory's own points arrive before the destination is dropped.
-- `humanize-mouse-trajectory.py`: the 105% arm's `y = 0` exits appeared in 4 of 4 runs before, and in none of 2 completed runs after. Its remaining failures, on both builds and at the default prefs too, are exits placed correctly but more than a frame after the last mousemove. #451 stays open for them.
+- The humanized 105% arms passed on both builds, so the shipped arm is non-humanized: a humanized move's own points reach the page before its destination, and the sweep counts any mousemove.
+- `humanize-mouse-trajectory.py`: the 105% arm's `y = 0` exits appeared in 4 of 4 runs before, and in none of 2 completed runs after. Its remaining failures, on both builds and at the default prefs too, are exits placed correctly but more than a frame after the last mousemove. That is #472, a separate mechanism.
 
 **What misled.** The guard printed each flagged mouseout beside the last mousemove before it, so a failed re-entry read as an exit placed a pixel short and a frame late. The probe's `over` timestamps, 5 s after each "exit", and Juggler's own `WARN` lines showed the 5 s waits. `mouse-boundary-sweep.py` exists for this class, but it swept only the default prefs. Its humanized arms count any mousemove, so they could not see a dropped destination.
 
