@@ -32,6 +32,8 @@ A reading, not a finding: the X11 popup window exists before it is sized and pla
 
 **Red-to-green.** `ci/tests/test_popup_covered_click.py`: the `[0, 0, 1, 1]` read from job 133590159488, the `[0, 0, 0.8, 0.8]` read from job 133617160042, a `[0, 0, 0, 0]` read, a `showing` read and no read all give no point (6 failed before the fix, none after); an open real rect gives its point.
 
+**Evidence on the fix.** A loop of the guard's own `probe` and `check` on both arms, on a draft diagnostic PR (#485, never merged), two runs of the same guard code: Tests run 43965887255 (job 133648534379, head 538dc375) and run 43974154518 (job 133676708463, head c919854d). Headless 97 + 136 = 233 launches, Xvfb display 96 + 135 = 231, **0 failure lines on either arm**. The guard file is byte-identical to the one in this PR. That is 0 of 231 on the arm that went red, against the 1 of 141 the unfixed readiness check accepted; at 231 launches a true rate of 1 in 141 would have shown zero about 20% of the time, so this lowers the rate and does not prove it gone.
+
 **What misled the investigation.** "What `_popupAt` tests" read as a readiness condition for the guard, and one green launch of the #483 head read as evidence of both arms. The first sequence diagnostic (run 43954923610) measured nothing: it replaced the guard file, and the guard's own unit tests, which import it, failed in Static checks.
 
 ## #460: `driven-dblclick-gap` read a first press 255 ms after the pointer arrived, against a 250 ms ceiling the dwell's own clamp sits next to
