@@ -488,9 +488,10 @@ describe("the GPU check", () => {
 	it("warns instead with require_gpu: false", async () => {
 		const display = new GpuDisplay(NVIDIA, false, false);
 		vi.spyOn(display, "waitForGpu").mockResolvedValue(false);
-		const { warnings: caught } = await warnings.recordWarnings(() =>
+		const { error, warnings: caught } = await warnings.recordWarnings(() =>
 			utils.attachVirtualDisplay(new FakeBrowser(), display),
 		);
+		if (error) throw error;
 		expect(
 			caught.some(
 				(w) => w.category === "LeakWarning" && w.message.includes("software"),

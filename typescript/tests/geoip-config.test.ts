@@ -101,10 +101,11 @@ it("unpacks the archive beside the database, not in os.tmpdir()", async () => {
 });
 
 it("warns on a deprecated source", async () => {
-	const { warnings } = await w.recordWarnings(() => {
+	const { error, warnings } = await w.recordWarnings(() => {
 		g.warnIfDeprecated(g.getGeoipConfigByName(DEPRECATED));
 		g.warnIfDeprecated(g.getGeoipConfigByName(DEFAULT));
 	});
+	if (error) throw error;
 	expect(warnings.map((x) => x.category)).toEqual(["FutureWarning"]);
 	expect(warnings[0].message).toContain(DEFAULT);
 });
