@@ -127,12 +127,14 @@ def probe_once(binary):
     _last[0] = 'launch'
     with Camoufox(executable_path=str(binary), headless=False, os="linux", i_know_what_im_doing=True,
                   args=marionette_args(), env=marionette_env(), firefox_user_prefs={"marionette.port": port}) as browser:
-        _last[0] = 'p1-goto'
-        page = browser.new_page()
-        page.goto(url, wait_until="load")
+        # Marionette stays on the newest window at connect; this one outlives both phases' pages.
+        keeper = browser.new_page()
+        keeper.goto(url, wait_until="load")
         _last[0] = 'marionette-connect'
         m = Marionette(port)
         _last[0] = 'p1'
+        page = browser.new_page()
+        page.goto(url, wait_until="load")
         page.locator("#open").click()
         rec["racing"] = timed_click(page)
         _last[0] = "p1-state"
