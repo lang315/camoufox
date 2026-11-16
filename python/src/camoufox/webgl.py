@@ -265,8 +265,9 @@ def sample_webgl_for_screen(
     Only GPUs the rest of the identity can stand beside are drawn: never a
     software rasteriser, a GPU the OS cannot report, the resistFingerprinting
     mask, a discrete GPU behind a netbook panel (see gpu_screen_is_plausible),
-    or an Intel Mac GPU beside cores or a panel no Intel Mac has
-    (coherence.gpu_fits_machine), or a GPU the claimed CPU cannot sit beside
+    an AMD iGPU beside a core count only Intel reports, an Intel Mac GPU beside
+    cores or a panel no Intel Mac has (coherence.gpu_fits_machine), or a GPU the
+    claimed CPU cannot sit beside
     (cpu: cpu:arch and cpu:manufacturer, coherence.gpu_fits_cpu).
     The screen is left alone: it has already been reconciled with the real
     display and the window (#499).
