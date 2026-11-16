@@ -13,6 +13,25 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #446: an AMD iGPU identity could draw a core count only Intel CPUs report
+
+**Found by:** the coherence tests on a 10-core macOS arm64 host, the upstream sync (#444, #445). `test_generated_identities[windows]`, `[linux]` and `test_every_bundled_preset[windows]`, `[linux]` failed with `Violation(rule='cpu-matches-hardware', detail='CPU amd x86 with hardwareConcurrency 10, which only an Intel CPU reports')`. Upstream at `df9ca115` fails the same way. Tests on `ubuntu-24.04` stayed green.
+
+**Root cause.** Two paths made the pair, and neither asked whether the GPU's CPU vendor can report the count:
+- The synthetic draw. `webgl.sample_webgl_for_screen` filtered GPUs with `gpu_fits_machine`, which modelled Intel Macs only (`target_os != 'mac' or ...`), and `gpu_fits_cpu`, which returns True while no `cpu:arch` or `cpu:manufacturer` is set. The GPU is drawn before `set_cpu_default`, so an AMD iGPU (`Radeon HD 3200 Graphics`) passed beside 10, 14, 18, 22 or 28 cores. Seeds 0 to 299 on a 1920x1080 screen at 10 cores drew it 24 times on Windows and 35 on Linux.
+- A preset. `fix_hardware_concurrency` replaces the preset's cores with the host's after the preset's GPU is kept, and `drop_incoherent_source_values` only dropped a GPU for `gpu-matches-os` and `intel-mac-hardware`. All 27 AMD iGPU presets of `fingerprint-presets-v150.json` (18 Windows, 9 Linux) carry 2 to 16 cores, so the pair came from a 10-core host and no preset is a data bug: 0 of the 113 and 0 of the 285 stored presets pair an AMD iGPU with an Intel-only count, and `clean-fingerprint-data.py` drops none.
+
+**Why CI was green.** The pythonlib job runs on `ubuntu-24.04` with 4 cores, which no draw makes an Intel-only count, and a Linux identity claims the host's llvmpipe, which fits any CPU.
+
+**The data.** fpgen's recorded core counts behind each iGPU (`model-2/2026`): Radeon HD 3200 reports 2, 6, 8, 12, 16 on Windows and 2, 8, 12, 16 on Linux, never 10, 14, 18, 22 or 28. Intel iGPUs reach 14 and 28 on Windows and 22 on Linux.
+
+**Fix.** `coherence._gpu_cores_misfit` says no machine whose GPU implies one CPU vendor reports a count only the other vendor ships. `gpu_fits_machine` (the sampler's filter), `_check_cpu` (so `validate` sees the pair before any `cpu:*` key is set, which is what `clean-fingerprint-data.py` reads) and `drop_incoherent_source_values` (so a preset's GPU is redrawn, as an Intel Mac IGP is) all use it. The same in TypeScript. A GPU or core count the caller set (`webgl_config`, `navigator.hardwareConcurrency`) is still kept and reported.
+
+**Evidence.** Red then green: `python/tests/test_amd_igpu_cores.py` (12 of 14 failed before the fix) and `typescript/tests/amd-igpu-cores.test.ts` (10 of 12). Each test pins the cores and the GPU draw's seeds, so none reads the host: a runner with 4 cores fails them as a 10-core Mac does. The sampler arms still draw the Radeon at 12 cores, so the filter is no over-reach.
+
+**What misled.** The issue named presets as a possible carrier. The stored presets are clean; the host's core count made the pair. And `_repair_cpu`'s comment ("stays reported") described a pair a launch could not avoid, when the draw could have.
+
+
 ## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
 
 **Found by:** measuring #456 on an arm64 Mac (M1 Pro) with the `v159.0-beta.35-fork.3` macOS release. Each pairing below gave the same result in 3 of 3 rounds:
