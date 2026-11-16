@@ -13,6 +13,30 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #472: a humanized edge exit came 19-28 ms after the last mousemove, not one sample after it
+
+**Symptom.** `humanize-mouse-trajectory.py`'s edge-exit arms, default prefs included, now and then flagged an exit placed as stock places it (last move on the edge or 2 px inside, exit 1-3 px past) but 21-53 ms after the last mousemove. That is over the guard's one-frame bound. Hosted macOS job 132694087736 (fork.3): `[[(1686, 0), (1686, -3), 24], [(53, 0), (53, -3), 24]]`.
+
+**Root cause.**
+- `MouseDispatch.sendTrajectoryAcked` sent the exit (`leaveContent`) only after `send()` had the renderer's ack for the move before it. That ack is fired by `BrowserChild::RecvRealMouseMoveEvent` (`input-coalescing-parity.patch`) on the content main thread.
+- Both events are stamped when the parent dispatches them, so the gap the page reads included however long that thread took to take the IPC message.
+- With `dump()` lines in the crossing branch (fork.3 macOS build, arm64 Mac, four runs), every flagged exit left from a step lying on the edge itself: `_crossing` returned `ms 0` and `last null`, and the step's ack took 22-28 ms. Over all 70 crossings the ack took 7 ms or less in 63 and 19-28 ms in 7.
+- Stock on X11 times both events from the X server's motion and leave events, one pointer sample apart, and never waits on the content process between them.
+- Which work holds the content main thread in the slow cases was not measured.
+
+**Fix.**
+- The exit goes out as soon as the page's last move is dispatched, and that move's ack is awaited after it. `send()` records the pixel at dispatch.
+- Only that last move is unacked when the exit goes. `RealMouseMoveEvent` is `[Compress]` (`PBrowser.ipdl`), so a move still queued when the next arrives is replaced and its ack never comes. A step before an interpolated `last` point is therefore still acked first.
+- The exit (`RealMouseEnterExitWidgetEvent`, the same input priority) cannot overtake the move: `BrowserChild::RecvRealMouseButtonEvent` flushes coalesced moves before it.
+- The step returns the last move's ack, and `Pacer.play` awaits each step, so nothing more is dispatched until that ack resolves. An unacked move still costs the 5 s deadline, now after the exit.
+
+Rejected: dropping the ack, which is the deadlock bound (`docs/input-dispatch.md`), and widening the guard's one-frame bound.
+
+**Evidence.** `browser/tests/juggler/edge-exit.test.mjs` drives `sendTrajectoryAcked` with acks the test releases. It covers an edge step, and a crossing with an interpolated `last` point. Before the fix both fail: the exit is not dispatched until the ack is released. After it both pass, and they also pin that nothing follows the exit until that ack resolves.
+
+**What misled.** The issue first blamed `send()` skipping `_crossing`'s `last` point. The instrumented runs showed it was never skipped, in 39 crossings where it could have been.
+
+
 ## #451: at 105% text scale a move to the content's edge row stalled 5 s and reached the page as a mouseout
 
 **Symptom.** The `ui.textScaleFactor: 105` arm of `humanize-mouse-trajectory.py`, added by the upstream sync (df9ca115), failed on Windows (job 132037002566) and on macOS (job 132330070472). Every flagged exit was at `y = 0`, 12-67 ms after the last mousemove. The default-prefs arm passed, and so did Linux.
