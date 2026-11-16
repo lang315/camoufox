@@ -125,7 +125,7 @@ def probe_once(binary):
     url = f"http://127.0.0.1:{srv.server_port}/"
     rec = {}
     _last[0] = 'launch'
-    with Camoufox(executable_path=str(binary), headless=True, os="linux", i_know_what_im_doing=True,
+    with Camoufox(executable_path=str(binary), headless=False, os="linux", i_know_what_im_doing=True,
                   args=marionette_args(), env=marionette_env(), firefox_user_prefs={"marionette.port": port}) as browser:
         _last[0] = 'marionette-connect'
         m = Marionette(port, timeout=20)
