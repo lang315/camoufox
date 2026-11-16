@@ -15,9 +15,12 @@ HERE = Path(__file__).resolve().parent
 
 
 def fixed():
-    spec = importlib.util.spec_from_file_location("fixed", HERE / "popup-covered-fixed.py")
+    from importlib.machinery import SourceFileLoader
+
+    loader = SourceFileLoader("fixed", str(HERE / "popup-covered-fixed.pyx"))
+    spec = importlib.util.spec_from_loader("fixed", loader)
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    loader.exec_module(module)
     return module
 
 
