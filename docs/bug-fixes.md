@@ -13,6 +13,27 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #469: `popup-covered-click` took the date picker's rect before it had its real one
+
+**Fixed by:** the PR that refs #469. **Found by:** Tests run 43947261469 (PR #474, head 702f6c85), job 133590159488, the display arm: `FAIL: :0: the picker [0, 0, 1, 1] covers none of the page [0, 85, 1280, 683]`.
+
+**Symptom.** One red on main's code, on the Xvfb arm the pre-#483 diagnostics had not measured. The headless arm had passed in the same run.
+
+**Root cause.** #483 made the guard wait until the picker was `open` with a non-zero width and height. `MouseDispatch._popupAt` skips a popup only when a side is 0, and that is not enough to tell the picker has its real rect. Measured with a recorder on a draft diagnostic PR (#484, never merged), run 43956846664 (job 133617160042, head 476040e0), both arms in parallel, 141 launches each, polling the panel from the click until its rect stopped changing for a second:
+
+- Display arm, 1 of 141: state `open` with the rect `[0, 0, 0.8, 0.8]` for 13 ms (t=13 to 26 ms, 4 reads about 1.7 ms apart), then `[0, 107.2, 273.6, 302.4]` from t=26 ms for the remaining second. The page's content rect was `[0, 84.8, 1024, 723.2]` in every read. The red above is the same with `[0, 0, 1, 1]`.
+- Headless arm: 0 of 141 had a non-final rect at the first `open` read. That does not show it cannot happen there.
+- Time to the final rect: headless median 25 ms, p95 47, max 67; display median 32 ms, p95 57, max 79. After the first read that covers a point of the page, the rect never changed again in any of the 282 launches.
+- The old check accepted the transient 1 of 141 times on display, 0 of 141 headless. A rect at the origin cannot cover a point of the page, whose content starts below the browser chrome (y 84.8 to 85), so "covers a point of the page" refuses it. Two consecutive agreeing reads would not have: the transient held 4 of them.
+
+A reading, not a finding: the X11 popup window exists before it is sized and placed. Not measured: a launch where the transient covers a point of the page, which cannot happen while the content starts below y 84.
+
+**Fix.** `open_point` returns the point the picker covers only when its state is `open` and its rect covers a point of the page; `wait_open` polls for it inside its 10 s deadline and returns the last read, which the failure prints. The point is rounded to whole pixels (a fractional rect gave `88.39999999999999`, which the page's `clientY` comparison could never match, so a move the page did see would have read as covered). The guard's per-arm checks are one function, `check`, so a loop can count them. No sleep-and-hope, no retry of the probe, no widened tolerance.
+
+**Red-to-green.** `ci/tests/test_popup_covered_click.py`: the `[0, 0, 1, 1]` read from job 133590159488, the `[0, 0, 0.8, 0.8]` read from job 133617160042, a `[0, 0, 0, 0]` read, a `showing` read and no read all give no point (6 failed before the fix, none after); an open real rect gives its point.
+
+**What misled the investigation.** "What `_popupAt` tests" read as a readiness condition for the guard, and one green launch of the #483 head read as evidence of both arms. The first sequence diagnostic (run 43954923610) measured nothing: it replaced the guard file, and the guard's own unit tests, which import it, failed in Static checks.
+
 ## #460: `driven-dblclick-gap` read a first press 255 ms after the pointer arrived, against a 250 ms ceiling the dwell's own clamp sits next to
 
 **Fixed by:** the PR that refs #460. **Found by:** the Windows patch-guard probe, e2e run 43674869097 (Windows build run 43538462122, job 132692726313): `locator.dblclick: first press 255 ms after the pointer reached the button, want 50-250`.
