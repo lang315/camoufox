@@ -116,6 +116,24 @@ return out;
 _last = [None]
 
 
+def wait_covered_rec(page, deadline_s=10):
+    """wait_covered, recording each move that took over 1 s, with its point."""
+    slow, end, i = [], time.monotonic() + deadline_s, 0
+    while time.monotonic() < end:
+        x, y = 150 + i % 2 * 20, 90
+        i += 1
+        t = time.monotonic()
+        page.mouse.move(x, y)
+        seen = page.evaluate("""([x, y]) => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(
+            () => r(document.getElementById('t').dataset.moved === `${x},${y}`))))""", [x, y])
+        took = time.monotonic() - t
+        if took > 1:
+            slow.append({"i": i, "x": x, "y": y, "took": round(took, 2), "seen": seen})
+        if not seen:
+            return True, slow
+    return False, slow
+
+
 def probe_once(binary):
     from camoufox.sync_api import Camoufox
 
@@ -148,8 +166,10 @@ def probe_once(binary):
         page.locator("#open").click()
         rec["p2_after_click"] = m.js(STATE)
         t = time.monotonic()
-        rec["covered"] = wait_covered(page)
+        rec["covered"], rec["slow_moves"] = wait_covered_rec(page)
         rec["cover_s"] = round(time.monotonic() - t, 2)
+        rec["box"] = {"t": page.locator("#t").bounding_box(),
+                      "win": page.evaluate("[innerWidth, innerHeight, outerWidth, outerHeight]")}
         rec["log"] = page.locator("#log").text_content().split()
         if not rec["covered"]:
             rec["p2_at_failure"] = m.js(STATE)
@@ -159,10 +179,12 @@ def probe_once(binary):
 
 
 def worker(binary, budget_s):
+    os.environ["DEBUG"] = "pw:browser"
     end = time.monotonic() + budget_s
     n = 0
     while time.monotonic() < end:
         n += 1
+        print(f"LAUNCH {n}", flush=True)
         try:
             rec = probe_once(binary)
         except Exception as e:
@@ -177,21 +199,40 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         with hidden_display():
             return worker(binary, float(sys.argv[2]))
-    budget = 420
-    workers = int(os.environ.get("DIAG_WORKERS", "2"))
-    procs = [subprocess.Popen([sys.executable, __file__, "--worker", str(budget)], stdout=subprocess.PIPE, text=True)
-             for _ in range(workers)]
+    budget = 1000
+    workers = int(os.environ.get("DIAG_WORKERS", "3"))
+    procs = [subprocess.Popen([sys.executable, __file__, "--worker", str(budget)], stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True) for _ in range(workers)]
     recs = []
-    for p in procs:
+    for w, p in enumerate(procs):
         out, _ = p.communicate()
-        recs += [json.loads(line[4:]) for line in out.splitlines() if line.startswith("REC ")]
+        cur, warns = None, {}
+        for line in out.splitlines():
+            if line.startswith("LAUNCH "):
+                cur = int(line[7:])
+            elif "[juggler] WARN" in line:
+                warns.setdefault(cur, []).append(line.strip()[:240])
+            elif line.startswith("REC "):
+                r = json.loads(line[4:])
+                r["worker"] = w
+                r["warn"] = warns.get(r["n"], [])
+                recs.append(r)
+    covered = [r for r in recs if r.get("covered")]
     bad = [r for r in recs if r.get("error") or not r.get("covered")]
-    print(f"DIAG workers={workers} launches={len(recs)} not-covered={sum(1 for r in recs if not r.get('covered') and not r.get('error'))} errors={sum(1 for r in recs if r.get('error'))}")
+    slow = [r for r in recs if r.get("slow_moves")]
+    print(f"DIAG workers={workers} launches={len(recs)} covered={len(covered)} "
+          f"not-covered={sum(1 for r in recs if not r.get('covered') and not r.get('error'))} "
+          f"errors={sum(1 for r in recs if r.get('error'))} slow-move-launches={len(slow)} "
+          f"with-warn={sum(1 for r in recs if r['warn'])}")
     for r in bad:
         print("BAD " + json.dumps(r))
+    for r in slow:
+        print("SLOW " + json.dumps({k: r.get(k) for k in ("n", "worker", "cover_s", "slow_moves", "box", "warn")}))
+    sig = {}
     for r in recs:
-        if r not in bad:
-            print("OK " + json.dumps({k: r[k] for k in ("n", "cover_s", "p1_after_close", "p2_before_click") if k in r}))
+        key = json.dumps([(w["focus"], w["canOpen"], w["activeWin"]) for w in r.get("p2_before_click", [])])
+        sig[key] = sig.get(key, 0) + 1
+    print("SIG " + json.dumps(sig))
     return 1
 
 

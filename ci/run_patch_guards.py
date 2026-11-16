@@ -254,7 +254,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path)
     parser.add_argument("--evidence-dir", type=Path, default=EVIDENCE_DIR)
-    parser.add_argument("--timeout", type=int, default=600, help="per guard")
+    parser.add_argument("--timeout", type=int, default=1800, help="per guard")
     parser.add_argument("--only", nargs="*", help="run only these guard names")
     parser.add_argument("--group", choices=sorted(GROUPS), help="run one group (default: all)")
     args = parser.parse_args(argv)
