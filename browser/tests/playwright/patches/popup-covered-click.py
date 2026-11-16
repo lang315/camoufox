@@ -21,15 +21,17 @@ Runs headless and, where Xvfb is installed, on a private Xvfb display.
 """
 
 import http.server
+import json
 import importlib.util
 import os
+import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import resolve_binary  # noqa: E402
+from helpers import Marionette, free_port, marionette_args, marionette_env, resolve_binary  # noqa: E402
 
 # A private Xvfb display, started as playwright-window-size.py starts one.
 _spec = importlib.util.spec_from_file_location(
@@ -77,7 +79,7 @@ def timed_click(page):
         return type(e).__name__
 
 
-def wait_covered(page, deadline_s=30):
+def wait_covered(page, deadline_s=10):
     """Whether the picker came to cover #t: a move there stops reaching the
     page. Juggler acks a move the parent gives the page, and the page handles
     it at its next refresh tick, before that tick's animation frame callbacks."""
@@ -94,69 +96,91 @@ def wait_covered(page, deadline_s=30):
     return False
 
 
-def probe(binary, display):
+
+STATE = """
+const out = [];
+for (const w of Services.wm.getEnumerator("navigator:browser")) {
+  const d = w.document, b = w.gBrowser && w.gBrowser.selectedBrowser, bc = b && b.browsingContext;
+  const popups = [...d.querySelectorAll("panel,menupopup,tooltip")].filter(p => p.state !== "closed").map(p => {
+    const r = p.getOuterScreenRect(); return {id: p.id, state: p.state, r: [r.left, r.top, r.width, r.height]};
+  });
+  const panel = d.getElementById("DateTimePickerPanel");
+  out.push({url: b && b.currentURI && b.currentURI.spec, focus: d.hasFocus(), activeIsBrowser: d.activeElement === b,
+            canOpen: bc && bc.canOpenModalPicker, isActive: bc && bc.isActive, activeWin: Services.focus.activeWindow === w,
+            panel: panel ? panel.state : null, popups});
+}
+return out;
+"""
+
+
+def probe_once(binary):
     from camoufox.sync_api import Camoufox
 
-    kw = dict(executable_path=str(binary), headless=display is None, os="linux", i_know_what_im_doing=True)
-    if display:
-        kw["env"] = {**os.environ, "DISPLAY": display}
+    port = free_port()
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_port}/"
-    with Camoufox(**kw) as browser:
-        # Each phase has its own page, so its own window and picker panel: a
-        # panel still hiding the last picker refuses to open again
-        # (nsXULPopupManager::MayShowPopup).
+    rec = {}
+    with Camoufox(executable_path=str(binary), headless=True, os="linux", i_know_what_im_doing=True,
+                  args=marionette_args(), env=marionette_env(), firefox_user_prefs={"marionette.port": port}) as browser:
+        m = Marionette(port)
         page = browser.new_page()
         page.goto(url, wait_until="load")
-        # A click while the picker opens lands on the picker or the page, as an
-        # OS click would, but never waits for an ack the popup swallowed.
         page.locator("#open").click()
-        racing = timed_click(page)
+        rec["racing"] = timed_click(page)
+        rec["p1_before_close"] = m.js(STATE)
         page.close()
+        rec["p1_after_close"] = m.js(STATE)
         page = browser.new_page()
         page.goto(url, wait_until="load")
+        rec["p2_before_click"] = m.js(STATE)
         page.locator("#open").click()
-        covered = wait_covered(page)
-        took = []
-        for _ in range(2):
-            took.append(timed_click(page))
-            page.wait_for_timeout(300)
-        # The page's own log, read from the DOM: evaluate runs in an isolated world.
-        out = {"racing": racing, "covered": covered, "took": took,
-               "page": page.locator("#log").text_content().split()}
+        rec["p2_after_click"] = m.js(STATE)
+        t = time.monotonic()
+        rec["covered"] = wait_covered(page)
+        rec["cover_s"] = round(time.monotonic() - t, 2)
+        rec["log"] = page.locator("#log").text_content().split()
+        if not rec["covered"]:
+            rec["p2_at_failure"] = m.js(STATE)
+        m.close()
     srv.shutdown()
-    return out
+    return rec
+
+
+def worker(binary, budget_s):
+    end = time.monotonic() + budget_s
+    n = 0
+    while time.monotonic() < end:
+        n += 1
+        try:
+            rec = probe_once(binary)
+        except Exception as e:
+            rec = {"error": f"{type(e).__name__}: {e}"[:300]}
+        rec["n"] = n
+        print("REC " + json.dumps(rec), flush=True)
+    return 0
 
 
 def main() -> int:
     binary = resolve_binary()
-    failures, seen = [], {}
-    proc, display = xvfb()
-    try:
-        for where in ("headless", display):
-            if where is None:
-                continue
-            got = probe(binary, None if where == "headless" else where)
-            seen[where] = got
-            if not isinstance(got["racing"], float) or got["racing"] >= 2:
-                failures.append(f"{where}: a click while the picker opened took {got['racing']}, want under 2 s")
-            if not got["covered"] or got["page"][:1] != ["picker"]:
-                failures.append(f"{where}: the picker did not open over #t: {got['page']}")
-            elif any(e in got["page"] for e in ("mousedown", "mouseup", "click")):
-                failures.append(f"{where}: the page got the clicks, so no popup covered #t: {got['page']}")
-            elif not all(isinstance(s, float) and s < 2 for s in got["took"]):
-                failures.append(f"{where}: clicks under the picker took {got['took']}, want each under 2 s")
-    finally:
-        if proc:
-            proc.kill()
-            proc.wait()
-    for f in failures:
-        print(f"FAIL: {f}")
-    if failures:
-        return 1
-    print(f"PASS: clicks under an open popup go to it at once: {seen}")
-    return 0
+    if len(sys.argv) > 1 and sys.argv[1] == "--worker":
+        return worker(binary, float(sys.argv[2]))
+    budget = 420
+    workers = int(os.environ.get("DIAG_WORKERS", "2"))
+    procs = [subprocess.Popen([sys.executable, __file__, "--worker", str(budget)], stdout=subprocess.PIPE, text=True)
+             for _ in range(workers)]
+    recs = []
+    for p in procs:
+        out, _ = p.communicate()
+        recs += [json.loads(line[4:]) for line in out.splitlines() if line.startswith("REC ")]
+    bad = [r for r in recs if r.get("error") or not r.get("covered")]
+    print(f"DIAG workers={workers} launches={len(recs)} not-covered={sum(1 for r in recs if not r.get('covered') and not r.get('error'))} errors={sum(1 for r in recs if r.get('error'))}")
+    for r in bad:
+        print("BAD " + json.dumps(r))
+    for r in recs:
+        if r not in bad:
+            print("OK " + json.dumps({k: r[k] for k in ("n", "cover_s", "p1_after_close", "p2_before_click") if k in r}))
+    return 1
 
 
 if __name__ == "__main__":
