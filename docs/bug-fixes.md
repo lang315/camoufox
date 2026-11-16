@@ -13,6 +13,31 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #451: at 105% text scale a move to the content's edge row stalled 5 s and reached the page as a mouseout
+
+**Symptom.** The `ui.textScaleFactor: 105` arm of `humanize-mouse-trajectory.py`, added by the upstream sync (df9ca115), failed on Windows (job 132037002566) and on macOS (job 132330070472). Every flagged exit was at `y = 0`, 12-67 ms after the last mousemove. The default-prefs arm passed, and so did Linux.
+
+**Root cause.** Not the trajectory and not the platform's exit. The flagged "exits" were Juggler's own mousemoves back into the page, which the widget hit-tested as chrome:
+- `MouseDispatch._measured` snapped points onto whole CSS pixels inside the browser (`Math.ceil(boundingBox.top)`). `jugglerSendMouseEvent` rounds a CSS point to app units and then to a device pixel (`nsContentUtils::ToWidgetPoint`), and the widget hit-tests that pixel.
+- Text at 105% is applied as full zoom (`browser.display.os-zoom-behavior` 1, `LookAndFeel::SystemZoomSettings`), so at an identity ratio of 1 the chrome has 57 app units per device pixel. Measured on a macOS host: content top 84.95 CSS, which is device 89.42; relative `y = 0` snapped to CSS 85, device 89.47, row 89, still chrome.
+- The parent sent the page an exit at that point, which reads as a mouseout at `y = 0`. No ack came, so `sendAcked` waited its 5 s deadline. Juggler logged `mousemove at (1824, 0) was not delivered to the renderer after 5000ms`, and each re-entry `mouseover` came about 5 s after its "exit".
+- A plain `page.mouse.move(x, 0)` did the same: 5.0 s and a mouseout, under each of the windows, macos and linux identities when the drawn ratio was 1. The bottom row failed the same way when the content's bottom fell on a device-pixel boundary (815.1 CSS, 48906 app units, device 858.0).
+- `leaveContent` floored in CSS pixels. Past a far edge it could floor back onto the content's last column.
+
+Why the arm passed on Linux and at the default prefs: the chrome's scale is the identity's `devicePixelRatio` times the text scale. At a whole scale, whole CSS pixels are whole device pixels. A drawn ratio of 1.5 gives 38 app units at 105%: top 84.633 is device 133.63, and the snap to CSS 85 is device 134.21, row 134, inside. Whether the snap lands inside is an accident of the content top's fraction and the scale, as #751 was of the top alone.
+
+**Fix.** `MouseDispatch._devicePixelsIn` snaps in device pixels, from the chrome's app units per device pixel (`toTopLevelWidgetRect(0, 0, 1, 1)`). The snap applies to the viewport bounds, to `_isShown`'s clip, and to `leaveContent`, which now goes at least one device pixel past the snapped edge. At a whole scale the bounds are unchanged.
+
+**Evidence.** `mouse-boundary-sweep.py` gained an arm at text 105% with the ratio pinned to 1. Measured on an arm64 Mac with the `v159.0-beta.35-fork.3` macOS build, whose browser inputs are main's, and the same build with only `MouseDispatch.js` replaced in `omni.ja`:
+- Before: all three non-humanized 105% arms failed, 20 coordinates: `y = 0` in each, and `h - 1` where the bottom fell on a pixel boundary. All read `dispatched, but the page saw no mousemove`.
+- After: every arm passed, 12 of 12.
+- Without the ratio pin, 2 of 3 non-humanized arms failed in each of two runs, 15 coordinates each. In the run that logged the scale, the failing draws were at 57 app units and the passing one, a linux draw at ratio 1.5, at 38.
+- The humanized arms pass either way: they count any mousemove, and the trajectory's own points arrive before the destination is dropped.
+- `humanize-mouse-trajectory.py`: the 105% arm's `y = 0` exits appeared in 4 of 4 runs before, and in none of 2 completed runs after. Its remaining failures, on both builds and at the default prefs too, are exits placed correctly but more than a frame after the last mousemove. #451 stays open for them.
+
+**What misled.** The guard printed each flagged mouseout beside the last mousemove before it, so a failed re-entry read as an exit placed a pixel short and a frame late. The probe's `over` timestamps, 5 s after each "exit", and Juggler's own `WARN` lines showed the 5 s waits. `mouse-boundary-sweep.py` exists for this class, but it swept only the default prefs. Its humanized arms count any mousemove, so they could not see a dropped destination.
+
+
 ## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
 
 **Found by:** measuring #456 on an arm64 Mac (M1 Pro) with the `v159.0-beta.35-fork.3` macOS release. Each pairing below gave the same result in 3 of 3 rounds:

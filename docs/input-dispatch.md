@@ -30,7 +30,13 @@ renderer is decided by `Math.round(boundingBox.top) < boundingBox.top` — a
 rounding accident in the fractional height of browser chrome, which varies with
 the *spoofed OS*: windows `51.4` → `51` deadlocks, macos `53.1` → `53`
 deadlocks, linux `56.5` → `57` is fine. No review catches that, and no
-hand-written list of coordinates contains it.
+hand-written list of coordinates contains it. The widget hit-tests whole
+*device* pixels, so the chrome's scale is the other half of the accident
+(#451): text at 105% (`ui.textScaleFactor`, applied as full zoom) gives the
+chrome 57 app units per device pixel, and a top at 84.95 CSS px is device
+89.42 while the snapped CSS 85 is device 89.47, row 89, still chrome. The snap
+is therefore taken in device pixels, from the chrome's app units per device
+pixel (`MouseDispatch._devicePixelsIn`).
 
 **Every miss costs the whole process.** `activateAndRun()`
 (`TargetRegistry.js`) serializes input on a promise chain shared by every tab in

@@ -76,14 +76,30 @@ export class MouseDispatch {
 
   _measured(boundingBox) {
     this._box = boundingBox;
+    // The chrome's app units per device pixel: 60 at a whole scale, 57 with
+    // text at 105% (ui.textScaleFactor; LookAndFeel::SystemZoomSettings).
+    this._auPerDevPx = Math.round(60 / this._win.windowUtils.toTopLevelWidgetRect(0, 0, 1, 1).width);
 
-    // Snap onto whole pixels fully inside the browser element. Its origin and
-    // size can be fractional, and a rounded point on either boundary belongs
-    // to chrome rather than content, so no renderer ack arrives (#751, #752).
-    this._originX = Math.ceil(boundingBox.left);
-    this._originY = Math.ceil(boundingBox.top);
-    this._limitX = Math.ceil(boundingBox.left + boundingBox.width) - 1;
-    this._limitY = Math.ceil(boundingBox.top + boundingBox.height) - 1;
+    // Snap onto whole device pixels fully inside the browser element. Its
+    // origin and size can be fractional, and a point on the device row that
+    // holds either boundary belongs to chrome rather than content, so no
+    // renderer ack arrives (#751, #752, #451).
+    [this._originX, this._limitX] = this._devicePixelsIn(boundingBox.left, boundingBox.left + boundingBox.width);
+    [this._originY, this._limitY] = this._devicePixelsIn(boundingBox.top, boundingBox.top + boundingBox.height);
+  }
+
+  /**
+   * The chrome CSS coordinates of the first and last whole device pixels in
+   * [lo, hi) along one axis. jugglerSendMouseEvent rounds a point to app units
+   * and then to a device pixel (nsContentUtils::ToWidgetPoint), and the widget
+   * hit-tests that pixel, so whole CSS pixels are only safe at a whole scale:
+   * at 57 app units, CSS 85 is device 89.47, row 89, above a top at 89.42.
+   */
+  _devicePixelsIn(lo, hi) {
+    const au = this._auPerDevPx;
+    const first = Math.ceil(Math.round(lo * 60) / au);
+    const last = Math.ceil(Math.round(hi * 60) / au) - 1;
+    return [first * au / 60, last * au / 60];
   }
 
   static forBrowser(win, linkedBrowser, eventArgs) {
@@ -125,8 +141,9 @@ export class MouseDispatch {
       return true;
     const clip = stack.getBoundingClientRect();
     const {x: absX, y: absY} = this.toAbsolute(x, y);
-    return absX >= Math.ceil(clip.left) && absX <= Math.ceil(clip.left + clip.width) - 1 &&
-           absY >= Math.ceil(clip.top) && absY <= Math.ceil(clip.top + clip.height) - 1;
+    const [left, right] = this._devicePixelsIn(clip.left, clip.left + clip.width);
+    const [top, bottom] = this._devicePixelsIn(clip.top, clip.top + clip.height);
+    return absX >= left && absX <= right && absY >= top && absY <= bottom;
   }
 
   /**
@@ -444,10 +461,13 @@ export class MouseDispatch {
    * the exit.
    */
   leaveContent(x, y) {
-    // The row the content's fractional top falls in is partly content (see the
-    // constructor), so a point above the content is floored onto the row above.
-    const absX = Math.floor(this._box.left + x);
-    const absY = Math.floor(this._box.top + y);
+    // The device row an edge falls in is partly content (_devicePixelsIn), so
+    // a point past the content goes at least one device pixel past its snap.
+    const px = this._auPerDevPx / 60;
+    const past = (v, size, start, origin, limit) =>
+      v < 0 ? Math.min(start + v, origin - px) : v >= size ? Math.max(start + v, limit + px) : start + v;
+    const absX = past(x, this._box.width, this._box.left, this._originX, this._limitX);
+    const absY = past(y, this._box.height, this._box.top, this._originY, this._limitY);
     const onChrome = absX >= 0 && absY >= 0 && absX < this._win.innerWidth && absY < this._win.innerHeight;
     this._sendAbsolute(onChrome ? 'mousemove' : 'mousecancel', absX, absY);
   }
