@@ -38,6 +38,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { speechdVoices } from "../src/fingerprints.js";
 import { PYTHON as GOLDEN_PYTHON } from "./golden-setup.js";
 import { prerequisite } from "./prereq.js";
+import { quietly } from "./quietly.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, "..", "..");
@@ -371,7 +372,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 	for (const identity of Object.keys(IDENTITIES)) {
 		describe(identity, () => {
 			it("builds the same CAMOU_CONFIG as Python", async () => {
-				const { result } = await mods.warnings.recordWarnings(() =>
+				const result = await quietly(() =>
 					mods.utils.launchOptions(kwargsFor(identity)),
 				);
 				const config = configOf(result as Record<string, any>);
@@ -381,7 +382,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 			}, 240_000);
 
 			it("headless: the page sees the configured identity, same as Python", async () => {
-				const { result: browser } = await mods.warnings.recordWarnings(() =>
+				const browser = await quietly(() =>
 					mods.sync.Camoufox(kwargsFor(identity)),
 				);
 				let probe: any;
@@ -394,7 +395,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 				results[`${identity}:headless`] = probe;
 
 				// A second launch of the same identity presents the same device.
-				const { result: again } = await mods.warnings.recordWarnings(() =>
+				const again = await quietly(() =>
 					mods.sync.Camoufox(kwargsFor(identity)),
 				);
 				try {
@@ -415,7 +416,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 				);
 				let probe: any;
 				try {
-					const { result: context } = await mods.warnings.recordWarnings(() =>
+					const context = await quietly(() =>
 						mods.sync.Camoufox({
 							...kwargsFor(identity),
 							persistent_context: true,
@@ -439,7 +440,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 
 			it("launchServer: a connected client sees the same identity", async () => {
 				const { firefox } = await import("playwright-core");
-				const { result: bs } = await mods.warnings.recordWarnings(() =>
+				const bs = await quietly(() =>
 					mods.server.launchServer(kwargsFor(identity)),
 				);
 				const browserServer = bs as import("playwright-core").BrowserServer;
@@ -479,9 +480,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 						? [INPUTS.presets.windows, INPUTS.presets.linux]
 						: [INPUTS.presets.linux, INPUTS.presets.windows];
 				const kwargs = { ...kwargsFor(identity), canvas_noise: true };
-				const { result: browser } = await mods.warnings.recordWarnings(() =>
-					mods.sync.Camoufox(kwargs),
-				);
+				const browser = await quietly(() => mods.sync.Camoufox(kwargs));
 				let probe: any;
 				let second: any;
 				try {
@@ -540,7 +539,7 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 							.readFileSync("/proc/self/status", "utf-8")
 							.match(/Cpus_allowed_list:\s*(.+)/)?.[1];
 					const before = selfCores();
-					const { result: browser } = await mods.warnings.recordWarnings(() =>
+					const browser = await quietly(() =>
 						mods.sync.Camoufox({ ...kwargsFor(identity), pin_cpu_cores: true }),
 					);
 					try {
@@ -590,9 +589,9 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 			it.runIf(identity === "fpgen_linux_de" && process.platform === "linux")(
 				"headless: 'virtual' runs headful on a private Xvfb and tears it down",
 				async () => {
-					const { result: browser } = await step(
+					const browser = await step(
 						"virtual: launch (Xvfb + headful browser)",
-						mods.warnings.recordWarnings(() =>
+						quietly(() =>
 							mods.sync.Camoufox({
 								...kwargsFor(identity),
 								headless: "virtual",
@@ -620,13 +619,12 @@ describe.runIf(ENABLED)("e2e: the TS launcher drives a real Camoufox", () => {
 						// The config this launch sent: Xvfb can render on another
 						// device than headless, and the identity claims the one the
 						// canvas renders on.
-						const { result: options } = await mods.warnings.recordWarnings(
-							async () =>
-								mods.utils.launchOptions({
-									...kwargsFor(identity),
-									headless: false,
-									virtual_display: await display.get(),
-								}),
+						const options = await quietly(async () =>
+							mods.utils.launchOptions({
+								...kwargsFor(identity),
+								headless: false,
+								virtual_display: await display.get(),
+							}),
 						);
 						results[`${identity}:virtualConfig`] = configOf(
 							options as Record<string, any>,

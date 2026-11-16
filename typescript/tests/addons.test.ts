@@ -38,9 +38,10 @@ function build({ mac = false, bundled = true } = {}): string {
 it("loads the bundled addon beside the binary", async () => {
 	const binary = build();
 	const out: string[] = [];
-	const { warnings } = await recordWarnings(() =>
+	const { error, warnings } = await recordWarnings(() =>
 		addDefaultAddons(out, undefined, binary),
 	);
+	if (error) throw error;
 	expect(out).toEqual([path.join(tmp, "addons", "UBO")]);
 	expect(warnings).toEqual([]);
 });
@@ -64,9 +65,10 @@ it("finds it in Contents/Resources of a macOS app bundle", () => {
 it("leaves an excluded addon out without a warning", async () => {
 	const binary = build({ bundled: false });
 	const out: string[] = [];
-	const { warnings } = await recordWarnings(() =>
+	const { error, warnings } = await recordWarnings(() =>
 		addDefaultAddons(out, ["UBO"], binary),
 	);
+	if (error) throw error;
 	expect(out).toEqual([]);
 	expect(warnings).toEqual([]);
 });
@@ -74,9 +76,10 @@ it("leaves an excluded addon out without a warning", async () => {
 it("launches a build without the addon without it, and says so", async () => {
 	const binary = build({ bundled: false });
 	const out: string[] = [];
-	const { warnings } = await recordWarnings(() =>
+	const { error, warnings } = await recordWarnings(() =>
 		addDefaultAddons(out, undefined, binary),
 	);
+	if (error) throw error;
 	expect(out).toEqual([]);
 	expect(warnings).toHaveLength(1);
 	expect(warnings[0].message).toContain(path.join(tmp, "addons", "UBO"));
@@ -87,6 +90,9 @@ it("does not count a partial directory", async () => {
 	const binary = build({ bundled: false });
 	fs.mkdirSync(path.join(tmp, "addons", "UBO"), { recursive: true });
 	const out: string[] = [];
-	await recordWarnings(() => addDefaultAddons(out, undefined, binary));
+	const { error } = await recordWarnings(() =>
+		addDefaultAddons(out, undefined, binary),
+	);
+	if (error) throw error;
 	expect(out).toEqual([]);
 });
