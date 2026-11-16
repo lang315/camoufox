@@ -37,6 +37,40 @@ Why the arm passed on Linux and at the default prefs: the chrome's scale is the 
 
 **What misled.** The guard printed each flagged mouseout beside the last mousemove before it, so a failed re-entry read as an exit placed a pixel short and a frame late. The probe's `over` timestamps, 5 s after each "exit", and Juggler's own `WARN` lines showed the 5 s waits. `mouse-boundary-sweep.py` exists for this class, but it swept only the default prefs. Its humanized arms count any mousemove, so they could not see a dropped destination.
 
+## #469: `popup-covered-click` moved to a point the date picker did not cover, and read a dropped move as a covered one
+
+**Fixed by:** the PR that refs #469. **Found by:** the Linux Tests runs 43848662716 (job 133238009854) and 43861605376, both the headless arm of "Patch guards: stock parity": `FAIL: headless: the picker did not open over #t: ['picker', 'mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click']`.
+
+**Symptom.** 2 reds in about 9 parity jobs (7 green on main). The page logged `picker`, the guard then waited its 30 s deadline for a move to stop reaching the page, and the two clicks landed on the page.
+
+**Root cause.** The picker did open: in three reds the panel's state was `open`. The guard assumed it covers `#t`, a fixed point of the page (client (150..170, 90)), and that is false when the panel is shifted. Diagnostic runs on a draft PR (#471, never merged), Linux headless, read the panel's screen rect and the window's inner screen origin through Marionette for every launch. In run 43906858431 (108 launches, job 133441633590): 107 greens had the panel's x equal to the window's x and its anchored right edge at or before 1366; the red (launch 25) had a window 1262x1384 at screen (1298, 44), the panel at x 1092..1366, 206 px left of the window, so the move point (screen x 1448..1468) was outside it. Firefox 159's headless screen is 1366x768 by default (`widget/headless/HeadlessScreenHelper.cpp`), and the red's panel ends exactly at 1366: it looks clamped to the real screen while the window sits at the identity's position. That is a reading of the numbers; #481 holds it. The two earlier reds (run 43895299280, launches 28 and 35) show the same panel rect and window size.
+
+The same guard read a move Juggler never delivered as one a popup took: its `wait_covered` stopped when the page did not see a move. In the two diagnostic runs 11 of 112 and 13 of 108 launches had the first move at (150, 90) dropped after the 5 s ack deadline (`mousemove ... was not delivered to the renderer after 5000ms; dropping it`), so about one launch in ten passed without testing anything. The product side of that is #480; it does not follow window size.
+
+**Fix.** The guard waits until the picker is open and sized (`picker_ready`, what `MouseDispatch._popupAt` tests), reads its screen rect and the page's content rect from the browser (Marionette, the shared `helpers.Marionette`), and moves and clicks at a point inside both (`covered_point`, the weekday-names row of the picker, where a click selects nothing; a day cell closes the picker and the second click then reaches the page). A move that waits out the ack deadline fails as its own line (`move_verdict`), and the page's listeners are on the document so a click anywhere is seen. Nothing was retried, no timeout changed, and no window size is pinned.
+
+**Red-to-green.** `ci/tests/test_popup_covered_click.py` fed the red launch's numbers to the guard's decisions: it failed first (the functions did not exist; 4 of 5 failed, and the one that passed shows the old point (150, 90) is outside the red's panel), and passes. A later red-first case, an open panel with a zero-sized rect (launch 69 of the next run), failed then passed. Negative control: aiming the same flow at a point the panel does not cover fails with `the move ... reached the page` and `the page got clicks`. The fixed guard, Linux headless, 198 launches (Tests run 43919371754, job 133486152985): 196 covered with no page event and both clicks under 2 s, 0 dropped moves, 1 `TargetClosedError` at `Page.goto` (the browser closed during navigation, not understood), and 1 zero-sized panel read, which is what the last test fixes.
+
+**What misled the investigation.** `showPicker()` returning and `picker` in the page log read as "the picker opened over #t"; the panel's rect is chrome UI the page cannot see. Three diagnostic runs measured nothing because Marionette was connected before the first page, and a fourth because `page.close()` discards the window Marionette is attached to. A local macOS read of "focus false, no panel" (a window behind the terminal) and an earlier local build (Firefox 156) pointed at a focus refusal that the CI reds do not show (focus and `canOpenModalPicker` were true in all 112 launches of a headless run).
+
+## #446: an AMD iGPU identity could draw a core count only Intel CPUs report
+
+**Found by:** the coherence tests on a 10-core macOS arm64 host, the upstream sync (#444, #445). `test_generated_identities[windows]`, `[linux]` and `test_every_bundled_preset[windows]`, `[linux]` failed with `Violation(rule='cpu-matches-hardware', detail='CPU amd x86 with hardwareConcurrency 10, which only an Intel CPU reports')`. Upstream at `df9ca115` fails the same way. Tests on `ubuntu-24.04` stayed green.
+
+**Root cause.** Two paths made the pair, and neither asked whether the GPU's CPU vendor can report the count:
+- The synthetic draw. `webgl.sample_webgl_for_screen` filtered GPUs with `gpu_fits_machine`, which modelled Intel Macs only (`target_os != 'mac' or ...`), and `gpu_fits_cpu`, which returns True while no `cpu:arch` or `cpu:manufacturer` is set. The GPU is drawn before `set_cpu_default`, so an AMD iGPU (`Radeon HD 3200 Graphics`) passed beside 10, 14, 18, 22 or 28 cores. Seeds 0 to 299 on a 1920x1080 screen at 10 cores drew it 24 times on Windows and 35 on Linux.
+- A preset. `fix_hardware_concurrency` replaces the preset's cores with the host's after the preset's GPU is kept, and `drop_incoherent_source_values` only dropped a GPU for `gpu-matches-os` and `intel-mac-hardware`. All 27 AMD iGPU presets of `fingerprint-presets-v150.json` (18 Windows, 9 Linux) carry 2 to 16 cores, so the pair came from a 10-core host and no preset is a data bug: 0 of the 113 and 0 of the 285 stored presets pair an AMD iGPU with an Intel-only count, and `clean-fingerprint-data.py` drops none.
+
+**Why CI was green.** The pythonlib job runs on `ubuntu-24.04` with 4 cores, which no draw makes an Intel-only count, and a Linux identity claims the host's llvmpipe, which fits any CPU.
+
+**The data.** fpgen's recorded core counts behind each iGPU (`model-2/2026`): Radeon HD 3200 reports 2, 6, 8, 12, 16 on Windows and 2, 8, 12, 16 on Linux, never 10, 14, 18, 22 or 28. Intel iGPUs reach 14 and 28 on Windows and 22 on Linux.
+
+**Fix.** `coherence._gpu_cores_misfit` says no machine whose GPU implies one CPU vendor reports a count only the other vendor ships. `gpu_fits_machine` (the sampler's filter), `_check_cpu` (so `validate` sees the pair before any `cpu:*` key is set, which is what `clean-fingerprint-data.py` reads) and `drop_incoherent_source_values` (so a preset's GPU is redrawn, as an Intel Mac IGP is) all use it. The same in TypeScript. A GPU or core count the caller set (`webgl_config`, `navigator.hardwareConcurrency`) is still kept and reported.
+
+**Evidence.** Red then green: `python/tests/test_amd_igpu_cores.py` (12 of 14 failed before the fix) and `typescript/tests/amd-igpu-cores.test.ts` (10 of 12). Each test pins the cores and the GPU draw's seeds, so none reads the host: a runner with 4 cores fails them as a 10-core Mac does. The sampler arms still draw the Radeon at 12 cores, so the filter is no over-reach.
+
+**What misled.** The issue named presets as a possible carrier. The stored presets are clean; the host's core count made the pair. And `_repair_cpu`'s comment ("stays reported") described a pair a launch could not avoid, when the draw could have.
+
 
 ## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
 
