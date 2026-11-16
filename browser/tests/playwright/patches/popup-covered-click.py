@@ -31,7 +31,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import Marionette, free_port, marionette_args, marionette_env, resolve_binary  # noqa: E402
+from helpers import Marionette, free_port, hidden_display, marionette_args, marionette_env, resolve_binary  # noqa: E402
 
 # A private Xvfb display, started as playwright-window-size.py starts one.
 _spec = importlib.util.spec_from_file_location(
@@ -127,11 +127,12 @@ def probe_once(binary):
     _last[0] = 'launch'
     with Camoufox(executable_path=str(binary), headless=False, os="linux", i_know_what_im_doing=True,
                   args=marionette_args(), env=marionette_env(), firefox_user_prefs={"marionette.port": port}) as browser:
-        _last[0] = 'marionette-connect'
-        m = Marionette(port, timeout=20)
         _last[0] = 'p1-goto'
         page = browser.new_page()
         page.goto(url, wait_until="load")
+        _last[0] = 'marionette-connect'
+        m = Marionette(port)
+        _last[0] = 'p1'
         page.locator("#open").click()
         rec["racing"] = timed_click(page)
         _last[0] = "p1-state"
@@ -172,7 +173,8 @@ def worker(binary, budget_s):
 def main() -> int:
     binary = resolve_binary()
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
-        return worker(binary, float(sys.argv[2]))
+        with hidden_display():
+            return worker(binary, float(sys.argv[2]))
     budget = 420
     workers = int(os.environ.get("DIAG_WORKERS", "2"))
     procs = [subprocess.Popen([sys.executable, __file__, "--worker", str(budget)], stdout=subprocess.PIPE, text=True)
