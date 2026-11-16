@@ -8,16 +8,21 @@ release (PageHandler.js clickGap, 70-180 ms), with clickHold() before it, so
 press to press stays inside the OS double-click time and dblclick still fires.
 
 The first press came under 10 ms after the move that brought the pointer
-onto the button (stock: under 250 ms): a press after a move now waits a person's dwell on the target
+onto the button: a press after a move now waits a person's dwell on the target
 (PageHandler.js hoverDwell, 60-240 ms). A double click at the point the
 pointer already rests on has no move before it and waits for nothing.
+
+The guard checks the floor only. This page-side reading is the parent's dwell plus the timer's lateness and
+the press's delivery lag, and neither can be told apart from the draw: 9.6% of draws clamp at exactly 240 ms,
+so a ceiling of 250 fails whenever the lag passes 10 ms (255 ms, Windows run 43674869097). The 250 came from
+one XTest-on-Xvfb reading of stock, a tool's timing and not a person's bound. That the dwell counts from the
+page's arrival is pinned deterministically by browser/tests/juggler/click-pacing.test.mjs.
 
 The guard launches without uBlock Origin: its startup work can stall the parent while the first double
 click is paced, and the first press then comes late (a 150 ms wait took 220 to 285 ms, diag-75: the guard
 passed 8 of 10 with uBO, 20 of 20 without it, diag-77). That is the bundled add-on's load, not Juggler's
 dwell, which is exact (the wait is computed at the page's arrival). Causation is not proven: diag-77's
-arms with uBO were clean too. If the tail ever shows without uBO, the 250 ms ceiling's design is the
-next question.
+arms with uBO were clean too.
 
     python browser/tests/playwright/patches/driven-dblclick-gap.py
 """
@@ -83,8 +88,8 @@ def main() -> int:
             failures.append(f"{name}: second press {g['upDown']} ms after the first release, want 60-200")
         elif g["pressToPress"] > 450 or g["dblclick"] != 1:
             failures.append(f"{name}: presses {g['pressToPress']} ms apart, {g['dblclick']} dblclick, want <450 and 1")
-        elif g["overDown"] is None or not 50 <= g["overDown"] < 250:
-            failures.append(f"{name}: first press {g['overDown']} ms after the pointer reached the button, want 50-250")
+        elif g["overDown"] is None or g["overDown"] < 50:
+            failures.append(f"{name}: first press {g['overDown']} ms after the pointer reached the button, want at least 50")
     for f in failures:
         print(f"FAIL: {f}")
     if failures:

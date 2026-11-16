@@ -13,6 +13,22 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #460: `driven-dblclick-gap` read a first press 255 ms after the pointer arrived, against a 250 ms ceiling the dwell's own clamp sits next to
+
+**Fixed by:** the PR that refs #460. **Found by:** the Windows patch-guard probe, e2e run 43674869097 (Windows build run 43538462122, job 132692726313): `locator.dblclick: first press 255 ms after the pointer reached the button, want 50-250`.
+
+**Symptom.** One red in a run that passed 31 of 33 guards; the same guard passed in fork.3's Windows probe and in main's e2e journeys.
+
+**Root cause.** `hoverDwell()` is `logNormalDelay(125, 0.5, 60, 240)`, and `logNormalDelay` clamps. P(draw above 240) = P(z > ln(240/125)/0.5 = 1.30), about 9.6%, so about one dwell in ten is exactly 240 ms. The parent counts that wait exactly from the move's arrival (`PageHandler._arrivedAt`); the guard reads the page's `mouseover` to first `mousedown` timestamps, which add the timer's lateness and the press's delivery lag (0 to 2 ms warm, diag-75; 70 to 210 ms on a cold or loaded parent, #419). 240 plus a lag over 10 ms is above 250. The browser never drew above 240: its contract held. The ceiling was the defect: 250 came from one XTest-on-Xvfb reading of stock Firefox (`driven-click-hold.py`, `PageHandler.js`), a tool's timing and not a person's bound, and the guard cannot separate the draw from the lag in a page-side reading.
+
+**Fix.** The guard keeps the 50 ms floor, the 60-200 ms release-to-press gap, the 450 ms press-to-press bound and the one-`dblclick` check, and drops the ceiling. The #419 regression the ceiling caught (a dwell counted from the queue ack, up to 225 ms long) is pinned deterministically instead: `browser/tests/juggler/click-pacing.test.mjs` runs `PageHandler._clickPacing` on a virtual clock with a median draw and a move whose queue ack came 10 ms before the page had it, and expects 125 ms from `_arrivedAt`.
+
+**Not done.** Not a widened ceiling, a retry or a lower `hoverDwell` max (200 would put more mass at the clamp). The clamp's own point mass, a fingerprint, is #467.
+
+**Red-to-green.** With `_clickPacing` counting from `_movedAt` (the pre-#419 code) the new test fails (`actual: 115, expected: 125`); on the current code it passes (`node --test browser/tests/juggler/click-pacing.test.mjs`, 3 of 3). One green guard run proves little against timing; the unit test is the contract evidence.
+
+**What misled.** The guard's 250 read as a stock-derived limit on the product, and the #419 note ("if the tail ever shows without uBO, the ceiling's design is the next question") pointed at the timer, not at the 10 ms between the clamp and the ceiling.
+
 ## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
 
 **Found by:** measuring #456 on an arm64 Mac (M1 Pro) with the `v159.0-beta.35-fork.3` macOS release. Each pairing below gave the same result in 3 of 3 rounds:
