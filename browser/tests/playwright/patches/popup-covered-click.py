@@ -113,6 +113,9 @@ return out;
 """
 
 
+_last = [None]
+
+
 def probe_once(binary):
     from camoufox.sync_api import Camoufox
 
@@ -121,16 +124,21 @@ def probe_once(binary):
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{srv.server_port}/"
     rec = {}
+    _last[0] = 'launch'
     with Camoufox(executable_path=str(binary), headless=True, os="linux", i_know_what_im_doing=True,
                   args=marionette_args(), env=marionette_env(), firefox_user_prefs={"marionette.port": port}) as browser:
-        m = Marionette(port)
+        _last[0] = 'marionette-connect'
+        m = Marionette(port, timeout=20)
+        _last[0] = 'p1-goto'
         page = browser.new_page()
         page.goto(url, wait_until="load")
         page.locator("#open").click()
         rec["racing"] = timed_click(page)
+        _last[0] = "p1-state"
         rec["p1_before_close"] = m.js(STATE)
         page.close()
         rec["p1_after_close"] = m.js(STATE)
+        _last[0] = "p2"
         page = browser.new_page()
         page.goto(url, wait_until="load")
         rec["p2_before_click"] = m.js(STATE)
@@ -155,7 +163,7 @@ def worker(binary, budget_s):
         try:
             rec = probe_once(binary)
         except Exception as e:
-            rec = {"error": f"{type(e).__name__}: {e}"[:300]}
+            rec = {"error": f"{type(e).__name__}: {e}"[:200], "stage": getattr(e, "stage", None) or _last[0]}
         rec["n"] = n
         print("REC " + json.dumps(rec), flush=True)
     return 0
