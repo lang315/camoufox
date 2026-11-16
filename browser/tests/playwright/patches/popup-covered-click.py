@@ -105,9 +105,15 @@ for (const w of Services.wm.getEnumerator("navigator:browser")) {
     const r = p.getOuterScreenRect(); return {id: p.id, state: p.state, r: [r.left, r.top, r.width, r.height]};
   });
   const panel = d.getElementById("DateTimePickerPanel");
-  out.push({url: b && b.currentURI && b.currentURI.spec, focus: d.hasFocus(), activeIsBrowser: d.activeElement === b,
+  const anchor = panel && panel.anchorNode ? {tag: panel.anchorNode.localName, id: panel.anchorNode.id} : null;
+  const posAttr = panel ? panel.getAttribute("position") : null;
+  const br = b ? b.getBoundingClientRect() : null;
+  out.push({sx: w.mozInnerScreenX, sy: w.mozInnerScreenY, br: br && [br.x, br.y, br.width, br.height],
+            scr: [w.screen.width, w.screen.height, w.screen.availWidth, w.screen.availHeight, w.devicePixelRatio],
+            win: [w.outerWidth, w.outerHeight, w.screenX, w.screenY],
+            url: b && b.currentURI && b.currentURI.spec, focus: d.hasFocus(), activeIsBrowser: d.activeElement === b,
             canOpen: bc && bc.canOpenModalPicker, isActive: bc && bc.isActive, activeWin: Services.focus.activeWindow === w,
-            panel: panel ? panel.state : null, popups});
+            panel: panel ? panel.state : null, anchor, posAttr, popups});
 }
 return out;
 """
@@ -170,6 +176,7 @@ def probe_once(binary):
         rec["cover_s"] = round(time.monotonic() - t, 2)
         rec["box"] = {"t": page.locator("#t").bounding_box(),
                       "win": page.evaluate("[innerWidth, innerHeight, outerWidth, outerHeight]")}
+        rec["after_cover"] = m.js(STATE)
         rec["log"] = page.locator("#log").text_content().split()
         if not rec["covered"]:
             rec["p2_at_failure"] = m.js(STATE)
@@ -226,6 +233,21 @@ def main() -> int:
           f"with-warn={sum(1 for r in recs if r['warn'])}")
     for r in bad:
         print("BAD " + json.dumps(r))
+    for r in recs:
+        w = next((w for w in r.get("after_cover", []) if w["focus"]), None)
+        if not w:
+            continue
+        panel = next((p["r"] for p in w["popups"] if p["id"] == "DateTimePickerPanel"), None)
+        o = w["br"] and [w["sx"] + w["br"][0] + 60, w["sy"] + w["br"][1] + 40, 200, 100]
+        hit = bool(panel and o and panel[0] < o[0] + o[2] and o[0] < panel[0] + panel[2]
+                   and panel[1] < o[1] + o[3] and o[1] < panel[1] + panel[3])
+        mv = w["br"] and [w["sx"] + w["br"][0] + 150, w["sx"] + w["br"][0] + 170, w["sy"] + w["br"][1] + 90]
+        inside = bool(panel and mv and all(panel[0] <= x < panel[0] + panel[2] for x in mv[:2])
+                      and panel[1] <= mv[2] < panel[1] + panel[3])
+        print("GEO " + json.dumps({"mv": mv, "move-in-panel": inside, "anchor": w.get("anchor"),
+                                   "posAttr": w.get("posAttr"), "n": r["n"], "w": r["worker"], "cov": r.get("covered"), "cs": r.get("cover_s"),
+                                   "win": w["win"], "scr": w["scr"], "in": [w["sx"], w["sy"]], "panel": panel,
+                                   "t": o, "overlap": hit, "slow": bool(r.get("slow_moves"))}))
     for r in slow:
         print("SLOW " + json.dumps({k: r.get(k) for k in ("n", "worker", "cover_s", "slow_moves", "box", "warn")}))
     sig = {}
