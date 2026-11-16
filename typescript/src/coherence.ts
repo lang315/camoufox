@@ -192,8 +192,27 @@ export function intelMacConditions(): Record<string, (value: any) => boolean> {
 }
 
 /**
- * Whether a machine with this GPU has these cores and this screen. Only Intel
- * Macs are modelled; serves the WebGL draw and the finished-identity check.
+ * Why no machine with this GPU's CPU vendor reports this core count. An AMD
+ * iGPU means an AMD CPU, and fpgen records none of them at a count only
+ * Intel's hybrids report (INTEL_ONLY_CORE_COUNTS).
+ */
+function gpuCoresMisfit(
+	rendererString: unknown,
+	targetOs: string,
+	cores: unknown,
+): string | null {
+	const vendor = gpuCpuVendor(rendererString, targetOs);
+	const byCores = coresCpuVendor(cores);
+	if (vendor && byCores && byCores !== vendor) {
+		return `${pyRepr(rendererString)} with hardwareConcurrency ${pyStr(cores)}, which only an Intel CPU reports`;
+	}
+	return null;
+}
+
+/**
+ * Whether a machine with this GPU has these cores and this screen. The screen
+ * is modelled for Intel Macs only; serves the WebGL draw and the
+ * finished-identity check.
  */
 export function gpuFitsMachine(
 	rendererString: string | null | undefined,
@@ -203,8 +222,9 @@ export function gpuFitsMachine(
 	height?: unknown,
 ): boolean {
 	return (
-		targetOs !== "mac" ||
-		intelMacMisfit(rendererString, cores, width, height) === null
+		gpuCoresMisfit(rendererString, targetOs, cores) === null &&
+		(targetOs !== "mac" ||
+			intelMacMisfit(rendererString, cores, width, height) === null)
 	);
 }
 
@@ -715,12 +735,20 @@ export function cpuConflict(config: Config, targetOs: string): string | null {
 }
 
 function checkCpu(config: Config, targetOs: string): string | null {
-	return cpuConflict(config, targetOs);
+	return (
+		cpuConflict(config, targetOs) ??
+		gpuCoresMisfit(
+			renderer(config),
+			targetOs,
+			config["navigator.hardwareConcurrency"],
+		)
+	);
 }
 
 function repairCpu(config: Config, targetOs: string): void {
 	// The GPU decides. An AMD APU's GPU beside an Intel-only core count stays
-	// reported: no vendor matches both.
+	// reported: no vendor matches both. A drawn identity never has the pair
+	// (gpuFitsMachine); a caller's own GPU or cores can.
 	const [implied, maker] = hardwareCpu(config, targetOs);
 	const arch = implied ?? "x86";
 	config["cpu:arch"] = arch;
@@ -820,6 +848,8 @@ export function dropIncoherentSourceValues(
 	let rule: string;
 	if (!gpuFitsOs(r, targetOs)) rule = "gpu-matches-os";
 	else if (checkIntelMacHardware(config, targetOs)) rule = "intel-mac-hardware";
+	else if (gpuCoresMisfit(r, targetOs, config["navigator.hardwareConcurrency"]))
+		rule = "cpu-matches-hardware";
 	else return [];
 	const kept = changed(
 		config,

@@ -21,7 +21,19 @@ Rather than guess which coordinates do that, sweep the ring:
     x in {0, 1, w/2, w-2, w-1}  x  y in {0, 1, h/2, h-2, h-1}
 
 across every spoofed OS (the chrome offset that decides #751 is a function of
-it: windows 51.4, macos 53.1, linux 56.5) and with humanize both off and on.
+it: windows 51.4, macos 53.1, linux 56.5) and with humanize both off and on,
+at the default prefs and with text scaled to 105%. The scale is the other
+half of the rounding: the widget hit-tests whole device pixels, and text at
+105% on a display at ratio 1 gives the chrome 57 app units to one (1.0526 per
+CSS pixel), so a point snapped onto whole CSS pixels can still round onto the
+device row that holds the content's edge, which is chrome (#451). Measured on
+a macOS host, content top 84.95: relative y == 0 went out at CSS 85, device
+row 89 against an edge at 89.42, and the page got a mouseout at y == 0 after
+a 5s ack wait. The chrome's scale is the identity's devicePixelRatio times the
+text scale, so that arm pins the ratio: a drawn 1.5 gives 38 app units, where
+the same snap happened to land inside. It runs without humanize only: a
+humanized move's own points reach the page before its destination, so the
+count below cannot see a dropped destination.
 
 Each point must be *delivered*, not merely survived: the page has to observe a
 mousemove. A point that is dropped without hanging is still a bug -- it is the
@@ -36,7 +48,8 @@ Run against a specific build:
     CAMOUFOX_EXECUTABLE_PATH=/path/to/camoufox-bin python3 browser/tests/playwright/patches/mouse-boundary-sweep.py
 
 What PASS means: every ring coordinate, on every spoofed OS, humanized and not,
-was acked and seen by the page; and input is still live at the end of each run.
+and at 105% text, was acked and seen by the page; and input is still live at
+the end of each run.
 """
 
 import asyncio
@@ -46,6 +59,9 @@ from camoufox.async_api import AsyncCamoufox
 from helpers import launch_kwargs
 
 SPOOFED_OSES = ["windows", "macos", "linux"]
+TEXT_105 = {"firefox_user_prefs": {"ui.textScaleFactor": 105},
+            "config": {"window.devicePixelRatio": 1}, "i_know_what_im_doing": True}
+ARMS = ((False, {}), (True, {}), (False, TEXT_105))
 # Well inside the viewport, so every dispatched point is a real displacement.
 INTERIOR = (0.34, 0.34)
 # Per-point ceiling. Comfortably above the 5s ack deadline, so a dropped point
@@ -61,10 +77,10 @@ def _ring(w, h):
     return [(x, y) for y in ys for x in xs]
 
 
-async def _sweep(spoofed_os, humanize) -> list:
+async def _sweep(spoofed_os, humanize, scale) -> list:
     """Returns the coordinates that did not reach the renderer."""
     undelivered = []
-    async with AsyncCamoufox(**launch_kwargs(os=spoofed_os, humanize=humanize)) as browser:
+    async with AsyncCamoufox(**launch_kwargs(os=spoofed_os, humanize=humanize, **scale)) as browser:
         page = await browser.new_page()
         await page.set_content('<body style="margin:0;height:1600px"></body>')
         await page.evaluate(RECORDER)
@@ -72,7 +88,7 @@ async def _sweep(spoofed_os, humanize) -> list:
         w, h = vp["w"], vp["h"]
         home = (int(w * INTERIOR[0]), int(h * INTERIOR[1]))
         points = _ring(w, h)
-        print(f"  [{spoofed_os}, humanize={humanize}] {w}x{h}: "
+        print(f"  [{spoofed_os}, humanize={humanize}, {scale.get('firefox_user_prefs', 'default prefs')}] {w}x{h}: "
               f"{len(points)} ring points", flush=True)
 
         for x, y in points:
@@ -103,10 +119,10 @@ async def main() -> int:
     print("\n=== viewport boundary sweep ===")
     failures = []
     for spoofed_os in SPOOFED_OSES:
-        for humanize in (False, True):
-            bad = await _sweep(spoofed_os, humanize)
+        for humanize, scale in ARMS:
+            bad = await _sweep(spoofed_os, humanize, scale)
             for point, why in bad:
-                failures.append((spoofed_os, humanize, point, why))
+                failures.append((spoofed_os, humanize, scale, point, why))
                 print(f"    FAIL {point}  {why}", flush=True)
             if not bad:
                 print("    ok", flush=True)
@@ -118,7 +134,7 @@ async def main() -> int:
               "  additions/juggler/input/MouseDispatch.js -- see docs/input-dispatch.md.\n")
         return 1
 
-    print("\n  PASS: every ring coordinate acked and observed, on every spoofed OS\n")
+    print("\n  PASS: every ring coordinate acked and observed, on every spoofed OS and text scale\n")
     return 0
 
 

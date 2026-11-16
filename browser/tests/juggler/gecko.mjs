@@ -32,15 +32,23 @@ globalThis.Components = {
 };
 
 globalThis.ChromeUtils = {
+  now: () => performance.now(),
   importESModule(url) {
     if (url === 'resource://gre/modules/NetUtil.sys.mjs')
       return {NetUtil: {newChannel: ({uri}) => ({open: () => readerFor(uri)})}};
+    if (url === 'resource://gre/modules/Timer.sys.mjs')
+      return {setTimeout, clearTimeout};
     const module = modules.get(url);
     if (!module)
       throw new Error(`not loaded under Node: ${url}`);
     return module;
   },
 };
+
+/** Stand in for a Juggler module that needs XPCOM to load. */
+export function provide(relative, module) {
+  modules.set(`resource://gre/modules/juggler/${relative}`, module);
+}
 
 /** Import a Juggler module by its path under browser/additions/juggler/. */
 export async function load(relative) {

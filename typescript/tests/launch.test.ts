@@ -729,9 +729,10 @@ describe("test_launch_environment: stock media defaults", () => {
 	it("isMobile warns that Camoufox is desktop-only", async () => {
 		const browser = utils.attachDesktopOnlyWarning(new FakeBrowser());
 		for (const create of ["newPage", "newContext"] as const) {
-			const { warnings: caught } = await warnings.recordWarnings(async () =>
-				browser[create]({ isMobile: true }),
+			const { error, warnings: caught } = await warnings.recordWarnings(
+				async () => browser[create]({ isMobile: true }),
 			);
+			if (error) throw error;
 			expect(
 				caught.some(
 					(w) =>
@@ -740,9 +741,10 @@ describe("test_launch_environment: stock media defaults", () => {
 				),
 			).toBe(true);
 		}
-		const { warnings: none } = await warnings.recordWarnings(async () =>
+		const { error, warnings: none } = await warnings.recordWarnings(async () =>
 			browser.newContext({ isMobile: false }),
 		);
+		if (error) throw error;
 		expect(none).toEqual([]);
 	});
 });
@@ -1076,12 +1078,13 @@ describe("test_executable_path_version_warning", () => {
 	beforeEach(() => {
 		deps.effectiveVersionMin = () => new Version("beta.30");
 	});
-	const runtimeWarnings = async (exe: string | null) =>
-		(
-			await warnings.recordWarnings(() =>
-				utils.warnIfExecutablePredatesPlaywright(exe),
-			)
-		).warnings.filter((w) => w.category === "RuntimeWarning");
+	const runtimeWarnings = async (exe: string | null) => {
+		const { error, warnings: caught } = await warnings.recordWarnings(() =>
+			utils.warnIfExecutablePredatesPlaywright(exe),
+		);
+		if (error) throw error;
+		return caught.filter((w) => w.category === "RuntimeWarning");
+	};
 
 	it("warns when the supplied build is too old, naming the symptom", async () => {
 		const caught = await runtimeWarnings(bundle("beta.29"));
@@ -1427,6 +1430,7 @@ describe.skipIf(!MODEL.ok)(
 					config_overrides: overrides,
 				}),
 			);
+			if (context.error) throw context.error;
 			expect(removed(context.warnings)).toHaveLength(1);
 			expect("audio:seed" in (context.result?.config ?? {})).toBe(false);
 			expect(context.result?.config.timezone).toBe("Pacific/Chatham");

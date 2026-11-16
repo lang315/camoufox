@@ -360,8 +360,9 @@ function cpuPair(
  *
  * Only GPUs the rest of the identity can stand beside are drawn: never a
  * software rasteriser, a GPU the OS cannot report, the resistFingerprinting
- * mask, a discrete GPU behind a netbook panel, or an Intel Mac GPU beside
- * cores or a panel no Intel Mac has, or a GPU the claimed CPU cannot sit
+ * mask, a discrete GPU behind a netbook panel, an AMD iGPU beside a core
+ * count only Intel reports, an Intel Mac GPU beside cores or a panel no Intel
+ * Mac has (coherence.gpuFitsMachine), or a GPU the claimed CPU cannot sit
  * beside (cpu: cpu:arch and cpu:manufacturer, coherence.gpuFitsCpu). The
  * screen is left alone:
  * it has already been reconciled with the real display and the window (#499).

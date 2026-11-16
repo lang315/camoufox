@@ -13,6 +13,80 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #460: `driven-dblclick-gap` read a first press 255 ms after the pointer arrived, against a 250 ms ceiling the dwell's own clamp sits next to
+
+**Fixed by:** the PR that refs #460. **Found by:** the Windows patch-guard probe, e2e run 43674869097 (Windows build run 43538462122, job 132692726313): `locator.dblclick: first press 255 ms after the pointer reached the button, want 50-250`.
+
+**Symptom.** One red in a run that passed 31 of 33 guards; the same guard passed in fork.3's Windows probe and in main's e2e journeys.
+
+**Root cause.** `hoverDwell()` is `logNormalDelay(125, 0.5, 60, 240)`, and `logNormalDelay` clamps. P(draw above 240) = P(z > ln(240/125)/0.5 = 1.30), about 9.6%, so about one dwell in ten is exactly 240 ms. The parent counts that wait exactly from the move's arrival (`PageHandler._arrivedAt`); the guard reads the page's `mouseover` to first `mousedown` timestamps, which add the timer's lateness and the press's delivery lag (0 to 2 ms warm, diag-75; 70 to 210 ms on a cold or loaded parent, #419). 240 plus a lag over 10 ms is above 250. The browser never drew above 240: its contract held. The ceiling was the defect: 250 came from one XTest-on-Xvfb reading of stock Firefox (`driven-click-hold.py`, `PageHandler.js`), a tool's timing and not a person's bound, and the guard cannot separate the draw from the lag in a page-side reading.
+
+**Fix.** The guard keeps the 50 ms floor, the 60-200 ms release-to-press gap, the 450 ms press-to-press bound and the one-`dblclick` check, and drops the ceiling. The #419 regression the ceiling caught (a dwell counted from the queue ack, up to 225 ms long) is pinned deterministically instead: `browser/tests/juggler/click-pacing.test.mjs` runs `PageHandler._clickPacing` on a virtual clock with a median draw and a move whose queue ack came 10 ms before the page had it, and expects 125 ms from `_arrivedAt`. A second test drives the draw to both extremes (`Math.random` near 0 and near 1) and asserts the wait stays within 60 and 240 ms, so a change to `hoverDwell`'s bounds goes red; it bounds the wait and does not pin the clamp's point mass (#467). With the ceiling raised to 300 it fails (`dwell 300 ms`), and with the floor lowered to 0 it fails (`dwell 3.04 ms`).
+
+**Not done.** Not a widened ceiling, a retry or a lower `hoverDwell` max (200 would put more mass at the clamp). The clamp's own point mass, a fingerprint, is #467.
+
+**Red-to-green.** With `_clickPacing` counting from `_movedAt` (the pre-#419 code) the new test fails (`actual: 115, expected: 125`); on the current code it passes (`node --test browser/tests/juggler/click-pacing.test.mjs`, 3 of 3). One green guard run proves little against timing; the unit test is the contract evidence.
+
+**What misled.** The guard's 250 read as a stock-derived limit on the product, and the #419 note ("if the tail ever shows without uBO, the ceiling's design is the next question") pointed at the timer, not at the 10 ms between the clamp and the ceiling.
+
+## #451: at 105% text scale a move to the content's edge row stalled 5 s and reached the page as a mouseout
+
+**Symptom.** The `ui.textScaleFactor: 105` arm of `humanize-mouse-trajectory.py`, added by the upstream sync (df9ca115), failed on Windows (job 132037002566) and on macOS (job 132330070472). Every flagged exit was at `y = 0`, 12-67 ms after the last mousemove. The default-prefs arm passed, and so did Linux.
+
+**Root cause.** Not the trajectory and not the platform's exit. The flagged "exits" were Juggler's own mousemoves back into the page, which the widget hit-tested as chrome:
+- `MouseDispatch._measured` snapped points onto whole CSS pixels inside the browser (`Math.ceil(boundingBox.top)`). `jugglerSendMouseEvent` rounds a CSS point to app units and then to a device pixel (`nsContentUtils::ToWidgetPoint`), and the widget hit-tests that pixel.
+- Text at 105% is applied as full zoom (`browser.display.os-zoom-behavior` 1, `LookAndFeel::SystemZoomSettings`), so at an identity ratio of 1 the chrome has 57 app units per device pixel. Measured on a macOS host: content top 84.95 CSS, which is device 89.42; relative `y = 0` snapped to CSS 85, device 89.47, row 89, still chrome.
+- The parent sent the page an exit at that point, which reads as a mouseout at `y = 0`. No ack came, so `sendAcked` waited its 5 s deadline. Juggler logged `mousemove at (1824, 0) was not delivered to the renderer after 5000ms`, and each re-entry `mouseover` came about 5 s after its "exit".
+- A plain `page.mouse.move(x, 0)` did the same: 5.0 s and a mouseout, under each of the windows, macos and linux identities when the drawn ratio was 1. The bottom row failed the same way when the content's bottom fell on a device-pixel boundary (815.1 CSS, 48906 app units, device 858.0).
+- `leaveContent` floored in CSS pixels. Past a far edge it could floor back onto the content's last column.
+
+Why the arm passed on Linux and at the default prefs: the chrome's scale is the identity's `devicePixelRatio` times the text scale. At a whole scale, whole CSS pixels are whole device pixels. A drawn ratio of 1.5 gives 38 app units at 105%: top 84.633 is device 133.63, and the snap to CSS 85 is device 134.21, row 134, inside. Whether the snap lands inside is an accident of the content top's fraction and the scale, as #751 was of the top alone.
+
+**Fix.** `MouseDispatch._devicePixelsIn` snaps in device pixels, from the chrome's app units per device pixel (`toTopLevelWidgetRect(0, 0, 1, 1)`). The snap applies to the viewport bounds, to `_isShown`'s clip, and to `leaveContent`, which now goes at least one device pixel past the snapped edge. At a whole scale the bounds are unchanged.
+
+**Evidence.** `mouse-boundary-sweep.py` gained a non-humanized arm at text 105% with the ratio pinned to 1, per spoofed OS. Measured on an arm64 Mac with the `v159.0-beta.35-fork.3` macOS build, whose browser inputs are main's, and the same build with only `MouseDispatch.js` replaced in `omni.ja`:
+- Before, in two runs: 20 coordinates each time, all reading `dispatched, but the page saw no mousemove`. The first run failed all three arms. The second failed the windows and macos arms (`y = 0` and `h - 1`) and passed a linux draw at 1344x633, whose geometry was not logged.
+- After: every arm passed, 9 of 9. An earlier version of the sweep, which also had humanized 105% arms, passed 12 of 12.
+- Without the ratio pin, 2 of 3 non-humanized arms failed in each of two runs, 15 coordinates each. In the run that logged the scale, the failing draws were at 57 app units and the passing one, a linux draw at ratio 1.5, at 38.
+- The humanized 105% arms passed on both builds, so the shipped arm is non-humanized: a humanized move's own points reach the page before its destination, and the sweep counts any mousemove.
+- `humanize-mouse-trajectory.py`: the 105% arm's `y = 0` exits appeared in 4 of 4 runs before, and in none of 2 completed runs after. Its remaining failures, on both builds and at the default prefs too, are exits placed correctly but more than a frame after the last mousemove. That is #472, a separate mechanism.
+
+**What misled.** The guard printed each flagged mouseout beside the last mousemove before it, so a failed re-entry read as an exit placed a pixel short and a frame late. The probe's `over` timestamps, 5 s after each "exit", and Juggler's own `WARN` lines showed the 5 s waits. `mouse-boundary-sweep.py` exists for this class, but it swept only the default prefs. Its humanized arms count any mousemove, so they could not see a dropped destination.
+
+## #469: `popup-covered-click` moved to a point the date picker did not cover, and read a dropped move as a covered one
+
+**Fixed by:** the PR that refs #469. **Found by:** the Linux Tests runs 43848662716 (job 133238009854) and 43861605376, both the headless arm of "Patch guards: stock parity": `FAIL: headless: the picker did not open over #t: ['picker', 'mousedown', 'mouseup', 'click', 'mousedown', 'mouseup', 'click']`.
+
+**Symptom.** 2 reds in about 9 parity jobs (7 green on main). The page logged `picker`, the guard then waited its 30 s deadline for a move to stop reaching the page, and the two clicks landed on the page.
+
+**Root cause.** The picker did open: in three reds the panel's state was `open`. The guard assumed it covers `#t`, a fixed point of the page (client (150..170, 90)), and that is false when the panel is shifted. Diagnostic runs on a draft PR (#471, never merged), Linux headless, read the panel's screen rect and the window's inner screen origin through Marionette for every launch. In run 43906858431 (108 launches, job 133441633590): 107 greens had the panel's x equal to the window's x and its anchored right edge at or before 1366; the red (launch 25) had a window 1262x1384 at screen (1298, 44), the panel at x 1092..1366, 206 px left of the window, so the move point (screen x 1448..1468) was outside it. Firefox 159's headless screen is 1366x768 by default (`widget/headless/HeadlessScreenHelper.cpp`), and the red's panel ends exactly at 1366: it looks clamped to the real screen while the window sits at the identity's position. That is a reading of the numbers; #481 holds it. The two earlier reds (run 43895299280, launches 28 and 35) show the same panel rect and window size.
+
+The same guard read a move Juggler never delivered as one a popup took: its `wait_covered` stopped when the page did not see a move. In the two diagnostic runs 11 of 112 and 13 of 108 launches had the first move at (150, 90) dropped after the 5 s ack deadline (`mousemove ... was not delivered to the renderer after 5000ms; dropping it`), so about one launch in ten passed without testing anything. The product side of that is #480; it does not follow window size.
+
+**Fix.** The guard waits until the picker is open and sized (`picker_ready`, what `MouseDispatch._popupAt` tests), reads its screen rect and the page's content rect from the browser (Marionette, the shared `helpers.Marionette`), and moves and clicks at a point inside both (`covered_point`, the weekday-names row of the picker, where a click selects nothing; a day cell closes the picker and the second click then reaches the page). A move that waits out the ack deadline fails as its own line (`move_verdict`), and the page's listeners are on the document so a click anywhere is seen. Nothing was retried, no timeout changed, and no window size is pinned.
+
+**Red-to-green.** `ci/tests/test_popup_covered_click.py` fed the red launch's numbers to the guard's decisions: it failed first (the functions did not exist; 4 of 5 failed, and the one that passed shows the old point (150, 90) is outside the red's panel), and passes. A later red-first case, an open panel with a zero-sized rect (launch 69 of the next run), failed then passed. Negative control: aiming the same flow at a point the panel does not cover fails with `the move ... reached the page` and `the page got clicks`. The fixed guard, Linux headless, 198 launches (Tests run 43919371754, job 133486152985): 196 covered with no page event and both clicks under 2 s, 0 dropped moves, 1 `TargetClosedError` at `Page.goto` (the browser closed during navigation, not understood), and 1 zero-sized panel read, which is what the last test fixes.
+
+**What misled the investigation.** `showPicker()` returning and `picker` in the page log read as "the picker opened over #t"; the panel's rect is chrome UI the page cannot see. Three diagnostic runs measured nothing because Marionette was connected before the first page, and a fourth because `page.close()` discards the window Marionette is attached to. A local macOS read of "focus false, no panel" (a window behind the terminal) and an earlier local build (Firefox 156) pointed at a focus refusal that the CI reds do not show (focus and `canOpenModalPicker` were true in all 112 launches of a headless run).
+
+## #446: an AMD iGPU identity could draw a core count only Intel CPUs report
+
+**Found by:** the coherence tests on a 10-core macOS arm64 host, the upstream sync (#444, #445). `test_generated_identities[windows]`, `[linux]` and `test_every_bundled_preset[windows]`, `[linux]` failed with `Violation(rule='cpu-matches-hardware', detail='CPU amd x86 with hardwareConcurrency 10, which only an Intel CPU reports')`. Upstream at `df9ca115` fails the same way. Tests on `ubuntu-24.04` stayed green.
+
+**Root cause.** Two paths made the pair, and neither asked whether the GPU's CPU vendor can report the count:
+- The synthetic draw. `webgl.sample_webgl_for_screen` filtered GPUs with `gpu_fits_machine`, which modelled Intel Macs only (`target_os != 'mac' or ...`), and `gpu_fits_cpu`, which returns True while no `cpu:arch` or `cpu:manufacturer` is set. The GPU is drawn before `set_cpu_default`, so an AMD iGPU (`Radeon HD 3200 Graphics`) passed beside 10, 14, 18, 22 or 28 cores. Seeds 0 to 299 on a 1920x1080 screen at 10 cores drew it 24 times on Windows and 35 on Linux.
+- A preset. `fix_hardware_concurrency` replaces the preset's cores with the host's after the preset's GPU is kept, and `drop_incoherent_source_values` only dropped a GPU for `gpu-matches-os` and `intel-mac-hardware`. All 27 AMD iGPU presets of `fingerprint-presets-v150.json` (18 Windows, 9 Linux) carry 2 to 16 cores, so the pair came from a 10-core host and no preset is a data bug: 0 of the 113 and 0 of the 285 stored presets pair an AMD iGPU with an Intel-only count, and `clean-fingerprint-data.py` drops none.
+
+**Why CI was green.** The pythonlib job runs on `ubuntu-24.04` with 4 cores, which no draw makes an Intel-only count, and a Linux identity claims the host's llvmpipe, which fits any CPU.
+
+**The data.** fpgen's recorded core counts behind each iGPU (`model-2/2026`): Radeon HD 3200 reports 2, 6, 8, 12, 16 on Windows and 2, 8, 12, 16 on Linux, never 10, 14, 18, 22 or 28. Intel iGPUs reach 14 and 28 on Windows and 22 on Linux.
+
+**Fix.** `coherence._gpu_cores_misfit` says no machine whose GPU implies one CPU vendor reports a count only the other vendor ships. `gpu_fits_machine` (the sampler's filter), `_check_cpu` (so `validate` sees the pair before any `cpu:*` key is set, which is what `clean-fingerprint-data.py` reads) and `drop_incoherent_source_values` (so a preset's GPU is redrawn, as an Intel Mac IGP is) all use it. The same in TypeScript. A GPU or core count the caller set (`webgl_config`, `navigator.hardwareConcurrency`) is still kept and reported.
+
+**Evidence.** Red then green: `python/tests/test_amd_igpu_cores.py` (12 of 14 failed before the fix) and `typescript/tests/amd-igpu-cores.test.ts` (10 of 12). Each test pins the cores and the GPU draw's seeds, so none reads the host: a runner with 4 cores fails them as a 10-core Mac does. The sampler arms still draw the Radeon at 12 cores, so the filter is no over-reach.
+
+**What misled.** The issue named presets as a possible carrier. The stored presets are clean; the host's core count made the pair. And `_repair_cpu`'s comment ("stays reported") described a pair a launch could not avoid, when the draw could have.
+
 ## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
 
 **Found by:** measuring #456 on an arm64 Mac (M1 Pro) with the `v159.0-beta.35-fork.3` macOS release. Each pairing below gave the same result in 3 of 3 rounds:
