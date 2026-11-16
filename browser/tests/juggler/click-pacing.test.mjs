@@ -22,9 +22,9 @@ ChromeUtils.importESModule = url => {
 const {PageHandler} = await import('../../additions/juggler/protocol/PageHandler.js');
 
 // random() of 0.5 then 0.25 is a standard normal of 0, so a dwell is its median.
-const medianDraws = [0.5, 0.25];
+let draws = [0.5, 0.25];
 let draw = 0;
-Math.random = () => medianDraws[draw++ % 2];
+Math.random = () => draws[draw++ % 2];
 
 async function pressAfterMove(state) {
   now = 5000;
@@ -46,4 +46,14 @@ test('with no arrival the queue ack stamp stands', async () => {
 
 test('a press with no move before it waits for nothing', async () => {
   assert.equal(await pressAfterMove({}), 0);
+});
+
+test('the dwell stays within 60 and 240 ms at both extremes of the draw', async () => {
+  // First random() near 1 makes the log-normal's radius huge; the second picks its sign: 0 is
+  // a draw far above the median, 0.5 one far below it.
+  for (const extreme of [[1 - 1e-12, 0], [1 - 1e-12, 0.5]]) {
+    draws = extreme;
+    const waited = await pressAfterMove({_movedAt: 4990, _arrivedAt: 5000});
+    assert.ok(waited >= 60 && waited <= 240, `dwell ${waited} ms for draws ${extreme}`);
+  }
 });
