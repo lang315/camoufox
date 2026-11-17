@@ -20,7 +20,8 @@ SLOWER_FACTOR times stock and at least MIN_GAP_NS more. It also fails when a
 getter is at least FASTER_MIN_GAP_NS cheaper than stock's and, measured against an
 untouched control getter in the same browser, under 1/FASTER_FACTOR of stock's
 cost: one that skips stock's work shows as plainly (screen.width took 18-24 ns
-against stock's 107 ns when it did).
+against stock's 107 ns when it did). The renderer strings, whose GPU round trip
+swings between sessions, fail only under 1/ROUND_TRIP_SKIP_FACTOR of stock's.
 
 What it compares across: separate processes. Each of LAUNCHES rounds starts
 stock Firefox and then Camoufox, once with a launch-level and once with a
@@ -94,11 +95,20 @@ WEBGL = [
 # 7812, then 4844). The spoof's per-call work is IsSupported(), which
 # getExtension() times above.
 GL_SETUP = "G.getExtension('WEBGL_debug_renderer_info');"
-# In a worker the renderer strings cost ~23 us in one browser session and
-# ~60 us in another, in stock and Camoufox alike (measured 2026-10-26: stock
-# 62.5 us in every launch of one guard run and 22.5-24.4 us in three others,
-# Camoufox 22.5-26.3 us and then 51.9 us), so the worker times only the rest.
-WORKER_WEBGL = [e for e in WEBGL if e not in ("G.getParameter(G.RENDERER)", "G.getParameter(37446)")]
+# The renderer strings are stock's round trip to the GPU process, and its cost
+# changes between browser sessions, in stock and Camoufox alike. In a worker it
+# took ~23 us in one session and ~60 us in another (2026-10-26: stock 62.5 us in
+# every launch of one guard run and 22.5-24.4 us in three others, Camoufox
+# 22.5-26.3 us and then 51.9 us), so the worker does not time them. In the page
+# it took stock 15.0 and 20.6 us for the two strings and Camoufox 31.3 and 35.0
+# (2026-11-13), and in the next run stock 33.8 us and Camoufox 15.6. The spoof
+# adds a memoized lookup after the round trip, so a cost within a few times
+# stock's, either way, is the session's, not the spoof's. A skipped round trip
+# costs what the other strings do, ~50 ns: under 1/ROUND_TRIP_SKIP_FACTOR of
+# stock's, which fails.
+ROUND_TRIP = ("G.getParameter(G.RENDERER)", "G.getParameter(37446)")
+ROUND_TRIP_SKIP_FACTOR = 10.0
+WORKER_WEBGL = [e for e in WEBGL if e not in ROUND_TRIP]
 
 # Spoofed getters, and controls Camoufox does not touch (a sanity check that
 # the two browsers are comparable on this machine). innerWidth, innerHeight and
@@ -196,6 +206,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.server.results.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
         self.send_response(204)
         self.end_headers()
+
+
+def judge(expr, s, c, stock_base, camou_base):
+    """verdict(), except that a renderer string fails only when its GPU round
+    trip was skipped: that round trip's cost swings between sessions."""
+    if expr in ROUND_TRIP:
+        return False, ROUND_TRIP_SKIP_FACTOR * c < s
+    return verdict(s, c, stock_base, camou_base)
 
 
 def prepare_stock(binary):
@@ -374,7 +392,7 @@ def measure() -> int:
                     print(f"{where:6s} {expr[:44]:44s} {'-':>8s} {'-':>9s}  not measurable")
                     continue
                 control = expr in CONTROLS
-                slow, fast = verdict(s, c, stock_base, camou_base)
+                slow, fast = judge(expr, s, c, stock_base, camou_base)
                 if control:
                     slow = c > SLOWER_FACTOR * s and c - s >= MIN_GAP_NS
                 mark = ("  <- control" if control else "  <- SLOWER" if slow
@@ -406,7 +424,7 @@ def measure() -> int:
             print(f"host CPU: {cpu}")
         return 1
     print(f"PASS: no spoofed getter costs over {SLOWER_FACTOR}x or under 1/{FASTER_FACTOR} of "
-          f"stock Firefox's from script.")
+          f"stock Firefox's from script, and no GPU round trip skipped.")
     return 0
 
 
