@@ -12,15 +12,21 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
-ROOT: Path
+ROOT: Optional[Path] = None
 
 
 def isolate() -> Path:
-    """Point every platform's cache location at a fresh temp root, and return it."""
+    """Point every platform's cache location at a fresh temp root, and return it.
+
+    Once per process: a test that does `from conftest import ...` imports the
+    native conftest a second time, which must not move the cache again."""
     global ROOT
+    if ROOT is not None:
+        return ROOT
     ROOT = Path(tempfile.mkdtemp(prefix="camoufox-pytest-")).resolve()
     os.environ["HOME"] = os.environ["USERPROFILE"] = str(ROOT)
     os.environ["LOCALAPPDATA"] = str(ROOT / "AppData" / "Local")

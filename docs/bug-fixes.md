@@ -29,7 +29,7 @@ later change should read first.
 - `python3 -m ci.run_pythonlib` after moving the Python suite onto the shared module: 952 passed, 0 failed.
 - Importing `camoufox` before the conftest, so a cache path escapes: the run aborts with `ERROR: cache paths outside the test root ...`, exit 4, before any test.
 
-**What misled the investigation.** The test passed alone and wrote nothing. The failure needs another module to have imported `camoufox` first.
+**What misled the investigation.** The test passed alone and wrote nothing. The failure needs another module to have imported `camoufox` first. The first version of this fix put `python/tests` first on `sys.path`, so `from conftest import fd_count, settle` in two native tests found the Python suite's conftest (Tests run 43993220442, job 133755483170: `ImportError: cannot import name 'fd_count' from 'conftest'`). Those imports sit inside test bodies that need a browser, so a local run without one never reached them. The path is now appended, `isolate()` runs once per process (a second import of the native conftest must not move the cache again), and `test_the_tests_still_import_this_suites_conftest_without_isolating_again` pins it: red with the path first, green with it last.
 
 ## #469: `popup-covered-click` took the date picker's rect before it had its real one
 

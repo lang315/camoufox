@@ -28,7 +28,8 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "python" / "src"))
-sys.path.insert(0, str(REPO_ROOT / "python" / "tests"))
+# Last, so that `from conftest import ...` in the tests still finds this suite's conftest.
+sys.path.append(str(REPO_ROOT / "python" / "tests"))
 
 import cache_root  # noqa: E402
 
