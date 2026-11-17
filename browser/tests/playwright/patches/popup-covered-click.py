@@ -99,7 +99,7 @@ return null;
 
 
 def covered_point(panel, content):
-    """A point of the page, relative to its content area, that the panel covers; None if it covers none.
+    """A whole-pixel point of the page, relative to its content area, that the panel covers; None if it covers none.
     The row is the picker's weekday names, where a click selects nothing and so leaves the picker open."""
     x0, y0 = max(panel[0], content[0]), max(panel[1], content[1])
     x1 = min(panel[0] + panel[2], content[0] + content[2])
@@ -107,7 +107,7 @@ def covered_point(panel, content):
     if x0 >= x1 or y0 >= y1:
         return None
     y = min(max(panel[1] + WEEKDAY_ROW, y0), y1 - 1)
-    return (x0 + x1) // 2 - content[0], y - content[1]
+    return round((x0 + x1) / 2 - content[0]), round(y - content[1])
 
 
 def move_verdict(took_s, page_saw):
@@ -117,21 +117,25 @@ def move_verdict(took_s, page_saw):
     return "reached the page" if page_saw else "covered"
 
 
-def picker_ready(seen):
-    """Whether the picker takes mouse events: open and sized, which is what _popupAt tests."""
-    return bool(seen and seen["state"] == "open" and seen["panel"][2] and seen["panel"][3])
+def open_point(seen):
+    """The point the picker covers once it is open and has its real rect, else None. It reads state 'open'
+    for a moment with a sub-pixel rect at the origin (13 ms on Xvfb, #469), which covers none of the page."""
+    if not seen or seen["state"] != "open":
+        return None
+    return covered_point(seen["panel"], seen["content"])
 
 
 def wait_open(m, deadline_s=10):
-    """The picker's state and rects once it takes mouse events, else the last state seen."""
+    """The last read of the picker, and the point it covers once it covers one."""
     end = time.monotonic() + deadline_s
     seen = None
     while time.monotonic() < end:
         seen = m.js(PANEL)
-        if picker_ready(seen):
-            return seen
+        point = open_point(seen)
+        if point:
+            return seen, point
         time.sleep(0.02)
-    return seen
+    return seen, None
 
 
 def probe(binary, display):
@@ -161,13 +165,11 @@ def probe(binary, display):
         m = Marionette(port)
         try:
             page.locator("#open").click()
-            opened = wait_open(m)
+            opened, point = wait_open(m)
         finally:
             m.close()
-        out = {"racing": racing, "opened": opened}
-        if picker_ready(opened):
-            out["point"] = covered_point(opened["panel"], opened["content"])
-        if out.get("point"):
+        out = {"racing": racing, "opened": opened, "point": point}
+        if point:
             x, y = out["point"]
             t = time.monotonic()
             page.mouse.move(x, y)
@@ -190,6 +192,27 @@ def probe(binary, display):
     return out
 
 
+def check(where, got):
+    """The failure lines of one arm's probe."""
+    failures, opened = [], got["opened"]
+    if not isinstance(got["racing"], float) or got["racing"] >= IMMEDIATE_S:
+        failures.append(f"{where}: a click while the picker opened took {got['racing']}, want under {IMMEDIATE_S} s")
+    if not got["point"] or got["page"][:1] != ["picker"]:
+        failures.append(f"{where}: the picker did not open over the page within the deadline; last read {opened}, "
+                        f"page log {got['page']}")
+        return failures
+    verdict, took = got["move"]
+    if verdict == "dropped":
+        failures.append(f"{where}: Juggler did not deliver the move to {got['point']} inside the picker: it took {took} s")
+    elif verdict == "reached the page":
+        failures.append(f"{where}: the move to {got['point']} inside the picker reached the page")
+    if any(e in got["page"] for e in ("mousedown", "mouseup", "click")):
+        failures.append(f"{where}: the page got clicks at {got['point']}, so no popup covered it: {got['page']}")
+    elif not all(isinstance(s, float) and s < IMMEDIATE_S for s in got["took"]):
+        failures.append(f"{where}: clicks inside the picker took {got['took']}, want each under {IMMEDIATE_S} s")
+    return failures
+
+
 def main() -> int:
     binary = resolve_binary()
     failures, seen = [], {}
@@ -198,26 +221,8 @@ def main() -> int:
         for where in ("headless", display):
             if where is None:
                 continue
-            got = probe(binary, None if where == "headless" else where)
-            seen[where] = got
-            opened = got["opened"]
-            if not isinstance(got["racing"], float) or got["racing"] >= IMMEDIATE_S:
-                failures.append(f"{where}: a click while the picker opened took {got['racing']}, want under {IMMEDIATE_S} s")
-            if not picker_ready(opened) or got["page"][:1] != ["picker"]:
-                failures.append(f"{where}: the picker did not open: {opened}, page log {got['page']}")
-                continue
-            if not got["point"]:
-                failures.append(f"{where}: the picker {opened['panel']} covers none of the page {opened['content']}")
-                continue
-            verdict, took = got["move"]
-            if verdict == "dropped":
-                failures.append(f"{where}: Juggler did not deliver the move to {got['point']} inside the picker: it took {took} s")
-            elif verdict == "reached the page":
-                failures.append(f"{where}: the move to {got['point']} inside the picker reached the page")
-            if any(e in got["page"] for e in ("mousedown", "mouseup", "click")):
-                failures.append(f"{where}: the page got clicks at {got['point']}, so no popup covered it: {got['page']}")
-            elif not all(isinstance(s, float) and s < IMMEDIATE_S for s in got["took"]):
-                failures.append(f"{where}: clicks inside the picker took {got['took']}, want each under {IMMEDIATE_S} s")
+            seen[where] = probe(binary, None if where == "headless" else where)
+            failures += check(where, seen[where])
     finally:
         if proc:
             proc.kill()
