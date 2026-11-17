@@ -123,6 +123,12 @@ jobs:
           ls "$fdir" | head -5
           echo "--- binary ---"; ls -la "$abs"; file "$abs" || true
 
+      # The package and the sha256-pinned fpgen model, restored from the cache, so no guard below
+      # downloads the model from GitHub on its first launch (#491). Playwright is pinned as in
+      # the steps after it.
+      - run: pip install --quiet -e python 'playwright==1.55.0'
+      - uses: ./.github/actions/fpgen-model
+
       - name: "page.evaluate() is isolated from the page (#51/#62)"
         timeout-minutes: 10
         run: |
