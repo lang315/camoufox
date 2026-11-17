@@ -23,16 +23,19 @@ const helper = new Helper();
 
 // How long a person holds a mouse button for a click. Human press durations
 // are right-skewed (arXiv 2607.26935 centres them on 100-120 ms), so this is a
-// log-normal with a 95 ms median, sigma 0.42, never under 50 ms.
+// log-normal with a 95 ms median (the untruncated draw's; truncated at 50 ms
+// the realized median is 98.2 ms), sigma 0.42.
 const clickHold = () => logNormalDelay(95, 0.42, 50);
 
 // How long a person's button stays up between the clicks of a double click:
-// 110 ms median, sigma 0.32, kept within 70-180 ms, so press to press stays
+// 110 ms median (untruncated; realized 110.8 ms), sigma 0.32, kept within
+// 70-180 ms, so press to press stays
 // well inside the OS double-click time with clickHold() before it.
 const clickGap = () => logNormalDelay(110, 0.32, 70, 180);
 
 // How long a person's pointer rests on a target before pressing it: 125 ms
-// median, sigma 0.5, kept within 60-240 ms. Stock's OS input reads under
+// median (untruncated; realized 123.1 ms), sigma 0.5, kept within 60-240 ms.
+// Stock's OS input reads under
 // 250 ms from arrival to press; Playwright pressed under 10 ms after the move.
 const hoverDwell = () => logNormalDelay(125, 0.5, 60, 240);
 

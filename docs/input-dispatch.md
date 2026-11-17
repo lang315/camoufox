@@ -234,7 +234,8 @@ clipboard, is cancelled in the system group; content never receives a
 `keypress` for a shortcut, so that is not observable. The text never goes
 through the system clipboard. The modifier leads V by about 60 ms and trails
 it by about 40 ms, as Shift does a key, and V is held 116.25 ms (SD 23.88;
-Dhakal et al., "Observations on Typing from 136 Million Keystrokes", CHI 2018).
+Dhakal et al., "Observations on Typing from 136 Million Keystrokes", CHI 2018; the
+untruncated draw's parameters, the 50 ms floor makes the realized mean 116.45 ms).
 Every delay between a person's input events comes from `input/HumanDelay.js`,
 with the figures its caller cites: a normal draw for a key or modifier hold
 (`normalDelay(mean, sd, min, max)`) and a right-skewed log-normal for a click
@@ -248,7 +249,9 @@ before the page's refresh tick; a press that finds no arrival waits for it.
 
 A page that cancels the paste, or the shortcut's `keydown`, and leaves the field
 as it was gets the text typed instead, as a person types what they cannot paste:
-key by key on a US keyboard, 238.66 ms press to press (SD 111.60, the same study).
+key by key on a US keyboard, 238.66 ms press to press (SD 111.60, the same study: the
+untruncated draw's parameters; the 80 ms floor, ours, makes the realized mean 256.2 ms,
+where a clamp gave about 242.6).
 A character with no US key arrives as an input method commits it. Typing stops
 with an error if the focus leaves the field, and a read-only field takes nothing,
 without error. A page that writes the pasted text in later than the shortcut's
