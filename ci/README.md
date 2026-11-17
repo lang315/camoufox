@@ -25,6 +25,15 @@ resolve ── static ─────────────── lint, tribal
                                summary ──► one comment on the PR ──► gate: "All tests passed"
 ```
 
+A push to `main` whose tree a passing pull request run already tested (nothing
+else merged in between) runs none of that again. `resolve` finds the run
+(`ci.carry`), `carry-browser` takes over the browser it tested, `sundial` runs
+against it, since a pull request from a fork has no credential for it, and
+`summary` reports the carried results with this run's grade. Each pull request
+run records the tree it tested as a `tested-tree-<tree>` artifact. A push that
+lands any other tree, or whose run's browser has expired (three days), is tested
+in full.
+
 ## Jobs
 
 | Job | Runner | What it proves |
@@ -33,7 +42,8 @@ resolve ── static ─────────────── lint, tribal
 | `pythonlib` | `ci.run_pythonlib` | `python/`'s own tests |
 | `typescript` | `ci.run_typescript` | Type check, lint, vitest, byte-for-byte parity with `python/` |
 | `install` | `ci.run_install` | The packed packages install into clean environments, fetch a real browser, and launch it and the browser under test through the installed package: the User-Agent claims the launched Firefox, the page and the request agree on it, the bundled fonts render, and a click and typed text reach the page as trusted events |
-| `build` / `fetch-browser` | `ci.run_prepare`, `ci.run_build` | The browser under test: compiled from this branch, or the published release built from the same sources |
+| `build` / `fetch-browser` | `ci.run_prepare`, `ci.run_build` | The browser under test: built and packaged from this branch by the command a release's build runs, or the published release built from the same sources |
+| `preflight` | `ci.run_prepare`, `ci.run_build --preflight` | Each target only a release builds (linux arm64, windows x86_64 and i686, macos x86_64 and arm64) configures, passes the export tiers, and compiles every source file a patch or an addition touches ([below](#what-a-release-builds)) |
 | `patch-guards` | `ci.run_patch_guards --group spoofing\|automation\|parity`, `ci.run_skiplist_audit` | One guard per shipped behaviour ([`browser/tests/playwright/`](../browser/tests/playwright/README.md)); every skiplist entry still fails |
 | `build-tester` | `ci.run_build_tester` | The raw binary against the anti-detect checks ([README](../browser/tests/build-tester/README.md)) |
 | `typescript-browser` | `ci.run_typescript --browser` | The npm launcher against a real browser |
@@ -42,6 +52,7 @@ resolve ── static ─────────────── lint, tribal
 | `playwright` | `ci.run_playwright --shard i/6` | Upstream playwright-python's suite, plus [`browser/tests/playwright/camoufox/`](../browser/tests/playwright/camoufox/README.md) |
 | `native` | `ci.run_native --subset browser` | Leaks, context isolation, crash recovery ([below](#camoufoxs-own-suite)) |
 | `growth` | `ci.run_native --subset growth --shard i/7` | Memory growth, one test per runner |
+| `carry-browser` | | A carried push to `main`: the pull request run's browser, cached for `main` when it was built |
 | `sundial` | `ci.run_sundial` | The stealth grade ([below](#stealth-grade)) |
 | `summary` | `ci.summarize` | Folds every result into one table and a pull request comment |
 | `gate` | | The required check, **`All tests passed`** |
@@ -189,9 +200,12 @@ Anything that is not `success` fails it, including `skipped`, except:
 
 | May be skipped | When |
 |---|---|
-| `build` | The browser was fetched, not compiled |
+| `build`, `preflight` | The browser was fetched, not compiled |
+| `preflight` | The repository is not `daijro/camoufox` (below) |
 | `fetch-browser` | The browser was compiled, not fetched |
 | `sundial` | Disabled in `ci/sundial.yml`, or no credential |
+| `carry-browser` | The push to `main` was not carried |
+| every suite but `sundial` | The push to `main` was carried; `summary` requires their results from the pull request run |
 
 `sundial` may also record a `skip` result when the sundial service is
 unreachable. A rejected credential, a full report, or a score under the floor
@@ -218,7 +232,7 @@ Each tier gates the next, so a lint failure never reaches the build:
 |---|---|---|
 | 0 static | lint, self-tests, settled decisions | seconds |
 | 1 unit | pythonlib, typescript | about a minute |
-| 2 browser | build (browser sources changed) or fetch (they did not) | minutes to hours |
+| 2 browser | build (browser sources changed) or fetch (they did not); on daijro/camoufox also five preflights | minutes to hours |
 | 3a smoke | patch guards, skiplist audit, build-tester, typescript-browser, goapi, observer, install | about 15 min |
 | 3b full | Playwright × 6, native, growth × 7, stealth | about 40 min |
 | 4 gate | the required check | seconds |
@@ -228,12 +242,38 @@ Each tier gates the next, so a lint failure never reaches the build:
 | **Fetch instead of build** | A pull request that does not touch browser sources tests the published release built from exactly this tree's sources (`ci.release paired`). With no such release, it builds. |
 | **Compiled-input cache** | The build cache is keyed on a hash of the compiled inputs only (`ci/browser_inputs.py`). On a hit the browser is restored and this branch's Juggler JavaScript and other resources, the files Juggler's `moz.build` lists in `FINAL_TARGET_FILES`, are laid over it. Everything else, including any new file type, counts as native and forces a build. |
 | **No partial restore** | That cache has no `restore-keys`: a partial match would hand the tests a browser built from different sources. A self-test checks the key covers every browser-affecting path. |
-| **Warm ccache** | Pushes to `main` and a twice-weekly schedule keep the ccache from being evicted; pull requests restore it. |
+| **Warm ccache** | Pushes to `main` that build, and a twice-weekly schedule, keep the ccache from being evicted; pull requests restore it. A carried push builds nothing, so it caches the pull request's browser under the compiled-input key instead. |
+| **Carried pushes** | A push to `main` that lands the tree its pull request run tested reuses that run's results ([above](#the-test-pipeline)). |
 | **Closed-PR cache cleanup** | `cleanup-pr-caches.yml` deletes the caches a pull request saved under `refs/pull/N/merge` when it closes, so merged pull requests stop holding space the build legs' ccache needs. `build.yml` saves its ccache and mozbuild state under a key ending in the run id, so every build saves a fresh one and restores the newest. A build dispatched from a branch saves into that branch's cache scope, which other branches cannot restore: only builds dispatched from `main` share their ccache, so dispatch builds from `main` where possible. |
 | **fpgen model cache** | Every job in `tests.yml`, `e2e.yml` and `smoke.yml` that installs camoufox installs the sha256-pinned fpgen model through `.github/actions/fpgen-model`, which restores the model archive from `actions/cache` (key `fpgen-archive-<hash of python/src/camoufox/fpgen-model.json>`, path `.ci-work/fpgen-model.zip`) and runs `python/scripts/pin-fpgen-model.py --archive` on it, so a model is downloaded once per pin rather than once per job, and the archive is checked against the pin whether it was cached or downloaded. `ci/tests` fails a workflow job that installs the package without it (`release.yml`'s `build-browser` is the one exception: it imports only the font helpers). The TypeScript launcher's copy is a separate cache of `.ci-work/fpgen`, set by `CAMOUFOX_FPGEN_DATA` (key `fpgen-model-<hash>`). |
 | **Network retries only** | `ci.run_prepare` (`setup-minimal`, `dir`, `mozbootstrap`) retries only failures that read as transient network errors. A failed hunk or compile error fails at once. |
 
 Pushing to a branch cancels its running build (`cancel-in-progress`).
+
+## What a release builds
+
+A release builds six targets and a pull request builds one. Every step of a
+release's build therefore also runs on a pull request
+([`one-build-entry-point`](tribal-rules.yml)):
+
+| | Pull request | Release |
+|---|---|---|
+| Runner setup | [`build-host`](../.github/actions/build-host/action.yml) | the same action |
+| Source tree | `ci.run_prepare` | the same |
+| linux x86_64 | `ci.run_build`: `multibuild.py` retargets, builds and packages | the same command |
+| The other five targets | `ci.run_build --preflight`: `multibuild.py` retargets, then [`preflight.py`](../browser/scripts/preflight.py) configures, runs the `pre-export`, `export` and `pre-compile` tiers and compiles the objects of every patched or added source file | `ci.run_build`: the full build |
+
+A preflight does not link or package, so a link error on a cross-compiled
+target is still found by a release. Its compiles are cached per target, and a
+target that passed is not preflighted again until the browser's compiled
+inputs, `build-host` or the runner scripts change; the twice-weekly scheduled
+run preflights every target regardless.
+
+On this fork `release.yml` does not run: a fork release is built by
+`build.yml`, which runs `multibuild.py` itself, macOS natively on `macos-26` and
+Windows from Linux with the system LLVM 18 that `build-host` does not install.
+The preflights cross-compile on `build-host` instead, a path the fork does not
+ship, so `tests.yml` runs them only on `daijro/camoufox`.
 
 ## Releases
 
@@ -252,7 +292,8 @@ exactly one browser build.
      ▼
 dispatch on main ─► ubo ─► tests ─► plan ─┬─► build-browser ─► publish-browser ─┐
                   (AMO's  (tests.yml,     │   (only if its      v156.0.1-beta.N  │
-                   newest) this commit)   │    sources changed)                  ├─► publish-pypi ─► publish-npm ─► tag-library
+                   newest) unless main's  │    sources changed)                  ├─► publish-pypi ─► publish-npm ─► tag-library
+                           run passed it) │                                      │
                                           └─► build-library ─────────────────────┘   0.5.9bN          0.5.9-beta.N    v0.5.9bN
                                               (only if what it ships changed)        (pip: --pre)     @next
 
@@ -284,7 +325,8 @@ Releases cut before manifests existed (up to `v156.0.1-beta.32`) pair by the tag
 | Command | Needs a browser | What it runs |
 |---|---|---|
 | `python3 -m ci.run_prepare` | | `make setup-minimal`, `dir`, `mozbootstrap` |
-| `python3 -m ci.run_build` | | The browser build |
+| `python3 -m ci.run_build` | | The browser build and package for linux x86_64; `--target`, `--arch` for another |
+| `python3 -m ci.run_build --target windows --arch x86_64 --preflight` | | Preflight one target |
 | `python3 -m ci.run_pythonlib` | | `python/`'s tests |
 | `python3 -m ci.run_typescript` | | `typescript/`'s tests |
 | `python3 -m ci.run_typescript --browser <bin>` | yes | The npm launcher end to end |

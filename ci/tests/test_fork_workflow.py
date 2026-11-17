@@ -137,7 +137,7 @@ def test_the_gate_lets_install_skip_on_a_fork_only():
 # --- the gate's table ----------------------------------------------------------
 
 
-def _run_gate(results: dict, *, built="true", has_sundial="false", repository="lang315/camoufox"):
+def _run_gate(results: dict, *, built="true", has_sundial="false", repository="lang315/camoufox", carried=""):
     """Run the gate job's own script with a synthetic `needs` and return the
     process and the mark printed for each tier."""
     import json
@@ -157,6 +157,7 @@ def _run_gate(results: dict, *, built="true", has_sundial="false", repository="l
         "BROWSER_CHANGED": built,
         "HAS_SUNDIAL": has_sundial,
         "REPOSITORY": repository,
+        "CARRIED": carried,
     }
     proc = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)], env=env, capture_output=True, text=True
@@ -191,6 +192,28 @@ def test_the_gate_fails_a_tier_that_failed():
     assert proc.returncode == 1
     assert marks["pythonlib"] == "FAIL"
     assert "not mergeable:\n  - pythonlib: failure" in proc.stdout
+
+
+def test_the_gate_excuses_the_preflights_on_a_fork_only():
+    """tests.yml runs the preflights on daijro/camoufox only."""
+    proc, marks = _run_gate({"preflight": "skipped"})
+    assert proc.returncode == 0, proc.stdout
+    assert marks["preflight"] == "skip"
+    proc, marks = _run_gate({"preflight": "skipped"}, repository="daijro/camoufox")
+    assert proc.returncode == 1
+    assert marks["preflight"] == "FAIL"
+
+
+def test_a_carried_push_excuses_the_forks_own_suites():
+    """A carried push to main skips every suite, the fork's goapi, observer and
+    e2e jobs included; the summary requires their results from the pull request run."""
+    skipped = ("static", "pythonlib", "typescript", "install", "build", "preflight", "fetch-browser",
+               "playwright", "patch-guards", "build-tester", "native", "typescript-browser",
+               "goapi", "observer", "growth", "e2e", "sundial")
+    proc, marks = _run_gate(dict.fromkeys(skipped, "skipped"), carried="123")
+    assert proc.returncode == 0, proc.stdout
+    assert {marks[t] for t in skipped} == {"skip"}
+    assert marks["carry-browser"] == "ok"
 
 
 def test_the_gate_does_not_excuse_a_skip_the_run_did_not_earn():

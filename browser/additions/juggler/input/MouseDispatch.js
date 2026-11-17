@@ -363,14 +363,14 @@ export class MouseDispatch {
     let lastY = start ? Math.round(from.y) : NaN;
     let offContent = false;
     const destination = steps.length - 1;
+    // Dispatches at once and resolves with the ack, so a caller can act on the
+    // move before the renderer has it; the cursor is on that pixel from now.
     const send = async (x, y) => {
       if (Math.round(x) === lastX && Math.round(y) === lastY)
         return true;
-      if (!await this.sendAcked(watcher, eventType, x, y))
-        return false;
       lastX = Math.round(x);
       lastY = Math.round(y);
-      return true;
+      return !!await this.sendAcked(watcher, eventType, x, y);
     };
     const leave = (x, y) => {
       this.leaveContent(x, y);
@@ -393,21 +393,29 @@ export class MouseDispatch {
         return true;
       }
       offContent = false;
-      if (!await send(x, y))
-        return false;
-      // A step on the way to one outside the viewport leaves it at the moment
-      // the pointer crosses the edge, not at the next step's time.
       const next = steps[i + 1];
       if (i + 1 === destination || this.isInViewport(next.x, next.y))
-        return true;
+        return send(x, y);
+      // A step on the way to one outside the viewport leaves it at the moment
+      // the pointer crosses the edge, not at the next step's time. The exit
+      // follows the page's last move by one sample of the mouse, so it goes out
+      // when that move is dispatched, not when the renderer acks it: the ack
+      // waits on the page's main thread, which a real exit never does (#472).
+      // Only that last move is unacked when the exit goes: an unprocessed move
+      // is replaced by the next ([Compress] on RealMouseMoveEvent), and its ack
+      // never comes. The exit cannot overtake it: the renderer flushes
+      // coalesced moves before an exit (BrowserChild::RecvRealMouseButtonEvent).
       const {ms, last, exit} = this._crossing(step, next);
+      let sent = send(x, y);
+      if (last && !await sent)
+        return false;
       const wait = ms - (ChromeUtils.now() - begun);
       if (wait > 0)
         await new Promise(resolve => setTimeout(resolve, wait));
-      if (last && !await send(last.x, last.y))
-        return false;
+      if (last)
+        sent = send(last.x, last.y);
       leave(exit.x, exit.y);
-      return true;
+      return sent;
     });
   }
 
