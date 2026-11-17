@@ -27,6 +27,38 @@ later change should read first.
 
 **What misled the investigation.** The issue lists `Screen(max_width=1024, max_height=768)` as the fix; it does not apply to a pinned identity. The guard passed on Linux, whose Xvfb is 1400 px wide and holds the window, so the failure looked platform-specific rather than monitor-size-specific.
 
+## #489: the native suite wrote to the developer's real camoufox cache
+
+**Fixed by:** the PR that refs #489. **Found by:** two files in a developer's `~/Library/Caches/camoufox/fontconfig` after a local run of `browser/tests/native` (2026-11-16).
+
+**Symptom.** `fonts-<hash>.conf` files appeared in the real cache, one per run.
+
+**Root cause.** `browser/tests/native/conftest.py` set no cache location, and `test_build_tester_fontconfig.py` redirected only `XDG_CACHE_HOME`, per test. `pkgman.INSTALL_DIR` is `Path(user_cache_dir("camoufox"))` evaluated once, on the first import of `camoufox` (`pkgman.py:64`), and `utils._generate_fontconfig` writes under it. In a directory run another test module has imported `camoufox` by then, so the monkeypatch changed nothing. Alone, the test wrote nothing, which is why it looked safe.
+
+**Fix.** The #280 isolation moved out of `python/tests/conftest.py` into `python/tests/cache_root.py`, which both suites now use (the native one loads it by file path): a temp root for `HOME`, `USERPROFILE`, `LOCALAPPDATA` and `XDG_CACHE_HOME` before `camoufox` is imported, a session-start check that aborts the run when a cache constant is outside the root, and removal of the root at the end. `test_cache_isolation.py` joins the `rules` subset of `ci/run_native.py`. Not copied from the Python suite: the per-test emptying of the root, which the native tests do not need.
+
+**Evidence.** All with a scratch `HOME`, counting files under `$HOME/Library/Caches/camoufox`:
+- Red: `test_cache_isolation.py` before the fix, 5 failed. The directory run from `browser/tests/native`, 1 file written.
+- Green: 7 passed. The same directory run, 0 files (the same 3 failures and 51 errors as before, which need a browser and Linux).
+- `python3 -m ci.run_pythonlib` after moving the Python suite onto the shared module: 952 passed, 0 failed.
+- Importing `camoufox` before the conftest, so a cache path escapes: the run aborts with `ERROR: cache paths outside the test root ...`, exit 4, before any test.
+
+**What misled the investigation.** The test passed alone and wrote nothing. The failure needs another module to have imported `camoufox` first. The first version of this fix put `python/tests` first on `sys.path`, so `from conftest import fd_count, settle` in two native tests found the Python suite's conftest (Tests run 43993220442, job 133755483170: `ImportError: cannot import name 'fd_count' from 'conftest'`). Those imports sit inside test bodies that need a browser, so a local run without one never reached them. The native conftest now loads `cache_root.py` by file path under the name `camoufox_cache_root`, so `python/tests` is never on `sys.path` and nothing depends on the order of two modules both named `conftest`; `isolate()` runs once per process (a second import of the native conftest must not move the cache again), and `test_the_tests_still_import_this_suites_conftest_without_isolating_again` pins it. It was red with `python/tests` first on the path (the first version) and passes without it.
+
+## #491: the `e2e` and `smoke` jobs downloaded the fpgen model during a test
+
+**Fixed by:** the PR that refs #491. **Found by:** Tests run 43988340287 (PR #474, head 92730f20), job 133733057176: `test_open_a_page[pkg]` failed in `drv.launch()` with `HTTPError: 502 ... model-2/2026/model-release.zip`.
+
+**Symptom.** One journey red on a GitHub 502, 124 others green.
+
+**Root cause.** The `e2e` job of `tests.yml` installs the package (`pip install -e 'python[geoip]'`) and never ran `./.github/actions/fpgen-model`. b8db9556 replaced the pin step nine jobs already had with the action, and this job was not one of them, so it had none to replace. Without the model in place, `fpgen_model.ensure_fpgen_model` installs the pinned one on first use (checked against the sha256), uncached and inside the test that launches first. `smoke.yml`'s `smoke` job had the same gap. The README said every job gets the action; nothing checked it.
+
+**Fix.** Both jobs run the action after installing the package (`smoke` gets an install step of its own before it, because its guards each install in their own step). `ci/tests/test_ci.py::test_every_job_that_installs_the_package_installs_the_pinned_fpgen_model` reads every workflow, finds the jobs whose steps `pip install` the repo's `python` package, and fails for one that neither uses the action nor runs `pin-fpgen-model.py`. The one exemption is `release.yml`'s `build-browser`, which imports only the font helpers.
+
+**Evidence.** Red on the unchanged workflows: `jobs that install the package without ./.github/actions/fpgen-model: ['smoke.yml:smoke', 'tests.yml:e2e']`. Green after: `python3 -m pytest ci/tests`, 387 passed, 1 skipped. The Tests run of the PR shows the `e2e` job restoring the archive from the cache. The `smoke` job is dispatch-only and was not run.
+
+**What misled the investigation.** The 502 trace names `ensure_fpgen_model`, which looks like the pin working; it was the fallback working. Only the job's steps showed the action missing.
+
 ## #467: `HumanDelay` clamped its draws, leaving a spike on each bound
 
 **Fixed by:** the PR that refs #467. **Found by:** reading `hoverDwell` while fixing #460.

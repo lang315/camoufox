@@ -1195,6 +1195,7 @@ jobs:
           go-version: "1.23"
           cache-dependency-path: goapi/go.sum
       - run: pip install -e 'python[geoip]'
+      - uses: ./.github/actions/fpgen-model
       # Oracle B compares behaviour with Playwright's own Firefox.
       - run: python3 -m playwright install --with-deps firefox
       - name: Run

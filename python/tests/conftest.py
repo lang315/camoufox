@@ -1,22 +1,15 @@
 """Shared fixtures for the camoufox test suite."""
 
-import os
 import json
 import shutil
-import sys
-import tempfile
 from pathlib import Path
 
 import pytest
 
-# camoufox computes its cache directories when it is first imported, from the
-# platform's cache location (HOME on macOS, XDG_CACHE_HOME on Linux,
-# LOCALAPPDATA on Windows). Point all of them at a temp root before that import,
-# or the suite reads and writes the developer's real cache (#279).
-CACHE_ROOT = Path(tempfile.mkdtemp(prefix="camoufox-pytest-")).resolve()
-os.environ["HOME"] = os.environ["USERPROFILE"] = str(CACHE_ROOT)
-os.environ["LOCALAPPDATA"] = str(CACHE_ROOT / "AppData" / "Local")
-os.environ["XDG_CACHE_HOME"] = str(CACHE_ROOT / ".cache")
+# The cache constants are computed on camoufox's first import: isolate before it (#279).
+import cache_root
+
+CACHE_ROOT = cache_root.isolate()
 
 from camoufox import pkgman, utils  # noqa: E402
 
@@ -25,41 +18,17 @@ SETTINGS = REPO_ROOT / 'browser' / 'settings'
 PACKAGE_DIR = Path(pkgman.__file__).resolve().parent
 
 
-def cache_paths_outside(root: Path) -> list:
-    """Every camoufox cache constant that resolves outside `root`.
-
-    A cache constant is a module-level Path in the package that has a
-    "camoufox" component and is not the package's own source tree, so a new one
-    is covered without being listed here.
-    """
-    outside = []
-    for name, module in sorted(sys.modules.items()):
-        if not name.startswith("camoufox") or module is None:
-            continue
-        for attr, value in vars(module).items():
-            if not isinstance(value, Path) or "camoufox" not in value.parts:
-                continue
-            resolved = value.resolve()
-            if not (resolved.is_relative_to(PACKAGE_DIR) or resolved.is_relative_to(root)):
-                outside.append(f"{name}.{attr} = {value}")
-    return outside
-
-
 def pytest_sessionstart(session):
-    outside = cache_paths_outside(CACHE_ROOT)
-    if outside:
-        raise pytest.UsageError(
-            f"cache paths outside the test root {CACHE_ROOT}: " + "; ".join(outside)
-        )
+    cache_root.check_session_start()
 
 
 def pytest_sessionfinish(session, exitstatus):
-    shutil.rmtree(CACHE_ROOT, ignore_errors=True)
+    cache_root.remove_root()
 
 
 @pytest.fixture
 def cache_paths_outside_root():
-    return cache_paths_outside
+    return cache_root.cache_paths_outside
 
 
 @pytest.fixture(autouse=True)
