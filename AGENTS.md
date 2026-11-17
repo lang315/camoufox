@@ -150,10 +150,13 @@ make build                     # ./mach build
 make run                       # run the build (wipes ~/.camoufox)
 make package-linux arch=x86_64 # or package-macos / package-windows
 python3 multibuild.py --target linux windows macos --arch x86_64 arm64
+python3 multibuild.py --target windows macos --arch x86_64 --preflight  # compile what the patches touch, in minutes
 ```
 
 Install `ccache`. A cold build takes about 40 minutes, and an incremental one
-about 5.
+about 5. `--preflight` configures a target, runs the export tiers and compiles
+every source a patch or an addition touches, without linking: a check for a
+patch with code for another OS or CPU, in minutes.
 
 ## Changing a patch
 

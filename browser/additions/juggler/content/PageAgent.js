@@ -884,14 +884,17 @@ function pause(ms) {
 }
 
 // How long a person holds a key: 116.25 ms (SD 23.88; Dhakal et al.,
-// "Observations on Typing from 136 Million Keystrokes", CHI 2018), never under
-// 50 ms.
+// "Observations on Typing from 136 Million Keystrokes", CHI 2018) are the
+// untruncated draw's parameters; truncated at 50 ms the realized mean is 116.45.
 const keyHold = () => normalDelay(116.25, 23.88, 50);
-// Press to press while typing, from the same study: 238.66 ms, SD 111.60.
+// Press to press while typing, from the same study: 238.66 ms, SD 111.60, the
+// untruncated draw's parameters. The 80 ms floor is ours, not the study's: the
+// realized mean is 256.2 ms (a clamp gave about 242.6).
 const keyInterval = () => normalDelay(238.66, 111.6, 80);
 // How far a modifier leads the key it modifies, and trails its release: tens
 // of ms. No recorded figure; these keep the mean and spread of the uniform
-// 35-90 ms and 20-65 ms draws they replaced, with those floors.
+// 35-90 ms and 20-65 ms draws they replaced, with those floors (untruncated;
+// the realized means are 64.0 and 43.7 ms).
 const modifierLead = () => normalDelay(62.5, 16, 35);
 const modifierTrail = () => normalDelay(42.5, 13, 20);
 
