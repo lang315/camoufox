@@ -6,15 +6,16 @@ with the Python suite, #280) and checks the result at session start.
 """
 
 import os
+import sys
 import tempfile
 from pathlib import Path
 
 import pytest
 
-import cache_root
 from camoufox import pkgman
 
 TEMP_ROOT = Path(tempfile.gettempdir()).resolve()
+cache_root = sys.modules["camoufox_cache_root"]  # loaded by conftest.py, which has isolated the cache
 
 
 def test_the_launcher_cache_is_under_the_temp_root():

@@ -15,6 +15,7 @@ Run:
 from __future__ import annotations
 
 import gc
+import importlib.util
 import os
 import resource
 import sys
@@ -28,13 +29,23 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "python" / "src"))
-# Last, so that `from conftest import ...` in the tests still finds this suite's conftest.
-sys.path.append(str(REPO_ROOT / "python" / "tests"))
 
-import cache_root  # noqa: E402
+
+def _load_cache_root():
+    """python/tests/cache_root.py, loaded by path under a name of its own: python/tests has a
+    conftest.py too, and on sys.path it would shadow this one for `from conftest import ...`."""
+    name = "camoufox_cache_root"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, REPO_ROOT / "python" / "tests" / "cache_root.py")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
 
 # The launcher's cache constants are computed on camoufox's first import, so the
 # suite is isolated before any test module imports it (#489, as the Python suite, #280).
+cache_root = _load_cache_root()
 cache_root.isolate()
 
 
