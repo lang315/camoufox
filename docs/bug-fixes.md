@@ -13,6 +13,24 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #489: the native suite wrote to the developer's real camoufox cache
+
+**Fixed by:** the PR that refs #489. **Found by:** two files in a developer's `~/Library/Caches/camoufox/fontconfig` after a local run of `browser/tests/native` (2026-11-16).
+
+**Symptom.** `fonts-<hash>.conf` files appeared in the real cache, one per run.
+
+**Root cause.** `browser/tests/native/conftest.py` set no cache location, and `test_build_tester_fontconfig.py` redirected only `XDG_CACHE_HOME`, per test. `pkgman.INSTALL_DIR` is `Path(user_cache_dir("camoufox"))` evaluated once, on the first import of `camoufox` (`pkgman.py:64`), and `utils._generate_fontconfig` writes under it. In a directory run another test module has imported `camoufox` by then, so the monkeypatch changed nothing. Alone, the test wrote nothing, which is why it looked safe.
+
+**Fix.** The #280 isolation moved out of `python/tests/conftest.py` into `python/tests/cache_root.py`, which both suites now use (the native one loads it by file path): a temp root for `HOME`, `USERPROFILE`, `LOCALAPPDATA` and `XDG_CACHE_HOME` before `camoufox` is imported, a session-start check that aborts the run when a cache constant is outside the root, and removal of the root at the end. `test_cache_isolation.py` joins the `rules` subset of `ci/run_native.py`. Not copied from the Python suite: the per-test emptying of the root, which the native tests do not need.
+
+**Evidence.** All with a scratch `HOME`, counting files under `$HOME/Library/Caches/camoufox`:
+- Red: `test_cache_isolation.py` before the fix, 5 failed. The directory run from `browser/tests/native`, 1 file written.
+- Green: 7 passed. The same directory run, 0 files (the same 3 failures and 51 errors as before, which need a browser and Linux).
+- `python3 -m ci.run_pythonlib` after moving the Python suite onto the shared module: 952 passed, 0 failed.
+- Importing `camoufox` before the conftest, so a cache path escapes: the run aborts with `ERROR: cache paths outside the test root ...`, exit 4, before any test.
+
+**What misled the investigation.** The test passed alone and wrote nothing. The failure needs another module to have imported `camoufox` first. The first version of this fix put `python/tests` first on `sys.path`, so `from conftest import fd_count, settle` in two native tests found the Python suite's conftest (Tests run 43993220442, job 133755483170: `ImportError: cannot import name 'fd_count' from 'conftest'`). Those imports sit inside test bodies that need a browser, so a local run without one never reached them. The native conftest now loads `cache_root.py` by file path under the name `camoufox_cache_root`, so `python/tests` is never on `sys.path` and nothing depends on the order of two modules both named `conftest`; `isolate()` runs once per process (a second import of the native conftest must not move the cache again), and `test_the_tests_still_import_this_suites_conftest_without_isolating_again` pins it. It was red with `python/tests` first on the path (the first version) and passes without it.
+
 ## #491: the `e2e` and `smoke` jobs downloaded the fpgen model during a test
 
 **Fixed by:** the PR that refs #491. **Found by:** Tests run 43988340287 (PR #474, head 92730f20), job 133733057176: `test_open_a_page[pkg]` failed in `drv.launch()` with `HTTPError: 502 ... model-2/2026/model-release.zip`.

@@ -147,7 +147,7 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   Every leg also runs the observer and goapi gates (`ci.run_observer`, `ci.run_goapi`) before the journeys, so
   macOS and Windows get the coverage `tests.yml` gives Linux (#310; the Windows goapi gate pins a Windows identity with
   `CAMOUFOX_TEST_OS`, because another OS's identity starts slowly there, #345); a dispatch with `probe` or `k` leaves them out.
-- **The suites isolate the launcher cache** (TypeScript #269, Python #280) and
+- **The suites isolate the launcher cache** (TypeScript #269, Python #280, native #489) and
   fail before any test if a cache path escapes the temp root. On macOS a launched
   browser still creates an empty `~/Library/Caches/camoufox` by itself, so check
   the file count, not whether the directory exists.
