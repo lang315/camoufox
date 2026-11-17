@@ -31,6 +31,20 @@ later change should read first.
 
 **What misled the investigation.** The test passed alone and wrote nothing. The failure needs another module to have imported `camoufox` first. The first version of this fix put `python/tests` first on `sys.path`, so `from conftest import fd_count, settle` in two native tests found the Python suite's conftest (Tests run 43993220442, job 133755483170: `ImportError: cannot import name 'fd_count' from 'conftest'`). Those imports sit inside test bodies that need a browser, so a local run without one never reached them. The native conftest now loads `cache_root.py` by file path under the name `camoufox_cache_root`, so `python/tests` is never on `sys.path` and nothing depends on the order of two modules both named `conftest`; `isolate()` runs once per process (a second import of the native conftest must not move the cache again), and `test_the_tests_still_import_this_suites_conftest_without_isolating_again` pins it. It was red with `python/tests` first on the path (the first version) and passes without it.
 
+## #491: the `e2e` and `smoke` jobs downloaded the fpgen model during a test
+
+**Fixed by:** the PR that refs #491. **Found by:** Tests run 43988340287 (PR #474, head 92730f20), job 133733057176: `test_open_a_page[pkg]` failed in `drv.launch()` with `HTTPError: 502 ... model-2/2026/model-release.zip`.
+
+**Symptom.** One journey red on a GitHub 502, 124 others green.
+
+**Root cause.** The `e2e` job of `tests.yml` installs the package (`pip install -e 'python[geoip]'`) and never ran `./.github/actions/fpgen-model`. b8db9556 replaced the pin step nine jobs already had with the action, and this job was not one of them, so it had none to replace. Without the model in place, `fpgen_model.ensure_fpgen_model` installs the pinned one on first use (checked against the sha256), uncached and inside the test that launches first. `smoke.yml`'s `smoke` job had the same gap. The README said every job gets the action; nothing checked it.
+
+**Fix.** Both jobs run the action after installing the package (`smoke` gets an install step of its own before it, because its guards each install in their own step). `ci/tests/test_ci.py::test_every_job_that_installs_the_package_installs_the_pinned_fpgen_model` reads every workflow, finds the jobs whose steps `pip install` the repo's `python` package, and fails for one that neither uses the action nor runs `pin-fpgen-model.py`. The one exemption is `release.yml`'s `build-browser`, which imports only the font helpers.
+
+**Evidence.** Red on the unchanged workflows: `jobs that install the package without ./.github/actions/fpgen-model: ['smoke.yml:smoke', 'tests.yml:e2e']`. Green after: `python3 -m pytest ci/tests`, 387 passed, 1 skipped. The Tests run of the PR shows the `e2e` job restoring the archive from the cache. The `smoke` job is dispatch-only and was not run.
+
+**What misled the investigation.** The 502 trace names `ensure_fpgen_model`, which looks like the pin working; it was the fallback working. Only the job's steps showed the action missing.
+
 ## #467: `HumanDelay` clamped its draws, leaving a spike on each bound
 
 **Fixed by:** the PR that refs #467. **Found by:** reading `hoverDwell` while fixing #460.
