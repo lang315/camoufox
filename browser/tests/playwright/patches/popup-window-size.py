@@ -28,6 +28,12 @@ identity here carries both sizes, and a 300x150 iframe must report 300x150.
 The popup's size is read several times across the startup hold, so a late
 resize to the identity's size is caught too.
 
+The identity is fitted to the monitor the guard runs on (a hosted Windows
+monitor is 1024 px wide and a hosted macOS one 1280), because the launcher
+refuses a headful window the monitor cannot hold. The subject is the same at any
+size above the popup's: the popup asks for 400x300, and a popup that took the
+identity's size would read that size instead.
+
     python browser/tests/playwright/patches/popup-window-size.py
 """
 
@@ -42,22 +48,38 @@ REQUESTED = [400, 300]
 FRAME = [300, 150]
 PLACED = [37, 41]
 CLAIMED = [123, 45]
-# A screen and window the claimed position fits in: the launcher clamps a
-# position that would put the window off the screen.
-CONFIG = {
-    "window.screenX": CLAIMED[0],
-    "window.screenY": CLAIMED[1],
-    "screen.width": 1920,
-    "screen.height": 1080,
-    "screen.availLeft": 0,
-    "screen.availTop": 0,
-    "screen.availWidth": 1920,
-    "screen.availHeight": 1080,
-    "window.innerWidth": 1366,
-    "window.innerHeight": 643,
-    "window.outerWidth": 1366,
-    "window.outerHeight": 728,
-}
+WIDE = [1366, 728]  # the window this guard asks for where the monitor holds it
+CHROME_HEIGHT = 85  # outerHeight - innerHeight of that window
+
+
+def identity(monitor):
+    """The identity's screen and window, no larger than the monitor.
+
+    The launcher refuses a headful window the monitor cannot hold, and clamps a
+    position that would put the window off the screen, so the screen is the
+    monitor's (at most 1920x1080) and the window leaves room for the claimed
+    position. Nothing below depends on the window being 1366 wide: the popup
+    asks for REQUESTED, and the main window only has to be larger than that and
+    answer with the identity's own sizes."""
+    width = min(1920, monitor.max_width)
+    height = min(1080, monitor.max_height)
+    outer = [min(WIDE[0], width - CLAIMED[0]), min(WIDE[1], height - CLAIMED[1])]
+    return {
+        "window.screenX": CLAIMED[0],
+        "window.screenY": CLAIMED[1],
+        "screen.width": width,
+        "screen.height": height,
+        "screen.availLeft": 0,
+        "screen.availTop": 0,
+        "screen.availWidth": width,
+        "screen.availHeight": height,
+        "window.innerWidth": outer[0],
+        "window.innerHeight": outer[1] - CHROME_HEIGHT,
+        "window.outerWidth": outer[0],
+        "window.outerHeight": outer[1],
+    }
+
+
 FRAME_SIZE = f"""() => new Promise(resolve => {{
   const frame = document.createElement('iframe');
   frame.style = 'border:0;width:{FRAME[0]}px;height:{FRAME[1]}px';
@@ -66,10 +88,10 @@ FRAME_SIZE = f"""() => new Promise(resolve => {{
 }})"""
 
 
-async def probe(binary):
+async def probe(binary, config):
     from camoufox.async_api import AsyncCamoufox
 
-    async with AsyncCamoufox(headless=True, executable_path=str(binary), config=CONFIG,
+    async with AsyncCamoufox(headless=True, executable_path=str(binary), config=config,
                              i_know_what_im_doing=True) as browser:
         page = await browser.new_page()
         await page.goto("about:blank")
@@ -92,12 +114,12 @@ async def probe(binary):
         return main_size, main_pos, frame_size, readings, positions
 
 
-async def headful_position(binary):
+async def headful_position(binary, config):
     """The identity's position on a window with a real X display (an Xvfb with no
     window manager on Linux, the host's desktop elsewhere)."""
     from camoufox.async_api import AsyncCamoufox
 
-    async with AsyncCamoufox(headless=False, executable_path=str(binary), config=CONFIG,
+    async with AsyncCamoufox(headless=False, executable_path=str(binary), config=config,
                              i_know_what_im_doing=True) as browser:
         page = await browser.new_page()
         await page.goto("about:blank")
@@ -106,17 +128,31 @@ async def headful_position(binary):
 
 
 def main() -> int:
-    main_size, main_pos, frame_size, readings, positions = asyncio.run(probe(resolve_binary()))
+    binary = resolve_binary()
     with hidden_display():
-        headful_pos = asyncio.run(headful_position(resolve_binary()))
+        # The monitor the headful launch is checked against, read as the launcher reads it.
+        from camoufox.utils import get_screen_cons
+
+        monitor = get_screen_cons(headless=False)
+        if monitor is None:
+            raise SystemExit("FAIL: SETUP-INVALID, the launcher cannot read this display's size")
+        config = identity(monitor)
+        # A main window no larger than the popup's request would make a popup that
+        # took the identity's size read as the size it asked for.
+        if config["window.innerWidth"] <= REQUESTED[0] or config["window.innerHeight"] <= REQUESTED[1]:
+            raise SystemExit(f"FAIL: SETUP-INVALID, a {monitor.max_width}x{monitor.max_height} monitor leaves a "
+                             f"{config['window.innerWidth']}x{config['window.innerHeight']} content area, "
+                             f"not larger than the popup's {REQUESTED}")
+        main_size, main_pos, frame_size, readings, positions = asyncio.run(probe(binary, config))
+        headful_pos = asyncio.run(headful_position(binary, config))
+    print(f"monitor {monitor.max_width}x{monitor.max_height}, identity window {config['window.outerWidth']}x"
+          f"{config['window.outerHeight']}")
     print(f"headful main window at {headful_pos}")
     print(f"main window inner and outer {main_size} at {main_pos}, iframe inner {frame_size}, "
           f"popup inner {readings} at {positions}")
     failures = []
-    if main_size[:2] != [CONFIG["window.innerWidth"], CONFIG["window.innerHeight"]]:
+    if main_size[:2] != [config["window.innerWidth"], config["window.innerHeight"]]:
         failures.append(f"the main window's content area {main_size[:2]} is not the identity's")
-    if main_size[2] == REQUESTED[0]:
-        failures.append("the main window is the popup's width, so the check proves nothing")
     if frame_size != FRAME:
         failures.append(f"a {FRAME} iframe reports {frame_size}")
     if any(reading != REQUESTED for reading in readings):
