@@ -148,6 +148,7 @@ authority on what fails; a local run is a hypothesis.
 | Crashes | Killing the browser, the X server, a content process or the driver mid-run leaves nothing behind, and the next launch works (`test_crash_recovery.py`) |
 | Memory growth | One mechanism (iframes, canvas readback, WebGL contexts, workers, script compilation, font measurement) driven N and 4N times grows by a bounded amount (`test_memory_growth.py`, the `growth` job) |
 | Settled decisions | Every mechanically checkable rule in [`ci/tribal-rules.yml`](tribal-rules.yml) (`test_tribal_rules.py`) |
+| Cache isolation | The suite runs with its launcher cache in a temp root, and a cache path outside it aborts the run before any test (`test_cache_isolation.py`, #489) |
 | GPU display | `headless="virtual-gpu"` renders on the card `CAMOUFOX_GPU` names, the identity claims that card, and the Xorg server exits with the browser (`test_gpu_display.py`). No runner has a GPU, so the `gpu` subset is run by hand and is not part of `all` |
 
 ## Stealth grade

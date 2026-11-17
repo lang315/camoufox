@@ -28,6 +28,23 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO_ROOT / "python" / "src"))
+sys.path.insert(0, str(REPO_ROOT / "python" / "tests"))
+
+import cache_root  # noqa: E402
+
+# The launcher's cache constants are computed on camoufox's first import, so the
+# suite is isolated before any test module imports it (#489, as the Python suite, #280).
+cache_root.isolate()
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    cache_root.check_session_start()
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    cache_root.remove_root()
+
+
 
 def pytest_addoption(parser: pytest.Parser) -> None:
     parser.addoption("--browsers", type=int, default=3,
