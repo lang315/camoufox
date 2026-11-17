@@ -13,6 +13,38 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
+
+**Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).
+
+**Symptom.** The guard failed before the browser started: `ValueError: window.outerWidth 1366 at display scale 1 needs 1366 pixels, but this monitor has 1024` (Windows), `... has 1280` (macOS). Every probe on those hosts ended red on it.
+
+**Root cause.** The guard pinned one identity for every host: a 1920x1080 screen and a 1366x728 window. Its headful arm opens that window, and the launcher refuses one the monitor cannot hold (`utils.py`, the `needs ... pixels, but this monitor has` check). The check is on the pinned `config`, which the launcher keeps as given: a `Screen(max_width=, max_height=)` bound shapes a generated identity and does not shrink a caller's keys, so the option the issue names cannot rescue a pinned config.
+
+**Fix.** The guard sizes its identity from the monitor, read as the launcher reads it (`get_screen_cons`, which `launch_options` uses for its own bound). The screen is the monitor's, at most 1920x1080, and the window is 1366x728 or the largest that leaves room for the claimed position (123, 45), so the launcher does not clamp it. Its subject does not depend on 1366: the popup asks for 400x300, the main window must answer with the identity's own, larger size, and an iframe with its own. Not marked not applicable. The guard exits `SETUP-INVALID` when the monitor leaves a content area no larger than the popup's request, because then a popup that took the identity's size would read as the size it asked for.
+
+**Evidence.** `launch_options(headless=False, config=...)` with the monitor's size mocked, old pinned config against the new identity: at 1024x768 and 1280x720 the old config raises the error above and the new identity is accepted (901x723 and 1157x675 windows) with every pinned key reaching the browser unchanged; at 1400x900 and above both are accepted. The guard's own result on a Windows build is in the PR.
+
+**What misled the investigation.** The issue lists `Screen(max_width=1024, max_height=768)` as the fix; it does not apply to a pinned identity. The guard passed on Linux, whose Xvfb is 1400 px wide and holds the window, so the failure looked platform-specific rather than monitor-size-specific.
+
+## #489: the native suite wrote to the developer's real camoufox cache
+
+**Fixed by:** the PR that refs #489. **Found by:** two files in a developer's `~/Library/Caches/camoufox/fontconfig` after a local run of `browser/tests/native` (2026-11-16).
+
+**Symptom.** `fonts-<hash>.conf` files appeared in the real cache, one per run.
+
+**Root cause.** `browser/tests/native/conftest.py` set no cache location, and `test_build_tester_fontconfig.py` redirected only `XDG_CACHE_HOME`, per test. `pkgman.INSTALL_DIR` is `Path(user_cache_dir("camoufox"))` evaluated once, on the first import of `camoufox` (`pkgman.py:64`), and `utils._generate_fontconfig` writes under it. In a directory run another test module has imported `camoufox` by then, so the monkeypatch changed nothing. Alone, the test wrote nothing, which is why it looked safe.
+
+**Fix.** The #280 isolation moved out of `python/tests/conftest.py` into `python/tests/cache_root.py`, which both suites now use (the native one loads it by file path): a temp root for `HOME`, `USERPROFILE`, `LOCALAPPDATA` and `XDG_CACHE_HOME` before `camoufox` is imported, a session-start check that aborts the run when a cache constant is outside the root, and removal of the root at the end. `test_cache_isolation.py` joins the `rules` subset of `ci/run_native.py`. Not copied from the Python suite: the per-test emptying of the root, which the native tests do not need.
+
+**Evidence.** All with a scratch `HOME`, counting files under `$HOME/Library/Caches/camoufox`:
+- Red: `test_cache_isolation.py` before the fix, 5 failed. The directory run from `browser/tests/native`, 1 file written.
+- Green: 7 passed. The same directory run, 0 files (the same 3 failures and 51 errors as before, which need a browser and Linux).
+- `python3 -m ci.run_pythonlib` after moving the Python suite onto the shared module: 952 passed, 0 failed.
+- Importing `camoufox` before the conftest, so a cache path escapes: the run aborts with `ERROR: cache paths outside the test root ...`, exit 4, before any test.
+
+**What misled the investigation.** The test passed alone and wrote nothing. The failure needs another module to have imported `camoufox` first. The first version of this fix put `python/tests` first on `sys.path`, so `from conftest import fd_count, settle` in two native tests found the Python suite's conftest (Tests run 43993220442, job 133755483170: `ImportError: cannot import name 'fd_count' from 'conftest'`). Those imports sit inside test bodies that need a browser, so a local run without one never reached them. The native conftest now loads `cache_root.py` by file path under the name `camoufox_cache_root`, so `python/tests` is never on `sys.path` and nothing depends on the order of two modules both named `conftest`; `isolate()` runs once per process (a second import of the native conftest must not move the cache again), and `test_the_tests_still_import_this_suites_conftest_without_isolating_again` pins it. It was red with `python/tests` first on the path (the first version) and passes without it.
+
 ## #491: the `e2e` and `smoke` jobs downloaded the fpgen model during a test
 
 **Fixed by:** the PR that refs #491. **Found by:** Tests run 43988340287 (PR #474, head 92730f20), job 133733057176: `test_open_a_page[pkg]` failed in `drv.launch()` with `HTTPError: 502 ... model-2/2026/model-release.zip`.
