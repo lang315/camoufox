@@ -239,7 +239,9 @@ Every delay between a person's input events comes from `input/HumanDelay.js`,
 with the figures its caller cites: a normal draw for a key or modifier hold
 (`normalDelay(mean, sd, min, max)`) and a right-skewed log-normal for a click
 hold, hover dwell or double-click gap (`logNormalDelay(median, sigma, min, max)`),
-as human timing is.
+as human timing is. A draw outside its bounds is drawn again (at most 100 times, then
+an error), so the bounds cut the distribution and put no mass on themselves; the cited
+mean or median is the untruncated distribution's.
 A hover dwell counts from when the page got the move (the `mousemove` event reaching
 the parent, `PageHandler._arrivedAt`), not from the renderer's queue ack, which comes
 before the page's refresh tick; a press that finds no arrival waits for it.

@@ -13,6 +13,38 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #467: `HumanDelay` clamped its draws, leaving a spike on each bound
+
+**Fixed by:** the PR that refs #467. **Found by:** reading `hoverDwell` while fixing #460.
+
+**Symptom.** About 1 of 10 `hoverDwell` draws was exactly 240.0 ms, and every delay with a bound had the same atom.
+
+**Root cause.** `normalDelay` and `logNormalDelay` ended in `Math.min(max, Math.max(min, x))`, which moves every draw beyond a bound onto the bound. The mass on each bound is the untruncated distribution's tail beyond it; from the callers' figures: `keyHold` 0.28% at 50 ms, `keyInterval` 7.8% at 80, `modifierLead` 4.3% at 35, `modifierTrail` 4.2% at 20, `clickHold` 6.3% at 50, `clickGap` 7.9% at 70 and 6.2% at 180, `hoverDwell` 7.1% at 60 and 9.6% at 240 (16.7% on a bound). In 20000 seeded draws per caller the red test counted 55, 1505, 853, 826, 1253, 2792 and 3325 draws on a bound.
+
+**Fix.** A draw outside `[min, max]` is drawn again (`withinBounds`), at most 100 times and then an error. The distribution is truncated: a hard cutoff at each bound, no mass on it.
+
+| Caller | Bounds (ms) | Accepts | Mean draws | P(100 misses) | Cited figure, truncated |
+|---|---|---|---|---|---|
+| `keyHold` | 50 | 99.72% | 1.003 | 1e-256 | mean 116.25 -> 116.45 |
+| `keyInterval` | 80 | 92.24% | 1.084 | 9e-112 | mean 238.66 -> 256.23 |
+| `modifierLead` | 35 | 95.72% | 1.045 | 2e-137 | mean 62.5 -> 64.02 |
+| `modifierTrail` | 20 | 95.83% | 1.044 | 1e-138 | mean 42.5 -> 43.71 |
+| `clickHold` | 50 | 93.68% | 1.067 | 1e-120 | median 95 -> 98.2 |
+| `clickGap` | 70 to 180 | 85.92% | 1.164 | 7e-86 | median 110 -> 110.8 |
+| `hoverDwell` | 60 to 240 | 83.29% | 1.201 | 2e-78 | median 125 -> 123.1 |
+
+The cap sits far under the worst caller. A source that never lands inside its bounds raises, and does not loop on.
+
+**Why a cutoff is acceptable.** The support limit already existed: no draw was ever beyond a bound, so a page could see "never over 240 ms" before and can now. What goes is the atom, which shows as a repeated exact value (subject to the timer precision under "Not measured"). None of the bounds comes from data: Dhakal et al. (CHI 2018) gives a mean and SD for key holds and intervals; the modifier floors are the minimums of the uniform draws they replaced; the click and dwell bounds are the code's (the 250 ms ceiling's origin is in #460). So there is no recorded figure to move a bound to, and none was changed. A person's dwell has no upper bound; whether `hoverDwell` should lose its ceiling is a product question, not decided here.
+
+**Cost.** Truncating moves a cited mean up where the floor cuts the lower tail. `keyInterval` moves from the cited 238.66 ms to 256.23 ms (+17.6 ms, 7.4%; the clamp gave about 242.6). The others move by 0.2 to 1.5 ms (means) or 0.8 to 3.2 ms (medians); `hoverDwell`'s median moves down 1.9 ms. No parameter was re-solved to restore a cited mean: that would be a new figure without data behind it.
+
+**Red-to-green.** `browser/tests/juggler/delay.test.mjs`: for each caller's figures, 20000 seeded draws must have none on a bound and all inside it (10 of 14 tests failed on the clamp), and a source that never lands inside the bounds must raise. The two older tests that asserted `min(xs) === 50` and `max(xs) === 180` pinned the spike; they now assert no draw on a bound. `click-pacing.test.mjs` (#460's bound on `hoverDwell`) drove constant extreme draws, which can no longer be returned; it now supplies a draw just outside each bound (270 ms, 40 ms) followed by a median draw, and still asserts the wait is within 60 to 240 ms. With the ceiling raised to 300 it fails (`dwell 270 ms`), with the floor lowered to 0 it fails (`dwell 40 ms`).
+
+**Not measured.** Whether a page can resolve a spike at its timer precision. Firefox 159's defaults are `privacy.reduceTimerPrecision` true at 1000 microseconds with jitter, and nothing in this repo overrides them, so a spike at 240.0 ms would be resolvable to about a millisecond; that is a reading of the defaults, not a measurement in Camoufox.
+
+**What misled the investigation.** The earlier arithmetic counted only the 240 ms ceiling (9.6%) and not the floor (7.1%) of `hoverDwell`, and the clamp had kept every cited median exactly, which made it look harmless; a truncation does not.
+
 ## #469: `popup-covered-click` took the date picker's rect before it had its real one
 
 **Fixed by:** the PR that refs #469. **Found by:** Tests run 43947261469 (PR #474, head 702f6c85), job 133590159488, the display arm: `FAIL: :0: the picker [0, 0, 1, 1] covers none of the page [0, 85, 1280, 683]`.
