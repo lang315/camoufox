@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
+
+**Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).
+
+**Symptom.** The guard failed before the browser started: `ValueError: window.outerWidth 1366 at display scale 1 needs 1366 pixels, but this monitor has 1024` (Windows), `... has 1280` (macOS). Every probe on those hosts ended red on it.
+
+**Root cause.** The guard pinned one identity for every host: a 1920x1080 screen and a 1366x728 window. Its headful arm opens that window, and the launcher refuses one the monitor cannot hold (`utils.py`, the `needs ... pixels, but this monitor has` check). The check is on the pinned `config`, which the launcher keeps as given: a `Screen(max_width=, max_height=)` bound shapes a generated identity and does not shrink a caller's keys, so the option the issue names cannot rescue a pinned config.
+
+**Fix.** The guard sizes its identity from the monitor, read as the launcher reads it (`get_screen_cons`, which `launch_options` uses for its own bound). The screen is the monitor's, at most 1920x1080, and the window is 1366x728 or the largest that leaves room for the claimed position (123, 45), so the launcher does not clamp it. Its subject does not depend on 1366: the popup asks for 400x300, the main window must answer with the identity's own, larger size, and an iframe with its own. Not marked not applicable. The guard exits `SETUP-INVALID` when the monitor leaves a content area no larger than the popup's request, because then a popup that took the identity's size would read as the size it asked for.
+
+**Evidence.** `launch_options(headless=False, config=...)` with the monitor's size mocked, old pinned config against the new identity: at 1024x768 and 1280x720 the old config raises the error above and the new identity is accepted (901x723 and 1157x675 windows) with every pinned key reaching the browser unchanged; at 1400x900 and above both are accepted. The guard's own result on a Windows build is in the PR.
+
+**What misled the investigation.** The issue lists `Screen(max_width=1024, max_height=768)` as the fix; it does not apply to a pinned identity. The guard passed on Linux, whose Xvfb is 1400 px wide and holds the window, so the failure looked platform-specific rather than monitor-size-specific.
+
 ## #489: the native suite wrote to the developer's real camoufox cache
 
 **Fixed by:** the PR that refs #489. **Found by:** two files in a developer's `~/Library/Caches/camoufox/fontconfig` after a local run of `browser/tests/native` (2026-11-16).
