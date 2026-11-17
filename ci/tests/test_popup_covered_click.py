@@ -58,9 +58,25 @@ def test_a_move_that_waited_out_the_ack_deadline_is_dropped_not_covered(guard):
     assert guard.move_verdict(took_s=0.02, page_saw=True) == "reached the page"
 
 
-def test_an_open_panel_with_no_size_yet_is_not_ready(guard):
-    # Launch 69 of Tests run 43919371754: state 'open', rect [0, 0, 0, 0]. _popupAt skips a popup with no size.
-    assert not guard.picker_ready({"state": "open", "panel": [0, 0, 0, 0], "content": [0, 86, 1445, 943]})
-    assert not guard.picker_ready({"state": "showing", "panel": [0, 107, 274, 303], "content": [0, 85, 1920, 947]})
-    assert not guard.picker_ready(None)
-    assert guard.picker_ready({"state": "open", "panel": [0, 107, 274, 303], "content": [0, 85, 1920, 947]})
+def read(state, panel, content=(0, 85, 1280, 683)):
+    return {"state": state, "panel": list(panel), "content": list(content)}
+
+
+@pytest.mark.parametrize("seen", [
+    None,
+    read("showing", (0, 107, 274, 303)),
+    read("open", (0, 0, 0, 0)),
+    # Tests run 43947261469, job 133590159488, display arm: the read the guard took too early.
+    read("open", (0, 0, 1, 1), (0, 85, 1280, 683)),
+    # Run 43956846664, job 133617160042: 13 ms of 0.8 x 0.8 at the origin before the real rect.
+    read("open", (0, 0, 0.8, 0.8), (0, 84.8, 1024, 723.2)),
+])
+def test_the_picker_is_not_there_until_it_covers_a_point_of_the_page(guard, seen):
+    assert guard.open_point(seen) is None
+
+
+def test_an_open_picker_that_covers_the_page_gives_its_point(guard):
+    panel, content = (0, 107.2, 273.6, 302.4), (0, 84.8, 1024, 723.2)
+    cx, cy = guard.open_point(read("open", panel, content))
+    assert (cx, cy) == (137, 88)
+    assert inside(panel, (content[0] + cx, content[1] + cy)) and inside(content, (content[0] + cx, content[1] + cy))

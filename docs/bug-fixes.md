@@ -37,6 +37,45 @@ Rejected: dropping the ack, which is the deadlock bound (`docs/input-dispatch.md
 **What misled.** The issue first blamed `send()` skipping `_crossing`'s `last` point. The instrumented runs showed it was never skipped, in 39 crossings where it could have been.
 
 
+## #469: `popup-covered-click` took the date picker's rect before it had its real one
+
+**Fixed by:** the PR that refs #469. **Found by:** Tests run 43947261469 (PR #474, head 702f6c85), job 133590159488, the display arm: `FAIL: :0: the picker [0, 0, 1, 1] covers none of the page [0, 85, 1280, 683]`.
+
+**Symptom.** One red on main's code, on the Xvfb arm the pre-#483 diagnostics had not measured. The headless arm had passed in the same run.
+
+**Root cause.** #483 made the guard wait until the picker was `open` with a non-zero width and height. `MouseDispatch._popupAt` skips a popup only when a side is 0, and that is not enough to tell the picker has its real rect. Measured with a recorder on a draft diagnostic PR (#484, never merged), run 43956846664 (job 133617160042, head 476040e0), both arms in parallel, 141 launches each, polling the panel from the click until its rect stopped changing for a second:
+
+- Display arm, 1 of 141: state `open` with the rect `[0, 0, 0.8, 0.8]` for 13 ms (t=13 to 26 ms, 4 reads about 1.7 ms apart), then `[0, 107.2, 273.6, 302.4]` from t=26 ms for the remaining second. The page's content rect was `[0, 84.8, 1024, 723.2]` in every read. The red above is the same with `[0, 0, 1, 1]`.
+- Headless arm: 0 of 141 had a non-final rect at the first `open` read. That does not show it cannot happen there.
+- Time to the final rect: headless median 25 ms, p95 47, max 67; display median 32 ms, p95 57, max 79. After the first read that covers a point of the page, the rect never changed again in any of the 282 launches.
+- The old check accepted the transient 1 of 141 times on display, 0 of 141 headless. A rect at the origin cannot cover a point of the page, whose content starts below the browser chrome (y 84.8 to 85), so "covers a point of the page" refuses it. Two consecutive agreeing reads would not have: the transient held 4 of them.
+
+A reading, not a finding: the X11 popup window exists before it is sized and placed. Not measured: a launch where the transient covers a point of the page, which cannot happen while the content starts below y 84.
+
+**Fix.** `open_point` returns the point the picker covers only when its state is `open` and its rect covers a point of the page; `wait_open` polls for it inside its 10 s deadline and returns the last read, which the failure prints. The point is rounded to whole pixels (a fractional rect gave `88.39999999999999`, which the page's `clientY` comparison could never match, so a move the page did see would have read as covered). The guard's per-arm checks are one function, `check`, so a loop can count them. No sleep-and-hope, no retry of the probe, no widened tolerance.
+
+**Red-to-green.** `ci/tests/test_popup_covered_click.py`: the `[0, 0, 1, 1]` read from job 133590159488, the `[0, 0, 0.8, 0.8]` read from job 133617160042, a `[0, 0, 0, 0]` read, a `showing` read and no read all give no point (6 failed before the fix, none after); an open real rect gives its point.
+
+**Evidence on the fix.** A loop of the guard's own `probe` and `check` on both arms, on a draft diagnostic PR (#485, never merged), two runs of the same guard code: Tests run 43965887255 (job 133648534379, head 538dc375) and run 43974154518 (job 133676708463, head c919854d). Headless 97 + 136 = 233 launches, Xvfb display 96 + 135 = 231, **0 failure lines on either arm**. The guard file is byte-identical to the one in this PR. That is 0 of 231 on the arm that went red, against the 1 of 141 the unfixed readiness check accepted; at 231 launches a true rate of 1 in 141 would have shown zero about 20% of the time, so this lowers the rate and does not prove it gone.
+
+**What misled the investigation.** "What `_popupAt` tests" read as a readiness condition for the guard, and one green launch of the #483 head read as evidence of both arms. The first sequence diagnostic (run 43954923610) measured nothing: it replaced the guard file, and the guard's own unit tests, which import it, failed in Static checks.
+
+## #460: `driven-dblclick-gap` read a first press 255 ms after the pointer arrived, against a 250 ms ceiling the dwell's own clamp sits next to
+
+**Fixed by:** the PR that refs #460. **Found by:** the Windows patch-guard probe, e2e run 43674869097 (Windows build run 43538462122, job 132692726313): `locator.dblclick: first press 255 ms after the pointer reached the button, want 50-250`.
+
+**Symptom.** One red in a run that passed 31 of 33 guards; the same guard passed in fork.3's Windows probe and in main's e2e journeys.
+
+**Root cause.** `hoverDwell()` is `logNormalDelay(125, 0.5, 60, 240)`, and `logNormalDelay` clamps. P(draw above 240) = P(z > ln(240/125)/0.5 = 1.30), about 9.6%, so about one dwell in ten is exactly 240 ms. The parent counts that wait exactly from the move's arrival (`PageHandler._arrivedAt`); the guard reads the page's `mouseover` to first `mousedown` timestamps, which add the timer's lateness and the press's delivery lag (0 to 2 ms warm, diag-75; 70 to 210 ms on a cold or loaded parent, #419). 240 plus a lag over 10 ms is above 250. The browser never drew above 240: its contract held. The ceiling was the defect: 250 came from one XTest-on-Xvfb reading of stock Firefox (`driven-click-hold.py`, `PageHandler.js`), a tool's timing and not a person's bound, and the guard cannot separate the draw from the lag in a page-side reading.
+
+**Fix.** The guard keeps the 50 ms floor, the 60-200 ms release-to-press gap, the 450 ms press-to-press bound and the one-`dblclick` check, and drops the ceiling. The #419 regression the ceiling caught (a dwell counted from the queue ack, up to 225 ms long) is pinned deterministically instead: `browser/tests/juggler/click-pacing.test.mjs` runs `PageHandler._clickPacing` on a virtual clock with a median draw and a move whose queue ack came 10 ms before the page had it, and expects 125 ms from `_arrivedAt`. A second test drives the draw to both extremes (`Math.random` near 0 and near 1) and asserts the wait stays within 60 and 240 ms, so a change to `hoverDwell`'s bounds goes red; it bounds the wait and does not pin the clamp's point mass (#467). With the ceiling raised to 300 it fails (`dwell 300 ms`), and with the floor lowered to 0 it fails (`dwell 3.04 ms`).
+
+**Not done.** Not a widened ceiling, a retry or a lower `hoverDwell` max (200 would put more mass at the clamp). The clamp's own point mass, a fingerprint, is #467.
+
+**Red-to-green.** With `_clickPacing` counting from `_movedAt` (the pre-#419 code) the new test fails (`actual: 115, expected: 125`); on the current code it passes (`node --test browser/tests/juggler/click-pacing.test.mjs`, 3 of 3). One green guard run proves little against timing; the unit test is the contract evidence.
+
+**What misled.** The guard's 250 read as a stock-derived limit on the product, and the #419 note ("if the tail ever shows without uBO, the ceiling's design is the next question") pointed at the timer, not at the 10 ms between the clamp and the ceiling.
+
 ## #451: at 105% text scale a move to the content's edge row stalled 5 s and reached the page as a mouseout
 
 **Symptom.** The `ui.textScaleFactor: 105` arm of `humanize-mouse-trajectory.py`, added by the upstream sync (df9ca115), failed on Windows (job 132037002566) and on macOS (job 132330070472). Every flagged exit was at `y = 0`, 12-67 ms after the last mousemove. The default-prefs arm passed, and so did Linux.
@@ -94,7 +133,6 @@ The same guard read a move Juggler never delivered as one a popup took: its `wai
 **Evidence.** Red then green: `python/tests/test_amd_igpu_cores.py` (12 of 14 failed before the fix) and `typescript/tests/amd-igpu-cores.test.ts` (10 of 12). Each test pins the cores and the GPU draw's seeds, so none reads the host: a runner with 4 cores fails them as a 10-core Mac does. The sampler arms still draw the Radeon at 12 cores, so the filter is no over-reach.
 
 **What misled.** The issue named presets as a possible carrier. The stored presets are clean; the host's core count made the pair. And `_repair_cpu`'s comment ("stays reported") described a pair a launch could not avoid, when the draw could have.
-
 
 ## #458: a NewContext claiming another CPU architecture rendered its launch's CPU
 
