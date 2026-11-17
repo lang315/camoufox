@@ -3364,6 +3364,34 @@ def test_every_workflow_step_running_verify_fonts_installs_the_package():
                     )
 
 
+# `pip install` of the repo's own python package, in any spelling the workflows use
+# (-e python, -e 'python[geoip]', -e ../python, -r ... -e python).
+_PIPS_THE_PACKAGE = re.compile(r"""pip3?\s+install\b[^\n]*?(?<![\w./-])(?:\.{1,2}/)*python(?:\[[^\]]*\])?(?=['"\s]|$)""")
+# release.yml:build-browser imports only the font helpers of the package (verify-fonts.py),
+# which never load the fpgen model.
+_NEEDS_NO_FPGEN_MODEL = {("release.yml", "build-browser")}
+
+
+def test_every_job_that_installs_the_package_installs_the_pinned_fpgen_model():
+    """A job that installs the package and does not pin the fpgen model downloads it from GitHub on
+    the first launch, in the middle of a test, so a 502 there failed one journey (#491)."""
+    import yaml
+
+    missing = []
+    for workflow in sorted((CI_ROOT.parent / ".github" / "workflows").glob("*.yml")):
+        for name, job in (yaml.safe_load(workflow.read_text(encoding="utf-8")).get("jobs") or {}).items():
+            runs = ["\n".join(line for line in (step.get("run") or "").splitlines()
+                              if not line.lstrip().startswith("#")) for step in job.get("steps") or []]
+            pins = any(step.get("uses") == "./.github/actions/fpgen-model" for step in job.get("steps") or []) \
+                or any("pin-fpgen-model.py" in run for run in runs)
+            if any(_PIPS_THE_PACKAGE.search(run) for run in runs) and not pins \
+                    and (workflow.name, name) not in _NEEDS_NO_FPGEN_MODEL:
+                missing.append(f"{workflow.name}:{name}")
+    assert not missing, (
+        f"jobs that install the package without ./.github/actions/fpgen-model: {missing}"
+    )
+
+
 def test_pull_requests_verify_the_fonts():
     """verify-fonts.py ran only in the release, so a pull request that broke it
     merged green and the next release failed before building."""

@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #491: the `e2e` and `smoke` jobs downloaded the fpgen model during a test
+
+**Fixed by:** the PR that refs #491. **Found by:** Tests run 43988340287 (PR #474, head 92730f20), job 133733057176: `test_open_a_page[pkg]` failed in `drv.launch()` with `HTTPError: 502 ... model-2/2026/model-release.zip`.
+
+**Symptom.** One journey red on a GitHub 502, 124 others green.
+
+**Root cause.** The `e2e` job of `tests.yml` installs the package (`pip install -e 'python[geoip]'`) and never ran `./.github/actions/fpgen-model`. b8db9556 replaced the pin step nine jobs already had with the action, and this job was not one of them, so it had none to replace. Without the model in place, `fpgen_model.ensure_fpgen_model` installs the pinned one on first use (checked against the sha256), uncached and inside the test that launches first. `smoke.yml`'s `smoke` job had the same gap. The README said every job gets the action; nothing checked it.
+
+**Fix.** Both jobs run the action after installing the package (`smoke` gets an install step of its own before it, because its guards each install in their own step). `ci/tests/test_ci.py::test_every_job_that_installs_the_package_installs_the_pinned_fpgen_model` reads every workflow, finds the jobs whose steps `pip install` the repo's `python` package, and fails for one that neither uses the action nor runs `pin-fpgen-model.py`. The one exemption is `release.yml`'s `build-browser`, which imports only the font helpers.
+
+**Evidence.** Red on the unchanged workflows: `jobs that install the package without ./.github/actions/fpgen-model: ['smoke.yml:smoke', 'tests.yml:e2e']`. Green after: `python3 -m pytest ci/tests`, 387 passed, 1 skipped. The Tests run of the PR shows the `e2e` job restoring the archive from the cache. The `smoke` job is dispatch-only and was not run.
+
+**What misled the investigation.** The 502 trace names `ensure_fpgen_model`, which looks like the pin working; it was the fallback working. Only the job's steps showed the action missing.
+
 ## #469: `popup-covered-click` took the date picker's rect before it had its real one
 
 **Fixed by:** the PR that refs #469. **Found by:** Tests run 43947261469 (PR #474, head 702f6c85), job 133590159488, the display arm: `FAIL: :0: the picker [0, 0, 1, 1] covers none of the page [0, 85, 1280, 683]`.
