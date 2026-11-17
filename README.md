@@ -46,6 +46,7 @@
       <strong>Special codes for Camoufox users:</strong><br>
       • <code>CAMOUFOX35</code> - 35% off to Mobile and Residential Proxies<br>
       • <code>CAMOUFOX40</code> - 40% off to ISP (Static) Proxies<br>
+      • <code>CAMOUFOX2X</code> - 2X traffic for Black Friday<br>
       Check Nodemaven's new GitHub for more web scraping and automation solutions - https://github.com/nodemaven
     </td>
   </tr>
@@ -236,12 +237,12 @@ Camoufox is intended to be used with rotating proxies (preferably residential IP
   </tr>     
   <tr>
     <td width="25%" align="center" valign="middle">
-      <a href="https://mangoproxy.com/?utm_source=github&utm_medium=partner&utm_campaign=daijro" target="_blank">
+      <a href="https://mangoproxy.com/prod-isp-static/?utm_source=daijro&utm_medium=partner&utm_campaign=daijro_github" target="_blank">
         <img width="380" alt="mangoproxy" src="https://github.com/user-attachments/assets/c2cd3ddf-c940-4906-be1b-5505dcdb6e06"/>
       </a>
     </td>
     <td valign="middle">
-      <a href="https://mangoproxy.com/?utm_source=github&utm_medium=partner&utm_campaign=daijro">MangoProxy</a> is a Residential, ISP, Mobile and Datacenter proxy service designed for professional tasks where stability, speed, and anonymity matter.<br>
+      <a href="https://mangoproxy.com/prod-isp-static/?utm_source=daijro&utm_medium=partner&utm_campaign=daijro_github">MangoProxy</a> is a Residential, ISP, Mobile and Datacenter proxy service designed for professional tasks where stability, speed, and anonymity matter.<br>
       Use code DAIJRO for 8% OFF ISP Static Proxies
     </td>
   </tr>
@@ -523,6 +524,8 @@ claims the host's OS. Details are in
 | Headless reports a fine pointer, like a desktop | `force-default-pointer` patch |
 | `mouse.wheel()` turns notches, as a physical wheel does: 100 px is one notch, each its own event with a native tick | Juggler, `wheel-native-ticks` patch |
 | Juggler's debugger leaves no side effects content can observe | `debugger-invisible-to-content` patch |
+| A stack the page captures while a driver call runs its code (`focus`, `dispatch_event`, an `mw:` evaluate) holds only the page's frames, never Juggler's, the isolated world's or the code the `mw:` evaluate compiled; a page function's `caller` is never driver code | Juggler, `debugger-invisible-to-content` patch |
+| Code an `mw:` evaluate runs is named after the document, as an inline script is, never `debugger eval code` | Juggler, `debugger-invisible-to-content` patch |
 | Per-context fingerprint setters are gone before page script runs | `window-setter-seal` patch |
 | Popup blocker on, as in stock Firefox | `popup-blocker-parity` patch |
 | On X11, a pointer-locked window partly off the top or left of the screen keeps running (stock Firefox can crash: the X server refuses the cursor barrier and GDK aborts) | `pointer-lock-offscreen` patch |
@@ -679,6 +682,7 @@ python3 multibuild.py --target linux windows macos --arch x86_64 arm64
 | `--arch` | `x86_64`, `arm64`, `i686` (one or more; `i686` builds Windows only) |
 | `--bootstrap` | Bootstrap the build system first |
 | `--clean` | Clean the build directory first |
+| `--preflight` | Check that each target builds without building it: configure, the export tiers, and every patched source file (minutes, not hours) |
 
 Artifacts are written to `browser/dist/`.
 
