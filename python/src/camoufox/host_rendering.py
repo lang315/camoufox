@@ -50,7 +50,9 @@ Gpu = Tuple[str, str]
 
 # A display that accepts TCP but never completes the X handshake leaves Firefox's
 # GL initialization inside getContext() forever, which used to block every launch.
-HOST_GPU_PROBE_TIMEOUT_S = 30.0
+# The bound is for that, not for a slow healthy probe, which took up to 80 s on a
+# loaded hosted Windows runner (`host-gpu-probe-timeout` in ci/tribal-rules.yml).
+HOST_GPU_PROBE_TIMEOUT_S = 120.0
 
 _READ_GPU = """() => {
     const gl = document.createElement('canvas').getContext('webgl');

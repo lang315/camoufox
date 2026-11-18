@@ -13,6 +13,25 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #497: the host GPU probe failed a launch at 30 s on a loaded Windows runner
+
+**Fixed by:** the PR that refs #497. **Found by:** e2e run 44089875316, job 134062178121 (Windows, build 44055836267, main `b074a8ce`), a never-merged probe for #370 that launched Camoufox repeatedly.
+
+**Symptom.** `TimeoutError: Host GPU probe timed out after 30 s while launching C:\...\camoufox.exe. The browser did not answer the WebGL probe; check that the display accepts X connections.` The launch failed before the browser under test started, on a host with no X display.
+
+**Root cause.** Two things, one a cause and one an exposure.
+
+- *The bound.* `HOST_GPU_PROBE_TIMEOUT_S = 30.0` bounds the whole probe child: interpreter start, the Playwright driver, `firefox.launch`, `new_page`, the WebGL read and the close. Measured on a hosted Windows runner (e2e run 44210677827, job 134490574929, the same build, a never-merged timing probe that times those phases in a child like `_read_host_gpu`): alone, a median 12.6 s and at most 19.1 s over 8 probes, of which `new_page` is 8.1 s (the WebGL read itself is 0.03 s); four at once, a median 35.9 s and at most 80.3 s, 31 of 32 over 30 s; beside 8 busy processes, a median 38.7 s and at most 48.2 s, 8 of 8 over 30 s. No probe failed. So 30 s fails a healthy probe whenever the host is busy.
+- *The cache key.* `host_gpu` keyed `_host_gpu`'s `lru_cache` on the whole environment except `CAMOU_*` and `FONTCONFIG_FILE`. The failing job gave each launch its own `MOZ_LOG_FILE`, so every launch ran its own probe: the failed one was the fifth. With a stable key it would have run one.
+
+**Fix.** `HOST_GPU_PROBE_TIMEOUT_S` and the TypeScript `HOST_GPU_PROBE_TIMEOUT_MS` are 120 s, 1.5 times the slowest healthy probe measured, and a browser that never answers still fails with its own message (rule `host-gpu-probe-timeout`). `MOZ_LOG*` joins the variables the key ignores, in both launchers. The message names an X display only on Linux. Rejected: an allow-list of the variables that choose a device (`DISPLAY`, Mesa and NVIDIA selectors). The launcher writes `DISPLAY`, `GDK_BACKEND`, `WAYLAND_DISPLAY` and `MOZ_ENABLE_WAYLAND` itself, but the drivers' own selectors cannot be listed from this repo, and a miss would claim a stale GPU silently; a missed name in the ignore list costs one more probe.
+
+**Not explained.** Why the probe that failed ran past 30 s on a runner whose other launches took about 15 s. The measurement shows load can do it; it does not show load did. This fix removes the exposure, not that cause. One hosted Windows runner type was measured; Linux and macOS were not.
+
+**Evidence.** Red: `test_a_per_launch_log_file_does_not_run_another_probe` and the Windows and macOS cases of `test_a_timed_out_probe_names_a_display_only_where_there_is_one` (Python), their TypeScript twins, and `test_the_host_gpu_probe_outlasts_a_loaded_runner` / the bound assertions in `host-rendering.test.ts` failed on main's source. Green after.
+
+**What misled the investigation.** The probe measured wall time per child from the parent while collecting children in order, so a child that had already finished read as late as the one collected before it (up to 18 s extra in one batch). The phase marks come from the child's own clock; the table above sums those.
+
 ## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
 
 **Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).

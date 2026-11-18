@@ -360,32 +360,30 @@ it.each([
 	["linux", true],
 	["win32", false],
 	["darwin", false],
-])(
-	"a timed-out probe names a display only where there is one (%s)",
-	async (platform, namesX) => {
-		vi.useFakeTimers();
-		const real = Object.getOwnPropertyDescriptor(process, "platform")!;
-		Object.defineProperty(process, "platform", { value: platform });
-		try {
-			vi.spyOn(firefox, "launch").mockImplementation(
-				() => new Promise(() => undefined),
-			);
-			const pending = hostGpu(`/nonexistent/${platform}-camoufox`, true, {}, {});
-			const rejected = pending.catch((error: Error) => error.message);
+])("a timed-out probe names a display only where there is one (%s)", async (platform, namesX) => {
+	vi.useFakeTimers();
+	const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+	Object.defineProperty(process, "platform", { value: platform });
+	try {
+		vi.spyOn(firefox, "launch").mockImplementation(
+			() => new Promise(() => undefined),
+		);
+		const pending = hostGpu(`/nonexistent/${platform}-camoufox`, true, {}, {});
+		const rejected = pending.catch((error: Error) => error.message);
 
-			await vi.advanceTimersByTimeAsync(HOST_GPU_PROBE_TIMEOUT_MS);
-			const message = await rejected;
-			expect(message).toContain("did not answer the WebGL probe");
-			expect(message.includes("X connections")).toBe(namesX);
-		} finally {
-			Object.defineProperty(process, "platform", real);
-			vi.useRealTimers();
-		}
-	},
-);
+		await vi.advanceTimersByTimeAsync(HOST_GPU_PROBE_TIMEOUT_MS);
+		const message = await rejected;
+		expect(message).toContain("did not answer the WebGL probe");
+		expect(message.includes("X connections")).toBe(namesX);
+	} finally {
+		Object.defineProperty(process, "platform", real);
+		vi.useRealTimers();
+	}
+});
 
 it("a host GPU probe that never answers times out and says so", async () => {
-	expect(HOST_GPU_PROBE_TIMEOUT_MS).toBe(30_000);
+	// Healthy probes took up to 80 s on a loaded hosted Windows runner (#497).
+	expect(HOST_GPU_PROBE_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
 	vi.useFakeTimers();
 	try {
 		vi.spyOn(firefox, "launch").mockImplementation(
@@ -398,7 +396,7 @@ it("a host GPU probe that never answers times out and says so", async () => {
 			{},
 		);
 		const rejected = expect(pending).rejects.toThrow(
-			"Host GPU probe timed out after 30000 ms",
+			`Host GPU probe timed out after ${HOST_GPU_PROBE_TIMEOUT_MS} ms`,
 		);
 
 		await vi.advanceTimersByTimeAsync(HOST_GPU_PROBE_TIMEOUT_MS);
@@ -409,7 +407,8 @@ it("a host GPU probe that never answers times out and says so", async () => {
 });
 
 it("a timed-out page read closes its browser", async () => {
-	expect(HOST_GPU_PROBE_TIMEOUT_MS).toBe(30_000);
+	// Healthy probes took up to 80 s on a loaded hosted Windows runner (#497).
+	expect(HOST_GPU_PROBE_TIMEOUT_MS).toBeGreaterThanOrEqual(120_000);
 	vi.useFakeTimers();
 	try {
 		const close = vi.fn(async () => undefined);
@@ -419,7 +418,7 @@ it("a timed-out page read closes its browser", async () => {
 		} as any);
 		const pending = hostGpu("/nonexistent/hung-page-camoufox", true, {}, {});
 		const rejected = expect(pending).rejects.toThrow(
-			"Host GPU probe timed out after 30000 ms",
+			`Host GPU probe timed out after ${HOST_GPU_PROBE_TIMEOUT_MS} ms`,
 		);
 
 		await vi.advanceTimersByTimeAsync(HOST_GPU_PROBE_TIMEOUT_MS);

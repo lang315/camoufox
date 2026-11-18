@@ -95,8 +95,13 @@ export function setWebgpu(
 
 const probes = new Map<string, Promise<Gpu | null>>();
 
-/** A browser that cannot answer a WebGL probe must not hold the launch forever. */
-export const HOST_GPU_PROBE_TIMEOUT_MS = 30_000;
+/**
+ * A browser that cannot answer a WebGL probe must not hold the launch forever.
+ * The bound is for that, not for a slow healthy probe, which took up to 80 s on
+ * a loaded hosted Windows runner (`host-gpu-probe-timeout` in
+ * ci/tribal-rules.yml).
+ */
+export const HOST_GPU_PROBE_TIMEOUT_MS = 120_000;
 const HOST_GPU_CLOSE_TIMEOUT_MS = 1_000;
 
 function within<T>(

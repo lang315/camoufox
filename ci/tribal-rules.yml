@@ -129,6 +129,26 @@ rules:
       attribute: DISPLAYFD_READ_TIMEOUT_S
       is_positive_number: true
 
+  - id: host-gpu-probe-timeout
+    title: The host GPU probe's bound is 120 s, not the 30 s of a quiet host
+    check: automated
+    evidence:
+      - "#497: e2e run 44089875316 (job 134062178121) failed a launch on a loaded hosted Windows runner at 30 s"
+      - "#497 measurement: e2e run 44210677827 (job 134490574929, Windows build 44055836267): probe children alone took a median 12.6 s, up to 19.1 s; four at once a median 35.9 s, up to 80.3 s (31 of 32 over 30 s); beside 8 busy processes a median 38.7 s, up to 48.2 s (8 of 8 over 30 s). No probe failed"
+    rationale: >-
+      The probe starts an interpreter, the Playwright driver and a browser,
+      opens a page and closes the browser, so on a host that is running other
+      launches it takes as long as they leave it. The bound exists to fail a
+      browser that never answers (a display that accepts TCP and never
+      completes the X handshake), not to time a healthy one. 120 s is 1.5 times
+      the slowest healthy probe measured; a hung one fails with its own message
+      after that. One hosted Windows runner type was measured, so a slower
+      host needs a measurement before the bound moves again.
+    expect:
+      module: camoufox.host_rendering
+      attribute: HOST_GPU_PROBE_TIMEOUT_S
+      is_positive_number: true
+
   - id: xvfb-cleanup-runs-even-if-it-already-died
     title: The display's lock and socket are removed whether or not we killed it
     check: automated
