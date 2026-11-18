@@ -51,6 +51,11 @@ const {Helper} = ChromeUtils.importESModule('resource://gre/modules/juggler/Help
 const {setTimeout} = ChromeUtils.importESModule('resource://gre/modules/Timer.sys.mjs');
 const helper = new Helper();
 
+// The events sendAcked dispatches, and per chrome window the one recorder of
+// the node the parent dispatched the current one to (sendRouted).
+const kAckedTypes = ['mousemove', 'mousedown', 'mouseup', 'contextmenu'];
+const routes = new WeakMap();
+
 function warnUndelivered(eventType, x, y, box, deadlineMs) {
   dump(
     `[juggler] WARN ${eventType} at (${x}, ${y}) was not delivered to the ` +
@@ -208,25 +213,59 @@ export class MouseDispatch {
   }
 
   /**
-   * The open chrome popup over an absolute point, if there is one.
-   *
-   * The parent hands a mouse event at a point inside a visible popup (the date
-   * picker, a permission doorhanger) to that popup, not to the browser under
-   * it (PresShell::EventHandler::ComputeRootFrameToHandleEventWithPopup), as
-   * an OS click there lands on the popup. The renderer never sees it, so there
-   * is no ack to wait for. Waiting cost 5s per event (kAckDeadlineMs): a
-   * click under the picker showPicker() opened took 15s and timed out
-   * Playwright, where stock's click went to the picker at once (2026-11-03,
-   * tests/playwright/patches/popup-covered-click.py). Mirrors
-   * nsXULPopupManager::GetVisiblePopups: visible, and not transparent to the mouse.
-   *
-   * The parent counts a popup from ePopupVisible, which layout sets on an
-   * opening popup that state still reports as "showing". Flushing layout first
-   * makes every popup with an outer rect (empty until it opens) one the parent
-   * hands the event to, so this neither waits out the deadline for a click the
-   * popup took nor skips the ack of a move the page still gets.
+   * Dispatch one event and return its id and the node the parent dispatched
+   * it to, read while it is dispatched: jugglerSendMouseEvent runs the
+   * parent's DOM dispatch synchronously, and the parent forwards the event to
+   * the renderer from there (EventStateManager::PostHandleEvent) only when
+   * that node is a remote browser. Null when the parent dispatched no event.
    */
-  _popupAt(absX, absY) {
+  _sendRouted(eventType, absX, absY) {
+    let route = routes.get(this._win);
+    if (!route) {
+      route = {sending: false, target: null};
+      const record = event => {
+        if (route.sending)
+          route.target ??= event.originalTarget;
+      };
+      for (const type of kAckedTypes)
+        this._win.addEventListener(type, record, {capture: true, mozSystemGroup: true});
+      routes.set(this._win, route);
+    }
+    route.sending = true;
+    try {
+      const jugglerEventId = this._sendAbsolute(eventType, absX, absY);
+      return {jugglerEventId, target: route.target};
+    } finally {
+      route.sending = false;
+      route.target = null;
+    }
+  }
+
+  /**
+   * Dispatch one event and wait for the renderer to ack it, under a deadline.
+   *
+   * Returns the ack event object, or null if none arrived in time -- in which
+   * case the event is dropped and a warning is logged -- or {takenBy} at once
+   * when the parent dispatched the event to something other than the browser.
+   * That is an open popup over the point (the date picker, a permission
+   * doorhanger), which the parent hands the event to as an OS click there
+   * lands on it (PresShell::EventHandler::ComputeRootFrameToHandleEventWithPopup).
+   * The renderer never sees such an event, so there is no ack to wait for;
+   * waiting cost 5s per event, and a click under the picker took 15s and timed
+   * out Playwright (2026-11-03, tests/playwright/patches/popup-covered-click.py).
+   *
+   * The node is read from the dispatch, not predicted from the popups' rects:
+   * the parent hit-tests a popup's layout rect, and getOuterScreenRect reads
+   * its widget's, which a just-opened date picker had not placed yet in 13 of
+   * 99 headless launches (#480).
+   *
+   * Rejects when the parent dispatched no event, which leaves nothing to wait
+   * for and nothing that took it. Never waits forever: input dispatch is
+   * serialized on activateAndRun()'s process-global chain, so an unbounded
+   * wait here wedges every later input event in the process, in every tab,
+   * for the life of the browser.
+   */
+  _d480PopupAt(absX, absY) {
     const popups = [...this._win.document.querySelectorAll('panel, menupopup, tooltip')]
         .filter(popup => popup.state === 'open' || popup.state === 'showing');
     if (popups.some(popup => popup.state === 'showing'))
@@ -245,82 +284,60 @@ export class MouseDispatch {
     return null;
   }
 
-  /**
-   * Dispatch one event and wait for the renderer to ack it, under a deadline.
-   *
-   * Returns the ack event object, or null if none arrived in time -- in which
-   * case the event is dropped and a warning is logged -- or {popup} at once
-   * when an open popup over the point took the event (_popupAt). Never rejects and never
-   * waits forever: input dispatch is serialized on activateAndRun()'s
-   * process-global chain, so an unbounded wait here wedges every later input
-   * event in the process, in every tab, for the life of the browser.
-   */
   _d480Popups() {
     try {
       return [...this._win.document.querySelectorAll('panel, menupopup, tooltip')]
           .filter(p => p.state && p.state !== 'closed')
           .map(p => {
             const r = p.getOuterScreenRect();
-            return `${p.id || p.localName}:${p.state}:[${r.left},${r.top},${r.width},${r.height}]:${this._win.getComputedStyle(p).pointerEvents}`;
+            return `${p.id || p.localName}:${p.state}:[${r.left},${r.top},${r.width},${r.height}]`;
           }).join(' ') || '-';
     } catch (e) {
       return `ERR ${e}`;
     }
   }
 
-  _d480Arm() {
-    const win = this._win;
-    if (!win.__d480) {
-      win.__d480 = true;
-      for (const type of ['popupshowing', 'popupshown', 'popuphiding', 'popuphidden', 'popuppositioned'])
-        win.addEventListener(type, e => dump(`D480 ${Date.now()} popup-event ${type} ${e.target.id || e.target.localName} state=${e.target.state}\n`), true);
-    }
-  }
-
   async sendAcked(watcher, eventType, x, y, deadlineMs = kAckDeadlineMs) {
-    const d480 = globalThis.Services?.env?.get('CAMOU_DIAG_480') === '1';
-    const d480try = f => { try { f(); } catch (e) { dump(`D480 ${Date.now()} diag-error ${e}\n`); } };
     this._remeasure();
     const {x: absX, y: absY} = this.toAbsolute(x, y);
-    let before, afterFlush, targets = [];
-    if (d480)
-      d480try(() => { this._d480Arm(); before = this._d480Popups(); });
-    const popup = this._popupAt(absX, absY);
-    if (d480)
-      afterFlush = this._d480Popups();
-    const listener = e => {
-      try {
-        const t = e.originalTarget;
-        const p = t.closest?.('panel, menupopup, tooltip');
-        targets.push(`${e.type}>${t.localName}#${t.id || ''}${p ? '@' + (p.id || p.localName) : ''}`);
-      } catch (err) {
-        targets.push(`${e.type}>ERR ${err}`);
-      }
-    };
-    const types = [eventType, 'pointermove', 'pointerdown', 'pointerup'];
-    if (d480)
-      d480try(() => types.forEach(type => this._win.addEventListener(type, listener, {capture: true, mozSystemGroup: true})));
-    // This dispatches to the renderer synchronously.
-    const jugglerEventId = this._sendAbsolute(eventType, absX, absY);
+    const d480 = globalThis.Services?.env?.get('CAMOU_DIAG_480') === '1';
+    const old = d480 && Services.env.get('CAMOU_DIAG_480_OLD') === '1';
+    let oldPopup = null, before = '';
     if (d480) {
-      d480try(() => types.forEach(type => this._win.removeEventListener(type, listener, {capture: true, mozSystemGroup: true})));
-      d480try(() => {
-        const s = this._win.windowUtils.toScreenRectInCSSUnits(absX, absY, 0, 0);
-        dump(`D480 ${Date.now()} send id=${jugglerEventId} ${eventType} rel=(${x},${y}) abs=(${absX},${absY}) screen=(${s.x},${s.y}) ` +
-             `popupAt=${popup ? (popup.id || popup.localName) : 'null'} targets=[${targets.join(' ')}] ` +
-             `before={${before}} flushed={${afterFlush}} after={${this._d480Popups()}}\n`);
-      });
+      before = this._d480Popups();
+      if (old)
+        oldPopup = this._d480PopupAt(absX, absY);
     }
-    if (popup)
-      return {jugglerEventId, popup};
+    const {jugglerEventId, target} = this._sendRouted(eventType, absX, absY);
+    if (d480) {
+      let desc = 'none';
+      try {
+        if (target) {
+          const p = target.closest?.('panel, menupopup, tooltip');
+          desc = `${target.localName}#${target.id || ''}${p ? '@' + (p.id || p.localName) : ''}${target === this._browser ? '=browser' : ''} doc=${target.ownerDocument?.documentURI}`;
+        }
+      } catch (e) {
+        desc = `ERR ${e}`;
+      }
+      dump(`D480 ${Date.now()} send id=${jugglerEventId} ${eventType} rel=(${x},${y}) arm=${old ? 'old' : 'new'} ` +
+           `oldPopupAt=${oldPopup ? (oldPopup.id || oldPopup.localName) : 'null'} target=[${desc}] before={${before}}\n`);
+    }
+    if (old) {
+      if (oldPopup)
+        return {jugglerEventId, takenBy: oldPopup};
+    } else {
+      if (!target)
+        throw new Error(`${eventType} at (${x}, ${y}) was not dispatched in the parent`);
+      if (target !== this._browser)
+        return {jugglerEventId, takenBy: target};
+    }
     // A move reaches the page at the next refresh tick; the renderer acks it
     // on arrival as "mousequeued" (BrowserChild::RecvRealMouseMoveEvent).
     const arrival = eventType === 'mousemove' ? 'mousequeued' : eventType;
-    const sentAt = ChromeUtils.now();
     const ack = await watcher.ensureEventWithin(
       arrival, deadlineMs, eventObject => eventObject.jugglerEventId === jugglerEventId);
     if (d480)
-      dump(`D480 ${Date.now()} ${ack ? 'ack' : 'miss'} id=${jugglerEventId} ${arrival} after=${Math.round(ChromeUtils.now() - sentAt)}ms popups={${this._d480Popups()}}\n`);
+      dump(`D480 ${Date.now()} ${ack ? 'ack' : 'miss'} id=${jugglerEventId} ${arrival} popups={${this._d480Popups()}}\n`);
     if (!ack)
       warnUndelivered(eventType, x, y, this._box, deadlineMs);
     return ack;
@@ -336,7 +353,7 @@ export class MouseDispatch {
   async sendQueuedMove(watcher, deliveryWatcher, x, y) {
     const queued = await this.sendAcked(watcher, 'mousemove', x, y);
     // A move a popup took never reaches the page either.
-    if (!queued || queued.popup) {
+    if (!queued || queued.takenBy) {
       deliveryWatcher.dispose();
       return null;
     }

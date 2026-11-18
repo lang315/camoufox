@@ -15,16 +15,22 @@ function harness() {
   const log = [];
   let id = 0;
   const pending = [];
+  const box = {left: 0, top: TOP, width: 800, height: 600};
+  // The parent dispatches every event in the content to the browser.
+  const browser = {getBoundingClientRect: () => box, closest: () => null};
+  const listeners = [];
   const win = {
     innerWidth: 1000,
     innerHeight: 800,
     MouseEvent: {MOZ_SOURCE_MOUSE: 1},
-    document: {querySelectorAll: () => []},
+    addEventListener: (type, listener) => listeners.push({type, listener}),
     windowUtils: {
       DEFAULT_MOUSE_POINTER_ID: 0,
       toTopLevelWidgetRect: () => ({width: 1}),
       jugglerSendMouseEvent: (type, x, y) => {
         log.push([type, x, y - TOP]);
+        for (const l of listeners.filter(l => l.type === type))
+          l.listener({type, originalTarget: browser});
         return ++id;
       },
     },
@@ -32,7 +38,7 @@ function harness() {
   const watcher = {
     ensureEventWithin: () => new Promise(resolve => pending.push(() => resolve({}))),
   };
-  const dispatch = new MouseDispatch(win, {left: 0, top: TOP, width: 800, height: 600});
+  const dispatch = new MouseDispatch(win, box, {}, browser);
   // Release every ack asked for so far, as the renderer would.
   const ack = () => pending.splice(0).forEach(release => release());
   return {log, watcher, dispatch, ack};
