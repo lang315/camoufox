@@ -828,6 +828,25 @@ def fix_hardware_concurrency(config: Dict[str, Any], can_pin: Optional[bool] = N
     config['navigator.hardwareConcurrency'] = host_value
 
 
+def core_count_note(user_set: bool, pin_cpu_cores: bool) -> str:
+    """Where navigator.hardwareConcurrency came from and what changes it, for a
+    refusal that names the count. Mirrors fix_hardware_concurrency."""
+    from .cpu_affinity import supported
+
+    if user_set:
+        return 'You set that count; set one an AMD CPU reports, or pass an Intel cpu.'
+    if not supported():
+        fix = 'This host cannot pin the browser to fewer cores, so pass an Intel cpu (or none)'
+    elif pin_cpu_cores:
+        return 'pin_cpu_cores kept the count this identity drew; pass an Intel cpu (or none), or draw again.'
+    else:
+        fix = 'Pass pin_cpu_cores=True to draw a count and pin the browser to it, or pass an Intel cpu (or none)'
+    return (
+        "That is this host's logical core count: a page times parallel workers and measures it, "
+        f'so the launcher reports no other. {fix}, or run on a host whose count an AMD CPU reports.'
+    )
+
+
 def fix_navigator_arch(config: Dict[str, Any], target_os: str) -> None:
     """Force navigator.platform AND navigator.oscpu to match the UA's arch.
 
