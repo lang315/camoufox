@@ -12,6 +12,7 @@ Run:
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections import defaultdict
@@ -56,6 +57,20 @@ def objects_of(touched, tree, objdir):
     return objects, built
 
 
+def gnu_make():
+    """The first of gmake and make that is GNU Make 4.0 or newer, which --output-sync needs"""
+    found = []
+    for name in ('gmake', 'make'):
+        if not shutil.which(name):
+            continue
+        version = re.search(r'GNU Make (\d+(?:\.\d+)*)', subprocess.check_output([name, '--version'], text=True))
+        if version and int(version.group(1).split('.')[0]) >= 4:
+            return name
+        found.append(f'{name} is {version.group(0) if version else "not GNU Make"}')
+    sys.exit(f'error: preflight needs GNU Make 4.0 or newer for --output-sync, but {", ".join(found) or "no make was found"}. '
+             'On macOS, run scripts/install-deps.sh, which installs GNU Make as gmake')
+
+
 def compile_objects(objects, objdir):
     """Compile them under one make, so its job server shares the cores between directories"""
     # make does not load an object's header dependencies when the object is
@@ -68,7 +83,7 @@ def compile_objects(objects, objdir):
     wrapper = objdir / 'preflight.mk'
     targets = ' '.join(str(n) for n in range(len(rules)))
     wrapper.write_text(f'.PHONY: all {targets}\nall: {targets}\n' + ''.join(rules))
-    run(f'make -f {wrapper} -k -j{os.cpu_count()} --output-sync=target')
+    run(f'{gnu_make()} -f {wrapper} -k -j{os.cpu_count()} --output-sync=target')
 
 
 if __name__ == '__main__':

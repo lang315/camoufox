@@ -95,9 +95,11 @@ install_macos() {
     log "Homebrew present ($(brew --version | head -1))."
   fi
 
+  # `make` from the Command Line Tools is GNU Make 3.81; preflight.py needs 4.0+
+  # for --output-sync, and Homebrew installs it as `gmake`.
   # Note: `p7zip` provides the `7z` binary the scripts call; the newer
   # `sevenzip` formula only ships `7zz`.
-  local formulae=(python@3.14 aria2 p7zip msitools wget sqlite)
+  local formulae=(python@3.14 aria2 p7zip msitools wget sqlite make)
   log "Installing Homebrew formulae: ${formulae[*]}"
   brew install "${formulae[@]}"
 
