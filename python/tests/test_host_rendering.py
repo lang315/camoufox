@@ -250,6 +250,41 @@ def test_the_probe_ignores_what_the_launcher_adds_to_the_environment():
     assert probe.call_args_list[0] == probe.call_args_list[1]
 
 
+def test_a_per_launch_log_file_does_not_run_another_probe():
+    """A caller that logs each launch to its own file (MOZ_LOG_FILE) chooses no
+    device; every launch used to run its own probe browser (#497)."""
+    with mock.patch.object(host_rendering, "_host_gpu", return_value=HOST_GPU) as probe:
+        for launch_number in range(2):
+            host_gpu(
+                "/bin/camoufox", True,
+                {"DISPLAY": ":0", "MOZ_LOG": "nsHttp:3", "MOZ_LOG_FILE": f"/logs/{launch_number}.txt"}, {},
+            )
+
+    assert probe.call_args_list[0] == probe.call_args_list[1]
+    assert probe.call_args_list[0].args[2] == (("DISPLAY", ":0"),)
+
+
+@pytest.mark.parametrize(
+    "platform, names_x",
+    [("linux", True), ("win32", False), ("darwin", False)],
+)
+def test_a_timed_out_probe_names_a_display_only_where_there_is_one(tmp_path, monkeypatch, platform, names_x):
+    browser = tmp_path / "firefox"
+    browser.write_text("#!/bin/sh\nexec sleep 600\n")
+    browser.chmod(0o755)
+    monkeypatch.setattr(host_rendering, "HOST_GPU_PROBE_TIMEOUT_S", 2)
+    monkeypatch.setattr(host_rendering.sys, "platform", platform)
+    host_rendering._host_gpu.cache_clear()
+    try:
+        with pytest.raises(TimeoutError) as raised:
+            host_gpu(str(browser), True, {}, {})
+    finally:
+        host_rendering._host_gpu.cache_clear()
+
+    assert ("X connections" in str(raised.value)) == names_x
+    assert "WebGL probe" in str(raised.value)
+
+
 def test_a_timed_out_host_gpu_probe_takes_its_browser_down(tmp_path, monkeypatch):
     """A display that accepts connections but never answers the X handshake
     leaves Firefox hung. The launch fails, naming the display, and the hung

@@ -10,22 +10,23 @@ index bcec423..4387a22 100644
 +# DOM Mask
 +LOCAL_INCLUDES += ['/camoucfg']
 diff --git a/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp b/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
-index e046255..2aefa7d 100644
+index e046255..dd53ca3 100644
 --- a/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
 +++ b/dom/media/webspeech/synth/nsSynthVoiceRegistry.cpp
-@@ -23,7 +23,11 @@
+@@ -23,7 +23,12 @@
  #include "nsServiceManagerUtils.h"
  #include "nsSpeechTask.h"
  #include "nsString.h"
 +#include "nsThreadUtils.h"
 +#include "nsEscape.h"
 +#include "nsRefPtrHashtable.h"
++#include "mozilla/TimeStamp.h"
  
 +#include "MaskConfig.hpp"
  using mozilla::intl::LocaleService;
  
  #undef LOG
-@@ -163,6 +167,11 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
+@@ -163,6 +168,11 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
      gSynthVoiceRegistry = new nsSynthVoiceRegistry();
      ClearOnShutdown(&gSynthVoiceRegistry);
      if (XRE_IsParentProcess()) {
@@ -37,7 +38,7 @@ index e046255..2aefa7d 100644
        // Start up all speech synth services.
        NS_CreateServicesFromCategory(NS_SPEECH_SYNTH_STARTED, nullptr,
                                      NS_SPEECH_SYNTH_STARTED);
-@@ -172,6 +181,67 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
+@@ -172,6 +182,67 @@ nsSynthVoiceRegistry* nsSynthVoiceRegistry::GetInstance() {
    return gSynthVoiceRegistry;
  }
  
@@ -105,7 +106,7 @@ index e046255..2aefa7d 100644
  already_AddRefed<nsSynthVoiceRegistry>
  nsSynthVoiceRegistry::GetInstanceForService() {
    RefPtr<nsSynthVoiceRegistry> registry = GetInstance();
-@@ -302,6 +372,16 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
+@@ -302,6 +373,16 @@ nsSynthVoiceRegistry::AddVoice(nsISpeechService* aService,
      return NS_ERROR_NOT_AVAILABLE;
    }
  
@@ -122,7 +123,7 @@ index e046255..2aefa7d 100644
    return AddVoiceImpl(aService, aUri, aName, aLang, aLocalService,
                        aQueuesUtterances);
  }
-@@ -374,6 +454,16 @@ nsSynthVoiceRegistry::NotifyVoicesChanged() {
+@@ -374,6 +455,16 @@ nsSynthVoiceRegistry::NotifyVoicesChanged() {
  
  NS_IMETHODIMP
  nsSynthVoiceRegistry::NotifyVoicesError(const nsAString& aError) {
@@ -139,26 +140,31 @@ index e046255..2aefa7d 100644
    if (XRE_IsParentProcess()) {
      nsTArray<SpeechSynthesisParent*> ssplist;
      GetAllSpeechSynthActors(ssplist);
-@@ -776,6 +866,25 @@ void nsSynthVoiceRegistry::SpeakImpl(VoiceData* aVoice, nsSpeechTask* aTask,
+@@ -776,6 +867,30 @@ void nsSynthVoiceRegistry::SpeakImpl(VoiceData* aVoice, nsSpeechTask* aTask,
         NS_ConvertUTF16toUTF8(aText).get(),
         NS_ConvertUTF16toUTF8(aVoice->mUri).get(), aRate, aPitch));
  
 +  // Only a spoofed voice has no service here (AddSpoofedVoices). It has no
 +  // engine behind it: speak it silently for as long as the text takes at ~150
 +  // words per minute, so start and end arrive when they would from a real
-+  // voice.
++  // voice. end reports the time since start, as SAPI's does, so a late end
++  // carries its delay (#370, #494).
 +  if (!aVoice->mService) {
++    const TimeStamp start = TimeStamp::Now();
 +    aTask->Init();
 +    aTask->DispatchStart();
-+    const float elapsed = static_cast<float>(aText.Length()) / (12.5f * aRate);
++    const float nominal = static_cast<float>(aText.Length()) / (12.5f * aRate);
 +    RefPtr<nsSpeechTask> task = aTask;
 +    const uint32_t length = aText.Length();
 +    NS_DelayedDispatchToCurrentThread(
-+        NS_NewRunnableFunction("CamouFakeSpeechEnd",
-+                               [task, elapsed, length]() {
-+                                 (void)task->DispatchEnd(elapsed, length);
-+                               }),
-+        static_cast<uint32_t>(elapsed * 1000));
++        NS_NewRunnableFunction(
++            "CamouFakeSpeechEnd",
++            [task, start, length]() {
++              (void)task->DispatchEnd(
++                  static_cast<float>((TimeStamp::Now() - start).ToSeconds()),
++                  length);
++            }),
++        static_cast<uint32_t>(nominal * 1000));
 +    return;
 +  }
 +
