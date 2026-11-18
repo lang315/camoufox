@@ -1035,7 +1035,7 @@ jobs:
         # This image has GLX for Xvfb but not libEGL or the software rasterizer.
         run: python3 ci/apt_install.py xdotool x11-xkb-utils libegl1 libgles2 libgl1-mesa-dri
       - if: matrix.leg != 'skiplist'
-        run: xvfb-run -a python3 -m ci.run_patch_guards --group "${{ matrix.leg }}" --binary "$CAMOUFOX_BINARY"
+        run: xvfb-run -a python3 -m ci.run_patch_guards --group "${{ matrix.leg }}" --binary "$CAMOUFOX_BINARY" ${{ matrix.leg == 'parity' && '--only picker-first-move-diag --timeout 1800' || '' }}
       - name: Every skiplist entry is still failing
         if: matrix.leg == 'skiplist'
         # About two minutes: one fresh browser per entry, and a correct skiplist

@@ -132,6 +132,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "no-background-traffic",
         "playwright-window-size",
         "popup-blocker-parity",
+        "picker-first-move-diag",
         "popup-covered-click",
         "popup-window-size",
         "release-rollouts",

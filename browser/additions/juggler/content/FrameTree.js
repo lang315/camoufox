@@ -101,6 +101,8 @@ export class FrameTree {
       }, 'browsing-context-discarded'),
       helper.addObserver((subject, topic, eventInfo) => {
         const [type, jugglerEventId] = eventInfo.split(' ');
+        if (Services.env.get('CAMOU_DIAG_480') === '1')
+          dump(`D480 ${Date.now()} renderer ${type} id=${jugglerEventId} pid=${Services.appinfo.processID}\n`);
         this.emit(FrameTree.Events.InputEvent, { type, jugglerEventId: +(jugglerEventId ?? '0') });
       }, 'juggler-mouse-event-hit-renderer'),
       helper.addProgressListener(webProgress, this, flags),

@@ -165,7 +165,11 @@ export class PageHandler {
         pageNavigationCommitted: emitProtocolEvent('Page.navigationCommitted'),
         pageNavigationStarted: emitProtocolEvent('Page.navigationStarted'),
         pageReady: this._onPageReady.bind(this),
-        pageInputEvent: (event) => this._pageEventSink.emit(event.type, event),
+        pageInputEvent: (event) => {
+          if (Services.env.get('CAMOU_DIAG_480') === '1')
+            dump(`D480 ${Date.now()} parent-got ${JSON.stringify(event)}\n`);
+          this._pageEventSink.emit(event.type, event);
+        },
         pageSameDocumentNavigation: emitProtocolEvent('Page.sameDocumentNavigation'),
         pageUncaughtError: emitProtocolEvent('Page.uncaughtError'),
         pageWorkerCreated: this._onWorkerCreated.bind(this),
