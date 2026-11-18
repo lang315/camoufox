@@ -672,6 +672,21 @@ export function coresCpuVendor(cores: unknown): CpuVendor | null {
 	return INTEL_ONLY_CORE_COUNTS.has(cores) ? "intel" : null;
 }
 
+/** False when an x86 CPU of another vendor than `maker` is the only kind that reports `cores`. */
+export function coresFitCpu(
+	cores: unknown,
+	arch: unknown,
+	maker: unknown,
+): boolean {
+	const vendor = coresCpuVendor(cores);
+	return !(
+		(pyTruthy(arch) ? arch : "x86") === "x86" &&
+		pyTruthy(maker) &&
+		vendor &&
+		maker !== vendor
+	);
+}
+
 /**
  * The [arch, manufacturer] the identity's GPU or, failing that, its core
  * count implies.
@@ -729,13 +744,7 @@ export function cpuConflict(
 		return `CPU ${claimed} beside ${pyRepr(r)}`;
 	}
 	const cores = config["navigator.hardwareConcurrency"];
-	const byCores = coresCpuVendor(cores);
-	if (
-		(pyTruthy(arch) ? arch : "x86") === "x86" &&
-		pyTruthy(maker) &&
-		maker !== byCores &&
-		byCores
-	) {
+	if (!coresFitCpu(cores, arch, maker)) {
 		return `CPU ${claimed} with hardwareConcurrency ${pyStr(cores)}, which only an Intel CPU reports${coresNote ? `. ${coresNote}` : ""}`;
 	}
 	return null;

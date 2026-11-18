@@ -57,9 +57,12 @@ const launchConfig = async (extra: Record<string, any>) =>
 		),
 	);
 
-const hostWith = (cpuCount: number) => {
+const hostWith = (cpuCount: number, canPinHost?: boolean) => {
 	utils.utilsDeps.fixHardwareConcurrency = (config, canPin) =>
-		fingerprints.fixHardwareConcurrency(config, canPin, { cpuCount });
+		fingerprints.fixHardwareConcurrency(config, canPin, {
+			cpuCount,
+			canPinHost,
+		});
 };
 
 describe.skipIf(!MODEL.ok)("the GPU draw", () => {
@@ -190,5 +193,66 @@ describe("coreCountNote", () => {
 		expect(fingerprints.coreCountNote(false, true, true)).toContain(
 			"kept the count this identity drew",
 		);
+	});
+});
+
+describe("a pinned draw for an AMD cpu", () => {
+	const HOSTS = [10, 14, 22, 28];
+	const DRAWS = Array.from({ length: 64 }, (_, i) => i + 1);
+	const AMD = { "cpu:arch": "x86", "cpu:manufacturer": "amd" };
+	const intelOnly = (cores: number) => INTEL_ONLY.includes(cores);
+
+	const fixed = (cpuCount: number, drawn: number, cpu: Record<string, any>) => {
+		const config: Record<string, any> = {
+			"navigator.hardwareConcurrency": drawn,
+			...cpu,
+		};
+		fingerprints.fixHardwareConcurrency(config, true, {
+			cpuCount,
+			canPinHost: true,
+		});
+		return config["navigator.hardwareConcurrency"] as number;
+	};
+
+	it.each(HOSTS)("skips the Intel-only counts on a %i-core host", (host) => {
+		// Before the fix 40% of draws on a 10-core host, 20% on 14, 4-9% on 22 and 28 kept one (#506).
+		for (const drawn of DRAWS) {
+			const kept = fixed(host, drawn, AMD);
+			expect(intelOnly(kept), `${host} ${drawn}`).toBe(false);
+			expect(kept).toBeLessThanOrEqual(host);
+			if (
+				fingerprints.PLAUSIBLE_CORE_COUNTS.includes(drawn) &&
+				drawn <= host &&
+				!intelOnly(drawn)
+			) {
+				expect(kept).toBe(drawn);
+			}
+		}
+	});
+
+	it.each(
+		HOSTS,
+	)("still keeps an Intel-only count for an Intel cpu or none on a %i-core host", (host) => {
+		expect(
+			fixed(host, 64, { "cpu:arch": "x86", "cpu:manufacturer": "intel" }),
+		).toBe(host);
+		expect(fixed(host, 64, {})).toBe(host);
+	});
+});
+
+describe.skipIf(!MODEL.ok)("an AMD launch with pinning on", () => {
+	it.each([
+		10, 14, 22, 28,
+	])("is never refused for its draw on a %i-core host", async (host) => {
+		hostWith(host, true);
+		for (let i = 0; i < 60; i++) {
+			const config = await launchConfig({
+				os: "linux",
+				canvas_noise: true,
+				cpu: { manufacturer: "amd" },
+				pin_cpu_cores: true,
+			});
+			expect(INTEL_ONLY).not.toContain(config["navigator.hardwareConcurrency"]);
+		}
 	});
 });

@@ -215,7 +215,8 @@ Steam's survey puts AMD far higher, so the share is a choice, kept in
 
 An AMD `cpu` on a host with one of the Intel-only counts is refused, not drawn: the
 count is the host's, which a page measures with parallel workers, so a lower one
-would contradict the machine (#498).
+would contradict the machine (#498). With `pin_cpu_cores` the browser is pinned to the count
+it reports, so the draw skips the Intel-only counts for an AMD `cpu` (#506).
 
 On an Apple M4, stock Firefox 159 gives other values than x86-64 for every
 Web Audio node, every canvas composite operation (source-over included, not

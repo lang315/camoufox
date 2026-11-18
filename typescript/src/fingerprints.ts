@@ -15,7 +15,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { generate, InvalidConstraints } from "fpgen-js";
 import * as random from "python-random";
-import { hardwareCpu, intelMacConditions } from "./coherence.js";
+import { coresFitCpu, hardwareCpu, intelMacConditions } from "./coherence.js";
 import {
 	supported as cpuAffinitySupported,
 	hostCoreCount,
@@ -921,7 +921,7 @@ export function coreCountNote(
 		fix =
 			"This host cannot pin the browser to fewer cores, so pass an Intel cpu (or none)";
 	} else if (pinCpuCores) {
-		return "pin_cpu_cores kept the count this identity drew; pass an Intel cpu (or none), or draw again.";
+		return "pin_cpu_cores kept the count this identity drew; pass an Intel cpu (or none).";
 	} else {
 		fix =
 			"Pass pin_cpu_cores=True to draw a count and pin the browser to it, or pass an Intel cpu (or none)";
@@ -966,7 +966,12 @@ export function fixHardwareConcurrency(
 		drawn >= 1
 	) {
 		const target = Math.min(drawn, cap);
-		const allowed = PLAUSIBLE_CORE_COUNTS.filter((c) => c <= target);
+		// A count only Intel reports is no count for a CPU the caller named that is not Intel.
+		const arch = config["cpu:arch"];
+		const maker = config["cpu:manufacturer"];
+		const allowed = PLAUSIBLE_CORE_COUNTS.filter(
+			(c) => c <= target && coresFitCpu(c, arch, maker),
+		);
 		config["navigator.hardwareConcurrency"] = allowed.length
 			? allowed[allowed.length - 1]
 			: PLAUSIBLE_CORE_COUNTS[0];
