@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #506: `cpu={'manufacturer': 'amd'}` with `pin_cpu_cores=True` was refused on a random 1-50% of launches
+
+**Fixed by:** the PR that refs #506. **Found by:** a seeded loop of launches written while checking the #498 message, which advised `pin_cpu_cores=True`.
+
+**Symptom.** On a host with 10 logical cores, `launch_options(cpu={'manufacturer': 'amd'}, pin_cpu_cores=True)` raised `ValueError: ... hardwareConcurrency 10, which only an Intel CPU reports` on about 40% of launches (Linux 82 of 200, Windows 96 of 200) and succeeded on the rest. Measured from 2000 fpgen draws per OS, by host cores (Linux / Windows): 10 cores 40% / 50%, 14 cores 20% / 30%, 22 cores 4.5% / 9%, 28 cores 3.6% / 5.3%, 32 and above 1% / 2%; hosts of 8, 12 and 16 cores were not affected. The message said "or draw again", which was the only way out.
+
+**Root cause.** The core count is drawn before the CPU is known to it, and a pinned launch keeps the draw. `utils.py` calls `generate_fingerprint(...)` without `cpu` (only an Intel Mac passes `machine=`), applies `cpu=` afterwards, then `fix_hardware_concurrency(config, can_pin=...)`. With pinning on it kept `min(drawn, host)` snapped down into `PLAUSIBLE_CORE_COUNTS`, so a draw of 12, 16, 22, 24 or 32 on a 10-core host became 10, and `coherence.cpu_conflict` then refused an AMD CPU beside `INTEL_ONLY_CORE_COUNTS`. fpgen itself never drew 10 or 18 in 4000 draws: the counts came from the snap to the host.
+
+**Fix.** `coherence.cores_fit_cpu` (`coresFitCpu`) is the one question `cpu_conflict` already asked, now shared: does this x86 vendor report this count. `fix_hardware_concurrency` (`fixHardwareConcurrency`) snaps the pinned draw down only into counts that fit the claimed CPU, so an AMD claim on a 10-core host is pinned to 8. The unpinned path is unchanged: the count is the host's, and #498's refusal stays. The "or draw again" clause is gone from the message.
+
+**Evidence.** Red on main: `test_a_pinned_draw_for_an_amd_cpu_skips_the_intel_only_counts[10|14|22|28]` and `test_an_amd_launch_with_pinning_on_is_never_refused_for_its_draw[10|14]` (Python), and the same eight in `amd-igpu-cores.test.ts`. Green after. The controls pass on both sides: an Intel cpu or none still keeps an Intel-only count.
+
+**What misled the investigation.** The #498 refusal was read as a property of the host. With pinning on it is a property of the draw, and a host of 16 cores never shows it.
+
 ## #500: the macOS build took 237 of its 240 minutes with no ccache, and a build cut off at the limit saves none
 
 **Fixed by:** the PR that refs #500. **Found by:** `build.yml` run 44055830400, the macOS arm64 build of `main` for v159.0-beta.35-fork.4.

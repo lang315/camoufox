@@ -10,7 +10,7 @@ from random import Random, choice, randint, randrange
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from camoufox._warnings import WARNINGS_DATA, FallbackWarning, _warn_from_caller
-from camoufox.coherence import hardware_cpu, intel_mac_conditions
+from camoufox.coherence import cores_fit_cpu, hardware_cpu, intel_mac_conditions
 from camoufox.ip import valid_ipv4, validate_ip
 from camoufox.pkgman import LAUNCHER_CONSTANTS, load_yaml
 
@@ -818,7 +818,9 @@ def fix_hardware_concurrency(config: Dict[str, Any], can_pin: Optional[bool] = N
         # The draw is kept for diversity, snapped down into the table and capped
         # by the host so pinning can honour it.
         target = min(drawn, cap)
-        allowed = [c for c in PLAUSIBLE_CORE_COUNTS if c <= target]
+        # A count only Intel reports is no count for a CPU the caller named that is not Intel.
+        arch, maker = config.get('cpu:arch'), config.get('cpu:manufacturer')
+        allowed = [c for c in PLAUSIBLE_CORE_COUNTS if c <= target and cores_fit_cpu(c, arch, maker)]
         # The floor is the table's even on a 1-3 core host: reporting the host's
         # own 1, 2 or 3 would contradict the drawn GPU (see the table above).
         config['navigator.hardwareConcurrency'] = (
@@ -838,7 +840,7 @@ def core_count_note(user_set: bool, pin_cpu_cores: bool) -> str:
     if not supported():
         fix = 'This host cannot pin the browser to fewer cores, so pass an Intel cpu (or none)'
     elif pin_cpu_cores:
-        return 'pin_cpu_cores kept the count this identity drew; pass an Intel cpu (or none), or draw again.'
+        return 'pin_cpu_cores kept the count this identity drew; pass an Intel cpu (or none).'
     else:
         fix = 'Pass pin_cpu_cores=True to draw a count and pin the browser to it, or pass an Intel cpu (or none)'
     return (
