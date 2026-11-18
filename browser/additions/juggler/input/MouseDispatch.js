@@ -259,8 +259,11 @@ export class MouseDispatch {
    * its widget's, which a just-opened date picker had not placed yet in 13 of
    * 99 headless launches (#480).
    *
-   * Rejects when the parent dispatched no event, which leaves nothing to wait
-   * for and nothing that took it. Never waits forever: input dispatch is
+   * An event the parent dispatched to nothing during the send is waited for
+   * as one sent to the browser: while the chrome document suppresses event
+   * handling, the parent drops a move and delays a press or a release until
+   * handling resumes (PresShell::EventHandler::MaybeDiscardOrDelayMouseEvent),
+   * and a delayed one can still reach the renderer. Never waits forever: input dispatch is
    * serialized on activateAndRun()'s process-global chain, so an unbounded
    * wait here wedges every later input event in the process, in every tab,
    * for the life of the browser.
@@ -269,9 +272,7 @@ export class MouseDispatch {
     this._remeasure();
     const {x: absX, y: absY} = this.toAbsolute(x, y);
     const {jugglerEventId, target} = this._sendRouted(eventType, absX, absY);
-    if (!target)
-      throw new Error(`${eventType} at (${x}, ${y}) was not dispatched in the parent`);
-    if (target !== this._browser)
+    if (target && target !== this._browser)
       return {jugglerEventId, takenBy: target};
     // A move reaches the page at the next refresh tick; the renderer acks it
     // on arrival as "mousequeued" (BrowserChild::RecvRealMouseMoveEvent).

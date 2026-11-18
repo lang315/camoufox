@@ -25,7 +25,7 @@ later change should read first.
 
 - the browser: wait for the renderer's ack, as before;
 - any other node: return `{takenBy}` at once;
-- no node: throw. The parent dispatched nothing, so there is nothing to wait for.
+- no node: wait for the ack, as for the browser. While the chrome document suppresses event handling, the parent drops a move and delays a press or a release until it resumes (`PresShell::EventHandler::MaybeDiscardOrDelayMouseEvent`), and a delayed one can still reach the renderer.
 
 Rejected:
 
@@ -34,7 +34,7 @@ Rejected:
 
 **Evidence.**
 
-- *Red to green.* `browser/tests/juggler/routing.test.mjs` failed 4 of 6 against main's `MouseDispatch.js`, among them `a move the parent gave the open picker returns at once, though its widget rect is still empty`. With the fix, the Juggler Node suite passes 37 of 37. `check-input-dispatch.py` passes.
+- *Red to green.* `browser/tests/juggler/routing.test.mjs` failed 3 of 6 against main's `MouseDispatch.js`, among them `a move the parent gave the open picker returns at once, though its widget rect is still empty`. With the fix, the Juggler Node suite passes 37 of 37. `check-input-dispatch.py` passes.
 - *Diag 2: the cause, per drop.* Run 44232057350 (head `dc5fe038`, job 134564531593) instrumented the dispatch. 13 of 99 launches dropped the first move, and all 13 read the same way. The parent dispatched the move to a `th` in `chrome://global/content/datetimepicker.xhtml`, and `_popupAt` returned null. The move took 5.01 s and the page never saw it. An unflushed read just before the send had the panel `open` at `[0,0,0,0]` (10 drops), `[66,32,0,0]` (2) or `[0,18,0,0]` (1). Each drop's move went out 48 to 51 ms after the click's mouseup.
 - *No before/after A/B on the browser.* Diag 5, run 44269823155 (head `ccfeb1d2`, job 134685984695), ran the old and new `MouseDispatch` on one binary. The validity rule, set before the run, was at least 30 sends in the trigger state per arm. It got 9 (old) and 10 (new), so the run is invalid and is not evidence. Its raw counts were:
   - those trigger sends: old 9 of 9 dropped, new 0 of 10;

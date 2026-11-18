@@ -71,11 +71,12 @@ test('a move the parent gave the browser waits for the renderer to queue it', as
   assert.deepEqual(asked, ['mousequeued']);
 });
 
-test('an event the parent did not dispatch fails at once, and is neither covered nor waited for', async () => {
+test('an event the parent did not dispatch during the send is waited for under the deadline, not covered', async () => {
+  // A press the parent delays while the chrome document suppresses event handling.
   const {watcher, asked, dispatch} = harness(() => null);
-  await assert.rejects(dispatch().sendAcked(watcher, 'mousedown', 150, 90, 50),
-                       /mousedown at \(150, 90\) was not dispatched/);
-  assert.deepEqual(asked, []);
+  const result = await dispatch().sendAcked(watcher, 'mousedown', 150, 90, 50);
+  assert.deepEqual(result, {type: 'mousedown', jugglerEventId: 1});
+  assert.deepEqual(asked, ['mousedown']);
 });
 
 test('a dispatch that throws leaves no target behind for the next one', async () => {
@@ -95,13 +96,15 @@ test('a dispatch that throws leaves no target behind for the next one', async ()
 
 test('a target read during one dispatch is not carried into the next', async () => {
   let target = th;
-  const {watcher, listeners, dispatch} = harness(() => target);
+  const {watcher, asked, listeners, dispatch} = harness(() => target);
   await dispatch().sendAcked(watcher, 'mousemove', 150, 90, 50);
   // An event the parent dispatches outside a send (a real move) is not a send's.
   for (const l of listeners.filter(l => l.type === 'mousemove'))
     l.listener({type: 'mousemove', originalTarget: th});
   target = null;
-  await assert.rejects(dispatch().sendAcked(watcher, 'mousemove', 151, 90, 50), /was not dispatched/);
+  const result = await dispatch().sendAcked(watcher, 'mousemove', 151, 90, 50);
+  assert.deepEqual(result, {type: 'mousequeued', jugglerEventId: 2}, 'not taken by the picker');
+  assert.deepEqual(asked, ['mousequeued']);
 });
 
 test('one recorder per chrome window, however many dispatches use it', async () => {
