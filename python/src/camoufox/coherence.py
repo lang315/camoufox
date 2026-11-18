@@ -576,8 +576,9 @@ def hardware_cpu_vendor(config: Dict[str, Any], target_os: str) -> Optional[str]
     return maker if arch == 'x86' else None
 
 
-def cpu_conflict(config: Dict[str, Any], target_os: str) -> Optional[str]:
-    """Why the claimed CPU cannot sit in this machine, or None."""
+def cpu_conflict(config: Dict[str, Any], target_os: str, cores_note: str = '') -> Optional[str]:
+    """Why the claimed CPU cannot sit in this machine, or None. `cores_note`
+    says where a contradicting core count came from."""
     arch, maker = config.get('cpu:arch'), config.get('cpu:manufacturer')
     if arch is None and maker is None:
         return None
@@ -591,7 +592,7 @@ def cpu_conflict(config: Dict[str, Any], target_os: str) -> Optional[str]:
         return f'CPU {claimed} beside {renderer!r}'
     cores = config.get('navigator.hardwareConcurrency')
     if (arch or 'x86') == 'x86' and maker and maker != cores_cpu_vendor(cores) and cores_cpu_vendor(cores):
-        return f'CPU {claimed} with hardwareConcurrency {cores}, which only an Intel CPU reports'
+        return f'CPU {claimed} with hardwareConcurrency {cores}, which only an Intel CPU reports' + (f'. {cores_note}' if cores_note else '')
     return None
 
 

@@ -697,8 +697,15 @@ export function hardwareCpuVendor(
 	return arch === "x86" ? (maker as CpuVendor | null) : null;
 }
 
-/** Why the claimed CPU cannot sit in this machine, or null. */
-export function cpuConflict(config: Config, targetOs: string): string | null {
+/**
+ * Why the claimed CPU cannot sit in this machine, or null. `coresNote` says
+ * where a contradicting core count came from.
+ */
+export function cpuConflict(
+	config: Config,
+	targetOs: string,
+	coresNote = "",
+): string | null {
 	const arch = isNone(config["cpu:arch"]) ? null : config["cpu:arch"];
 	const maker = isNone(config["cpu:manufacturer"])
 		? null
@@ -729,7 +736,7 @@ export function cpuConflict(config: Config, targetOs: string): string | null {
 		maker !== byCores &&
 		byCores
 	) {
-		return `CPU ${claimed} with hardwareConcurrency ${pyStr(cores)}, which only an Intel CPU reports`;
+		return `CPU ${claimed} with hardwareConcurrency ${pyStr(cores)}, which only an Intel CPU reports${coresNote ? `. ${coresNote}` : ""}`;
 	}
 	return null;
 }

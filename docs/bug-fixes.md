@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #498: `cpu={'manufacturer': 'amd'}` was refused on a 10-core host with no word about where the 10 came from
+
+**Fixed by:** the PR that refs #498. **Found by:** a local run of `cpu-vendor-estimates.py` on a 10-core Apple Silicon Mac, against the macOS arm64 package of main `b074a8ce` (build run 44055830400).
+
+**Symptom.** `ValueError: cpu={'manufacturer': 'amd'}: CPU amd x86 with hardwareConcurrency 10, which only an Intel CPU reports`, raised from `render()` before a browser started. The guard read it as a red.
+
+**Root cause.** Two rules that are each right meet on a host whose core count is Intel-only. `fix_hardware_concurrency` (`fingerprints.py`) sets `navigator.hardwareConcurrency` to the host's count, because a page that times parallel workers measures the real one; a drawn count survives only when `pin_cpu_cores` pins the browser (Linux and Windows, off by default). `coherence.cpu_conflict` refuses an x86 vendor other than Intel beside 10, 14, 18, 22 or 28 (#446). So on macOS, and on Linux and Windows without pinning, AMD is undrawable on such a host. The refusal was correct and its message gave no sign that the count was the host's, and macOS has no supported way out.
+
+**Fix.** The refusal stays: drawing an AMD-compatible count below the host's would put `navigator.hardwareConcurrency` out of line with the parallelism a page measures (the drift `fix_hardware_concurrency` removes). `core_count_note` (both launchers) adds where the count came from and what changes it: the caller's own config, `pin_cpu_cores` (named where it can work), or a host that cannot pin. The guard asks the launcher's own rule (`core_count_refusal`) before each vendor's launch and reports an undrawable vendor as not applicable with that reason. Rejected: drawing the next lower table entry (8 on a 10-core host), for the reason above.
+
+**Evidence.** Red: three Python tests (`test_a_refusal_*` in `test_amd_igpu_cores.py`), four TypeScript tests (`amd-igpu-cores.test.ts`, run against main's source) and two guard tests (`ci/tests/test_ci.py`, `cpu_vendor_guard`) failed on the old message and on `render` being called for AMD at 10 cores. Green after.
+
+**What misled the investigation.** The guard passed on the hosted macOS runner, whose core count AMD reports, so it read as a flake of a loaded Mac rather than a host property.
+
 ## #497: the host GPU probe failed a launch at 30 s on a loaded Windows runner
 
 **Fixed by:** the PR that refs #497. **Found by:** e2e run 44089875316, job 134062178121 (Windows, build 44055836267, main `b074a8ce`), a never-merged probe for #370 that launched Camoufox repeatedly.

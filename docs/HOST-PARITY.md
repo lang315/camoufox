@@ -213,6 +213,10 @@ Intel 76.86%, AMD 17.61%, Apple 5.04%). The report has no per-OS split;
 Steam's survey puts AMD far higher, so the share is a choice, kept in
 `launcher-constants.json` as `x86IntelShare`.
 
+An AMD `cpu` on a host with one of the Intel-only counts is refused, not drawn: the
+count is the host's, which a page measures with parallel workers, so a lower one
+would contradict the machine (#498).
+
 On an Apple M4, stock Firefox 159 gives other values than x86-64 for every
 Web Audio node, every canvas composite operation (source-over included, not
 only the estimate-based ones), drawImage, filters and paths, the Opus and VP9
