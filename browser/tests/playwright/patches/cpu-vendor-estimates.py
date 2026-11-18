@@ -243,7 +243,7 @@ def main() -> int:
 
     unmeasured = [f"cpu={v}" for v, reason in refused.items() if reason]
     for cpu in ("intel", "amd") if host == "arm" else ("arm",):
-        reason = undrawable(cpu, sys.platform)
+        reason = (core_count_refusal(cpu) if cpu != "arm" else None) or undrawable(cpu, sys.platform)
         if reason:
             print(f"  arch arm cpu={cpu}: not applicable on {sys.platform}: {reason}")
             unmeasured.append(f"arch arm cpu={cpu}")

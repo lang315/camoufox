@@ -3336,6 +3336,28 @@ def test_cpu_vendor_guard_reports_a_vendor_its_host_cannot_draw_as_not_applicabl
     assert "PASS" in out and "cpu=amd" in out.split("PASS")[1]
 
 
+def test_cpu_vendor_guard_arm_host_does_not_claim_an_x86_vendor_its_core_count_refuses(monkeypatch, capsys):
+    """An ARM64 host claims Intel and AMD x86 in the arch arm, and reports its own core
+    count there too: on a 10-core Mac the AMD claim is refused before a browser starts (#498)."""
+    from camoufox import fingerprints
+
+    guard = _cpu_vendor_guard()
+    probed = []
+    monkeypatch.setattr(fingerprints, "host_cpu_count", lambda: 10)
+    monkeypatch.setattr(guard, "host_cpu", lambda: "arm")
+    monkeypatch.setattr(guard, "undrawable", lambda cpu, platform: None)
+    monkeypatch.setattr(guard, "render", lambda **kwargs: dict(guard.EXPECTED[kwargs["cpu"]["manufacturer"]]))
+    monkeypatch.setattr(guard, "arch_keys", lambda cpu: {})
+    monkeypatch.setattr(guard, "stock", lambda name: {})
+    monkeypatch.setattr(guard, "probe", lambda **kwargs: probed.append(kwargs["cpu"]["manufacturer"]) or {})
+
+    assert guard.main() == 0
+    out = capsys.readouterr().out
+    assert probed == ["intel"]
+    assert "arch arm cpu=amd: not applicable" in out
+    assert "hardwareConcurrency 10" in out
+
+
 def test_every_linux_only_guard_is_a_guard():
     from ci.run_patch_guards import LINUX_ONLY, guards
 
