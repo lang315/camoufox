@@ -7,8 +7,8 @@ never reaches the renderer. Juggler waited 5 s per event for a renderer ack
 that could not come: a click under the picker took 15 s and timed out
 Playwright, and every input after it queued behind. Stock 158.0.1 Linux, by
 OS (XTest) clicks on the same page: the clicks land on the picker at once, the
-page sees none of them, the picker stays open. MouseDispatch._popupAt now
-sends such an event without waiting for an ack.
+page sees none of them, the picker stays open. MouseDispatch.sendAcked now
+returns at once for an event the parent did not dispatch to the browser.
 
 A click right after showPicker() lands on the picker or the page, whichever the
 parent routes it to; either way it must not wait out the ack deadline. The covered

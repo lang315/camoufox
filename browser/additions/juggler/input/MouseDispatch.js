@@ -52,7 +52,7 @@ const {setTimeout} = ChromeUtils.importESModule('resource://gre/modules/Timer.sy
 const helper = new Helper();
 
 // The events sendAcked dispatches, and per chrome window the one recorder of
-// the node the parent dispatched the current one to (sendRouted).
+// the node the parent dispatched the current one to (_sendRouted).
 const kAckedTypes = ['mousemove', 'mousedown', 'mouseup', 'contextmenu'];
 const routes = new WeakMap();
 
