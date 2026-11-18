@@ -256,12 +256,16 @@ export class MouseDispatch {
    * event in the process, in every tab, for the life of the browser.
    */
   _d480Popups() {
-    return [...this._win.document.querySelectorAll('panel, menupopup, tooltip')]
-        .filter(p => p.state !== 'closed')
-        .map(p => {
-          const r = p.getOuterScreenRect();
-          return `${p.id || p.localName}:${p.state}:[${r.left},${r.top},${r.width},${r.height}]:${this._win.getComputedStyle(p).pointerEvents}`;
-        }).join(' ') || '-';
+    try {
+      return [...this._win.document.querySelectorAll('panel, menupopup, tooltip')]
+          .filter(p => p.state && p.state !== 'closed')
+          .map(p => {
+            const r = p.getOuterScreenRect();
+            return `${p.id || p.localName}:${p.state}:[${r.left},${r.top},${r.width},${r.height}]:${this._win.getComputedStyle(p).pointerEvents}`;
+          }).join(' ') || '-';
+    } catch (e) {
+      return `ERR ${e}`;
+    }
   }
 
   _d480Arm() {
@@ -275,33 +279,37 @@ export class MouseDispatch {
 
   async sendAcked(watcher, eventType, x, y, deadlineMs = kAckDeadlineMs) {
     const d480 = globalThis.Services?.env?.get('CAMOU_DIAG_480') === '1';
+    const d480try = f => { try { f(); } catch (e) { dump(`D480 ${Date.now()} diag-error ${e}\n`); } };
     this._remeasure();
     const {x: absX, y: absY} = this.toAbsolute(x, y);
-    let before, targets = [];
-    if (d480) {
-      this._d480Arm();
-      before = this._d480Popups();
-    }
+    let before, afterFlush, targets = [];
+    if (d480)
+      d480try(() => { this._d480Arm(); before = this._d480Popups(); });
     const popup = this._popupAt(absX, absY);
-    const afterFlush = d480 ? this._d480Popups() : null;
+    if (d480)
+      afterFlush = this._d480Popups();
     const listener = e => {
-      const t = e.originalTarget;
-      const p = t.closest?.('panel, menupopup, tooltip');
-      targets.push(`${e.type}>${t.localName}#${t.id || ''}${p ? '@' + (p.id || p.localName) : ''}`);
+      try {
+        const t = e.originalTarget;
+        const p = t.closest?.('panel, menupopup, tooltip');
+        targets.push(`${e.type}>${t.localName}#${t.id || ''}${p ? '@' + (p.id || p.localName) : ''}`);
+      } catch (err) {
+        targets.push(`${e.type}>ERR ${err}`);
+      }
     };
-    if (d480) {
-      for (const type of [eventType, 'pointermove', 'pointerdown', 'pointerup'])
-        Services.els.addSystemEventListener(this._win, type, listener, true);
-    }
+    const types = [eventType, 'pointermove', 'pointerdown', 'pointerup'];
+    if (d480)
+      d480try(() => types.forEach(type => this._win.addEventListener(type, listener, {capture: true, mozSystemGroup: true})));
     // This dispatches to the renderer synchronously.
     const jugglerEventId = this._sendAbsolute(eventType, absX, absY);
     if (d480) {
-      for (const type of [eventType, 'pointermove', 'pointerdown', 'pointerup'])
-        Services.els.removeSystemEventListener(this._win, type, listener, true);
-      const s = this._win.windowUtils.toScreenRectInCSSUnits(absX, absY, 0, 0);
-      dump(`D480 ${Date.now()} send id=${jugglerEventId} ${eventType} rel=(${x},${y}) abs=(${absX},${absY}) screen=(${s.x},${s.y}) ` +
-           `popupAt=${popup ? (popup.id || popup.localName) : 'null'} targets=[${targets.join(' ')}] ` +
-           `before={${before}} flushed={${afterFlush}} after={${this._d480Popups()}}\n`);
+      d480try(() => types.forEach(type => this._win.removeEventListener(type, listener, {capture: true, mozSystemGroup: true})));
+      d480try(() => {
+        const s = this._win.windowUtils.toScreenRectInCSSUnits(absX, absY, 0, 0);
+        dump(`D480 ${Date.now()} send id=${jugglerEventId} ${eventType} rel=(${x},${y}) abs=(${absX},${absY}) screen=(${s.x},${s.y}) ` +
+             `popupAt=${popup ? (popup.id || popup.localName) : 'null'} targets=[${targets.join(' ')}] ` +
+             `before={${before}} flushed={${afterFlush}} after={${this._d480Popups()}}\n`);
+      });
     }
     if (popup)
       return {jugglerEventId, popup};

@@ -144,7 +144,7 @@ def worker(binary, budget_s):
             try:
                 rec = probe_once(binary, n, logdir)
             except Exception as e:
-                rec = {"error": f"{type(e).__name__}: {e}"[:200]}
+                rec = {"error": f"{type(e).__name__}: {e}"[:1500], "mozlog": bool(n % 2)}
             rec["n"], rec["wall"] = n, round(time.monotonic() - t, 1)
             dropped = any(s["took"] > 4.5 for s in rec.get("slow_moves", []))
             files = sorted(glob.glob(os.path.join(logdir, "moz*")))
