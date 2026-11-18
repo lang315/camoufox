@@ -34,9 +34,12 @@ export const WEBGPU_BLOCKLIST_PREF = "gfx.blacklist.webgpu";
 export const FEATURE_STATUS_OK = 1;
 export const FEATURE_BLOCKED_DEVICE = 4;
 
-// What the launcher itself adds to the browser's environment; none of it
-// changes which device Firefox renders on.
-const LAUNCHER_ENV = ["CAMOU_", "FONTCONFIG_FILE"];
+// Variables that choose no device: what the launcher adds to the browser's
+// environment, and Firefox's logging (a caller that logs each launch to its own
+// MOZ_LOG_FILE would otherwise probe every time, #497). A list of the variables
+// that do choose one would miss the drivers' own selectors and claim a stale
+// GPU; missing a name here costs one more probe.
+const LAUNCHER_ENV = ["CAMOU_", "FONTCONFIG_FILE", "MOZ_LOG"];
 
 /** A GPU as WEBGL_debug_renderer_info reports it: [vendor, renderer]. */
 export type Gpu = [string, string];
@@ -165,10 +168,15 @@ async function readGpu(
 	// cleanup share one deadline, and a timeout says what it was waiting on.
 	const deadline = Date.now() + HOST_GPU_PROBE_TIMEOUT_MS;
 	const display = env.DISPLAY ? ` (DISPLAY=${env.DISPLAY})` : "";
+	// Only Linux has an X display to blame.
+	const hint =
+		process.platform === "linux"
+			? "; check that the display accepts X connections"
+			: "";
 	const timeoutMessage =
 		`Host GPU probe timed out after ${HOST_GPU_PROBE_TIMEOUT_MS} ms ` +
 		`while launching ${executablePath}${display}. The browser did not answer ` +
-		"the WebGL probe; check that the display accepts X connections.";
+		`the WebGL probe${hint}.`;
 	const remaining = () => Math.max(1, deadline - Date.now());
 	let browser: Awaited<ReturnType<typeof firefox.launch>> | undefined;
 	let result: Gpu | null = null;
