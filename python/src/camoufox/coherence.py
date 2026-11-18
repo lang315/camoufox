@@ -561,6 +561,12 @@ def cores_cpu_vendor(cores: Any) -> Optional[str]:
     return 'intel' if cores in INTEL_ONLY_CORE_COUNTS else None
 
 
+def cores_fit_cpu(cores: Any, arch: Optional[str], maker: Optional[str]) -> bool:
+    """False when an x86 CPU of another vendor than `maker` is the only kind that reports `cores`."""
+    vendor = cores_cpu_vendor(cores)
+    return not ((arch or 'x86') == 'x86' and maker and vendor and maker != vendor)
+
+
 def hardware_cpu(config: Dict[str, Any], target_os: str) -> Tuple[Optional[str], Optional[str]]:
     """The (arch, manufacturer) the identity's GPU or, failing that, its core count implies."""
     arch, makers = gpu_cpu(_renderer(config), target_os)
@@ -591,7 +597,7 @@ def cpu_conflict(config: Dict[str, Any], target_os: str, cores_note: str = '') -
     if renderer and not gpu_fits_cpu(renderer, target_os, arch, maker):
         return f'CPU {claimed} beside {renderer!r}'
     cores = config.get('navigator.hardwareConcurrency')
-    if (arch or 'x86') == 'x86' and maker and maker != cores_cpu_vendor(cores) and cores_cpu_vendor(cores):
+    if not cores_fit_cpu(cores, arch, maker):
         return f'CPU {claimed} with hardwareConcurrency {cores}, which only an Intel CPU reports' + (f'. {cores_note}' if cores_note else '')
     return None
 

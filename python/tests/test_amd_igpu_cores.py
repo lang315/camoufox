@@ -8,6 +8,8 @@ needs: none reads the machine running it, so none passes vacuously on a runner
 with four cores and a software renderer.
 """
 
+import random
+
 import pytest
 
 from camoufox import coherence, cpu_affinity
@@ -133,3 +135,47 @@ def test_a_refusal_of_a_count_the_caller_set_says_so(monkeypatch):
 
     assert "You set that count" in message
     assert "host's" not in message
+
+
+DRAWS = range(1, 65)
+HOSTS = [10, 14, 22, 28]
+
+
+def pinned(monkeypatch, host_cores):
+    monkeypatch.setattr(cpu_affinity, "supported", lambda: True)
+    monkeypatch.setattr(fp, "host_cpu_count", lambda: host_cores)
+
+
+def fixed_cores(drawn, **cpu):
+    config = {"navigator.hardwareConcurrency": drawn, **cpu}
+    fp.fix_hardware_concurrency(config, can_pin=True)
+    return config["navigator.hardwareConcurrency"]
+
+
+@pytest.mark.parametrize("host_cores", HOSTS)
+def test_a_pinned_draw_for_an_amd_cpu_skips_the_intel_only_counts(host_cores, monkeypatch):
+    # Before the fix 40% of draws on a 10-core host, 20% on 14, 4-9% on 22 and 28 kept an Intel-only count (#506).
+    pinned(monkeypatch, host_cores)
+    for drawn in DRAWS:
+        kept = fixed_cores(drawn, **{"cpu:arch": "x86", "cpu:manufacturer": "amd"})
+        assert kept not in coherence.INTEL_ONLY_CORE_COUNTS, (host_cores, drawn)
+        assert kept <= max(host_cores, fp.PLAUSIBLE_CORE_COUNTS[0]), (host_cores, drawn)
+        if drawn in fp.PLAUSIBLE_CORE_COUNTS and drawn <= host_cores and drawn not in coherence.INTEL_ONLY_CORE_COUNTS:
+            assert kept == drawn, (host_cores, drawn)
+
+
+@pytest.mark.parametrize("host_cores", HOSTS)
+def test_a_pinned_draw_for_an_intel_cpu_or_none_still_keeps_an_intel_only_count(host_cores, monkeypatch):
+    # The control: only an AMD claim moves the count, so the fix is not a blanket ban on these counts.
+    pinned(monkeypatch, host_cores)
+    assert fixed_cores(64, **{"cpu:arch": "x86", "cpu:manufacturer": "intel"}) == host_cores
+    assert fixed_cores(64) == host_cores
+
+
+@pytest.mark.parametrize("host_cores", HOSTS)
+def test_an_amd_launch_with_pinning_on_is_never_refused_for_its_draw(host_cores, monkeypatch):
+    pinned(monkeypatch, host_cores)
+    for seed in range(60):
+        random.seed(seed)
+        config = launch(os="linux", canvas_noise=True, cpu={"manufacturer": "amd"}, pin_cpu_cores=True)
+        assert config["navigator.hardwareConcurrency"] not in coherence.INTEL_ONLY_CORE_COUNTS, seed
