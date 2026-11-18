@@ -13,6 +13,23 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #500: the macOS build took 237 of its 240 minutes with no ccache, and a build cut off at the limit saves none
+
+**Fixed by:** the PR that refs #500. **Found by:** `build.yml` run 44055830400, the macOS arm64 build of `main` for v159.0-beta.35-fork.4.
+
+**Symptom.** The Build step took 237.1 minutes against a `timeout-minutes` of 240 (the comment above it said the slowest was 188). ccache hit 1 of 4109 cacheable calls, `Cache not found for input keys` for the mozbuild and ccache caches including both restore-key prefixes, and the Windows leg of the same dispatch was cold too (3 of 4461). A warm macOS build (run 43859463756, branch `fix/451...`, restoring `main`'s entries) took 86 minutes: its compile phase, 41 minutes by mach's own clock, against 126 to 198 minutes cold.
+
+**Root cause.** Two things in `build.yml`, with the repository's size limit behind them.
+
+- `actions/cache` saves in its post-job step, and only when the job succeeded. A cold macOS build is 163 to 237 minutes against the 240-minute step limit, so one that is cut off saves nothing and the next build is cold again.
+- Every run saves entries under keys ending in `github.run_id` (a key is never overwritten), and the repository's cache holds 10 GB, where `mozbuild-windows-x86_64` alone is 3.7 GB per run. GitHub evicts the oldest-accessed entries first, which took `main`'s ccache and mozbuild entries of 14 November (last restored on the 16th) before the 17th. The cache API lists live entries only, so the eviction was not observed; a manual delete cannot be excluded. `main` reads only `main`'s caches, so the fresh macOS ccache the sync's build had saved under its own branch was no help to it. `cleanup-pr-caches.yml` already named this at the size limit.
+
+**Fix.** Each cache is restored by `actions/cache/restore@v6` and saved by `actions/cache/save@v6` in a step after Build, with the key the restore computed. The ccache save runs `always()` unless the Build step never ran, and the mozbuild save only when the job passes. A new `prune-caches` job, the only one with `actions: write` and with no checkout, deletes the older `ccache-` and `mozbuild-` entries of its leg on its ref, only those whose run id is lower than its own and only once an entry of its own run exists, so two overlapping runs (`build.yml` has no `concurrency:` group) cannot delete each other's newer entry. Not done: raising the timeout, which would hide the cold start and cost four hours a cold build.
+
+**Evidence.** Seven new tests in `ci/tests/test_ci.py` failed on `main`'s `build.yml` (`7 failed`) and pass with the change; one runs the prune script against a fake `gh`. Two Windows builds dispatched in a row from the branch at `26b29241`: run 44194617745 restored `main`'s entries, hit about 99% (cumulative 4418 of 8922 over the restored counters of 3 of 4461) and saved `ccache-windows-x86_64-...-44194617745` and the mozbuild one; run 44203567013 restored exactly those (`Cache restored from key: ...-44194617745`), hit about 99% (cumulative 8833 of 13383; this run 4415 of 4461 by subtraction), and its `prune-caches` job deleted caches 10694812530 and 10694838823, the first run's two entries. After it, the branch holds one `ccache-` and one `mozbuild-` entry, both from run 44203567013. Tests on the PR: run 44194697552, success.
+
+**What misled the investigation.** The 188 minutes in the Build step's comment was the slowest build seen so far, not a bound: cold builds took 163, 174 and 237 minutes for the same 4109 or 4110 compile misses, the slowest on a newer runner image (one sample, so image and runner variance are not separated). And a build on a branch restores `main`'s entries through the default-branch fallback, so a branch build can run warm while `main`'s own build is cold.
+
 ## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
 
 **Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).
