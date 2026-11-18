@@ -3762,6 +3762,132 @@ def test_a_build_leg_saves_a_fresh_cache_every_run(prefix):
     assert cache["key"].startswith(restore[0])
 
 
+def _build_steps():
+    return _workflow("build.yml")["jobs"]["build"]["steps"]
+
+
+def _step_index(steps, predicate, what):
+    found = [i for i, s in enumerate(steps) if predicate(s)]
+    assert len(found) == 1, f"{what}: {len(found)} steps"
+    return found[0]
+
+
+@pytest.mark.parametrize("prefix", ["mozbuild", "ccache"])
+def test_a_build_leg_restores_and_saves_each_cache_in_steps_of_its_own(prefix):
+    """The cache action saves in its post-job step, only when the job succeeded, and after every
+    other step. A cold macOS build that hit its step timeout therefore saved nothing and left the
+    next build cold again (#500), and a prune step could not run after the save."""
+    steps = _build_steps()
+    assert not [s for s in steps if s.get("uses", "").startswith("actions/cache@")
+                and str(s["with"].get("key", "")).startswith(prefix)]
+    restore = _step_index(steps, lambda s: s.get("uses", "").startswith("actions/cache/restore@")
+                          and str(s["with"]["key"]).startswith(prefix), f"{prefix} restore")
+    save = _step_index(steps, lambda s: s.get("uses", "").startswith("actions/cache/save@")
+                       and prefix in s["with"]["key"], f"{prefix} save")
+    build = _step_index(steps, lambda s: s.get("name") == "Build", "Build")
+    assert restore < build < save
+    # The save re-uses the key the restore computed, so the two cannot drift.
+    assert steps[save]["with"]["key"] == f"${{{{ steps.{steps[restore]['id']}.outputs.cache-primary-key }}}}"
+    assert steps[save]["with"]["path"] == steps[restore]["with"]["path"]
+
+
+def test_the_ccache_is_saved_when_the_build_fails_and_the_mozbuild_state_only_when_it_passes():
+    steps = _build_steps()
+    ccache = next(s for s in steps if s.get("uses", "").startswith("actions/cache/save@") and "ccache" in s["with"]["key"])
+    mozbuild = next(s for s in steps if s.get("uses", "").startswith("actions/cache/save@") and "mozbuild" in s["with"]["key"])
+    assert "always()" in ccache["if"]
+    # Not saved when the Build step never ran: that would upload what the restore just downloaded.
+    assert "steps.build.outcome != 'skipped'" in ccache["if"]
+    assert next(s for s in steps if s.get("name") == "Build")["id"] == "build"
+    assert "always()" not in mozbuild.get("if", "")
+
+
+def _prune_job():
+    return _workflow("build.yml")["jobs"]["prune-caches"]
+
+
+def test_the_cache_pruning_job_is_the_only_one_that_can_delete_caches():
+    jobs = _workflow("build.yml")["jobs"]
+    assert jobs["build"]["permissions"] == {"contents": "read"}
+    prune = jobs["prune-caches"]
+    assert prune["permissions"] == {"actions": "write"}
+    assert set(prune["needs"]) == {"matrix", "build"}
+    assert prune["strategy"]["matrix"] == jobs["build"]["strategy"]["matrix"]
+    assert "always()" in prune["if"]
+    assert not any("uses" in step for step in prune["steps"]), "must not check out or run the build's code"
+
+
+def _run_prune(tmp_path, entries, *, run_id="200", target="windows", arch="x86_64", ref="refs/heads/fix/x"):
+    """Run the prune step's script against a `gh` that serves `entries` and records every call."""
+    step = next(s for s in _prune_job()["steps"] if "gh cache delete" in s["run"])
+    for name in ("REF", "RUN_ID", "TARGET", "ARCH", "GH_TOKEN", "GH_REPO"):
+        assert name in step["env"], name
+    assert step["env"]["REF"] == "${{ github.ref }}"
+    assert step["env"]["RUN_ID"] == "${{ github.run_id }}"
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    (tmp_path / "entries.json").write_text(json.dumps(entries), encoding="utf-8")
+    (fake / "gh").write_text(
+        "#!/bin/bash\n"
+        'echo "$@" >> "$CALLS"\n'
+        'if [ "$1 $2" = "cache list" ]; then\n'
+        '  while [ $# -gt 0 ]; do [ "$1" = "--key" ] && prefix=$2; [ "$1" = "--ref" ] && ref=$2; shift; done\n'
+        '  [ "$ref" = "$EXPECT_REF" ] || { echo "list for $ref" >> "$CALLS"; echo "[]"; exit 0; }\n'
+        '  jq -c --arg p "$prefix" \'[.[] | select(.key | startswith($p))]\' "$ENTRIES"\n'
+        "fi\n",
+        encoding="utf-8",
+    )
+    (fake / "gh").chmod(0o755)
+    calls = tmp_path / "calls.txt"
+    env = {
+        **os.environ,
+        "PATH": f"{fake}:{os.environ['PATH']}",
+        "CALLS": str(calls),
+        "ENTRIES": str(tmp_path / "entries.json"),
+        "EXPECT_REF": ref,
+        "REF": ref,
+        "RUN_ID": run_id,
+        "TARGET": target,
+        "ARCH": arch,
+        "GH_TOKEN": "t",
+        "GH_REPO": "o/r",
+    }
+    done = subprocess.run(["bash", "-e", "-o", "pipefail", "-c", step["run"]], env=env, capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    lines = calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+    return sorted(int(line.split()[2]) for line in lines if line.startswith("cache delete"))
+
+
+def _entry(cid, kind, run, target="windows", arch="x86_64"):
+    return {"id": cid, "key": f"{kind}-{target}-{arch}-abc123-{run}"}
+
+
+def test_a_run_deletes_only_the_older_entries_of_its_own_leg_once_its_own_is_saved(tmp_path):
+    entries = [
+        _entry(1, "ccache", 100), _entry(2, "ccache", 150), _entry(3, "ccache", 200),
+        _entry(4, "mozbuild", 120), _entry(5, "mozbuild", 200),
+        _entry(6, "ccache", 250),                       # a concurrent, newer run's fresh entry
+        _entry(7, "ccache", 90, target="macos", arch="arm64"),   # another leg's entry
+        _entry(8, "ccache", 90, arch="i686"),           # a leg whose name this one is a prefix of
+    ]
+    assert _run_prune(tmp_path, entries) == [1, 2, 4]
+
+
+def test_a_run_whose_own_entry_was_not_saved_deletes_nothing(tmp_path):
+    """The build failed before it saved, or the save did not land: the older entries are all there is."""
+    entries = [_entry(1, "ccache", 100), _entry(2, "mozbuild", 100), _entry(3, "ccache", 250)]
+    assert _run_prune(tmp_path, entries) == []
+
+
+def test_the_prune_lists_only_the_ref_and_the_leg_prefix_the_run_saved_under(tmp_path):
+    entries = [_entry(1, "ccache", 100), _entry(2, "ccache", 200), _entry(3, "mozbuild", 200)]
+    _run_prune(tmp_path, entries, ref="refs/heads/fix/x")
+    lists = [c for c in (tmp_path / "calls.txt").read_text(encoding="utf-8").splitlines() if c.startswith("cache list")]
+    assert len(lists) == 2
+    assert all("--ref refs/heads/fix/x" in c for c in lists)
+    assert sorted(c.split("--key ")[1].split()[0] for c in lists) == ["ccache-windows-x86_64-", "mozbuild-windows-x86_64-"]
+
+
 def test_closing_a_pull_request_deletes_the_caches_it_saved():
     """A pull request's caches live under refs/pull/N/merge, where nothing else can restore them,
     and at the size limit the eviction took the build legs' ccache instead."""
