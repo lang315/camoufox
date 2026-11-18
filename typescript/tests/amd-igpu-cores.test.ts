@@ -19,6 +19,7 @@ import {
 } from "./launch-host.js";
 
 const coherence = await import("../src/coherence.js");
+const cpuAffinity = await import("../src/cpu_affinity.js");
 const { sampleWebglForScreen } = await import("../src/webgl.js");
 const { MODEL } = await import("./fpgen-setup.js");
 
@@ -136,5 +137,58 @@ describe.skipIf(!MODEL.ok)("a launch on an Intel-only host", () => {
 			expect(config["navigator.hardwareConcurrency"]).toBe(14);
 			expect(coherence.validate(config, OS_KEY[os])).toEqual([]);
 		}
+	});
+});
+
+describe.skipIf(!MODEL.ok)("a refused AMD cpu on a 10-core host", () => {
+	const refusal = async (extra: Record<string, any> = {}) => {
+		hostWith(10);
+		return String(
+			await launchConfig({
+				os: "linux",
+				canvas_noise: true,
+				cpu: { manufacturer: "amd" },
+				...extra,
+			}).then(
+				() => "",
+				(error: Error) => error.message,
+			),
+		);
+	};
+
+	it("names the count as the host's and what to change", async () => {
+		const message = await refusal();
+
+		expect(message).toContain("hardwareConcurrency 10");
+		expect(message).toContain("this host's logical core count");
+		expect(message).toContain(
+			cpuAffinity.supported() ? "pin_cpu_cores=True" : "cannot pin the browser",
+		);
+	});
+
+	it("says so when the caller set the count", async () => {
+		const message = await refusal({
+			config: { "navigator.hardwareConcurrency": 10 },
+		});
+
+		expect(message).toContain("You set that count");
+		expect(message).not.toContain("host's");
+	});
+});
+
+describe("coreCountNote", () => {
+	it("tells a host that cannot pin from one with pinning off", () => {
+		const cannot = fingerprints.coreCountNote(false, false, false);
+		const off = fingerprints.coreCountNote(false, false, true);
+
+		expect(cannot).toContain("cannot pin");
+		expect(cannot).not.toContain("pin_cpu_cores");
+		expect(off).toContain("pin_cpu_cores=True");
+	});
+
+	it("says a pinned launch kept its drawn count", () => {
+		expect(fingerprints.coreCountNote(false, true, true)).toContain(
+			"kept the count this identity drew",
+		);
 	});
 });

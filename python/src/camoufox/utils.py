@@ -26,7 +26,7 @@ from .exceptions import (
     NotWritableError,
     UnknownIPLocation,
 )
-from .fingerprints import Screen, platform_to_os, from_fpgen, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, draw_voice_config, fix_navigator_arch, fix_hardware_concurrency, set_cpu_default, identity_salt, drop_audio_seed, identity_seed, follow_baseline_protection, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, raise_screen_to_modern_floor, resample_screen_for_dpr1, set_media_devices_defaults, WINDOWS_11_MARKER_FONTS, OS_KEYS, OS_NAMES
+from .fingerprints import Screen, platform_to_os, from_fpgen, from_preset, generate_fingerprint, get_random_preset, _generate_random_font_subset, draw_voice_config, fix_navigator_arch, fix_hardware_concurrency, core_count_note, set_cpu_default, identity_salt, drop_audio_seed, identity_seed, follow_baseline_protection, clamp_screen_to_display, clamp_window_dimensions, clamp_window_position, raise_screen_to_modern_floor, resample_screen_for_dpr1, set_media_devices_defaults, WINDOWS_11_MARKER_FONTS, OS_KEYS, OS_NAMES
 from . import coherence
 from .geolocation import geoip_allowed, get_geolocation
 from .ip import ExitGeo, Proxy, proxy_auth_env, proxy_auth_init_script, public_ip, public_ipv6, socks5_auth, valid_ipv4, valid_ipv6
@@ -2151,7 +2151,7 @@ def launch_options(
     # caller named that the GPU contradicts (a preset's, webgl_config's, the
     # host's) is no machine at all.
     if cpu is not None:
-        _conflict = coherence.cpu_conflict(config, target_os)
+        _conflict = coherence.cpu_conflict(config, target_os, core_count_note(_user_set_navigator, bool(pin_cpu_cores)))
         if _conflict:
             raise ValueError(f'cpu={cpu!r}: {_conflict}')
     set_cpu_default(config, target_os, _identity_salt)

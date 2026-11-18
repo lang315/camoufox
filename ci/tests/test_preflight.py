@@ -2,10 +2,12 @@
 
 import sys
 
+import pytest
+
 from ci._util import BROWSER_ROOT
 
 sys.path.insert(0, str(BROWSER_ROOT / "scripts"))
-from preflight import compile_objects, objects_of, touched_sources  # noqa: E402
+from preflight import compile_objects, gnu_make, objects_of, touched_sources  # noqa: E402
 
 
 def _write(path, text=""):
@@ -57,3 +59,29 @@ def test_an_object_from_an_earlier_run_is_compiled_again(tmp_path):
     compile_objects({directory: {"Stale.o", "New.o"}}, tmp_path)
     assert (directory / "Stale.o").read_text() == "compiled\n"
     assert (directory / "New.o").read_text() == "compiled\n"
+
+
+def _make_versions(monkeypatch, versions):
+    """Stub `which` and `<make> --version`: versions maps a make's name to its first line."""
+    monkeypatch.setattr("preflight.shutil.which", lambda name: name if name in versions else None)
+    monkeypatch.setattr("preflight.subprocess.check_output",
+                        lambda cmd, text: f"{versions[cmd[0]]}\nBuilt for x86_64\n")
+
+
+def test_make_older_than_4_is_refused_naming_its_version_and_the_fix(monkeypatch):
+    """Apple's make is 3.81 and rejects --output-sync, which first appeared in 4.0."""
+    _make_versions(monkeypatch, {"make": "GNU Make 3.81"})
+    with pytest.raises(SystemExit) as refused:
+        gnu_make()
+    assert "3.81" in str(refused.value)
+    assert "install-deps.sh" in str(refused.value)
+
+
+def test_gmake_is_used_when_make_is_too_old(monkeypatch):
+    _make_versions(monkeypatch, {"make": "GNU Make 3.81", "gmake": "GNU Make 4.4.1"})
+    assert gnu_make() == "gmake"
+
+
+def test_make_4_is_used_as_it_is(monkeypatch):
+    _make_versions(monkeypatch, {"make": "GNU Make 4.3"})
+    assert gnu_make() == "make"

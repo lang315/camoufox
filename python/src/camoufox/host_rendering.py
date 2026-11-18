@@ -39,15 +39,20 @@ WEBGPU_BLOCKLIST_PREF = 'gfx.blacklist.webgpu'
 FEATURE_STATUS_OK = 1
 FEATURE_BLOCKED_DEVICE = 4
 
-# What the launcher itself adds to the browser's environment; none of it
-# changes which device Firefox renders on.
-_LAUNCHER_ENV = ('CAMOU_', 'FONTCONFIG_FILE')
+# Variables that choose no device: what the launcher adds to the browser's
+# environment, and Firefox's logging (a caller that logs each launch to its own
+# MOZ_LOG_FILE would otherwise probe every time, #497). A list of the variables
+# that do choose one would miss the drivers' own selectors and claim a stale
+# GPU; missing a name here costs one more probe.
+_LAUNCHER_ENV = ('CAMOU_', 'FONTCONFIG_FILE', 'MOZ_LOG')
 
 Gpu = Tuple[str, str]
 
 # A display that accepts TCP but never completes the X handshake leaves Firefox's
 # GL initialization inside getContext() forever, which used to block every launch.
-HOST_GPU_PROBE_TIMEOUT_S = 30.0
+# The bound is for that, not for a slow healthy probe, which took up to 80 s on a
+# loaded hosted Windows runner (`host-gpu-probe-timeout` in ci/tribal-rules.yml).
+HOST_GPU_PROBE_TIMEOUT_S = 120.0
 
 _READ_GPU = """() => {
     const gl = document.createElement('canvas').getContext('webgl');
@@ -138,10 +143,12 @@ def _host_gpu(
         child.communicate()
         display = dict(env).get('DISPLAY')
         context = f' (DISPLAY={display})' if display else ''
+        # Only Linux has an X display to blame.
+        hint = '; check that the display accepts X connections' if sys.platform.startswith('linux') else ''
         raise TimeoutError(
             f'Host GPU probe timed out after {HOST_GPU_PROBE_TIMEOUT_S:g} s '
             f'while launching {executable_path}{context}. The browser did not '
-            'answer the WebGL probe; check that the display accepts X connections.'
+            f'answer the WebGL probe{hint}.'
         ) from None
     if child.returncode != 0:
         raise RuntimeError(f'Host GPU probe failed while launching {executable_path}:\n{err.strip()}')

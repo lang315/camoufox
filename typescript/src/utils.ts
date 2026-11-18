@@ -25,6 +25,7 @@ import {
 	clampScreenToDisplay,
 	clampWindowDimensions,
 	clampWindowPosition,
+	coreCountNote,
 	drawVoiceConfig,
 	dropAudioSeed,
 	fixHardwareConcurrency,
@@ -2457,7 +2458,11 @@ export async function launchOptions({
 	// caller named that the GPU contradicts (a preset's, webgl_config's, the
 	// host's) is no machine at all.
 	if (cpu !== undefined && cpu !== null) {
-		const conflict = coherence.cpuConflict(config, targetOs);
+		const conflict = coherence.cpuConflict(
+			config,
+			targetOs,
+			coreCountNote(userSetNavigator, Boolean(pin_cpu_cores)),
+		);
 		if (conflict) throw new ValueError(`cpu=${pyRepr(cpu)}: ${conflict}`);
 	}
 	setCpuDefault(config, targetOs, salt);
