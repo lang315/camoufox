@@ -102,3 +102,34 @@ def test_a_context_identity_with_an_intel_only_count_is_coherent(os_name, monkey
         config = fp.generate_context_fingerprint(os=os_name)["config"]
         assert config["navigator.hardwareConcurrency"] == 22
         assert coherence.gpu_cpu_vendor(config["webGl:renderer"], get_target_os(config)) != "amd"
+
+
+def refusal(monkeypatch, can_pin, **kwargs):
+    monkeypatch.setattr(cpu_affinity, "supported", lambda: can_pin)
+    monkeypatch.setattr(fp, "host_cpu_count", lambda: 10)
+    with pytest.raises(ValueError, match=r"only an Intel CPU reports") as raised:
+        launch(os="linux", canvas_noise=True, cpu={"manufacturer": "amd"}, **kwargs)
+    return str(raised.value)
+
+
+def test_a_refusal_on_a_host_that_cannot_pin_says_the_count_is_the_hosts(monkeypatch):
+    message = refusal(monkeypatch, can_pin=False)
+
+    assert "hardwareConcurrency 10" in message
+    assert "this host's logical core count" in message
+    assert "cannot pin" in message
+    assert "pin_cpu_cores" not in message
+
+
+def test_a_refusal_with_pinning_off_names_the_option_that_turns_it_on(monkeypatch):
+    message = refusal(monkeypatch, can_pin=True)
+
+    assert "this host's logical core count" in message
+    assert "pin_cpu_cores=True" in message
+
+
+def test_a_refusal_of_a_count_the_caller_set_says_so(monkeypatch):
+    message = refusal(monkeypatch, can_pin=True, config={"navigator.hardwareConcurrency": 10})
+
+    assert "You set that count" in message
+    assert "host's" not in message

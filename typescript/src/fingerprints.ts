@@ -903,6 +903,36 @@ export interface HostCpu {
 }
 
 /**
+ * Where navigator.hardwareConcurrency came from and what changes it, for a
+ * refusal that names the count. Mirrors fixHardwareConcurrency.
+ *
+ * @param canPinHost overrides cpu_affinity.supported() (tests).
+ */
+export function coreCountNote(
+	userSet: boolean,
+	pinCpuCores: boolean,
+	canPinHost: boolean = cpuAffinitySupported(),
+): string {
+	if (userSet) {
+		return "You set that count; set one an AMD CPU reports, or pass an Intel cpu.";
+	}
+	let fix: string;
+	if (!canPinHost) {
+		fix =
+			"This host cannot pin the browser to fewer cores, so pass an Intel cpu (or none)";
+	} else if (pinCpuCores) {
+		return "pin_cpu_cores kept the count this identity drew; pass an Intel cpu (or none), or draw again.";
+	} else {
+		fix =
+			"Pass pin_cpu_cores=True to draw a count and pin the browser to it, or pass an Intel cpu (or none)";
+	}
+	return (
+		"That is this host's logical core count: a page times parallel workers and measures it, " +
+		`so the launcher reports no other. ${fix}, or run on a host whose count an AMD CPU reports.`
+	);
+}
+
+/**
  * navigator.hardwareConcurrency = the host's parallelism, snapped DOWN into
  * PLAUSIBLE_CORE_COUNTS -- or the fingerprint's own value (snapped, capped by
  * the host) when the browser can be pinned to that many cores.

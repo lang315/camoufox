@@ -38,8 +38,10 @@ What PASS means: each launch matches its CPU in every value. Without the
 patch a launch naming another CPU gives the host's values and fails. The host
 must be Intel or AMD x86-64, or ARM64, on any OS, with a display whose GPU
 the other architecture's machines can have, such as Xvfb's llvmpipe
-(LIBGL_ALWAYS_SOFTWARE=1 on a host with a GPU), and a core count an AMD CPU
-reports (not 10, 14, 18, 22 or 28; hardwareConcurrency is the host's).
+(LIBGL_ALWAYS_SOFTWARE=1 on a host with a GPU). hardwareConcurrency is the host's,
+and the launcher refuses an AMD CPU beside 10, 14, 18, 22 or 28 cores, which only
+Intel reports (#498): on such a host the AMD launch is not applicable, and the
+guard says so and measures Intel alone.
 
     python browser/tests/playwright/patches/cpu-vendor-estimates.py
 """
@@ -189,6 +191,17 @@ def host_cpu() -> str:
     return host_vendor() if machine in ("x86_64", "amd64") else ""
 
 
+def core_count_refusal(vendor: str):
+    """Why the launcher refuses a launch claiming this x86 vendor on this host's core
+    count, or None. The count a launch reports is the host's (pin_cpu_cores is off in
+    every guard), so this asks the launcher's own rule with that count."""
+    from camoufox import coherence, fingerprints
+
+    config = {"cpu:manufacturer": vendor}
+    fingerprints.fix_hardware_concurrency(config, can_pin=False)
+    return coherence.cpu_conflict(config, "lin")
+
+
 def undrawable(cpu: str, platform: str):
     """Why a Linux identity claiming `cpu` cannot be drawn on this host, or None.
 
@@ -216,7 +229,11 @@ def main() -> int:
         print(f"FAIL: needs an Intel, AMD or ARM64 host, not {platform.machine()} {platform.processor()!r}")
         return 1
 
-    seen = {v: render(cpu={"manufacturer": v}) for v in EXPECTED}
+    refused = {v: core_count_refusal(v) for v in EXPECTED}
+    for vendor, reason in refused.items():
+        if reason:
+            print(f"  cpu={vendor}: not applicable on this host: {reason}")
+    seen = {v: render(cpu={"manufacturer": v}) for v in EXPECTED if not refused[v]}
     failures = []
     for vendor, got in seen.items():
         wrong = sorted(k for k, v in EXPECTED[vendor].items() if got.get(k) != v)
@@ -224,12 +241,12 @@ def main() -> int:
         if wrong:
             failures.append(f"cpu={vendor}: {', '.join(f'{k} {got.get(k)} (stock {EXPECTED[vendor][k]})' for k in wrong)}")
 
-    unmeasured = []
+    unmeasured = [f"cpu={v}" for v, reason in refused.items() if reason]
     for cpu in ("intel", "amd") if host == "arm" else ("arm",):
         reason = undrawable(cpu, sys.platform)
         if reason:
             print(f"  arch arm cpu={cpu}: not applicable on {sys.platform}: {reason}")
-            unmeasured.append(cpu)
+            unmeasured.append(f"arch arm cpu={cpu}")
             continue
         expected = arch_keys(cpu)
         expected_errors = {k for k in stock(STOCK[cpu]) if k.endswith(".error")}
@@ -253,8 +270,8 @@ def main() -> int:
     if failures:
         return 1
     if unmeasured:
-        print(f"PASS: on this {host} host, a page computes as stock Firefox does on Intel and on AMD; "
-              f"the arch arm ({', '.join(unmeasured)}) could not be drawn on this host.")
+        print(f"PASS: on this {host} host, every launch it could draw computes as stock Firefox does on that CPU; "
+              f"not applicable here, so not measured: {', '.join(unmeasured)}.")
         return 0
     print(f"PASS: on this {host} host, a page computes as stock Firefox does on Intel, on AMD and on ARM64.")
     return 0

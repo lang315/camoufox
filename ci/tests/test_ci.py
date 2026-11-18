@@ -3293,6 +3293,49 @@ def test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere
         assert guard.undrawable("amd", platform) is None
 
 
+def _cpu_vendor_guard():
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "cpu_vendor_guard", CI_ROOT.parent / "browser/tests/playwright/patches/cpu-vendor-estimates.py")
+    guard = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(guard)
+    return guard
+
+
+@pytest.mark.parametrize("cores,refused", [(8, []), (12, []), (10, ["amd"]), (14, ["amd"]), (22, ["amd"])])
+def test_cpu_vendor_guard_asks_the_launcher_which_vendors_the_hosts_core_count_allows(monkeypatch, cores, refused):
+    """hardwareConcurrency is the host's, and only Intel reports 10, 14, 18, 22 or 28 (#498)."""
+    from camoufox import fingerprints
+
+    guard = _cpu_vendor_guard()
+    monkeypatch.setattr(fingerprints, "host_cpu_count", lambda: cores)
+    assert [v for v in guard.EXPECTED if guard.core_count_refusal(v)] == refused
+    if refused:
+        assert f"hardwareConcurrency {cores}" in guard.core_count_refusal("amd")
+
+
+def test_cpu_vendor_guard_reports_a_vendor_its_host_cannot_draw_as_not_applicable(monkeypatch, capsys):
+    """On a 10-core host the AMD launch raises ValueError before any browser starts; the guard
+    reads that as a red unless it asks first (#498). Not applicable is never a pass of that vendor."""
+    from camoufox import fingerprints
+
+    guard = _cpu_vendor_guard()
+    rendered = []
+    monkeypatch.setattr(fingerprints, "host_cpu_count", lambda: 10)
+    monkeypatch.setattr(guard, "host_cpu", lambda: "intel")
+    monkeypatch.setattr(guard, "undrawable", lambda cpu, platform: "no GPU")
+    monkeypatch.setattr(guard, "render", lambda **kwargs: rendered.append(kwargs["cpu"]["manufacturer"]) or dict(guard.EXPECTED[kwargs["cpu"]["manufacturer"]]))
+
+    assert guard.main() == 0
+    out = capsys.readouterr().out
+    assert rendered == ["intel"]
+    assert "cpu=amd: not applicable" in out
+    assert "hardwareConcurrency 10" in out
+    assert "cpu=amd: matches" not in out
+    assert "PASS" in out and "cpu=amd" in out.split("PASS")[1]
+
+
 def test_every_linux_only_guard_is_a_guard():
     from ci.run_patch_guards import LINUX_ONLY, guards
 
