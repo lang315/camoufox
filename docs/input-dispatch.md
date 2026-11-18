@@ -75,6 +75,21 @@ the destination included, 13-84 px off. The stack
 is `overflow: hidden` since, so only Juggler's own `scrollRectIntoViewIfNeeded`
 scrolls it.
 
+**Where the event went.** The parent hands an event at a point inside an open
+popup (the date picker, a permission doorhanger) to that popup, as an OS click
+there lands on it, and the renderer never sees it. `sendAcked()` reads the node
+the parent dispatched the event to, through one system-group capture listener
+per chrome window that records it during the synchronous
+`jugglerSendMouseEvent`. It waits for an ack only when that node is the
+browser, since the parent forwards an event to the renderer only from there
+(`EventStateManager::PostHandleEvent`). Any other node returns at once. An
+event the parent did not dispatch at all rejects: nothing will ack it, and
+nothing took it. The node is read, not predicted from the popups' rects
+(#480): the parent hit-tests a popup frame's layout rect, while
+`getOuterScreenRect()` reads its widget's bounds, which lag. Right after
+`showPicker()`, the date picker was `open` with a 0x0 outer rect in 13 of 99
+headless Linux launches, and the first move into it waited out the deadline.
+
 **Bounded waits.** `sendAcked()` waits at most `kAckDeadlineMs` (5s) and then
 drops the event with a warning naming the type, coordinate and browser rect. The
 deadline is sized above the slowest *legitimate* ack, not near the typical one:

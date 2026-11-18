@@ -13,6 +13,39 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #480: a driven move right after `showPicker()` was dropped after the 5 s ack deadline
+
+**Fixed by:** the PR that refs #480. **Found by:** a diagnostic copy of `popup-covered-click.py` on #471 (never merged), runs 43895299280 and 43906858431, Linux headless.
+
+**Symptom.** `[juggler] WARN mousemove at (150, 90) was not delivered to the renderer after 5000ms; dropping it`, on the first move after a click that opened the date picker, in 24 of 220 headless launches. Every drop took 5.01 to 5.02 s, and the page never saw the move.
+
+**Root cause.** `MouseDispatch._popupAt` (main `9821f053`, `input/MouseDispatch.js:229`) predicted where the parent would route an event from each popup's `getOuterScreenRect()`, and skipped a popup with a 0 width or height (`:238-239`). That rect is the popup's widget. The parent hit-tests the popup's layout rect. For about 50 ms after `showPicker()`, `DateTimePickerPanel` is already `open` while its widget rect is still empty. The parent hands a move inside the picker to the picker, so the renderer never gets it. `_popupAt` returned null, and `sendAcked` waited out `kAckDeadlineMs` for a `mousequeued` that could not come. `_popupAt` flushed layout only when a popup was `showing` (`:233`), and in this window the panel is already `open`.
+
+**Fix.** `sendAcked` no longer predicts. `_sendRouted` reads the node the parent dispatched the event to, during the dispatch itself. `jugglerSendMouseEvent` runs the parent's DOM dispatch synchronously, and one capture listener per chrome window, in the system group, records the event's `originalTarget`. Each target leads to one outcome:
+
+- the browser: wait for the renderer's ack, as before;
+- any other node: return `{takenBy}` at once;
+- no node: wait for the ack, as for the browser. While the chrome document suppresses event handling, the parent drops a move and delays a press or a release until it resumes (`PresShell::EventHandler::MaybeDiscardOrDelayMouseEvent`), and a delayed one can still reach the renderer.
+
+Rejected:
+
+- reading the rects with a flush on `open` as well. That still predicts the parent's hit test from a second source of truth.
+- a longer deadline, a retry, or a special case at the call site. Each only moves the 5 s.
+
+**Evidence.**
+
+- *Red to green.* `browser/tests/juggler/routing.test.mjs` failed 3 of 6 against main's `MouseDispatch.js`, among them `a move the parent gave the open picker returns at once, though its widget rect is still empty`. With the fix, the Juggler Node suite passes 37 of 37. `check-input-dispatch.py` passes.
+- *Diag 2: the cause, per drop.* Run 44232057350 (head `dc5fe038`, job 134564531593) instrumented the dispatch. 13 of 99 launches dropped the first move, and all 13 read the same way. The parent dispatched the move to a `th` in `chrome://global/content/datetimepicker.xhtml`, and `_popupAt` returned null. The move took 5.01 s and the page never saw it. An unflushed read just before the send had the panel `open` at `[0,0,0,0]` (10 drops), `[66,32,0,0]` (2) or `[0,18,0,0]` (1). Each drop's move went out 48 to 51 ms after the click's mouseup.
+- *No before/after A/B on the browser.* Diag 5, run 44269823155 (head `ccfeb1d2`, job 134685984695), ran the old and new `MouseDispatch` on one binary. The validity rule, set before the run, was at least 30 sends in the trigger state per arm. It got 9 (old) and 10 (new), so the run is invalid and is not evidence. Its raw counts were:
+  - those trigger sends: old 9 of 9 dropped, new 0 of 10;
+  - moves no popup covered: acked and seen in 147 of 147 old launches and 146 of 146 new ones.
+
+**What misled the investigation.**
+
+- The panel was `open` at 0x0, not `showing`. The issue's open question, and main's flush, both pointed at `showing`.
+- Diags 3 and 4 found nothing: 0 trigger sends in 400 and 206 launches (runs 44244194739, 44259511908). Their changed setup sent the first move about 35 ms later, a median 90 ms after the mouseup. By then the 0x0 state, which lasts about 50 ms, was over.
+- The local macOS build never shows that state. Its picker opened with its real rect, so only Linux CI could reproduce the drop.
+
 ## #506: `cpu={'manufacturer': 'amd'}` with `pin_cpu_cores=True` was refused on a random 1-50% of launches
 
 **Fixed by:** the PR that refs #506. **Found by:** a seeded loop of launches written while checking the #498 message, which advised `pin_cpu_cores=True`.
