@@ -13,6 +13,63 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #497: the host GPU probe failed a launch at 30 s on a loaded Windows runner
+
+**Fixed by:** the PR that refs #497. **Found by:** e2e run 44089875316, job 134062178121 (Windows, build 44055836267, main `b074a8ce`), a never-merged probe for #370 that launched Camoufox repeatedly.
+
+**Symptom.** `TimeoutError: Host GPU probe timed out after 30 s while launching C:\...\camoufox.exe. The browser did not answer the WebGL probe; check that the display accepts X connections.` The launch failed before the browser under test started, on a host with no X display.
+
+**Root cause.** Two things, one a cause and one an exposure.
+
+- *The bound.* `HOST_GPU_PROBE_TIMEOUT_S = 30.0` bounds the whole probe child: interpreter start, the Playwright driver, `firefox.launch`, `new_page`, the WebGL read and the close. Measured on a hosted Windows runner (e2e run 44210677827, job 134490574929, the same build, a never-merged timing probe that times those phases in a child like `_read_host_gpu`): alone, a median 12.6 s and at most 19.1 s over 8 probes, of which `new_page` is 8.1 s (the WebGL read itself is 0.03 s); four at once, a median 35.9 s and at most 80.3 s, 31 of 32 over 30 s; beside 8 busy processes, a median 38.7 s and at most 48.2 s, 8 of 8 over 30 s. No probe failed. So 30 s fails a healthy probe whenever the host is busy.
+- *The cache key.* `host_gpu` keyed `_host_gpu`'s `lru_cache` on the whole environment except `CAMOU_*` and `FONTCONFIG_FILE`. The failing job gave each launch its own `MOZ_LOG_FILE`, so every launch ran its own probe: the failed one was the fifth. With a stable key it would have run one.
+
+**Fix.** `HOST_GPU_PROBE_TIMEOUT_S` and the TypeScript `HOST_GPU_PROBE_TIMEOUT_MS` are 120 s, 1.5 times the slowest healthy probe measured, and a browser that never answers still fails with its own message (rule `host-gpu-probe-timeout`). `MOZ_LOG*` joins the variables the key ignores, in both launchers. The message names an X display only on Linux. Rejected: an allow-list of the variables that choose a device (`DISPLAY`, Mesa and NVIDIA selectors). The launcher writes `DISPLAY`, `GDK_BACKEND`, `WAYLAND_DISPLAY` and `MOZ_ENABLE_WAYLAND` itself, but the drivers' own selectors cannot be listed from this repo, and a miss would claim a stale GPU silently; a missed name in the ignore list costs one more probe.
+
+**Not explained.** Why the probe that failed ran past 30 s on a runner whose other launches took about 15 s. The measurement shows load can do it; it does not show load did. This fix removes the exposure, not that cause. One hosted Windows runner type was measured; Linux and macOS were not.
+
+**Evidence.** Red: `test_a_per_launch_log_file_does_not_run_another_probe` and the Windows and macOS cases of `test_a_timed_out_probe_names_a_display_only_where_there_is_one` (Python), their TypeScript twins, and `test_the_host_gpu_probe_outlasts_a_loaded_runner` / the bound assertions in `host-rendering.test.ts` failed on main's source. Green after.
+
+**What misled the investigation.** The probe measured wall time per child from the parent while collecting children in order, so a child that had already finished read as late as the one collected before it (up to 18 s extra in one batch). The phase marks come from the child's own clock; the table above sums those.
+
+## #493: preflight passed `--output-sync` to the Make 3.81 that macOS ships
+
+**Fixed by:** the PR that refs #493. **Found by:** `ci/tests/test_preflight.py` on a macOS host.
+
+**Symptom.** `test_an_object_from_an_earlier_run_is_compiled_again` raised `SystemExit: 1` on macOS and passed on Linux CI. `make -C browser preflight` stopped at the same line.
+
+**Root cause.** `compile_objects` ran `make ... --output-sync=target`. `/usr/bin/make` on macOS is GNU Make 3.81, and `--output-sync` first appeared in 4.0, so it fails with `unrecognized option` before reading the makefile. `install-deps.sh` relied on the Command Line Tools for `make`, so a host set up as documented had 3.81. Linux runners have Make 4 or newer, which hid it.
+
+**Fix.** `gnu_make()` picks the first of `gmake` and `make` that is GNU Make 4.0 or newer, and exits with the versions it found and the `install-deps.sh` fix when none is. `install-deps.sh` installs Homebrew's `make`, which provides `gmake`, so no shell profile or PATH change is needed. No fallback drops `--output-sync`.
+
+**Evidence.** The three new unit tests stub `--version` output (3.81, 4.3, 4.4.1) and failed on import before `gnu_make` existed. With only `/usr/bin/make` on PATH, the real preflight test exits with `error: preflight needs GNU Make 4.0 or newer for --output-sync, but make is GNU Make 3.81. ...`; with Homebrew's `gmake` on PATH it passes.
+
+**What misled the investigation.** Putting Homebrew's `gnubin` first on PATH made the test pass, which pointed at a test-environment fix; the shipped `make -C browser preflight` has the same flaw.
+
+## #370, #494: a spoofed voice's `end` reported the nominal duration, and the guard bounded the runner
+
+**Fixed by:** the PR that refs #370 and #494. **Found by:** the Windows e2e step "Spoofed voices reach the page (#313)": `end` 6166 ms after `start` (run 41272143411, job 124749161790), then 4142 ms on main's build (run 44071385094, job 133998632618), against a 4000 ms ceiling.
+
+**Symptom.** `spoofed-voice-speaks.py` failed now and then on Windows only: `FAIL: end came 4142ms after start, expected about 2000ms (... the page's event loop lagged up to 2ms)`.
+
+**Root cause.** Two things, one in the guard and one in the product.
+- The guard's 1500-4000 ms window had no reference. A spoofed voice's `end` comes from a 2 s delayed runnable on the parent's main thread, in `voice-spoofing.patch`'s `SpeakImpl` branch for a voice with no service. Every engine's `end`, SAPI's included, leaves through `SpeechTaskParent::DispatchEndImpl`'s `SendOnEnd` on that same thread, so a busy parent delays stock's `end` too. Measured with `MOZ_LOG=SpeechSynthesis:5,timestamp,sync` on main's Windows build, the parent ran that runnable 56 ms to 14.5 s late on the first utterance after each launch, and 0-3 ms late on the later ones (run 44084344153, job 134043585700; #496). The page's own lag never showed it, because the probe can only watch the content process.
+- The product: the runnable passed the nominal `elapsed`, 2.0 s, to `DispatchEnd` however late it ran. SAPI passes `TimeStamp::Now() - mStartingTime` (`SapiService.cpp:52-53, 135`). So under a parent stall, a page that compared `event.elapsedTime` with its own clock saw 2.0 s against about 4.1 s, where stock would report about 4.1 s (#494).
+
+**Fix.**
+- `SpeakImpl` stamps the start before `Init` and `DispatchStart`, as `SapiCallback` does in its constructor. The runnable reports `(TimeStamp::Now() - start).ToSeconds()`. The delay stays nominal.
+- The guard keeps the 1500 ms floor, the old same-tick tell. It drops the ceiling and checks that `elapsedTime` matches the page's span within the page's lag plus `HOPS_MS` (100). It waits `WAIT_MS` (33 s) for `end`, and a wait that expires is its own failure line.
+- Both constants come from measurements on main's build, cited in the docstring:
+  - `HOPS_MS` is twice the largest span-to-parent-interval difference measured: 49 ms over 143 utterances in two Windows runs and a local macOS run.
+  - `WAIT_MS` is twice the longest parent interval, 16.5 s.
+- The patch was hand-edited. On pristine Firefox 159.0 files, it is byte-identical to the regenerated diff, and GNU patch's `--dry-run` applies it cleanly.
+
+**Evidence.**
+- Red, on the fork.3 macOS build (whose voice patches equal main's), locally. A negative control stalled the parent with one Juggler `setCookies` of 120000 cookies, sent 1 s after `speak()`. The stall covered the deadline in one run, and the new check failed: span 3025 ms, `elapsedTime` 2000 ms, page lag 1 ms. The old ceiling would have passed that run. A stall that missed the deadline left `end` at 2000 ms and passed. Idle runs pass on the old build too: with no stall, the two agree.
+- Green: Tests on the PR, where the Linux guard runs a Windows identity through the spoofed branch, and a Windows e2e on a build of the branch. Both are in the PR.
+
+**What misled the investigation.** The guard printed the page's event-loop lag as if it covered the whole path. A lag of 2 ms read as "the page was fine, so the browser was slow for no reason". The stalled side was the parent's main thread, which the page cannot see. Stock Firefox could not serve as the reference on the hosted Windows runner: its SAPI voices returned `error` on every utterance there (#496).
+
 ## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
 
 **Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).

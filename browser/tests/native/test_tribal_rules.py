@@ -217,6 +217,12 @@ def test_the_displayfd_read_is_bounded():
     assert isinstance(timeout, (int, float)) and timeout > 0, explain("displayfd-read-timeout")
 
 
+def test_the_host_gpu_probe_outlasts_a_loaded_runner():
+    from camoufox import host_rendering
+
+    assert host_rendering.HOST_GPU_PROBE_TIMEOUT_S >= 120, explain("host-gpu-probe-timeout")
+
+
 def test_cleanup_is_not_gated_on_the_process_still_running():
     """The unlink must not sit behind a `poll() is None` check.
 
