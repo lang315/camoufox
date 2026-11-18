@@ -13,6 +13,30 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #370, #494: a spoofed voice's `end` reported the nominal duration, and the guard bounded the runner
+
+**Fixed by:** the PR that refs #370 and #494. **Found by:** the Windows e2e step "Spoofed voices reach the page (#313)": `end` 6166 ms after `start` (run 41272143411, job 124749161790), then 4142 ms on main's build (run 44071385094, job 133998632618), against a 4000 ms ceiling.
+
+**Symptom.** `spoofed-voice-speaks.py` failed now and then on Windows only: `FAIL: end came 4142ms after start, expected about 2000ms (... the page's event loop lagged up to 2ms)`.
+
+**Root cause.** Two things, one in the guard and one in the product.
+- The guard's 1500-4000 ms window had no reference. A spoofed voice's `end` comes from a 2 s delayed runnable on the parent's main thread, in `voice-spoofing.patch`'s `SpeakImpl` branch for a voice with no service. Every engine's `end`, SAPI's included, leaves through `SpeechTaskParent::DispatchEndImpl`'s `SendOnEnd` on that same thread, so a busy parent delays stock's `end` too. Measured with `MOZ_LOG=SpeechSynthesis:5,timestamp,sync` on main's Windows build, the parent ran that runnable 56 ms to 14.5 s late on the first utterance after each launch, and 0-3 ms late on the later ones (run 44084344153, job 134043585700; #496). The page's own lag never showed it, because the probe can only watch the content process.
+- The product: the runnable passed the nominal `elapsed`, 2.0 s, to `DispatchEnd` however late it ran. SAPI passes `TimeStamp::Now() - mStartingTime` (`SapiService.cpp:52-53, 135`). So under a parent stall, a page that compared `event.elapsedTime` with its own clock saw 2.0 s against about 4.1 s, where stock would report about 4.1 s (#494).
+
+**Fix.**
+- `SpeakImpl` stamps the start before `Init` and `DispatchStart`, as `SapiCallback` does in its constructor. The runnable reports `(TimeStamp::Now() - start).ToSeconds()`. The delay stays nominal.
+- The guard keeps the 1500 ms floor, the old same-tick tell. It drops the ceiling and checks that `elapsedTime` matches the page's span within the page's lag plus `HOPS_MS` (100). It waits `WAIT_MS` (33 s) for `end`, and a wait that expires is its own failure line.
+- Both constants come from measurements on main's build, cited in the docstring:
+  - `HOPS_MS` is twice the largest span-to-parent-interval difference measured: 49 ms over 143 utterances in two Windows runs and a local macOS run.
+  - `WAIT_MS` is twice the longest parent interval, 16.5 s.
+- The patch was hand-edited. On pristine Firefox 159.0 files, it is byte-identical to the regenerated diff, and GNU patch's `--dry-run` applies it cleanly.
+
+**Evidence.**
+- Red, on the fork.3 macOS build (whose voice patches equal main's), locally. A negative control stalled the parent with one Juggler `setCookies` of 120000 cookies, sent 1 s after `speak()`. The stall covered the deadline in one run, and the new check failed: span 3025 ms, `elapsedTime` 2000 ms, page lag 1 ms. The old ceiling would have passed that run. A stall that missed the deadline left `end` at 2000 ms and passed. Idle runs pass on the old build too: with no stall, the two agree.
+- Green: Tests on the PR, where the Linux guard runs a Windows identity through the spoofed branch, and a Windows e2e on a build of the branch. Both are in the PR.
+
+**What misled the investigation.** The guard printed the page's event-loop lag as if it covered the whole path. A lag of 2 ms read as "the page was fine, so the browser was slow for no reason". The stalled side was the parent's main thread, which the page cannot see. Stock Firefox could not serve as the reference on the hosted Windows runner: its SAPI voices returned `error` on every utterance there (#496).
+
 ## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
 
 **Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).
