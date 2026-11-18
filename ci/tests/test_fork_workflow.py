@@ -272,7 +272,7 @@ def test_the_build_step_cannot_hang_on_mach_s_notifier_or_run_to_the_job_limit()
     # blocked for 3.5 h and GitHub cancelled the job at 6 h (#354). mach skips
     # the notification when MOZ_NOSPAM is set (python/mozbuild/mozbuild/base.py),
     # and the step's own timeout turns any other hang into a failure that is
-    # reported long before the job limit. The slowest passing Build step took 188 min.
+    # reported long before the job limit. The slowest passing Build step took 237 min (#500).
     workflow = yaml.safe_load(BUILD.read_text(encoding="utf-8"))
     build = next(s for s in workflow["jobs"]["build"]["steps"] if s.get("name") == "Build")
     assert build["env"].get("MOZ_NOSPAM") == "1"
