@@ -2,13 +2,14 @@
 Diagnostic for #480 (never merged): the first move after showPicker(), old against new MouseDispatch.
 
 Diag 2's setup (run 44232057350), the only one that reproduced (13 of 99): one browser at a time, and
-#471's sequence unchanged up to and including the covered moves (click #open so showPicker() runs, a
-racing click, a new page, a click on #open, one Marionette read, then moves to (150, 90) / (170, 90)
-until one stops reaching #t). Odd launches run main's _popupAt (CAMOU_DIAG_480_OLD), even ones the
+#471's sequence (click #open so showPicker() runs, a racing click, a new page, a click on #open, then
+moves to (150, 90) / (170, 90) until one stops reaching #t). In every drop the panel read `open` at 0x0,
+which lasts about 50 ms after the click; the first covered move now goes as soon as a parent read
+during the click sees that state, in place of diag 2's Marionette read. Odd launches run main's _popupAt (CAMOU_DIAG_480_OLD), even ones the
 routing read. After the covered moves, each launch injects a cross-site iframe and moves to a point the
 picker does not cover and into the iframe.
 
-Pre-registered counts, per arm: the trigger (a covered send whose pre-dispatch read, taken without a
+Pre-registered counts, per arm (the run is valid only with at least 30 trigger sends in each): the trigger (a covered send whose pre-dispatch read, taken without a
 flush, has the date picker open at 0x0 and the parent dispatching to something not the browser), and
 first-move drops (a covered move over 4.5 s).
 
@@ -74,6 +75,27 @@ for (const w of Services.wm.getEnumerator("navigator:browser")) {
   out.push({focus: d.hasFocus(), popups});
 }
 return out;
+"""
+
+# Resolves once a date picker panel reads `open` with a 0 width or height, unflushed: the state of all
+# 13 drops in diag 2, about 50 ms after the click. Polls on the parent's event loop, so it delays nothing.
+WAIT_EMPTY = """
+const t0 = Date.now();
+const w0 = Services.wm.getMostRecentWindow("navigator:browser");
+return new Promise(resolve => {
+  const tick = () => {
+    for (const w of Services.wm.getEnumerator("navigator:browser")) {
+      const p = w.document.getElementById("DateTimePickerPanel");
+      if (!p || p.state !== "open") continue;
+      const r = p.getOuterScreenRect();
+      return resolve({empty: !r.width || !r.height, ms: Date.now() - t0, at: Date.now(),
+                      r: [r.left, r.top, r.width, r.height]});
+    }
+    if (Date.now() - t0 > 5000) return resolve({empty: false, ms: Date.now() - t0, timeout: true});
+    w0.setTimeout(tick, 0);
+  };
+  tick();
+});
 """
 
 PIDS = """
@@ -170,8 +192,13 @@ def probe_once(binary, n):
         page = browser.new_page()
         page.goto(url, wait_until="load")
         print("PHASE p2-click", flush=True)
+        # The first covered move goes as soon as the panel reads open at 0x0, read during the click.
+        opened = {}
+        waiter = threading.Thread(target=lambda: opened.update(m.js(WAIT_EMPTY)))
+        waiter.start()
         page.locator("#open").click()
-        rec["p2_after_click"] = m.js(STATE)
+        waiter.join()
+        rec["opened"] = opened
         print("PHASE p2-moves", flush=True)
         rec["covered"], rec["moves"] = wait_covered_rec(page)
         rec["after_cover"] = m.js(STATE)
@@ -222,7 +249,7 @@ def main() -> int:
     if len(sys.argv) > 1 and sys.argv[1] == "--worker":
         with hidden_display():
             return worker(binary, float(sys.argv[2]))
-    budget = float(os.environ.get("DIAG_480_BUDGET", "2700"))
+    budget = float(os.environ.get("DIAG_480_BUDGET", "3300"))
     # One browser at a time, as in diag 2. The worker writes to a file, not a pipe read only at its end.
     with tempfile.TemporaryDirectory() as tmp:
         out = Path(tmp) / "w0.log"
@@ -261,6 +288,7 @@ def main() -> int:
             fr = [s for s in sends.get(r["n"], []) if s["phase"] == "p2-frame" and s["type"] == "mousemove"]
             frame_acked += 1 if fr and fr[0]["browser"] and acks.get(r["n"], {}).get(fr[0]["id"]) == "ack" else 0
         print(f"ARM {arm} launches={len(rs)} errors={len(rs) - len(ok)} trigger-sends={trig} "
+              f"opened-empty={sum(1 for r in ok if r.get('opened', {}).get('empty'))}/{len(ok)} "
               f"trigger-launches={trig_launches} first-covered-dropped={drops} any-covered-dropped={any_drops} "
               f"first-covered-reached-page={sum(1 for r in ok if r.get('moves') and r['moves'][0]['seen'])} "
               f"uncovered-acked-and-seen={sum(1 for r in ok if r['uncovered']['seen'] and r['uncovered']['took'] < 2)}/{len(ok)} "
