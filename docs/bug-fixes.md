@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #493: preflight passed `--output-sync` to the Make 3.81 that macOS ships
+
+**Fixed by:** the PR that refs #493. **Found by:** `ci/tests/test_preflight.py` on a macOS host.
+
+**Symptom.** `test_an_object_from_an_earlier_run_is_compiled_again` raised `SystemExit: 1` on macOS and passed on Linux CI. `make -C browser preflight` stopped at the same line.
+
+**Root cause.** `compile_objects` ran `make ... --output-sync=target`. `/usr/bin/make` on macOS is GNU Make 3.81, and `--output-sync` first appeared in 4.0, so it fails with `unrecognized option` before reading the makefile. `install-deps.sh` relied on the Command Line Tools for `make`, so a host set up as documented had 3.81. Linux runners have Make 4 or newer, which hid it.
+
+**Fix.** `gnu_make()` picks the first of `gmake` and `make` that is GNU Make 4.0 or newer, and exits with the versions it found and the `install-deps.sh` fix when none is. `install-deps.sh` installs Homebrew's `make`, which provides `gmake`, so no shell profile or PATH change is needed. No fallback drops `--output-sync`.
+
+**Evidence.** The three new unit tests stub `--version` output (3.81, 4.3, 4.4.1) and failed on import before `gnu_make` existed. With only `/usr/bin/make` on PATH, the real preflight test exits with `error: preflight needs GNU Make 4.0 or newer for --output-sync, but make is GNU Make 3.81. ...`; with Homebrew's `gmake` on PATH it passes.
+
+**What misled the investigation.** Putting Homebrew's `gnubin` first on PATH made the test pass, which pointed at a test-environment fix; the shipped `make -C browser preflight` has the same flaw.
+
 ## #430: `popup-window-size` asked a hosted Windows or macOS monitor for a 1366 px window
 
 **Fixed by:** the PR that refs #430. **Found by:** Windows patch-guard probe run 42888796068 (job 130084161444) and macOS probe run 42923629488 (job 130204462226).
