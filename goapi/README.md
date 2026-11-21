@@ -184,6 +184,19 @@ of the browser, so two pages never replay the same draws; each page has its own 
 humanized call at a time. A humanized call that fails or is cancelled midway releases the keys and
 buttons it pressed.
 
+The port's planners are pinned to myuri 4.0.0 by golden traces recorded from the JS library;
+the whole-scenario `browser/tests/humanize/sequence.json` that the Python and TypeScript launchers
+share is not pinned for Go, which has no caller-replaced parts, `fill`, `position=` or `trial=`.
+
+## Licence
+
+Camoufox is MPL-2.0, but `pkg/myuri` is a port of [myuri](https://github.com/JWriter20/Myuri) and
+[cursory-js](https://github.com/JWriter20/cursory-js) and stays LGPL-3.0-or-later. goapi links it into every
+binary that imports goapi. Under LGPL section 4 you keep its notices, ship the licence texts
+([`LICENSE`](pkg/myuri/LICENSE), [`COPYING`](pkg/myuri/COPYING), [`NOTICE`](pkg/myuri/NOTICE)) with your
+binary, and let a user relink your program against a modified `pkg/myuri`, which this module's source gives
+them. The rest of goapi is unaffected.
+
 ## Calling back into Go from the page
 
 `Page.ExposeBinding` installs `window[name]` in the same isolated world as `Evaluate` and

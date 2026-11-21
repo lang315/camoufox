@@ -77,6 +77,11 @@ myuri's `make_rng`, which draws the same numbers in Python and TypeScript;
 and both launchers are tested against it. Without a seed, each launch draws a
 random one.
 
+goapi's Go port of myuri (`goapi/pkg/myuri`) pins its planners to myuri 4.0.0 by
+golden traces recorded from the JS library. It is not tested against
+`sequence.json`, which needs caller-replaced parts, `fill`, `position=` and
+`trial=`, and goapi has none of them.
+
 ## What the browser still times
 
 Some single commands still carry timing inside the browser, because without it
