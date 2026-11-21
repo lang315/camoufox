@@ -37,6 +37,23 @@ The first repeat now lands a return hop after the delay. One fixed run on a busy
 
 **What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
 
+**Inferred, not shown.** The journey's own failures are attributed to this fix by inference. The plain legs failed 3 of 4 in the first two Windows runs (44868302020, 44873395322). On the same unfixed binary they then passed 8 of 8 in four diag runs. The only doubled character on record is the probe's `s33cret`.
+
+
+## #510: `test_sign_in_and_shop[go-humanize]` read the menu closed after a hover
+
+**Fixed by:** the PR that refs #510. **Found by:** `diag/510-signin` run 44877489341 (Windows): `failed: hover opened the menu`.
+
+**Root cause.** The sign-in click leaves the pointer on `#go`, at `y` 8 to 30. On `/shop`, `#menu` spans `y` 8 to 42, so the pointer is already over it. myuri's click chooses the pointer's own point when it is inside the box (`point`, `attempt == 0`). Its `move` then returns without sending anything (`placed && cursor == end`). The Python and Go ports both do this. The `mouseenter` comes instead from Gecko, which sends one to a new page under a resting pointer. It can arrive after `goto` returns, and the journey checked the menu at once.
+
+**Fix.** The journey waits up to 5 s for the menu before it checks.
+
+**Evidence.**
+- The diag runs printed the two boxes and whether the menu was open before the hover. They were 44882605471 and 44882608054, and every humanized leg was open before the hover. Their extra round trips had given Gecko time.
+- On a macOS host, after a raw move onto a top nav and a `goto`, Gecko's `mouseenter` came 0 to 7 ms after the page's script ran, in 6 of 6 tries.
+
+**What misled.** That macOS measurement first read as ruling the race out. It went through Playwright's `goto`, which waits for `load`, so it showed the premise of the race rather than its absence.
+
 
 ## #510: six patch guards were red after the 4c909d69 upstream sync, one on every host and five off Linux
 

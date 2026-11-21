@@ -86,6 +86,9 @@ def main() -> int:
         flagged = [k for type, k, repeat, _ in seen if type == "keydown" and repeat]
         first, repeats = held(seen, "a")
         expected = int((HOLD - delay) / interval)
+        print(f"{os_name}: 'a' first repeat after "
+              f"{repeats[0] - first if repeats else float('nan'):.1f} ms, {len(repeats)} repeats; "
+              f"'d' {1 + len(held(seen, 'd')[1])} keydowns")
         if not expected - 3 <= len(repeats) <= expected + 1:
             failures.append(f"{os_name}: 'a' held {HOLD} ms repeated {len(repeats)} times, the OS {expected}")
         else:
