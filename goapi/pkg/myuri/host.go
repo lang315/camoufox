@@ -39,6 +39,10 @@ type Options struct {
 	OS   string
 	Seed uint64
 	WPM  float64
+	// RNG, when set, is the stream every draw comes from, instead of one made from Seed:
+	// actions on several pages draw from one stream, which the caller must make safe for
+	// concurrent use.
+	RNG RNG
 	// IntoView replaces the wheel scroll into view, as a part of the JS Actions does (a raw scroll channel).
 	IntoView func(ctx context.Context, target Target) error
 	// RawMove makes every move one event at its point, with no path and no clamping, as a raw mouse channel does.
@@ -82,5 +86,9 @@ func New(host Host, opts Options) *Actions {
 	if wpm == 0 {
 		wpm = defaultWPM
 	}
-	return &Actions{host: host, rng: MakeRNG(opts.Seed), os: opts.OS, wpm: wpm, intoView: opts.IntoView, rawMove: opts.RawMove, movedAt: math.Inf(-1), releasedAt: math.Inf(-1)}
+	rng := opts.RNG
+	if rng == nil {
+		rng = MakeRNG(opts.Seed)
+	}
+	return &Actions{host: host, rng: rng, os: opts.OS, wpm: wpm, intoView: opts.IntoView, rawMove: opts.RawMove, movedAt: math.Inf(-1), releasedAt: math.Inf(-1)}
 }

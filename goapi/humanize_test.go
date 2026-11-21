@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +24,8 @@ type fakeBrowser struct {
 	mu    sync.Mutex
 	buf   []byte
 	calls []fakeCall
+	// override answers a call with this result instead of the default, when it returns ok.
+	override func(method string, params map[string]any) (string, bool)
 	// fail maps a method, or "method/type" for an input event, to the error it answers with.
 	fail map[string]string
 }
@@ -70,6 +73,11 @@ func (f *fakeBrowser) answer(id uint64, method string, params map[string]any) st
 		}
 	}
 	result := `{}`
+	if f.override != nil {
+		if r, ok := f.override(method, params); ok {
+			return fmt.Sprintf(`{"id":%d,"sessionId":"s1","result":%s}`, id, r)
+		}
+	}
 	switch method {
 	case "Runtime.evaluate":
 		expr, _ := params["expression"].(string)
@@ -213,54 +221,82 @@ func scenario(ctx context.Context, p *Page) error {
 	return el.ScrollIntoViewIfNeeded(ctx)
 }
 
-// A nil Humanize, and one whose channels are all raw, send what goapi sent
-// before the option existed: one Juggler call per input call.
+// sig is an input call as "method k=v ..." with the keys sorted, so a test pins every parameter.
+func sig(c fakeCall) string {
+	keys := make([]string, 0, len(c.Params))
+	for k := range c.Params {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := c.Method
+	for _, k := range keys {
+		out += fmt.Sprintf(" %s=%v", k, c.Params[k])
+	}
+	return out
+}
+
+func mouseSig(typ string, x, y float64, buttons int, clickCount int) string {
+	cc := ""
+	if clickCount > 0 {
+		cc = fmt.Sprintf(" clickCount=%d", clickCount)
+	}
+	return fmt.Sprintf("Page.dispatchMouseEvent button=0 buttons=%d%s modifiers=0 type=%s x=%v y=%v", buttons, cc, typ, x, y)
+}
+
+// A nil Humanize sends what goapi sent before the option existed: one Juggler
+// call per input call, with these parameters. A browser whose channels are all
+// raw is the same browser.
 func TestHumanizeRawIsPlaywrightDispatch(t *testing.T) {
 	ctx := ctxT(t)
-	run := func(h *Humanize) []fakeCall {
+	run := func(h *Humanize) []string {
 		p, fb := newHumanizePage(t, h, "linux")
 		if err := scenario(ctx, p); err != nil {
 			t.Fatal(err)
 		}
-		return fb.recorded()
-	}
-	raw := &Engine{Name: "raw"}
-	nilCalls := run(nil)
-	allRaw := run(&Humanize{Mouse: raw, Keyboard: raw, Scroll: raw})
-	if !reflect.DeepEqual(nilCalls, allRaw) {
-		t.Fatalf("an all-raw Humanize sent other calls than none:\n nil: %v\n raw: %v", nilCalls, allRaw)
-	}
-	var methods []string
-	for _, c := range nilCalls {
-		m := c.Method
-		if typ, ok := c.Params["type"].(string); ok {
-			m += "/" + typ
+		var out []string
+		for _, c := range fb.recorded() {
+			switch c.Method {
+			case "Runtime.callFunction", "Runtime.evaluate":
+				out = append(out, c.Method+" "+fmt.Sprint(c.Params["functionDeclaration"], c.Params["expression"]))
+			default:
+				out = append(out, sig(c))
+			}
 		}
-		methods = append(methods, m)
+		return out
+	}
+	got := run(nil)
+	var inputs []string
+	for _, c := range got {
+		if strings.HasPrefix(c, "Page.") {
+			inputs = append(inputs, c)
+		}
 	}
 	want := []string{
-		"Page.dispatchMouseEvent/mousemove", // Mouse.Move
-		"Page.dispatchWheelEvent",           // Mouse.Wheel
-		"Page.insertText",                   // Keyboard.Type
-		"Runtime.evaluate",                  // Page.Click resolves the element
-		"Page.dispatchMouseEvent/mousemove", "Page.dispatchMouseEvent/mousedown", "Page.dispatchMouseEvent/mouseup",
-		"Runtime.callFunction", // QuerySelector
-		"Page.getContentQuads", // Hover
-		"Page.dispatchMouseEvent/mousemove",
-		"Runtime.callFunction", // Type: focus
-		"Page.insertText",
-		"Runtime.callFunction", // Click: the element's centre
-		"Page.dispatchMouseEvent/mousemove", "Page.dispatchMouseEvent/mousedown", "Page.dispatchMouseEvent/mouseup",
-		"Page.scrollIntoViewIfNeeded",
+		mouseSig("mousemove", 300, 200, 0, 0), // Mouse.Move
+		"Page.dispatchWheelEvent deltaX=0 deltaY=120 deltaZ=0 modifiers=0 x=300 y=200",
+		"Page.insertText text=hi",                                                                                         // Keyboard.Type
+		mouseSig("mousemove", 200, 300, 0, 0), mouseSig("mousedown", 200, 300, 1, 1), mouseSig("mouseup", 200, 300, 0, 1), // Page.Click
+		"Page.getContentQuads frameId=f1 objectId=o1", // Hover
+		mouseSig("mousemove", 125, 110, 0, 0),
+		"Page.insertText text=ok",                                                                                         // Type
+		mouseSig("mousemove", 125, 110, 0, 0), mouseSig("mousedown", 125, 110, 1, 1), mouseSig("mouseup", 125, 110, 0, 1), // Click
+		"Page.scrollIntoViewIfNeeded frameId=f1 objectId=o1",
 	}
-	if !reflect.DeepEqual(methods, want) {
-		t.Fatalf("raw calls:\n got %v\nwant %v", methods, want)
+	if !reflect.DeepEqual(inputs, want) {
+		t.Fatalf("raw input calls:\n got %q\nwant %q", inputs, want)
+	}
+	raw := &Engine{Name: "raw"}
+	if allRaw := run(&Humanize{Mouse: raw, Keyboard: raw, Scroll: raw}); !reflect.DeepEqual(got, allRaw) {
+		t.Fatalf("an all-raw Humanize sent other calls than none:\n nil: %q\n raw: %q", got, allRaw)
 	}
 }
 
 func TestHumanizeUnknownEngineFails(t *testing.T) {
 	for name, h := range map[string]*Humanize{
-		"unknown mouse engine":    {Mouse: &Engine{Name: "cursory"}},
+		"unknown mouse engine":    {Mouse: &Engine{Name: "bezier"}},
+		"wpm on the mouse":        {Mouse: &Engine{WPM: 50}},
+		"wpm on a raw keyboard":   {Keyboard: &Engine{Name: "raw", WPM: 50}},
+		"negative wpm":            {Keyboard: &Engine{WPM: -1}},
 		"unknown keyboard engine": {Keyboard: &Engine{Name: "bezier"}},
 		"unknown scroll engine":   {Scroll: &Engine{Name: "Myuri"}},
 		"unnamed engine":          {Mouse: &Engine{}},
@@ -273,6 +309,9 @@ func TestHumanizeUnknownEngineFails(t *testing.T) {
 		if _, err := Launch(context.Background(), WithExecutablePath("/no/such/camoufox"), WithHumanize(h)); err == nil || strings.Contains(err.Error(), "resolve executable") {
 			t.Errorf("%s: Launch error = %v, want the humanize error", name, err)
 		}
+	}
+	if _, err := newHumanizeSetup(&Humanize{Mouse: &Engine{Name: "cursory"}, Keyboard: &Engine{Name: "myuri", WPM: 70}}); err != nil {
+		t.Errorf("cursory is another name for myuri, and a myuri keyboard has a speed: %v", err)
 	}
 	if _, err := newHumanizeSetup(&Humanize{}); err != nil {
 		t.Errorf("the zero Humanize is myuri everywhere: %v", err)
@@ -394,25 +433,45 @@ func TestHumanizeKeyboardChannel(t *testing.T) {
 	}
 }
 
-// Mouse.Wheel dispatches at the point the caller names.
+// Mouse.Wheel turns at the point the caller names: a myuri mouse is moved there
+// first, a raw one is not moved.
 func TestHumanizeWheelAtTheGivenPoint(t *testing.T) {
-	p, fb := newHumanizePage(t, &Humanize{Seed: u64(5)}, "linux")
-	virtualClock(p)
-	if err := p.Mouse().Wheel(ctxT(t), 640, 360, 0, 300); err != nil {
-		t.Fatal(err)
-	}
-	var total float64
-	for _, c := range fb.inputs() {
-		if c.Method != "Page.dispatchWheelEvent" {
-			t.Fatalf("unexpected %s", c.Method)
+	for name, tc := range map[string]struct {
+		h     *Humanize
+		moves bool
+	}{
+		"myuri mouse": {&Humanize{Seed: u64(5)}, true},
+		"raw mouse":   {&Humanize{Seed: u64(5), Mouse: &Engine{Name: "raw"}}, false},
+	} {
+		p, fb := newHumanizePage(t, tc.h, "linux")
+		virtualClock(p)
+		if err := p.Mouse().Wheel(ctxT(t), 640, 360, 0, 300); err != nil {
+			t.Fatalf("%s: %v", name, err)
 		}
-		if c.Params["x"] != 640.0 || c.Params["y"] != 360.0 {
-			t.Fatalf("wheel at (%v, %v), want (640, 360)", c.Params["x"], c.Params["y"])
+		var total float64
+		var moves int
+		var last fakeCall
+		for _, c := range fb.inputs() {
+			switch c.Method {
+			case "Page.dispatchMouseEvent":
+				moves++
+				last = c
+			case "Page.dispatchWheelEvent":
+				if c.Params["x"] != 640.0 || c.Params["y"] != 360.0 {
+					t.Fatalf("%s: wheel at (%v, %v), want (640, 360)", name, c.Params["x"], c.Params["y"])
+				}
+				total += c.Params["deltaY"].(float64)
+			}
 		}
-		total += c.Params["deltaY"].(float64)
-	}
-	if total != 300 {
-		t.Fatalf("the notches add up to %v, want 300", total)
+		if total != 300 {
+			t.Errorf("%s: the notches add up to %v, want 300", name, total)
+		}
+		if tc.moves && (moves < 3 || last.Params["x"] != 640.0 || last.Params["y"] != 360.0) {
+			t.Errorf("%s: %d moves ending at %v, want a path to (640, 360)", name, moves, last.Params)
+		}
+		if !tc.moves && moves != 0 {
+			t.Errorf("%s: a raw mouse was moved %d times", name, moves)
+		}
 	}
 }
 

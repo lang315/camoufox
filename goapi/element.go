@@ -174,6 +174,9 @@ func (p *Page) QuerySelectorAll(ctx context.Context, selector string) ([]*Elemen
 // with the wheel, moves along a path to a point inside the element, checks
 // that the press would land on it, and presses.
 func (e *ElementHandle) Click(ctx context.Context) error {
+	// A humanized scroll has already brought the element into view; an instant
+	// programmatic one after it would undo what the wheel just did.
+	scrollJS := `el.scrollIntoView({block:'center', inline:'center'});`
 	if h := e.page.humanizer(); h != nil {
 		if h.mouse {
 			return h.pointAt(ctx, e, false)
@@ -182,11 +185,12 @@ func (e *ElementHandle) Click(ctx context.Context) error {
 			if err := h.intoView(ctx, e); err != nil {
 				return err
 			}
+			scrollJS = ""
 		}
 	}
 	res, err := e.page.callFunction(ctx, e.ctxID,
 		`function(el) {
-			el.scrollIntoView({block:'center', inline:'center'});
+			`+scrollJS+`
 			const r = el.getBoundingClientRect();
 			return {x: r.left + r.width/2, y: r.top + r.height/2};
 		}`,
@@ -405,7 +409,11 @@ func (e *ElementHandle) Hover(ctx context.Context) error {
 	ev := juggler.PageDispatchMouseEventParams{
 		Type: "mousemove", X: cx, Y: cy,
 	}
-	return e.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil)
+	if err := e.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil); err != nil {
+		return err
+	}
+	e.page.noteMouse(cx, cy)
+	return nil
 }
 
 // Screenshot captures the element's bounding region as PNG bytes.
