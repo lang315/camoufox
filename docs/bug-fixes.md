@@ -226,6 +226,8 @@ The cap sits far under the worst caller. A source that never lands inside its bo
 
 **What misled the investigation.** The earlier arithmetic counted only the 240 ms ceiling (9.6%) and not the floor (7.1%) of `hoverDwell`, and the clamp had kept every cited median exactly, which made it look harmless; a truncation does not.
 
+**Since the 4c909d69 upstream sync.** Upstream removed the click hold, double-click gap and hover dwell, and `logNormalDelay` with them (daijro/camoufox#1000). The redraw stays on `normalDelay`, whose key and modifier callers remain; `keyInterval` would put 7.8% of its draws on its 80 ms floor under a clamp. `delay.test.mjs` keeps the per-caller check for those callers.
+
 ## #472: a humanized edge exit came 19-28 ms after the last mousemove, not one sample after it
 
 **Symptom.** `humanize-mouse-trajectory.py`'s edge-exit arms, default prefs included, now and then flagged an exit placed as stock places it (last move on the edge or 2 px inside, exit 1-3 px past) but 21-53 ms after the last mousemove. That is over the guard's one-frame bound. Hosted macOS job 132694087736 (fork.3): `[[(1686, 0), (1686, -3), 24], [(53, 0), (53, -3), 24]]`.
@@ -248,6 +250,8 @@ Rejected: dropping the ack, which is the deadlock bound (`docs/input-dispatch.md
 **Evidence.** `browser/tests/juggler/edge-exit.test.mjs` drives `sendTrajectoryAcked` with acks the test releases. It covers an edge step, and a crossing with an interpolated `last` point. Before the fix both fail: the exit is not dispatched until the ack is released. After it both pass, and they also pin that nothing follows the exit until that ack resolves.
 
 **What misled.** The issue first blamed `send()` skipping `_crossing`'s `last` point. The instrumented runs showed it was never skipped, in 39 crossings where it could have been.
+
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (`sendTrajectoryAcked`, `_crossing`, `leaveContent`). `edge-exit.test.mjs` went with it.
 
 ## #469: `popup-covered-click` took the date picker's rect before it had its real one
 
@@ -288,6 +292,8 @@ A reading, not a finding: the X11 popup window exists before it is sized and pla
 
 **What misled.** The guard's 250 read as a stock-derived limit on the product, and the #419 note ("if the tail ever shows without uBO, the ceiling's design is the next question") pointed at the timer, not at the 10 ms between the clamp and the ceiling.
 
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (the hover dwell and double-click gap). `driven-dblclick-gap.py` and `click-pacing.test.mjs` went with it.
+
 ## #451: at 105% text scale a move to the content's edge row stalled 5 s and reached the page as a mouseout
 
 **Symptom.** The `ui.textScaleFactor: 105` arm of `humanize-mouse-trajectory.py`, added by the upstream sync (df9ca115), failed on Windows (job 132037002566) and on macOS (job 132330070472). Every flagged exit was at `y = 0`, 12-67 ms after the last mousemove. The default-prefs arm passed, and so did Linux.
@@ -311,6 +317,8 @@ Why the arm passed on Linux and at the default prefs: the chrome's scale is the 
 - `humanize-mouse-trajectory.py`: the 105% arm's `y = 0` exits appeared in 4 of 4 runs before, and in none of 2 completed runs after. Its remaining failures, on both builds and at the default prefs too, are exits placed correctly but more than a frame after the last mousemove. That is #472, a separate mechanism.
 
 **What misled.** The guard printed each flagged mouseout beside the last mousemove before it, so a failed re-entry read as an exit placed a pixel short and a frame late. The probe's `over` timestamps, 5 s after each "exit", and Juggler's own `WARN` lines showed the 5 s waits. `mouse-boundary-sweep.py` exists for this class, but it swept only the default prefs. Its humanized arms count any mousemove, so they could not see a dropped destination.
+
+**Since the 4c909d69 upstream sync.** `_isShown` and `leaveContent` went with upstream's removal of the in-browser trajectory (daijro/camoufox#1000). The device-pixel snap in `MouseDispatch._measured` stays, since every `Page.dispatchMouseEvent` still converts through it, and so does the 105% arm of `mouse-boundary-sweep.py`.
 
 ## #469: `popup-covered-click` moved to a point the date picker did not cover, and read a dropped move as a covered one
 
@@ -613,6 +621,8 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 
 **Evidence.** The guard without uBO: 20 of 20 on the fixed Juggler (diag-77); with uBO 8 of 10 (diag-75). If the tail ever shows without uBO, the ceiling's design is the next question.
 
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (the double-click gap), and `driven-dblclick-gap.py`.
+
 ## #419: `identity-golden` "reproduces 800 voice lists" timed out on a hosted runner
 
 **Fixed by:** the PR that fixes #419. **Found by:** Tests run 42976257299 on the sync branch (job 130376551923, `typescript`).
@@ -680,6 +690,8 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 **Evidence.** Dwell forced to 60, 150 and 240, orders L M L and L L L L, 10 launches per cell (diag-75, run 42950463501): every warm cell reads 0 to 2 ms over the dwell and nothing reads under it (before: -9 to -11). The first-double-click tail that remains is the parent's `setTimeout` firing 70 to 210 ms late (p3 minus the arrival stamp 220 to 285 ms for a 150 ms wait, the wait itself computed correctly) in some runs and not in others (present in diag-63, 70, 71, 75, absent in 66, 72, 77); the old and the fixed code overshoot identically (diag-77, run 42953609503: median -1 ms, max 0, 0 of 80 samples above 50). `driven-dblclick-gap` launches without uBlock Origin for that reason (below).
 
 **What misled the investigation.** `_moveDelivered` looked like the delivery time and was not: it runs when the next command asks for it, so its stamp was the press's arrival. `beforeDispatch`'s comment says the page has seen the move before any other command runs, which is false for a press sent behind a move. A diag that added page-side `mousemove` recording moved timing enough to hide the offset (diag-66).
+
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (`_clickPacing`), along with `EventWatcher.receivedAt` and the queued move's `arrivedAt`, which only it read.
 
 ## #419: five patch guards were red on a hosted Windows runner after the upstream sync, for five different reasons
 

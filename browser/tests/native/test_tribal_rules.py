@@ -1159,3 +1159,22 @@ def test_additions_register_no_new_chrome_package():
                 if name not in registered.get(kind, []):
                     extra.append(f"{jar.relative_to(REPO_ROOT)}: {kind} {name}")
     assert not extra, f"{extra}\n" + explain("additions-register-no-new-chrome-package")
+
+
+# ---------------------------------------------------------------------------
+# humanize
+# ---------------------------------------------------------------------------
+
+
+def test_the_launchers_take_the_smart_actions_page_reads_from_myuri():
+    """Rule: humanize-smart-actions-are-myuris."""
+    launchers = {
+        "python": (REPO_ROOT / "python" / "src" / "camoufox", "*.py", "from myuri.page_functions import HIT_TEST_JS"),
+        "typescript": (REPO_ROOT / "typescript" / "src", "*.ts", "HIT_TEST_JS"),
+    }
+    for name, (root, pattern, import_line) in launchers.items():
+        sources = {f.relative_to(REPO_ROOT): f.read_text(encoding="utf-8") for f in root.rglob(pattern)}
+        own = [str(f) for f, text in sources.items() if "elementFromPoint" in text or "elementsFromPoint" in text]
+        assert not own, f"{name} hit-tests the page itself in {own}" + explain("humanize-smart-actions-are-myuris")
+        assert any(import_line in text and "myuri" in text for text in sources.values()), (
+            f"{name} does not take HIT_TEST_JS from myuri" + explain("humanize-smart-actions-are-myuris"))

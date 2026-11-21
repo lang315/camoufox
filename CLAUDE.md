@@ -96,7 +96,7 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   A WebGL check that finds no WebGL fails; it used to pass on "WebGL not
   available", which scored a run without a GL context as green (issue #75).
 - **`browser/tests/playwright/patches/`** — one standalone guard per shipped spoofing behaviour
-  (isolated evaluate, trusted events, fonts, mouse trajectories, touchscreen).
+  (isolated evaluate, trusted events, fonts, input dispatch, touchscreen).
   The most direct evidence a Firefox bump did not neuter a patch that still
   *applies* cleanly.
   ```bash
