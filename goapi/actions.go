@@ -64,8 +64,12 @@ func (p *Page) Click(ctx context.Context, selector string) error {
 }
 
 // MouseClick dispatches mousemove → mousedown → mouseup at the given
-// viewport coordinates.
+// viewport coordinates. When myuri drives the mouse (WithHumanize) it moves
+// along a path to (x, y) and presses as a person does.
 func (p *Page) MouseClick(ctx context.Context, x, y float64) error {
+	if h := p.humanizer(); h != nil && h.mouse {
+		return h.clickAt(ctx, x, y, "left", 1, nil)
+	}
 	one := 1
 	move := juggler.PageDispatchMouseEventParams{
 		Type: "mousemove", Button: 0, Buttons: 0, X: x, Y: y, Modifiers: 0,
@@ -83,6 +87,7 @@ func (p *Page) MouseClick(ctx context.Context, x, y float64) error {
 			return fmt.Errorf("camoufox: dispatchMouseEvent %s: %w", ev.Type, err)
 		}
 	}
+	p.noteMouse(x, y)
 	return nil
 }
 

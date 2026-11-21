@@ -68,6 +68,7 @@ func (m *Mouse) Down(ctx context.Context, x, y float64, opts ...MouseClickOption
 	if err := m.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil); err != nil {
 		return fmt.Errorf("camoufox: mouse Down: %w", err)
 	}
+	m.page.noteMouse(x, y)
 	return nil
 }
 
@@ -90,6 +91,7 @@ func (m *Mouse) Up(ctx context.Context, x, y float64, opts ...MouseClickOption) 
 	if err := m.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil); err != nil {
 		return fmt.Errorf("camoufox: mouse Up: %w", err)
 	}
+	m.page.noteMouse(x, y)
 	return nil
 }
 

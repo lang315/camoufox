@@ -78,6 +78,8 @@ class GoDriver:
         for opt, value in (("geoip", geoip), ("locale", locale), ("env", env)):
             if value:
                 pytest.skip(f"go: no {opt}")
+        if humanize is not None and not isinstance(humanize, bool):  # the RPC takes a flag; a per-channel dict must not become all-myuri
+            raise TypeError(f"go: humanize must be a bool, got {humanize!r}")
         if headless == "virtual":
             pytest.skip("go: no headless='virtual'")
         h = self.rpc("launch", binary=str(self.binary), os=os or "", headless=headless, humanize=bool(humanize), proxy=proxy, webrtc_ip=webrtc_ip or "", prefs=prefs or {})

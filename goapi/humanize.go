@@ -3,6 +3,7 @@ package camoufox
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sync"
@@ -23,30 +24,39 @@ import (
 type Engine struct {
 	// Name is "myuri" (paths, clicks, typing and wheel turns as people make
 	// them on the identity's OS, and the decisions around a click: scroll into
-	// view, the point, whether it lands) or "raw" (goapi's own calls).
+	// view, the point, whether it lands; "cursory" is another name for it) or
+	// "raw" (goapi's own calls).
 	Name string
+	// WPM is the typing speed of a myuri keyboard; 0 is myuri's 80. It is an
+	// error on any other channel or on a raw engine.
+	WPM float64
 }
 
 const (
-	engineMyuri = "myuri"
-	engineRaw   = "raw"
+	engineMyuri   = "myuri"
+	engineCursory = "cursory" // another name for myuri, which runs cursory's paths
+	engineRaw     = "raw"
 )
 
 // Humanize chooses the engine of each input channel. A nil channel is myuri, so
 // the zero Humanize is myuri on every channel; a nil *Humanize (WithHumanize
 // not used) is raw on every channel.
 //
-//	Mouse     Mouse.Move, Mouse.Click, Mouse.DblClick; Page.Click; ElementHandle.Click and Hover
+//	Mouse     Mouse.Move, Mouse.Click, Mouse.DblClick; Page.MouseClick, Page.Click; ElementHandle.Click and Hover
 //	Keyboard  Keyboard.Type and Press; Page.Type; ElementHandle.Type
 //	Scroll    Mouse.Wheel; ElementHandle.ScrollIntoViewIfNeeded, and the scroll
 //	          into view before a pointer action or typing
 //
 // Page.ScrollTo, ScrollBy and ScrollToBottom, Mouse.Down and Up, Keyboard.Down
 // and Up, tap, and drag are always goapi's own.
+//
+// goapi has no Locator, so ElementHandle methods are where the Locator methods
+// of the Python and TypeScript launchers are humanized.
 type Humanize struct {
 	Mouse, Keyboard, Scroll *Engine
-	// Seed seeds the stream every draw of a page comes from, in [0, 2^32): two
-	// pages given one seed make the same calls. Nil draws a fresh seed per page.
+	// Seed seeds the one stream of the browser, in [0, 2^32), which every page and
+	// every draw comes from: two pages never replay the same draws, and two
+	// launches given one seed make the same calls. Nil draws a random seed per launch.
 	Seed *uint64
 }
 
@@ -57,7 +67,8 @@ func WithHumanize(h *Humanize) Option { return func(c *launchConfig) { c.humaniz
 // OS of the identity whose people it models.
 type humanizeSetup struct {
 	mouse, keyboard, scroll bool
-	seed                    *uint64
+	wpm                     float64
+	rng                     myuri.RNG // the browser's one stream, safe for concurrent use
 	os                      string
 }
 
@@ -67,25 +78,42 @@ func newHumanizeSetup(h *Humanize) (*humanizeSetup, error) {
 	if h == nil {
 		return nil, nil
 	}
-	s := &humanizeSetup{seed: h.Seed}
+	s := &humanizeSetup{}
 	for _, ch := range []struct {
 		name   string
 		engine *Engine
 		drives *bool
 	}{{"Mouse", h.Mouse, &s.mouse}, {"Keyboard", h.Keyboard, &s.keyboard}, {"Scroll", h.Scroll, &s.scroll}} {
 		switch {
-		case ch.engine == nil || ch.engine.Name == engineMyuri:
+		case ch.engine == nil || ch.engine.Name == engineMyuri || ch.engine.Name == engineCursory:
 			*ch.drives = true
 		case ch.engine.Name == engineRaw:
 		default:
 			return nil, fmt.Errorf("camoufox: Humanize.%s: unknown engine %q; use %q or %q", ch.name, ch.engine.Name, engineMyuri, engineRaw)
 		}
+		if e := ch.engine; e != nil && e.WPM != 0 {
+			if ch.name != "Keyboard" || !*ch.drives || e.WPM < 0 {
+				return nil, fmt.Errorf("camoufox: Humanize.%s: WPM is the typing speed of a myuri keyboard, and must be positive", ch.name)
+			}
+			s.wpm = e.WPM
+		}
 	}
-	if h.Seed != nil && *h.Seed >= 1<<32 {
-		return nil, fmt.Errorf("camoufox: Humanize.Seed %d is not in [0, 2^32)", *h.Seed)
+	seed := uint64(rand.Uint32())
+	if h.Seed != nil {
+		if *h.Seed >= 1<<32 {
+			return nil, fmt.Errorf("camoufox: Humanize.Seed %d is not in [0, 2^32)", *h.Seed)
+		}
+		seed = *h.Seed
 	}
 	if !s.mouse && !s.keyboard && !s.scroll {
 		return nil, nil
+	}
+	var mu sync.Mutex
+	draw := myuri.MakeRNG(seed)
+	s.rng = func() float64 {
+		mu.Lock()
+		defer mu.Unlock()
+		return draw()
 	}
 	return s, nil
 }
@@ -121,15 +149,10 @@ func (p *Page) humanizer() *humanizer {
 	}
 	p.humOnce.Do(func() {
 		s := p.bc.b.humanize
-		// Each page's stream starts at the seed; without one, at its own random seed.
-		seed := uint64(rand.Uint32())
-		if s.seed != nil {
-			seed = *s.seed
-		}
 		h := &humanizer{humanizeSetup: s}
 		h.host = &pageHost{p: p, own: &Keyboard{page: p, modifiers: map[string]bool{}, pressed: map[string]bool{}}, start: time.Now()}
 		h.host.kb = h.host.own
-		opts := myuri.Options{OS: s.os, Seed: seed, RawMove: !s.mouse}
+		opts := myuri.Options{OS: s.os, RNG: s.rng, WPM: s.wpm, RawMove: !s.mouse}
 		if !s.scroll {
 			// A raw scroll channel scrolls as goapi does; the wheel is for myuri's.
 			opts.IntoView = func(ctx context.Context, t myuri.Target) error {
@@ -143,15 +166,21 @@ func (p *Page) humanizer() *humanizer {
 }
 
 // do runs f on the page's actions, one operation at a time. The events carry the
-// modifiers of kb (the Keyboard the caller used) when it is not nil.
-func (h *humanizer) do(kb *Keyboard, f func(*myuri.Actions) error) error {
+// modifiers of kb (the Keyboard the caller used) when it is not nil. An
+// operation that fails or is cancelled midway lets go of the keys and buttons it
+// pressed, or the next action would run with Shift held or a button down.
+func (h *humanizer) do(ctx context.Context, kb *Keyboard, f func(*myuri.Actions) error) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if kb != nil {
 		h.host.kb = kb
 		defer func() { h.host.kb = h.host.own }()
 	}
-	return f(h.actions)
+	err := f(h.actions)
+	if err != nil {
+		h.host.releaseHeld(ctx)
+	}
+	return err
 }
 
 // noteMouse tells the actions where a raw call left the mouse, so its next path
@@ -166,50 +195,42 @@ func (p *Page) noteMouse(x, y float64) {
 }
 
 func (h *humanizer) move(ctx context.Context, x, y float64) error {
-	return wrapHumanize("mouse Move", h.do(nil, func(a *myuri.Actions) error { return a.Move(ctx, x, y) }))
+	return wrapHumanize("mouse Move", h.do(ctx, nil, func(a *myuri.Actions) error { return a.Move(ctx, x, y) }))
 }
 
 // clickAt moves to (x, y) and presses there, holding the modifiers (names of keys) for the press.
 func (h *humanizer) clickAt(ctx context.Context, x, y float64, button string, count int, modifiers []string) error {
-	return wrapHumanize("mouse Click", h.do(nil, func(a *myuri.Actions) error {
-		err := a.Move(ctx, x, y)
-		if err == nil {
-			err = a.Press(ctx, button, count, modifiers)
+	return wrapHumanize("mouse Click", h.do(ctx, nil, func(a *myuri.Actions) error {
+		if err := a.Move(ctx, x, y); err != nil {
+			return err
 		}
-		if err != nil {
-			// A press that fails or is cancelled midway leaves its modifiers down;
-			// the next action would then run with Shift or Control held.
-			h.releaseModifiers(ctx, modifiers)
-		}
-		return err
+		return a.Press(ctx, button, count, modifiers)
 	}))
 }
 
-func (h *humanizer) releaseModifiers(ctx context.Context, modifiers []string) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	for i := len(modifiers) - 1; i >= 0; i-- {
-		if h.host.kb.modifiers[modifiers[i]] {
-			_ = h.host.kb.Up(ctx, modifiers[i])
-		}
-	}
-}
-
-// wheel turns the wheel at (x, y), where the caller names it.
+// wheel turns the wheel at (x, y), where the caller names it. A myuri mouse
+// moves there first, as a person's hand does; a raw one is not moved, and the
+// wheel is dispatched there.
 func (h *humanizer) wheel(ctx context.Context, x, y, dx, dy float64) error {
-	return wrapHumanize("mouse Wheel", h.do(nil, func(a *myuri.Actions) error {
-		h.host.wheelAt = &myuri.Point{X: x, Y: y}
-		defer func() { h.host.wheelAt = nil }()
+	return wrapHumanize("mouse Wheel", h.do(ctx, nil, func(a *myuri.Actions) error {
+		if !h.mouse {
+			h.host.wheelAt = &myuri.Point{X: x, Y: y}
+			defer func() { h.host.wheelAt = nil }()
+		} else if h.host.x != x || h.host.y != y {
+			if err := a.Move(ctx, x, y); err != nil {
+				return err
+			}
+		}
 		return a.Wheel(ctx, dx, dy)
 	}))
 }
 
 func (h *humanizer) typeText(ctx context.Context, kb *Keyboard, text string) error {
-	return wrapHumanize("Type", h.do(kb, func(a *myuri.Actions) error { return a.Type(ctx, text, 0) }))
+	return wrapHumanize("Type", h.do(ctx, kb, func(a *myuri.Actions) error { return a.Type(ctx, text, 0) }))
 }
 
 func (h *humanizer) pressKey(ctx context.Context, kb *Keyboard, key string) error {
-	return wrapHumanize("Press", h.do(kb, func(a *myuri.Actions) error { return a.Key(ctx, key) }))
+	return wrapHumanize("Press", h.do(ctx, kb, func(a *myuri.Actions) error { return a.Key(ctx, key) }))
 }
 
 // pointAt scrolls e into view, moves onto it and presses, or only moves when hover is set.
@@ -218,13 +239,13 @@ func (h *humanizer) pointAt(ctx context.Context, e *ElementHandle, hover bool) e
 	if hover {
 		op = "Hover"
 	}
-	return wrapHumanize(op, h.do(nil, func(a *myuri.Actions) error {
+	return wrapHumanize(op, h.do(ctx, nil, func(a *myuri.Actions) error {
 		return a.Click(ctx, elementTarget{e}, myuri.ClickOptions{Hover: hover, Timeout: humanizeActionTimeoutMS})
 	}))
 }
 
 func (h *humanizer) intoView(ctx context.Context, e *ElementHandle) error {
-	return wrapHumanize("ScrollIntoViewIfNeeded", h.do(nil, func(a *myuri.Actions) error { return a.IntoView(ctx, elementTarget{e}) }))
+	return wrapHumanize("ScrollIntoViewIfNeeded", h.do(ctx, nil, func(a *myuri.Actions) error { return a.IntoView(ctx, elementTarget{e}) }))
 }
 
 // withElement runs f on the first element matching selector, then releases the handle.
@@ -282,6 +303,7 @@ type pageHost struct {
 
 	x, y    float64      // where the mouse is
 	buttons int          // the buttons held, as Juggler's mask
+	held    []string     // the keys this host pressed and has not released
 	wheelAt *myuri.Point // where the wheel turns during a Mouse.Wheel; nil: at the mouse
 	start   time.Time
 	nowFn   func() float64 // the clock and its sleep, replaced in tests
@@ -358,8 +380,48 @@ func (h *pageHost) Wheel(ctx context.Context, dx, dy float64) error {
 	return nil
 }
 
-func (h *pageHost) KeyDown(ctx context.Context, key string) error { return h.kb.Down(ctx, key) }
-func (h *pageHost) KeyUp(ctx context.Context, key string) error   { return h.kb.Up(ctx, key) }
+func (h *pageHost) KeyDown(ctx context.Context, key string) error {
+	if err := h.kb.Down(ctx, key); err != nil {
+		return err
+	}
+	h.held = append(h.held, key)
+	return nil
+}
+
+func (h *pageHost) KeyUp(ctx context.Context, key string) error {
+	if err := h.kb.Up(ctx, key); err != nil {
+		return err
+	}
+	for i := len(h.held) - 1; i >= 0; i-- {
+		if h.held[i] == key {
+			h.held = append(h.held[:i], h.held[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
+// releaseHeld lets go of every key and button this host pressed and has not
+// released, after an operation failed or was cancelled. It runs on a context of
+// its own, since the operation's may be the one that ended.
+func (h *pageHost) releaseHeld(ctx context.Context) {
+	if len(h.held) == 0 && h.buttons == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	for len(h.held) > 0 {
+		key := h.held[len(h.held)-1]
+		if h.KeyUp(ctx, key) != nil {
+			h.held = h.held[:len(h.held)-1]
+		}
+	}
+	for name, b := range mouseButtons {
+		if h.buttons&b.mask != 0 {
+			_ = h.release(ctx, name, 1)
+		}
+	}
+}
 func (h *pageHost) InsertText(ctx context.Context, text string) error {
 	return h.kb.insertText(ctx, text)
 }
@@ -371,10 +433,13 @@ func (h *pageHost) Viewport(ctx context.Context) (float64, float64, error) {
 	}
 	size, _ := v.([]any)
 	if len(size) != 2 {
-		return 0, 0, fmt.Errorf("camoufox: viewport size is %v", v)
+		return 0, 0, fmt.Errorf("camoufox: viewport size is %v, want [width, height]", v)
 	}
-	w, _ := size[0].(float64)
-	ht, _ := size[1].(float64)
+	w, wok := size[0].(float64)
+	ht, hok := size[1].(float64)
+	if !wok || !hok {
+		return 0, 0, fmt.Errorf("camoufox: viewport size is %v, want two numbers", size)
+	}
 	return w, ht, nil
 }
 
@@ -420,7 +485,7 @@ func (elementTarget) Offset(context.Context) (float64, float64, bool, error) { r
 
 func (t elementTarget) Plan(ctx context.Context, args myuri.PlanArgs) (*myuri.ScrollPlan, error) {
 	raw, err := t.e.run(ctx, myuri.ScrollPlanJS, args)
-	if err != nil || len(raw) == 0 {
+	if err != nil {
 		return nil, err
 	}
 	var plan *myuri.ScrollPlan
@@ -436,7 +501,7 @@ func (t elementTarget) HitTest(ctx context.Context, x, y float64, pressing bool)
 		Y        float64 `json:"y"`
 		Pressing bool    `json:"pressing"`
 	}{x, y, pressing})
-	if err != nil || len(raw) == 0 {
+	if err != nil {
 		return "", err
 	}
 	var reason *string
@@ -457,8 +522,13 @@ func (e *ElementHandle) run(ctx context.Context, fn string, arg any) (json.RawMe
 	}
 	res, err := e.page.callFunction(ctx, e.ctxID, "function(el, arg) { return ("+fn+")(el, arg); }",
 		[]juggler.CallFunctionArgument{{ObjectID: e.objectID}, {Value: argJSON}}, true)
-	if err != nil || res.Result == nil {
+	if err != nil {
 		return nil, err
+	}
+	// A page function here returns a value or null; no value is a page that did
+	// not answer, which must not read as "the press lands".
+	if res.Result == nil || len(res.Result.Value) == 0 {
+		return nil, errors.New("camoufox: the page function returned no value")
 	}
 	return res.Result.Value, nil
 }
