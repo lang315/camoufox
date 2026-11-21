@@ -25,6 +25,7 @@ type goldenCase struct {
 	Name    string                  `json:"name"`
 	Seed    uint64                  `json:"seed"`
 	OS      string                  `json:"os"`
+	WPM     float64                 `json:"wpm"`
 	Targets map[string]goldenTarget `json:"targets"`
 	Ops     []goldenOp              `json:"ops"`
 	Calls   [][]any                 `json:"calls"`
@@ -46,6 +47,8 @@ type goldenOp struct {
 	Count     int      `json:"count"`
 	Modifiers []string `json:"modifiers"`
 	Target    string   `json:"target"`
+	Text      string   `json:"text"`
+	Key       string   `json:"key"`
 	Opts      struct {
 		Button     string   `json:"button"`
 		ClickCount int      `json:"clickCount"`
@@ -141,7 +144,7 @@ func (t scripted) HitTest(_ context.Context, x, y float64, pressing bool) (strin
 func replay(t *testing.T, g *golden, c *goldenCase) [][]any {
 	t.Helper()
 	r := &recorder{g: g, c: c, now: g.ClockStart, seen: map[string]int{}}
-	a := New(r, Options{OS: c.OS, Seed: c.Seed})
+	a := New(r, Options{OS: c.OS, Seed: c.Seed, WPM: c.WPM})
 	ctx := context.Background()
 	target := func(name string) Target { return scripted{r: r, name: name, spec: c.Targets[name]} }
 	for _, op := range c.Ops {
@@ -155,6 +158,10 @@ func replay(t *testing.T, g *golden, c *goldenCase) [][]any {
 			err = a.Press(ctx, op.Button, op.Count, op.Modifiers)
 		case "wheel":
 			err = a.Wheel(ctx, op.Dx, op.Dy)
+		case "type":
+			err = a.Type(ctx, op.Text, 0)
+		case "key":
+			err = a.Key(ctx, op.Key)
 		case "intoView":
 			err = a.IntoView(ctx, target(op.Target))
 		case "click":
@@ -195,7 +202,7 @@ func sameCall(want, got []any) bool {
 	return true
 }
 
-func runGolden(t *testing.T, file string) {
+func runGolden(t *testing.T, file string, cases int) {
 	raw, err := os.ReadFile(filepath.Join("testdata", file))
 	if err != nil {
 		t.Fatal(err)
@@ -207,8 +214,8 @@ func runGolden(t *testing.T, file string) {
 	if g.Versions["myuri"] != "4.0.0" || g.Versions["cursory-js"] != "2.1.0" {
 		t.Fatalf("golden recorded from %v, the port tracks myuri 4.0.0 on cursory-js 2.1.0", g.Versions)
 	}
-	if len(g.Cases) != 5 {
-		t.Fatalf("%d cases, want 5 seeds", len(g.Cases))
+	if len(g.Cases) != cases {
+		t.Fatalf("%d cases, want %d seeds", len(g.Cases), cases)
 	}
 	for i := range g.Cases {
 		c := &g.Cases[i]
@@ -226,5 +233,7 @@ func runGolden(t *testing.T, file string) {
 	}
 }
 
-func TestGoldenMouse(t *testing.T)  { runGolden(t, "mouse.json") }
-func TestGoldenScroll(t *testing.T) { runGolden(t, "scroll.json") }
+func TestGoldenMouse(t *testing.T)  { runGolden(t, "mouse.json", 5) }
+func TestGoldenScroll(t *testing.T) { runGolden(t, "scroll.json", 5) }
+func TestGoldenTyping(t *testing.T) { runGolden(t, "typing.json", 3) }
+func TestGoldenKey(t *testing.T)    { runGolden(t, "key.json", 3) }

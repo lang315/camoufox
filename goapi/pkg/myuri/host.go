@@ -33,10 +33,12 @@ type Host interface {
 }
 
 // Options configure Actions. OS is the OS the browser claims ("macos", "windows"
-// or "linux"); Seed seeds the stream every draw comes from, taken mod 2^32.
+// or "linux"); Seed seeds the stream every draw comes from, taken mod 2^32; WPM
+// is the typing speed (0: 80).
 type Options struct {
 	OS   string
 	Seed uint64
+	WPM  float64
 }
 
 // Missed is a click that could not reach its element; Reason says why.
@@ -50,6 +52,7 @@ type Actions struct {
 	host Host
 	rng  RNG
 	os   string
+	wpm  float64
 
 	// Where the cursor is, in page px; unset until known. Before the first move
 	// it is only where the person's hand is taken to be.
@@ -68,5 +71,9 @@ func New(host Host, opts Options) *Actions {
 	default:
 		panic(fmt.Sprintf("myuri: unknown os %q; use 'macos', 'windows' or 'linux'", opts.OS))
 	}
-	return &Actions{host: host, rng: MakeRNG(opts.Seed), os: opts.OS, movedAt: math.Inf(-1), releasedAt: math.Inf(-1)}
+	wpm := opts.WPM
+	if wpm == 0 {
+		wpm = defaultWPM
+	}
+	return &Actions{host: host, rng: MakeRNG(opts.Seed), os: opts.OS, wpm: wpm, movedAt: math.Inf(-1), releasedAt: math.Inf(-1)}
 }

@@ -1,18 +1,20 @@
 // Records what @jwriter20/myuri's Actions ask of a host, for fixed seeds and
-// inputs, into ../mouse.json and ../scroll.json. The Go port replays the same
+// inputs, into ../{mouse,scroll,typing,key}.json. The Go port replays the same
 // scenarios and must issue the same calls (myuri_test.go).
 //
 //   npm ci && node gen.mjs
+//
+// Regenerate the goldens whenever the pinned myuri version (package.json) changes,
+// and run `node tables.mjs` too: the Go tables are copied from that version.
 //
 // The host is a fake with a virtual clock: sleep(ms) and a click's hold advance
 // it by exactly ms, so a run is deterministic and takes no real time. Each page
 // target is a scripted sequence of scroll plans and hit-test answers, so a
 // scenario needs no browser. `go test` reads the goldens; it never runs this.
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Actions, HIT_TEST_JS, SCROLL_PLAN_JS, makeRng } from '@jwriter20/myuri';
-import { readFileSync } from 'node:fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 // Recorded in each golden, so a stale one is visible. The packages export no package.json.
@@ -63,7 +65,7 @@ async function record(scenario) {
             throw new Error('unexpected page function');
         },
     };
-    const actions = new Actions(host, makeRng(scenario.seed), { os: scenario.os, device: 'mouse' });
+    const actions = new Actions(host, makeRng(scenario.seed), { os: scenario.os, device: 'mouse', wpm: scenario.wpm });
     for (const op of scenario.ops) {
         try {
             if (op.op === 'move') await actions.move(op.x, op.y);
@@ -71,6 +73,8 @@ async function record(scenario) {
             else if (op.op === 'press') await actions.press(op.button, op.count, op.modifiers);
             else if (op.op === 'wheel') await actions.wheel(op.dx, op.dy);
             else if (op.op === 'intoView') await actions.intoView({ name: op.target });
+            else if (op.op === 'type') await actions.type(op.text);
+            else if (op.op === 'key') await actions.key(op.key);
             else if (op.op === 'click') await actions.click({ name: op.target }, op.opts);
             else throw new Error(`unknown op ${op.op}`);
         } catch (e) {
@@ -173,13 +177,28 @@ const scrollOps = [
     { op: 'intoView', target: 'drifting' },
 ];
 
-async function write(file, targets, ops) {
+async function write(file, targets, ops, seeds = SEEDS) {
     const cases = [];
-    for (const [seed, os] of SEEDS) {
-        cases.push(await record({ name: `${file}-${seed}-${os}`, seed, os, targets, ops }));
+    for (const [seed, os, wpm] of seeds) {
+        cases.push(await record({ name: `${file}-${seed}-${os}`, seed, os, wpm, targets, ops }));
     }
     writeFileSync(join(here, '..', `${file}.json`), `${JSON.stringify({ versions, viewport: VIEWPORT, clockStart: CLOCK_START, cases })}\n`);
 }
 
 await write('mouse', mouseTargets, mouseOps);
 await write('scroll', scrollTargets, scrollOps);
+
+// Typing and keys: a capital and punctuation, non-ASCII (accents the typer may
+// mistype, CJK and an emoji it types literally), and a long text with a newline
+// and digits. One stream per case, so each text starts where the last left off.
+// The third value is the typist's wpm (undefined: myuri's 80).
+const KEY_SEEDS = [[1, 'macos', undefined], [42, 'linux', 55], [4294967295, 'windows', 120]];
+const typingOps = [
+    { op: 'type', text: 'Hello, World.' },
+    { op: 'type', text: 'café naïve ÉCOLE 日本語 😀' },
+    { op: 'type', text: 'The quick brown fox jumps over 13 lazy dogs;\nthey zigzag, quickly!' },
+];
+const keyOps = ['Enter', 'Tab', 'Control+a', 'Meta+Shift+z', 'A', '?', 'Control++', '+', 'Backspace'].map((key) => ({ op: 'key', key }));
+
+await write('typing', {}, typingOps, KEY_SEEDS);
+await write('key', {}, keyOps, KEY_SEEDS);

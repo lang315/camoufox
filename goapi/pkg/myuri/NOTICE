@@ -30,6 +30,16 @@ original author to:
   - MIMIC-LOGICS, for Mouse-Synthesizer
     (https://github.com/MIMIC-LOGICS/Mouse-Synthesizer)
 
+Typing
+------
+
+The typo and correction model (typing_markov.go) follows myuri's port of
+HumanTyping (https://github.com/Lax3n/HumanTyping). bigrams.go embeds a table
+derived by myuri from english_bigrams.txt in John Burkardt's NGRAMS dataset
+(https://people.sc.fsu.edu/~jburkardt/datasets/ngrams/ngrams.html), distributed
+under the GNU LGPL. testdata/gen/tables.mjs regenerates it from the pinned
+package.
+
 Derived from numpy
 ------------------
 
