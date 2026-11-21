@@ -536,17 +536,25 @@ inline std::optional<double>& PendingKeyRepeatMs() {
 // the tick grid when that is the OS's. Any other key event is stamped as
 // InputTimeStamp() stamps input.
 inline mozilla::TimeStamp KeyTimeStamp(uint32_t aCode, bool aKeyDown, bool aRepeat) {
-  static std::unordered_map<uint32_t, mozilla::TimeStamp> keyDowns;
-  const auto after = std::exchange(PendingKeyRepeatMs(), std::nullopt);
-  if (aKeyDown && aRepeat && after) {
-    if (const auto it = keyDowns.find(aCode); it != keyDowns.end())
-      return InputTimeStamp(it->second + mozilla::TimeDuration::FromMilliseconds(*after));
-  }
   // Kept before the tick floor, so a repeat lands a whole number of ticks
   // after its keydown.
+  static std::unordered_map<uint32_t, mozilla::TimeStamp> keyDowns;
+  static mozilla::TimeStamp last;
+  const auto after = std::exchange(PendingKeyRepeatMs(), std::nullopt);
   const auto now = mozilla::TimeStamp::Now();
+  auto at = now;
+  if (aKeyDown && aRepeat && after) {
+    if (const auto it = keyDowns.find(aCode); it != keyDowns.end()) {
+      const auto made = it->second + mozilla::TimeDuration::FromMilliseconds(*after);
+      // An OS delivers key events in the order it stamped them, so a repeat
+      // that would land after now or before an event already stamped is now.
+      if (made <= now && (last.IsNull() || made >= last)) at = made;
+    }
+  }
   if (aKeyDown && !aRepeat) keyDowns[aCode] = now;
-  return InputTimeStamp(now);
+  if (!aKeyDown) keyDowns.erase(aCode);
+  last = at;
+  return InputTimeStamp(at);
 }
 
 // The ephemeral port range of an OS, which is where its kernel puts a socket

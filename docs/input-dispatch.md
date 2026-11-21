@@ -277,10 +277,13 @@ timer fires late on a loaded machine, so each repeat carries the time the OS
 would have made it instead: its key's keydown plus the delay and the
 intervals. Juggler passes that offset to `ChromeUtils.camouStampKeyRepeat`
 just before it dispatches the repeat. `TextInputProcessor` adds it to the
-keydown's time, which `MaskConfig::KeyTimeStamp` keeps per physical key.
-Under a Windows launch the sum goes on the tick grid, so a repeat lands a
-whole number of ticks after its keydown. A repeat the client sends is stamped
-when it is dispatched.
+keydown's time, which `MaskConfig::KeyTimeStamp` keeps per physical key until
+its keyup. Under a Windows launch the sum goes on the tick grid, so a repeat
+lands a whole number of ticks after its keydown. The OS delivers key events in
+the order it stamps them, so a repeat whose time would come after now, or
+before a key event already stamped (a Windows Shift repeat that fires late,
+after another key's press), is stamped when it is dispatched. So is a repeat
+the client sends.
 
 | OS | Delay | Interval | Modifiers |
 |---|---|---|---|

@@ -16,10 +16,16 @@ to handle its keydown: the OS counts the delay from the press, and the release
 comes before it. Juggler counted it from the command, so a keydown handler busy
 for 700 ms got a repeat before the client could send the keyup (#510).
 
+A key held on such a page repeats when the OS would have made the repeat: the
+OS stamps it 500 ms after the press while the page is still busy, and the page
+reads it once it is free. Juggler's timer can only fire after the keydown
+returns, so each repeat it makes is stamped from its key's keydown, not from
+the timer (#510).
+
 The guard holds a letter, then Shift, then a letter and another over it, then
-presses a letter whose keydown keeps the page busy, under each identity, and
-checks the repeat keydowns, their delay and interval, and the text the repeats
-type.
+presses a letter whose keydown keeps the page busy and holds another, under
+each identity, and checks the repeat keydowns, their delay and interval, and
+the text the repeats type.
 
     python browser/tests/playwright/patches/driven-key-repeat.py
 """
@@ -37,7 +43,7 @@ PAGE = """<!doctype html><html><body><input id="field"><script>
     addEventListener(type, (e) => {
       seen.push([type, e.key, e.repeat, e.timeStamp]);
       document.body.dataset.seen = JSON.stringify(seen);
-      if (type === 'keydown' && e.key === 'd')
+      if (type === 'keydown' && !e.repeat && 'de'.includes(e.key))
         for (const end = performance.now() + 700; performance.now() < end;);
     }, true);
 </script></body></html>"""
@@ -69,6 +75,9 @@ def probe(binary, os_name):
         page.keyboard.up("c")
         page.keyboard.press("d")
         page.wait_for_timeout(100)
+        page.keyboard.down("e")
+        page.wait_for_timeout(HOLD)
+        page.keyboard.up("e")
         return page.evaluate("() => JSON.parse(document.body.dataset.seen || '[]')"), page.input_value("#field")
 
 
@@ -85,10 +94,12 @@ def main() -> int:
         seen, value = runs[os_name]
         flagged = [k for type, k, repeat, _ in seen if type == "keydown" and repeat]
         first, repeats = held(seen, "a")
+        e_down, e_repeats = held(seen, "e")
+        e_first = e_repeats[0] - e_down if e_repeats else float("nan")
         expected = int((HOLD - delay) / interval)
         print(f"{os_name}: 'a' first repeat after "
               f"{repeats[0] - first if repeats else float('nan'):.1f} ms, {len(repeats)} repeats; "
-              f"'d' {1 + len(held(seen, 'd')[1])} keydowns")
+              f"'d' {1 + len(held(seen, 'd')[1])} keydowns; 'e' on a busy page first repeat after {e_first:.1f} ms")
         if not expected - 3 <= len(repeats) <= expected + 1:
             failures.append(f"{os_name}: 'a' held {HOLD} ms repeated {len(repeats)} times, the OS {expected}")
         else:
@@ -109,9 +120,12 @@ def main() -> int:
         if held(seen, "d")[1]:
             failures.append(f"{os_name}: 'd', pressed once on a page busy 700 ms in its keydown, "
                             f"sent {1 + len(held(seen, 'd')[1])} keydowns")
-        if any(k not in "abcShiftd" for k in flagged):
+        if not abs(e_first - delay) <= 17:
+            failures.append(f"{os_name}: 'e', held on a page busy 700 ms in its keydown, first repeated "
+                            f"{e_first:.0f} ms after its keydown, the OS {delay}")
+        if any(k not in "abcShiftde" for k in flagged):
             failures.append(f"{os_name}: repeats of keys not held: {set(flagged)}")
-        typed = "a" * (1 + len(repeats)) + "b" * (1 + len(b_repeats)) + "c" * len(held(seen, "c")[1] + [c_down]) + "d"
+        typed = "a" * (1 + len(repeats)) + "b" * (1 + len(b_repeats)) + "c" * len(held(seen, "c")[1] + [c_down]) + "d" + "e" * (1 + len(e_repeats))
         if value != typed:
             failures.append(f"{os_name}: the field holds {value!r}, the repeats typed {typed!r}")
     for failure in failures:
