@@ -621,8 +621,20 @@ export class PageHandler {
   }
 
   async ['Page.dispatchKeyEvent'](params) {
-    this._holdKey(params);
-    return await this._dispatchKeyEvent(params);
+    const held = this._holdKey(params);
+    let result;
+    try {
+      result = await this._dispatchKeyEvent(params);
+    } catch (e) {
+      if (held && this._heldKey === held)
+        this._heldKey = null;
+      throw e;
+    }
+    // The client cannot release the key before this returns, so the repeat
+    // delay starts once the page has handled the press, not when the command came.
+    if (held)
+      this._repeatKey(params, held);
+    return result;
   }
 
   async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text}, held = null) {
@@ -1011,17 +1023,23 @@ export class PageHandler {
 
   // Camoufox: the OS repeats the last key pressed while it is held, and a key
   // up or another key stops it; a modifier that does not repeat leaves it.
+  // _holdKey marks the key held when the command comes, so a release that
+  // overtakes the press still stops it; _repeatKey starts the repeats.
   _holdKey(params) {
     const {type, key, repeat} = params;
     if (type === 'keyup') {
       if (this._heldKey?.key === key)
         this._heldKey = null;
-      return;
+      return null;
     }
     const os = kOsInput[this._identityOS()];
     if ((repeat && this._heldKey?.key === key) || (kModifierKeys.has(key) && !os.modifiersRepeat))
-      return;
-    const held = this._heldKey = { key };
+      return null;
+    return this._heldKey = { key };
+  }
+
+  _repeatKey(params, held) {
+    const os = kOsInput[this._identityOS()];
     const start = Date.now() + os.repeatDelayMs;
     const next = k => setTimeout(async () => {
       if (this._heldKey !== held)

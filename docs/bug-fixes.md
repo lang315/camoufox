@@ -13,6 +13,31 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #510: a quick key press typed its character twice when the page was slow to handle the keydown
+
+**Fixed by:** the PR that refs #510. **Found by:** `test_sign_in_and_shop[pkg-plain]` and `[pw-plain]` on Windows after the 4c909d69 sync (e2e run 44868302020): the form stayed on `/login`.
+
+**Symptom.**
+- A diagnostic probe on the same build typed `s33cret` for `s3cret` in 1 of 24 sign-ins: `diag/510-signin`, run 44874365221. That one was the first launch of the run.
+- On the main build, the same probe went 24 of 24 (run 44874367719).
+- On Linux, `driven-key-repeat` once counted 22 repeats of a key held 1100 ms, where 17 to 21 pass (Tests run 44873598829).
+
+**Root cause.** Key repeat came in with upstream's #1000. `PageHandler._holdKey` started the repeat timer when the keydown command arrived. `Page.dispatchKeyEvent` then awaited the dispatch. A client sends the keyup only after the keydown returns. When the page took longer than the OS's 500 ms delay to handle the keydown, the first repeat fired before the keyup could arrive. Main has no key repeat, so it never did this.
+
+**Fix.** `_holdKey` still marks the key held when the command comes, so a release that overtakes the press stops it. `_repeatKey` starts the delay once the keydown has been dispatched. A failed dispatch clears the held key, as the failed repeat did before.
+
+**Evidence.** `driven-key-repeat.py` has a new arm: `d` pressed once on a page whose keydown handler is busy for 700 ms. Measured on a macOS arm64 host with the build of `8d987e33`, its `omni.ja` as shipped and then with the fixed `PageHandler.js`, 4 runs per identity:
+
+| | `d` keydowns | first repeat (macOS identity) | repeats of `a` (Linux identity) |
+|---|---|---|---|
+| as shipped | 2, in 12 of 12 | 497.4 to 500.2 ms | 21, 21, 21, 22 |
+| fixed | 1, in 12 of 12 | 502.4 to 504.6 ms | 21, 21, 21, 21 |
+
+The first repeat now lands a return hop after the delay. One fixed run on a busy desktop read 524 ms, outside the guard's 17 ms. Before the fix, Tests run 44873598829 read 563 ms.
+
+**What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
+
+
 ## #510: six patch guards were red after the 4c909d69 upstream sync, one on every host and five off Linux
 
 **Fixed by:** the PR that refs #510. **Found by:** `Patch guards: automation` in Tests run 44862813445 (Linux), and `e2e.yml` `probe=patch_guard.py` run 44868304511 (Windows, build 44862862532).

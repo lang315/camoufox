@@ -11,9 +11,15 @@ stock 159.0 (private) and the defaults:
 Pressing another key moves the repeat to that key. A driven key held down
 sent one keydown however long it was held.
 
-The guard holds a letter, then Shift, then a letter and another over it, under
-each identity, and checks the repeat keydowns, their delay and interval, and
-the text the repeats type.
+A key pressed and released at once never repeats, however long the page takes
+to handle its keydown: the OS counts the delay from the press, and the release
+comes before it. Juggler counted it from the command, so a keydown handler busy
+for 700 ms got a repeat before the client could send the keyup (#510).
+
+The guard holds a letter, then Shift, then a letter and another over it, then
+presses a letter whose keydown keeps the page busy, under each identity, and
+checks the repeat keydowns, their delay and interval, and the text the repeats
+type.
 
     python browser/tests/playwright/patches/driven-key-repeat.py
 """
@@ -31,6 +37,8 @@ PAGE = """<!doctype html><html><body><input id="field"><script>
     addEventListener(type, (e) => {
       seen.push([type, e.key, e.repeat, e.timeStamp]);
       document.body.dataset.seen = JSON.stringify(seen);
+      if (type === 'keydown' && e.key === 'd')
+        for (const end = performance.now() + 700; performance.now() < end;);
     }, true);
 </script></body></html>"""
 # Delay and interval in ms, and whether a modifier repeats.
@@ -59,6 +67,7 @@ def probe(binary, os_name):
         page.wait_for_timeout(700)
         page.keyboard.up("b")
         page.keyboard.up("c")
+        page.keyboard.press("d")
         page.wait_for_timeout(100)
         return page.evaluate("() => JSON.parse(document.body.dataset.seen || '[]')"), page.input_value("#field")
 
@@ -94,9 +103,12 @@ def main() -> int:
         c_down = held(seen, "c")[0]
         if not b_repeats or any(t > c_down for t in b_repeats) or not held(seen, "c")[1]:
             failures.append(f"{os_name}: the repeat did not move from 'b' to 'c' when 'c' was pressed")
-        if any(k not in "abcShift" for k in flagged):
+        if held(seen, "d")[1]:
+            failures.append(f"{os_name}: 'd', pressed once on a page busy 700 ms in its keydown, "
+                            f"sent {1 + len(held(seen, 'd')[1])} keydowns")
+        if any(k not in "abcShiftd" for k in flagged):
             failures.append(f"{os_name}: repeats of keys not held: {set(flagged)}")
-        typed = "a" * (1 + len(repeats)) + "b" * (1 + len(b_repeats)) + "c" * len(held(seen, "c")[1] + [c_down])
+        typed = "a" * (1 + len(repeats)) + "b" * (1 + len(b_repeats)) + "c" * len(held(seen, "c")[1] + [c_down]) + "d"
         if value != typed:
             failures.append(f"{os_name}: the field holds {value!r}, the repeats typed {typed!r}")
     for failure in failures:

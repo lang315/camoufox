@@ -263,6 +263,13 @@ held driven key with the claimed OS's delay and interval, as keydowns with
 key stops it. A repeat the client sends for the held key is dispatched as sent
 and does not restart the browser's.
 
+The delay starts when the page has handled the keydown, not when the command
+arrives. A client sends the keyup only after the keydown returns, so a delay
+counted from the command fired a repeat whenever the page took longer than the
+delay to handle the press. A person's quick press on a busy page then typed its
+character twice (#510). The first repeat therefore lands a few ms after the
+delay: measured on a macOS host, 502 to 505 ms against 497 to 500 ms before.
+
 | OS | Delay | Interval | Modifiers |
 |---|---|---|---|
 | Windows | 500 ms | 31.25 ms | repeat |
