@@ -88,6 +88,8 @@ Tests run 44885320910 on `74b73ad0` passed every check, `driven-key-repeat` incl
 
 The guard that remains red on Windows, `bare-launch-host-fonts`, is a product finding, not a guard bug: #513.
 
+On the `74b73ad0` Windows build (e2e run 44899374299), `bare-launch-host-fonts` failed with a traceback instead: `UnicodeEncodeError: 'charmap' codec can't encode characters`, at its `print(f"FAIL: ...")`. A Windows runner's stdout is cp1252. A family such as `Heiti-간체` crashed the guard and lost its second FAIL line. `ci.run_patch_guards.guard_env` now runs every guard with `PYTHONIOENCODING=ascii:backslashreplace`. Escapes decode in any locale, whereas UTF-8 output could break the runner's own cp1252 decode. `test_a_guard_prints_a_non_ascii_font_name_on_a_cp1252_console` failed with that error without the setting, and passes with it.
+
 With the import fixed, `closed-page-released` still read the closed page alive after its 1 s GC window. That happened on Linux in Tests run 44873598829 and in e2e run 44876047156. It passed in Tests run 44878823241.
 
 On the same Linux build, `diag/510-signin` ran the guard 16 times: in process, as fresh subprocesses after `addons-install-once`, and inside the full group sequence. That is runs 44879124653, 44882603030, 44883152099 and 44883154410. Every time the page freed within 0.2 s.

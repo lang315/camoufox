@@ -3365,6 +3365,22 @@ def test_every_linux_only_guard_is_a_guard():
     assert LINUX_ONLY <= {g.stem for g in guards()}
 
 
+def test_a_guard_prints_a_non_ascii_font_name_on_a_cp1252_console(tmp_path):
+    """bare-launch-host-fonts crashed printing Heiti-간체 on a Windows runner (#510)."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from ci.run_patch_guards import guard_env
+
+    # A cp1252 console, as on a Windows runner; guard_env must override it.
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", **guard_env(Path("camoufox-bin"))}
+    proc = subprocess.run([sys.executable, "-c", "print('FAIL: Heiti-\\uac04\\uccb4')"],
+                          env=env, capture_output=True, text=True, errors="strict")
+    assert proc.returncode == 0, proc.stderr
+    assert "Heiti-\\uac04\\uccb4" in proc.stdout
+
+
 def test_every_name_a_guard_imports_from_helpers_exists():
     """An upstream sync can bring a guard that imports a helper the fork removed (own_address)."""
     import ast

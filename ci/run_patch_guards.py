@@ -225,6 +225,21 @@ def not_applicable_reason(stem: str, platform: str) -> Optional[str]:
     return NOT_ON.get(platform, {}).get(stem)
 
 
+def guard_env(binary: Path) -> Dict[str, str]:
+    """What a guard runs with, on top of this process's environment."""
+    return {
+        "CAMOUFOX_EXECUTABLE_PATH": str(binary),
+        # The guards drive the browser through the Python package, which resolves
+        # the binary from this variable rather than a packaged install.
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, [str(REPO_ROOT / "python" / "src"), os.environ.get("PYTHONPATH", "")])
+        ),
+        # A Windows runner's stdout is cp1252, so a guard that prints a font name
+        # like Heiti-간체 crashed before its FAIL lines; escapes read in any locale.
+        "PYTHONIOENCODING": "ascii:backslashreplace",
+    }
+
+
 def gate_name(group: Optional[str]) -> str:
     """patch_guards for the whole set, patch_guards_<group> for one group."""
     return f"patch_guards_{group}" if group else "patch_guards"
@@ -279,14 +294,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         result.finish(evidence.ERROR).save(args.evidence_dir)
         return 1
 
-    env = {
-        "CAMOUFOX_EXECUTABLE_PATH": str(binary),
-        # The guards drive the browser through the Python package, which resolves
-        # the binary from this variable rather than a packaged install.
-        "PYTHONPATH": os.pathsep.join(
-            filter(None, [str(REPO_ROOT / "python" / "src"), os.environ.get("PYTHONPATH", "")])
-        ),
-    }
+    env = guard_env(binary)
 
     selected = [
         g for g in guards()
