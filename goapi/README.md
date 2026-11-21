@@ -29,6 +29,7 @@ The package implements the launch path and Juggler RPC core:
 - `pkg/juggler` — pipe transport (FDs 3/4, `\0`-delimited JSON), dispatcher, sessions
 - `pkg/config` — full `CAMOU_CONFIG` schema (mirrors `browser/settings/properties.json`) and env-var chunking
 - `pkg/proxy` — proxy struct + IP/timezone resolution via `ip-api.com`
+- `pkg/myuri` — Go port of myuri's mouse, wheel and typing planners, run by `WithHumanize`
 - `pkg/fingerprint` — minimal Firefox fingerprint sampler (presets + font/voice subset)
 - `camoufox` — top-level public API: `Launch`, `Browser`, `BrowserContext`, `Page`
 
@@ -138,6 +139,44 @@ value cannot become a handle), a node that is not an element (a text node, a com
 document) is an error, and so is an element of an iframe's document, because a handle
 carries the main frame and `Click` would aim its frame-relative coordinates at the main
 page. `ElementHandle.Evaluate` decodes the value as `Page.Evaluate` does.
+
+## Humanized input
+
+The browser does not humanize input: each input call is one native event, and no `humanize*`
+config key reaches it. goapi humanizes in the driver, as the Python and TypeScript launchers do
+([`docs/humanize.md`](../docs/humanize.md)), with `pkg/myuri`, a Go port of
+[myuri](https://github.com/JWriter20/Myuri)'s smart actions: paths, clicks, typing and wheel turns as
+the people it was fitted to make them on the identity's OS, and the decisions around a click (scroll
+into view, the point, whether the press would land on the element, trying again when it does not).
+
+```go
+// myuri on every channel
+b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(bin), camoufox.WithHumanize(&camoufox.Humanize{}))
+
+// per channel, replayable: the same seed makes a page send the same calls
+seed := uint64(1234)
+camoufox.WithHumanize(&camoufox.Humanize{
+    Scroll: &camoufox.Engine{Name: "raw"}, // goapi's own calls; "myuri" is the default
+    Seed:   &seed,
+})
+```
+
+Without `WithHumanize` every channel is raw: goapi sends what it always has. An engine name other
+than `"myuri"` or `"raw"`, or a seed of 2^32 or more, makes `Launch` return an error. The OS myuri
+models is the identity's (`WithOS`, or the config's user agent).
+
+| Channel | Routed when it is myuri |
+|---|---|
+| `Mouse` | `Mouse.Move`, `Mouse.Click`, `Mouse.DblClick`, `Page.Click`, `ElementHandle.Click` and `Hover` |
+| `Keyboard` | `Keyboard.Type` and `Press`, `Page.Type`, `ElementHandle.Type` |
+| `Scroll` | `Mouse.Wheel`, `ElementHandle.ScrollIntoViewIfNeeded`, and the scroll into view before a click, hover or `Type` |
+
+`Keyboard.Type` ignores `WithDelay` and `Keyboard.Press` takes chords such as `Control+a` when
+myuri types: the pace is myuri's. `Mouse.Wheel` returns when its last notch has been sent. A click
+that misses its element is tried again for 30 s, then returns an error wrapping the reason.
+`ScrollTo`, `ScrollBy`, `ScrollToBottom`, `Mouse.Down` and `Up`, `Keyboard.Down` and `Up`, touch and
+drag are always goapi's own. Each page has its own stream and its own cursor; one page runs one
+humanized call at a time.
 
 ## Calling back into Go from the page
 

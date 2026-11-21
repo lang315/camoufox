@@ -170,8 +170,20 @@ func (p *Page) QuerySelectorAll(ctx context.Context, selector string) ([]*Elemen
 }
 
 // Click scrolls the element into view and dispatches a real mouse
-// click at its center.
+// click at its center. When myuri drives the mouse (WithHumanize) it scrolls
+// with the wheel, moves along a path to a point inside the element, checks
+// that the press would land on it, and presses.
 func (e *ElementHandle) Click(ctx context.Context) error {
+	if h := e.page.humanizer(); h != nil {
+		if h.mouse {
+			return h.pointAt(ctx, e, false)
+		}
+		if h.scroll {
+			if err := h.intoView(ctx, e); err != nil {
+				return err
+			}
+		}
+	}
 	res, err := e.page.callFunction(ctx, e.ctxID,
 		`function(el) {
 			el.scrollIntoView({block:'center', inline:'center'});
@@ -200,10 +212,20 @@ func (e *ElementHandle) Focus(ctx context.Context) error {
 	return err
 }
 
-// Type focuses the element then inserts text via Page.insertText.
+// Type focuses the element then inserts text via Page.insertText. When myuri
+// drives the keyboard (WithHumanize) the text is typed at a person's pace.
 func (e *ElementHandle) Type(ctx context.Context, text string) error {
+	h := e.page.humanizer()
+	if h != nil && h.scroll {
+		if err := h.intoView(ctx, e); err != nil {
+			return err
+		}
+	}
 	if err := e.Focus(ctx); err != nil {
 		return err
+	}
+	if h != nil && h.keyboard && text != "" {
+		return h.typeText(ctx, nil, text)
 	}
 	return e.page.session.Call(ctx, "Page.insertText", map[string]any{"text": text}, nil)
 }
@@ -345,7 +367,11 @@ func (e *ElementHandle) BoundingBox(ctx context.Context) (*Box, error) {
 }
 
 // ScrollIntoViewIfNeeded scrolls the element into the visible area if it is not already.
+// When myuri drives the scroll channel (WithHumanize) it scrolls with the wheel.
 func (e *ElementHandle) ScrollIntoViewIfNeeded(ctx context.Context) error {
+	if h := e.page.humanizer(); h != nil && h.scroll {
+		return h.intoView(ctx, e)
+	}
 	frameID := e.frameID
 	if frameID == "" {
 		frameID = e.page.MainFrameID()
@@ -357,8 +383,19 @@ func (e *ElementHandle) ScrollIntoViewIfNeeded(ctx context.Context) error {
 	return e.page.session.Call(ctx, "Page.scrollIntoViewIfNeeded", params, nil)
 }
 
-// Hover moves the mouse to the center of the element.
+// Hover moves the mouse to the center of the element. When myuri drives the
+// mouse (WithHumanize) it moves along a path to a point inside the element.
 func (e *ElementHandle) Hover(ctx context.Context) error {
+	if h := e.page.humanizer(); h != nil {
+		if h.mouse {
+			return h.pointAt(ctx, e, true)
+		}
+		if h.scroll {
+			if err := h.intoView(ctx, e); err != nil {
+				return err
+			}
+		}
+	}
 	box, err := e.BoundingBox(ctx)
 	if err != nil {
 		return fmt.Errorf("camoufox: Hover: %w", err)

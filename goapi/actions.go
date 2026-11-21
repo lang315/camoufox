@@ -13,7 +13,12 @@ import (
 // Click locates the first element matching the CSS selector and
 // synthesizes a real mouse click at its center. Falls back to
 // element.click() (DOM-level) if mouse coordinates can't be resolved.
+// When myuri drives the mouse or the scroll channel (WithHumanize) the click is
+// ElementHandle.Click's on the matching element.
 func (p *Page) Click(ctx context.Context, selector string) error {
+	if h := p.humanizer(); h != nil && (h.mouse || h.scroll) {
+		return p.withElement(ctx, "Click", selector, (*ElementHandle).Click)
+	}
 	frameID := p.MainFrameID()
 	if frameID == "" {
 		return errors.New("camoufox: Click: main frame not ready")
@@ -101,8 +106,12 @@ func (p *Page) Focus(ctx context.Context, selector string) error {
 
 // Type focuses the element matching selector then inserts text via
 // Page.insertText (one frame round-trip — fast but not keystroke-by-
-// keystroke).
+// keystroke). When myuri drives the keyboard or the scroll channel
+// (WithHumanize) it is ElementHandle.Type's on the matching element.
 func (p *Page) Type(ctx context.Context, selector, text string) error {
+	if h := p.humanizer(); h != nil && (h.keyboard || h.scroll) {
+		return p.withElement(ctx, "Type", selector, func(e *ElementHandle, ctx context.Context) error { return e.Type(ctx, text) })
+	}
 	if err := p.Focus(ctx, selector); err != nil {
 		return err
 	}
