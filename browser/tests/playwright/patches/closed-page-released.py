@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import Marionette, free_port, launch_kwargs, marionette_args, marionette_env, own_address  # noqa: E402
+from helpers import Marionette, free_port, launch_kwargs, marionette_args, marionette_env, default_route_ipv4  # noqa: E402
 
 SERVER = r"""
 const http2 = require('node:http2'), fs = require('node:fs');
@@ -56,7 +56,7 @@ return {target: !!p.target.deref(), network: !!p.network.deref()};
 def main() -> int:
     from camoufox.sync_api import Camoufox
 
-    host = own_address()
+    host = default_route_ipv4()
     tmp = Path(tempfile.mkdtemp())
     key, cert = tmp / "key.pem", tmp / "cert.pem"
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key),

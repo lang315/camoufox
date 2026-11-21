@@ -13,6 +13,27 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #510: six patch guards were red after the 4c909d69 upstream sync, one on every host and five off Linux
+
+**Fixed by:** the PR that refs #510. **Found by:** `Patch guards: automation` in Tests run 44862813445 (Linux), and `e2e.yml` `probe=patch_guard.py` run 44868304511 (Windows, build 44862862532).
+
+**Symptom.** `closed-page-released.py` failed on Linux and Windows with `ImportError: cannot import name 'own_address' from 'helpers'`. On Windows, `driven-click-count`, `driven-input-timestamp-grid`, `driven-key-repeat`, `driven-move-device-pixels` and `driven-right-click-order` failed with `fpgen.exceptions.RestrictiveConstraints: Cannot generate fingerprint: screen=(...)`.
+
+**Root cause.**
+- *The import.* The 2853a767 sync deleted upstream's STUN block from `helpers.py`, `own_address` included (`5b6e5313`). That sync moved its one caller to `default_route_ipv4`. Upstream's #1110 then added `closed-page-released.py`, which imports `own_address`. Both functions return the source address of a UDP socket connected to a public address.
+- *The five guards.* Each one launches a macOS identity sized to the host's display. Hosted Windows (1366x768) and macOS (1280x720) displays fit no recorded macOS screen, as `driven-wheel-notches-macos` already records. Upstream's runner reads `/proc`, so upstream runs these guards on Linux only.
+
+**Fix.** `closed-page-released.py` takes `default_route_ipv4`. The five guards are not applicable on `darwin` and `win32`, with the same reason as `driven-wheel-notches-macos` (`_DRAWS_MACOS` in `ci/run_patch_guards.py`). They still run on Linux, which draws every identity, all three OSes included.
+
+**Evidence.**
+- *Red to green.* `test_every_name_a_guard_imports_from_helpers_exists` failed against the merged guard with `{'closed-page-released.py: own_address'}`. It passes with the fix.
+- *Linux.* With the import error, the Linux automation group passed 26 of 27.
+
+**What misled.** Nothing checked that a guard's imports from `helpers` resolve, so the failure waited for a binary. The darwin half rests on the 1280x720 fact recorded for `driven-wheel-notches-macos`, not on a macOS run of these five guards.
+
+The guard that remains red on Windows, `bare-launch-host-fonts`, is a product finding, not a guard bug: #513.
+
+
 ## #480: a driven move right after `showPicker()` was dropped after the 5 s ack deadline
 
 **Fixed by:** the PR that refs #480. **Found by:** a diagnostic copy of `popup-covered-click.py` on #471 (never merged), runs 43895299280 and 43906858431, Linux headless.

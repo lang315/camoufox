@@ -3365,6 +3365,27 @@ def test_every_linux_only_guard_is_a_guard():
     assert LINUX_ONLY <= {g.stem for g in guards()}
 
 
+def test_every_name_a_guard_imports_from_helpers_exists():
+    """An upstream sync can bring a guard that imports a helper the fork removed (own_address)."""
+    import ast
+    from ci.run_patch_guards import GUARD_DIR, guards
+
+    helpers = ast.parse((GUARD_DIR / "helpers.py").read_text(encoding="utf-8"))
+    defined = set()
+    for n in helpers.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(n.name)
+        elif isinstance(n, ast.Assign):
+            defined |= {t.id for t in n.targets if isinstance(t, ast.Name)}
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            defined |= {(a.asname or a.name).split(".")[0] for a in n.names}
+    missing = {f"{g.name}: {a.name}" for g in guards()
+               for n in ast.walk(ast.parse(g.read_text(encoding="utf-8")))
+               if isinstance(n, ast.ImportFrom) and n.module == "helpers"
+               for a in n.names if a.name not in defined}
+    assert not missing
+
+
 def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_only(tmp_path, monkeypatch):
     from ci.run_patch_guards import NOT_ON, not_applicable_reason
 
