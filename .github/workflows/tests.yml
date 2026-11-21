@@ -349,9 +349,10 @@ jobs:
         # patch guard.
         run: python3 browser/tests/ucrt-math/check.py
 
-      - name: Juggler input delays
-        # HumanDelay (the paste and auto-Shift modifier timing) is a plain ES
-        # module, so it runs under Node without a browser build.
+      - name: Juggler input delays, routing and mouse dispatch
+        # HumanDelay (the paste and auto-Shift modifier timing), the event
+        # routing and MouseDispatch are plain ES modules, so they run under
+        # Node without a browser build.
         run: node --test browser/tests/juggler/*.test.mjs
 
       - name: CI pipeline self-tests

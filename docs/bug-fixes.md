@@ -563,6 +563,8 @@ A first version passed the screen predicate beside the display bound (`Screen.as
 
 **What misled.** Nothing; the failure message already named the cause. The trap is that the test depends on the pinned model: a model bump re-rolls the seeded sequence, and the test then fails deterministically at about 0.125% per bump, to be fixed by choosing another seed.
 
+**Since the 4c909d69 upstream sync.** The seeded mulberry32 test body was replaced by upstream's (#1094, daijro/camoufox#1099): `fingerprints.test.ts` now spies on `Generator.prototype.generate` and checks the OS predicate directly, with no random draws, so a model bump cannot re-roll it. The Python twin still raises `InvalidConstraints` for an OS list.
+
 ## #428: a launch crashed with `UnicodeEncodeError` when the browser did not know a config key
 
 **Fixed by:** the PR that fixes #428. **Found by:** reading the sync PR (#426): an unpinned launcher fetches a release whose `properties.json` lacks `voices:speechd`.

@@ -20,8 +20,8 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # rustup / cargo (all platforms)
 # ---------------------------------------------------------------------------
 install_rust() {
-  # The build needs rustup, not a toolchain: scripts/patch.py installs the Rust
-  # release Mozilla builds the tree with, so a distro rustc and cargo is not enough.
+  # The build needs rustup, not a toolchain: scripts/patch.py adds the std
+  # targets with rustup, so a distro rustc and cargo is not enough.
   if have rustup; then
     log "rustup already installed ($(rustup --version 2>/dev/null))"
   else
