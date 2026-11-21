@@ -37,6 +37,8 @@ type launchConfig struct {
 	geoIPTimeout time.Duration
 
 	addons []string
+
+	humanize *Humanize
 }
 
 // Option mutates a launchConfig. Pass to Launch.

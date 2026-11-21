@@ -86,7 +86,7 @@ func (p *Page) ScrollToBottom(ctx context.Context, opts ScrollToBottomOptions) e
 		delta := opts.StepDelta + jitter
 
 		// Use wheel events so the browser's scroll event pipeline fires normally.
-		if err := p.Mouse().Wheel(ctx, 1, 1, 0, delta); err != nil {
+		if err := p.Mouse().wheelRaw(ctx, 1, 1, 0, delta); err != nil {
 			return fmt.Errorf("camoufox: ScrollToBottom wheel: %w", err)
 		}
 

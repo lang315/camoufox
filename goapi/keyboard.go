@@ -90,18 +90,29 @@ func (k *Keyboard) Up(ctx context.Context, key string) error {
 	return nil
 }
 
-// Press sends keydown then keyup for the key.
+// Press sends keydown then keyup for the key. When myuri drives the keyboard
+// (WithHumanize) key may be a chord such as "Control+a", and the keys are held
+// as a person holds them.
 func (k *Keyboard) Press(ctx context.Context, key string) error {
+	if h := k.page.humanizer(); h != nil && h.keyboard {
+		return h.pressKey(ctx, k, key)
+	}
 	if err := k.Down(ctx, key); err != nil {
 		return err
 	}
 	return k.Up(ctx, key)
 }
 
-// Type inserts text. Fast path uses Page.insertText (one round-trip).
+// Type inserts text. When myuri drives the keyboard (WithHumanize) the text is
+// typed at a person's pace, mistakes and corrections included, and WithDelay is
+// ignored: the pace is myuri's to plan.
+// Fast path uses Page.insertText (one round-trip).
 // If Delay option is set, a character in the US layout is pressed as a key and any other
 // character (CJK, emoji) is inserted as text, as Playwright's Keyboard.type does.
 func (k *Keyboard) Type(ctx context.Context, text string, opts ...TypeOption) error {
+	if h := k.page.humanizer(); h != nil && h.keyboard && text != "" {
+		return h.typeText(ctx, k, text)
+	}
 	o := typeOpts{}
 	for _, fn := range opts {
 		fn(&o)

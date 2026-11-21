@@ -30,7 +30,6 @@ func main() {
 		Timezone:                     "Europe/London",
 		LocaleLanguage:               "en",
 		LocaleRegion:                 "GB",
-		Humanize:                     config.Bool(true),
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -41,6 +40,7 @@ func main() {
 		camoufox.WithConfig(cfg),
 		camoufox.WithNoFingerprint(),
 		camoufox.WithHeadless(true),
+		camoufox.WithHumanize(&camoufox.Humanize{}),
 	)
 	if err != nil {
 		log.Fatalf("launch: %v", err)

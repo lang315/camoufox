@@ -48,6 +48,8 @@ type Browser struct {
 	// pageAwaiters hands a NewPage the Page for the target Browser.newPage
 	// named, if its attach event has not been seen yet. Guarded by mu.
 	pageAwaiters map[string]chan *Page
+
+	humanize *humanizeSetup // nil: every input channel is goapi's own dispatch
 }
 
 // defaultOS stands in for WithOS when the caller gives none. Only export_test.go sets it, so a
@@ -65,6 +67,10 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	}
 	if lc.executablePath == "" {
 		return nil, errors.New("camoufox: WithExecutablePath is required")
+	}
+	hum, err := newHumanizeSetup(lc.humanize)
+	if err != nil {
+		return nil, err
 	}
 	// Launch prepends its own -profile and Firefox honors the FIRST
 	// occurrence, so a caller-supplied one here would be dropped without a
@@ -122,6 +128,12 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 	// after geo resolution + fingerprint so cfg reflects the final config.
 	seedUncoveredCanvas(cfg, lc.canvasPlaceholder, lc.rand)
 	emitLeakWarnings(os.Stderr, leakWarnings(cfg, lc.proxy != nil, lc.geoIPEnabled, coversCanvas(lc.canvasPlaceholder)))
+
+	if hum != nil {
+		if err := hum.useOS(uaOSDir(cfg.NavigatorUserAgent, config.HostOS())); err != nil {
+			return nil, err
+		}
+	}
 
 	envVars, err := cfg.EnvVars(config.HostOS())
 	if err != nil {
@@ -213,6 +225,7 @@ func Launch(ctx context.Context, opts ...Option) (*Browser, error) {
 		contexts:       make(map[string]*BrowserContext),
 		pages:          make(map[string]*Page),
 		pageAwaiters:   make(map[string]chan *Page),
+		humanize:       hum,
 	}
 	b.subscribeAttach()
 
