@@ -1,0 +1,45 @@
+myuri (Go port), in Camoufox's goapi
+====================================
+
+This package is a Go port of two TypeScript libraries, which it follows
+function by function so that one seed makes the same input as theirs:
+
+  - @jwriter20/myuri 4.0.0, https://github.com/JWriter20/Myuri
+    © Jake Writer, licensed under the GNU Lesser General Public License v3.0 or
+    later (LICENSE next to this file). The smart actions, the planners and the
+    timing models.
+
+  - cursory-js 2.1.0, https://github.com/JWriter20/cursory-js
+    A port of cursory (https://github.com/Vinyzu/cursory), © Vinyzu, dual-licensed
+    under LGPLv3-or-later and GPLv3-or-later. The port is © Jake Writer, LGPLv3-or-later.
+    The mouse trajectories.
+
+Camoufox as a whole is MPL-2.0. The files in this directory are not: they remain
+LGPLv3-or-later and are identified as such here, which is what section 4 of that
+licence asks of a work that combines them.
+
+Bundled data
+------------
+
+trajectories.json.gz is the recorded-trajectory database of cursory, as shipped by
+cursory-js 2.1.0, byte for byte. The recordings behind it are credited by the
+original author to:
+
+  - Margit Antal, Norbert Fejer and Krisztian Buza, for SapiMouse
+    (https://ieeexplore.ieee.org/document/9465583)
+  - MIMIC-LOGICS, for Mouse-Synthesizer
+    (https://github.com/MIMIC-LOGICS/Mouse-Synthesizer)
+
+Derived from numpy
+------------------
+
+To reproduce cursory's output for a given seed, cursory-js reimplements the parts of
+numpy that its results depend on, and this port follows it: the PCG64 bit generator
+and SeedSequence, the ziggurat normal sampler and its constant tables (ziggurat.go),
+Lemire's bounded-integer method, and pairwise summation. Those algorithms and the
+ziggurat tables come from numpy (https://github.com/numpy/numpy), © 2005-2025 NumPy
+Developers, BSD-3-Clause. numpy's PCG64 is itself © 2014 Melissa O'Neill and
+© 2015 Robert Kern, MIT licensed.
+
+hypot follows CPython's vector_norm (https://github.com/python/cpython), © 2001-2025
+Python Software Foundation, PSF License v2.
