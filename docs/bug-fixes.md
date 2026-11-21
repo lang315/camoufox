@@ -39,6 +39,15 @@ Rejected: widening the guard's 17 ms. Unfixed code had already read 563 ms (Test
 
 Those runs predate the stamping: one of them read 524 ms on a busy desktop.
 
+The stamped build is build.yml run 44885334358, head `74b73ad0`. It was measured on the same host, with every core spinning, against the shipped `8d987e33` build. That was 2 runs per identity, and 3 more for the stamped build at rest. Its readings were the same loaded and at rest:
+
+| | first repeat | gaps | `d` keydowns |
+|---|---|---|---|
+| `8d987e33`, loaded | macOS 558.96 and 500.6 ms; Linux 500.12 and 499.7 ms | macOS 26.58 to 84.76 ms; Linux 28.36 to 31.88 ms | 2 |
+| `74b73ad0` | 500.0 ms, every identity | Windows 31 and 32 ms (the tick grid, 31.25 on average); macOS 83.32 and 83.34 ms; Linux 30.0 ms | 1 |
+
+Tests run 44885320910 on `74b73ad0` passed every check, `driven-key-repeat` included.
+
 **What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
 
 **Inferred, not shown.** The journey's own failures are attributed to this fix by inference. The plain legs failed 3 of 4 in the first two Windows runs (44868302020, 44873395322). On the same unfixed binary they then passed 8 of 8 in four diag runs. The only doubled character on record is the probe's `s33cret`.
