@@ -41,3 +41,16 @@ def test_a_reply_outside_the_host_codepage_reaches_the_caller(monkeypatch, tmp_p
     monkeypatch.setattr(go.subprocess, "Popen", lambda argv, **kw: real_popen([sys.executable, str(echo)], **kw))
     monkeypatch.setattr(go, "build", lambda: echo)
     assert go.GoDriver(tmp_path).rpc("page.eval", "p1", js="1") == "\u201d"
+
+
+def test_a_humanize_dict_is_refused(tmp_path):
+    with pytest.raises(TypeError, match="humanize must be a bool"):
+        go.GoDriver(tmp_path).launch(humanize={"mouse": "raw"})
+
+
+def test_humanize_true_reaches_the_launch_call(monkeypatch, tmp_path):
+    d = go.GoDriver(tmp_path)
+    sent = []
+    monkeypatch.setattr(d, "rpc", lambda op, **kw: sent.append((op, kw)) or "b1")
+    d.launch(humanize=True)
+    assert sent[0][0] == "launch" and sent[0][1]["humanize"] is True

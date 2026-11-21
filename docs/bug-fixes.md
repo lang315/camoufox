@@ -813,6 +813,8 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 **Evidence.** With `/account`'s body held back for 2 s after its first 60 bytes (a local, uncommitted change to `e2e/web/server.py`), the old test fails 2 of 2 (`pw-plain`, `pw-humanize`) with the error above, and the fixed test passes 2 of 2. Without the delay the fixed test passes 4 of 4 (`pw` and `pkg` drivers). Release `v159.0-beta.35-fork.1`, macOS arm64.
 
 **What misled the investigation.** Nothing. The first local reproduction crashed in its own server change (`render()` already returns bytes) and produced the same error from a broken response, so it was discarded and repeated with a clean server.
+
+**Since the 4c909d69 upstream sync.** The `humanize` legs cited above then ran the browser's own humanization. Humanization now runs in the driver, and the `pw-humanize` leg attaches it by hand (`e2e/drivers/playwright_drivers.py`); the fix, a `readyState` wait, does not depend on either.
 ## #421: a release-asset 504 in pythonlib skipped the Linux build
 
 **Fixed by:** the PR that fixes #421. **Found by:** three `pythonlib` failures on 2026-11-09 (jobs 129007541532, 129008759434 and 129011278012).
