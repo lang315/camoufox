@@ -48,6 +48,13 @@ The stamped build is build.yml run 44885334358, head `74b73ad0`. It was measured
 
 Tests run 44885320910 on `74b73ad0` passed every check, `driven-key-repeat` included.
 
+At rest, the unstamped timing passed the guard too, so nothing would have caught the stamping if it broke. The guard now has an `e` arm: `e` held 1100 ms on a page whose keydown handler is busy for 700 ms. It was run on the same host with the `74b73ad0` build, once with its `omni.ja` as shipped and once with the `camouStampKeyRepeat` call removed from `PageAgent.js`. Each run covered all three identities:
+
+| `e` first repeat after its keydown | Windows | macOS | Linux | guard |
+|---|---|---|---|---|
+| call removed | 1203.0 ms | 1201.4 ms | 1201.4 ms | FAIL, exit 1 |
+| as shipped | 500.0 ms | 500.0 ms | 500.0 ms | PASS, exit 0 |
+
 **What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
 
 **Inferred, not shown.** The journey's own failures are attributed to this fix by inference. The plain legs failed 3 of 4 in the first two Windows runs (44868302020, 44873395322). On the same unfixed binary they then passed 8 of 8 in four diag runs. The only doubled character on record is the probe's `s33cret`.
