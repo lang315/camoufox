@@ -35,6 +35,9 @@ type Page struct {
 
 	bindMu sync.Mutex
 	bound  map[string]struct{} // names passed to addBinding; Juggler cannot unbind them
+
+	humOnce sync.Once
+	hum     *humanizer // see humanizer(); nil when no channel is myuri
 }
 
 // NewPage opens a fresh page in this context. It blocks until the

@@ -84,7 +84,6 @@ NON_NATIVE_SCRIPTS = frozenset(
         "browser/scripts/check-input-dispatch.py",
         "browser/scripts/data/contentaccessible-manifest-macos.json",
         "browser/scripts/data/contentaccessible-manifest-windows.json",
-        "browser/scripts/cursor-demo.py",
         "browser/scripts/gen-contentaccessible-manifest.py",
         "browser/scripts/gen-font-groups.py",
         "browser/scripts/gen-fonts-json.py",

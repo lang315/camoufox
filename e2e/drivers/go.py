@@ -75,12 +75,14 @@ class GoDriver:
 
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
                webrtc_ip=None, prefs=None, env=None, exclude_addons=None) -> "GoBrowser":  # goapi bundles no uBO: nothing to exclude
-        for opt, value in (("humanize", humanize), ("geoip", geoip), ("locale", locale), ("env", env)):
+        for opt, value in (("geoip", geoip), ("locale", locale), ("env", env)):
             if value:
                 pytest.skip(f"go: no {opt}")
+        if humanize is not None and not isinstance(humanize, bool):  # the RPC takes a flag; a per-channel dict must not become all-myuri
+            raise TypeError(f"go: humanize must be a bool, got {humanize!r}")
         if headless == "virtual":
             pytest.skip("go: no headless='virtual'")
-        h = self.rpc("launch", binary=str(self.binary), os=os or "", headless=headless, proxy=proxy, webrtc_ip=webrtc_ip or "", prefs=prefs or {})
+        h = self.rpc("launch", binary=str(self.binary), os=os or "", headless=headless, humanize=bool(humanize), proxy=proxy, webrtc_ip=webrtc_ip or "", prefs=prefs or {})
         b = GoBrowser(self, h)
         self.browsers.append(b)
         return b

@@ -102,7 +102,6 @@ const probes = new Map<string, Promise<Gpu | null>>();
  * ci/tribal-rules.yml).
  */
 export const HOST_GPU_PROBE_TIMEOUT_MS = 120_000;
-const HOST_GPU_CLOSE_TIMEOUT_MS = 1_000;
 
 function within<T>(
 	promise: Promise<T>,
@@ -224,11 +223,7 @@ async function readGpu(
 	} finally {
 		if (browser) {
 			try {
-				await within(
-					browser.close(),
-					HOST_GPU_CLOSE_TIMEOUT_MS,
-					`Host GPU probe browser.close timed out after ${HOST_GPU_CLOSE_TIMEOUT_MS} ms`,
-				);
+				await within(browser.close(), remaining(), timeoutMessage);
 			} catch (error) {
 				closeFailure = error;
 			}

@@ -79,14 +79,13 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
     ),
     "automation": (
         "addons-install-once",
+        "closed-page-released",
         "context-process-isolation",
         "debug-logging-off",
         "driver-stack-frames",
         "fonts-ready-driver",
         "force-scope-access",
-        "humanize-edge-deadlock",
-        "humanize-mouse-trajectory",
-        "humanize-pacing",
+        "humanize",
         "input-ack-backstop",
         "isolated-evaluate",
         "long-press-no-link-preview",
@@ -100,6 +99,7 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "pointer-lock-offscreen",
         "screenshot-canvas-release",
         "socks5-proxy-auth",
+        "tab-switch-budget",
         "trusted-events",
         "ubo-lists-frozen",
         "ubo-speculative-loading",
@@ -107,18 +107,21 @@ GROUPS: Dict[str, Tuple[str, ...]] = {
         "webdriver-bidi-tabs",
     ),
     "parity": (
+        "bare-launch-host-fonts",
         "certificate-revocations",
         "contentaccessible-parity",
         "css-device-size-fractional",
-        "driven-click-hold",
-        "driven-click-throughput",
-        "driven-dblclick-gap",
+        "driven-click-count",
         "driven-drag-gtk",
         "driven-evaluate-globals",
         "driven-fill-paste",
         "driven-global-order",
+        "driven-input-timestamp-grid",
+        "driven-key-repeat",
         "driven-move-coalescing",
+        "driven-move-device-pixels",
         "driven-page-real-focus",
+        "driven-right-click-order",
         "driven-wheel-notches",
         "driven-wheel-notches-macos",
         "enterprise-policies",
@@ -177,7 +180,8 @@ LINUX_ONLY = frozenset({
 # apart from the passes with the reason in the log. windows-keyboard compares a
 # Windows identity with Windows' keyboard, which a Windows host has natively, and
 # on a macOS host runs its caret arm alone (the rest is GTK); driven-wheel-notches-macos
-# needs a macOS identity, and a hosted Windows (1366x768) or macOS (1280x720) display fits none;
+# and the guards in _DRAWS_MACOS need a macOS identity, and a hosted Windows (1366x768) or
+# macOS (1280x720) display fits none (fpgen raises RestrictiveConstraints);
 # driven-move-coalescing needs moves that outrun a refresh tick (Juggler paces a driven move at 8 ms,
 # PageHandler.js kMoveIntervalMs): measured on hosted runners they land 8.0 ms apart on Linux and a tick apart on
 # Windows and macOS.
@@ -188,20 +192,26 @@ _PACED_AT_A_TICK = (
     "one pointermove each as well"
 )
 _COUNTED_FROM_PROC = "it counts web-content processes from /proc, which this platform does not have"
+_DRAWS_MACOS = ("driven-click-count", "driven-input-timestamp-grid", "driven-key-repeat",
+                "driven-move-device-pixels", "driven-right-click-order")
+_NO_MACOS_ON = {
+    "darwin": "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
+    "win32": "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
+}
 
 NOT_ON = {
     "darwin": {
         "system-font-alias-stall":
             "its count reads the host's font universe, and its ratio alone cannot go red on this host",
-        "driven-wheel-notches-macos":
-            "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
+        "driven-wheel-notches-macos": _NO_MACOS_ON["darwin"],
+        **dict.fromkeys(_DRAWS_MACOS, _NO_MACOS_ON["darwin"]),
         "driven-move-coalescing": _PACED_AT_A_TICK,
         "context-process-isolation": _COUNTED_FROM_PROC,
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
-        "driven-wheel-notches-macos":
-            "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
+        "driven-wheel-notches-macos": _NO_MACOS_ON["win32"],
+        **dict.fromkeys(_DRAWS_MACOS, _NO_MACOS_ON["win32"]),
         "driven-move-coalescing": _PACED_AT_A_TICK,
         "context-process-isolation": _COUNTED_FROM_PROC,
     },
@@ -213,6 +223,21 @@ def not_applicable_reason(stem: str, platform: str) -> Optional[str]:
     if stem in LINUX_ONLY and not platform.startswith("linux"):
         return "it is Linux-only by subject"
     return NOT_ON.get(platform, {}).get(stem)
+
+
+def guard_env(binary: Path) -> Dict[str, str]:
+    """What a guard runs with, on top of this process's environment."""
+    return {
+        "CAMOUFOX_EXECUTABLE_PATH": str(binary),
+        # The guards drive the browser through the Python package, which resolves
+        # the binary from this variable rather than a packaged install.
+        "PYTHONPATH": os.pathsep.join(
+            filter(None, [str(REPO_ROOT / "python" / "src"), os.environ.get("PYTHONPATH", "")])
+        ),
+        # A Windows runner's stdout is cp1252, so a guard that prints a font name
+        # like Heiti-간체 crashed before its FAIL lines; escapes read in any locale.
+        "PYTHONIOENCODING": "ascii:backslashreplace",
+    }
 
 
 def gate_name(group: Optional[str]) -> str:
@@ -269,14 +294,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         result.finish(evidence.ERROR).save(args.evidence_dir)
         return 1
 
-    env = {
-        "CAMOUFOX_EXECUTABLE_PATH": str(binary),
-        # The guards drive the browser through the Python package, which resolves
-        # the binary from this variable rather than a packaged install.
-        "PYTHONPATH": os.pathsep.join(
-            filter(None, [str(REPO_ROOT / "python" / "src"), os.environ.get("PYTHONPATH", "")])
-        ),
-    }
+    env = guard_env(binary)
 
     selected = [
         g for g in guards()

@@ -24,6 +24,9 @@ Written by daijro.
 #include <cstring>
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cmath>
+#include "mozilla/TimeStamp.h"
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -499,6 +502,59 @@ inline SpoofedOS GetSpoofedOS() {
     return platform ? SpoofedOSFor(*platform) : SpoofedOS::None;
   }();
   return os;
+}
+
+// The time a driven input event carries. Windows stamps input with its tick
+// count (GetMessageTime): whole milliseconds that advance 15.625 ms at a time.
+// The tick is read off steady_clock, which every process shares, through an
+// anchor taken once, so gaps between one process's events are exact. aAt is
+// when the event happened: now, unless it is a key repeat the OS made earlier.
+inline mozilla::TimeStamp InputTimeStamp(
+    mozilla::TimeStamp aAt = mozilla::TimeStamp::Now()) {
+  if (GetSpoofedOS() != SpoofedOS::Windows) return aAt;
+  static const auto anchor = std::pair{
+      mozilla::TimeStamp::Now(),
+      std::chrono::duration<double, std::milli>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count()};
+  const double ms = anchor.second + (aAt - anchor.first).ToMilliseconds();
+  const double tick = std::floor(std::floor(ms / 15.625) * 15.625);
+  return aAt - mozilla::TimeDuration::FromMilliseconds(ms - tick);
+}
+
+// The offset Juggler sets just before it dispatches a key repeat it made
+// (ChromeUtils.camouStampKeyRepeat): the repeat comes that many ms after its
+// key's keydown. Main thread only, like the TextInputProcessor that reads it.
+inline std::optional<double>& PendingKeyRepeatMs() {
+  static std::optional<double> pending;
+  return pending;
+}
+
+// A key event's stamp. The OS makes a held key's repeats on its own clock, so
+// a repeat the browser makes is stamped when the OS would have made it, its
+// key's keydown plus the offset, however late the browser's timer fired, on
+// the tick grid when that is the OS's. Any other key event is stamped as
+// InputTimeStamp() stamps input.
+inline mozilla::TimeStamp KeyTimeStamp(uint32_t aCode, bool aKeyDown, bool aRepeat) {
+  // Kept before the tick floor, so a repeat lands a whole number of ticks
+  // after its keydown.
+  static std::unordered_map<uint32_t, mozilla::TimeStamp> keyDowns;
+  static mozilla::TimeStamp last;
+  const auto after = std::exchange(PendingKeyRepeatMs(), std::nullopt);
+  const auto now = mozilla::TimeStamp::Now();
+  auto at = now;
+  if (aKeyDown && aRepeat && after) {
+    if (const auto it = keyDowns.find(aCode); it != keyDowns.end()) {
+      const auto made = it->second + mozilla::TimeDuration::FromMilliseconds(*after);
+      // An OS delivers key events in the order it stamped them, so a repeat
+      // that would land after now or before an event already stamped is now.
+      if (made <= now && (last.IsNull() || made >= last)) at = made;
+    }
+  }
+  if (aKeyDown && !aRepeat) keyDowns[aCode] = now;
+  if (!aKeyDown) keyDowns.erase(aCode);
+  last = at;
+  return InputTimeStamp(at);
 }
 
 // The ephemeral port range of an OS, which is where its kernel puts a socket

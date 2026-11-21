@@ -13,6 +13,90 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #510: a quick key press typed its character twice when the page was slow to handle the keydown
+
+**Fixed by:** the PR that refs #510. **Found by:** `test_sign_in_and_shop[pkg-plain]` and `[pw-plain]` on Windows after the 4c909d69 sync (e2e run 44868302020): the form stayed on `/login`.
+
+**Symptom.**
+- A diagnostic probe on the same build typed `s33cret` for `s3cret` in 1 of 24 sign-ins: `diag/510-signin`, run 44874365221. That one was the first launch of the run.
+- On the main build, the same probe went 24 of 24 (run 44874367719).
+- On Linux, `driven-key-repeat` once counted 22 repeats of a key held 1100 ms, where 17 to 21 pass (Tests run 44873598829).
+
+**Root cause.** Key repeat came in with upstream's #1000. `PageHandler._holdKey` started the repeat timer when the keydown command arrived. `Page.dispatchKeyEvent` then awaited the dispatch. A client sends the keyup only after the keydown returns. When the page took longer than the OS's 500 ms delay to handle the keydown, the first repeat fired before the keyup could arrive. Main has no key repeat, so it never did this.
+
+**Fix.** `_holdKey` still marks the key held when the command comes, so a release that overtakes the press stops it. `_repeatKey` starts the delay once the keydown has been dispatched. A failed dispatch clears the held key, as the failed repeat did before.
+
+That alone made the timing worse. The first repeat landed a return hop after the delay, plus whatever the timer lost on a loaded runner. `driven-key-repeat` read 547 ms on a Windows identity (Tests run 44878823241), against 500 ± 17. Each repeat is now stamped when the OS would have made it: its key's keydown plus the delay and the intervals. Juggler passes the offset to `ChromeUtils.camouStampKeyRepeat`. `MaskConfig::KeyTimeStamp` keeps the keydown's time per physical key and puts the sum on the Windows tick grid (`input-timestamp-tick.patch`). The timer's lateness then delays a repeat without moving its stamp, as an OS's queue does. An OS's queue also delivers in stamp order, so a repeat whose time would come after now, or before a key event already stamped, is stamped when it is dispatched, and a key's keydown time is dropped at its keyup. A review found the unbounded first version could stamp in the future: the map is per content process, so another page's press of the same key moved the time a held key's repeats count from.
+
+Rejected: widening the guard's 17 ms. Unfixed code had already read 563 ms (Tests run 44873598829), so the arm measured the runner's load, not the browser.
+
+**Evidence.** `driven-key-repeat.py` has a new arm: `d` pressed once on a page whose keydown handler is busy for 700 ms. Measured on a macOS arm64 host with the build of `8d987e33`, its `omni.ja` as shipped and then with the fixed `PageHandler.js`, 4 runs per identity:
+
+| | `d` keydowns | first repeat (macOS identity) | repeats of `a` (Linux identity) |
+|---|---|---|---|
+| as shipped | 2, in 12 of 12 | 497.4 to 500.2 ms | 21, 21, 21, 22 |
+| fixed | 1, in 12 of 12 | 502.4 to 504.6 ms | 21, 21, 21, 21 |
+
+Those runs predate the stamping: one of them read 524 ms on a busy desktop.
+
+The stamped build is build.yml run 44885334358, head `74b73ad0`. It was measured on the same host, with every core spinning, against the shipped `8d987e33` build. That was 2 runs per identity, and 3 more for the stamped build at rest. Its readings were the same loaded and at rest:
+
+| | first repeat | gaps | `d` keydowns |
+|---|---|---|---|
+| `8d987e33`, loaded | macOS 558.96 and 500.6 ms; Linux 500.12 and 499.7 ms | macOS 26.58 to 84.76 ms; Linux 28.36 to 31.88 ms | 2 |
+| `74b73ad0` | 500.0 ms, every identity | Windows 31 and 32 ms (the tick grid, 31.25 on average); macOS 83.32 and 83.34 ms; Linux 30.0 ms | 1 |
+
+Tests run 44885320910 on `74b73ad0` passed every check, `driven-key-repeat` included.
+
+**What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
+
+**Inferred, not shown.** The journey's own failures are attributed to this fix by inference. The plain legs failed 3 of 4 in the first two Windows runs (44868302020, 44873395322). On the same unfixed binary they then passed 8 of 8 in four diag runs. The only doubled character on record is the probe's `s33cret`.
+
+
+## #510: `test_sign_in_and_shop[go-humanize]` read the menu closed after a hover
+
+**Fixed by:** the PR that refs #510. **Found by:** `diag/510-signin` run 44877489341 (Windows): `failed: hover opened the menu`.
+
+**Root cause.** The sign-in click leaves the pointer on `#go`, at `y` 8 to 30. On `/shop`, `#menu` spans `y` 8 to 42, so the pointer is already over it. myuri's click chooses the pointer's own point when it is inside the box (`point`, `attempt == 0`). Its `move` then returns without sending anything (`placed && cursor == end`). The Python and Go ports both do this. The `mouseenter` comes instead from Gecko, which sends one to a new page under a resting pointer. It can arrive after `goto` returns, and the journey checked the menu at once.
+
+**Fix.** The journey waits up to 5 s for the menu before it checks.
+
+**Evidence.**
+- The diag runs printed the two boxes and whether the menu was open before the hover. They were 44882605471 and 44882608054, and every humanized leg was open before the hover. Their extra round trips had given Gecko time.
+- On a macOS host, after a raw move onto a top nav and a `goto`, Gecko's `mouseenter` came 0 to 7 ms after the page's script ran, in 6 of 6 tries.
+
+**What misled.** That macOS measurement first read as ruling the race out. It went through Playwright's `goto`, which waits for `load`, so it showed the premise of the race rather than its absence.
+
+
+## #510: six patch guards were red after the 4c909d69 upstream sync, one on every host and five off Linux
+
+**Fixed by:** the PR that refs #510. **Found by:** `Patch guards: automation` in Tests run 44862813445 (Linux), and `e2e.yml` `probe=patch_guard.py` run 44868304511 (Windows, build 44862862532).
+
+**Symptom.** `closed-page-released.py` failed on Linux and Windows with `ImportError: cannot import name 'own_address' from 'helpers'`. On Windows, `driven-click-count`, `driven-input-timestamp-grid`, `driven-key-repeat`, `driven-move-device-pixels` and `driven-right-click-order` failed with `fpgen.exceptions.RestrictiveConstraints: Cannot generate fingerprint: screen=(...)`.
+
+**Root cause.**
+- *The import.* The 2853a767 sync deleted upstream's STUN block from `helpers.py`, `own_address` included (`5b6e5313`). That sync moved its one caller to `default_route_ipv4`. Upstream's #1110 then added `closed-page-released.py`, which imports `own_address`. Both functions return the source address of a UDP socket connected to a public address.
+- *The five guards.* Each one launches a macOS identity sized to the host's display. Hosted Windows (1366x768) and macOS (1280x720) displays fit no recorded macOS screen, as `driven-wheel-notches-macos` already records. Upstream's runner reads `/proc`, so upstream runs these guards on Linux only.
+
+**Fix.** `closed-page-released.py` takes `default_route_ipv4`. The five guards are not applicable on `darwin` and `win32`, with the same reason as `driven-wheel-notches-macos` (`_DRAWS_MACOS` in `ci/run_patch_guards.py`). They still run on Linux, which draws every identity, all three OSes included.
+
+**Evidence.**
+- *Red to green.* `test_every_name_a_guard_imports_from_helpers_exists` failed against the merged guard with `{'closed-page-released.py: own_address'}`. It passes with the fix.
+- *Linux.* With the import error, the Linux automation group passed 26 of 27.
+
+**What misled.** Nothing checked that a guard's imports from `helpers` resolve, so the failure waited for a binary. The darwin half rests on the 1280x720 fact recorded for `driven-wheel-notches-macos`, not on a macOS run of these five guards.
+
+The guard that remains red on Windows, `bare-launch-host-fonts`, is a product finding, not a guard bug: #513.
+
+On the `74b73ad0` Windows build (e2e run 44899374299), `bare-launch-host-fonts` failed with a traceback instead: `UnicodeEncodeError: 'charmap' codec can't encode characters`, at its `print(f"FAIL: ...")`. A Windows runner's stdout is cp1252. A family such as `Heiti-간체` crashed the guard and lost its second FAIL line. `ci.run_patch_guards.guard_env` now runs every guard with `PYTHONIOENCODING=ascii:backslashreplace`. Escapes decode in any locale, whereas UTF-8 output could break the runner's own cp1252 decode. `test_a_guard_prints_a_non_ascii_font_name_on_a_cp1252_console` failed with that error without the setting, and passes with it.
+
+With the import fixed, `closed-page-released` still read the closed page alive after its 1 s GC window. That happened on Linux in Tests run 44873598829 and in e2e run 44876047156. It passed in Tests run 44878823241.
+
+On the same Linux build, `diag/510-signin` ran the guard 16 times: in process, as fresh subprocesses after `addons-install-once`, and inside the full group sequence. That is runs 44879124653, 44882603030, 44883152099 and 44883154410. Every time the page freed within 0.2 s.
+
+The guard now collects for up to 10 s and prints how long it took. The leak it guards keeps a page for as long as its connections stay open, and they stay open past the deadline. A red therefore still means a retained page. Why the two reds kept the page past 1 s is not known.
+
+
 ## #480: a driven move right after `showPicker()` was dropped after the 5 s ack deadline
 
 **Fixed by:** the PR that refs #480. **Found by:** a diagnostic copy of `popup-covered-click.py` on #471 (never merged), runs 43895299280 and 43906858431, Linux headless.
@@ -226,6 +310,8 @@ The cap sits far under the worst caller. A source that never lands inside its bo
 
 **What misled the investigation.** The earlier arithmetic counted only the 240 ms ceiling (9.6%) and not the floor (7.1%) of `hoverDwell`, and the clamp had kept every cited median exactly, which made it look harmless; a truncation does not.
 
+**Since the 4c909d69 upstream sync.** Upstream removed the click hold, double-click gap and hover dwell, and `logNormalDelay` with them (daijro/camoufox#1000). The redraw stays on `normalDelay`, whose key and modifier callers remain; `keyInterval` would put 7.8% of its draws on its 80 ms floor under a clamp. `delay.test.mjs` keeps the per-caller check for those callers.
+
 ## #472: a humanized edge exit came 19-28 ms after the last mousemove, not one sample after it
 
 **Symptom.** `humanize-mouse-trajectory.py`'s edge-exit arms, default prefs included, now and then flagged an exit placed as stock places it (last move on the edge or 2 px inside, exit 1-3 px past) but 21-53 ms after the last mousemove. That is over the guard's one-frame bound. Hosted macOS job 132694087736 (fork.3): `[[(1686, 0), (1686, -3), 24], [(53, 0), (53, -3), 24]]`.
@@ -248,6 +334,8 @@ Rejected: dropping the ack, which is the deadlock bound (`docs/input-dispatch.md
 **Evidence.** `browser/tests/juggler/edge-exit.test.mjs` drives `sendTrajectoryAcked` with acks the test releases. It covers an edge step, and a crossing with an interpolated `last` point. Before the fix both fail: the exit is not dispatched until the ack is released. After it both pass, and they also pin that nothing follows the exit until that ack resolves.
 
 **What misled.** The issue first blamed `send()` skipping `_crossing`'s `last` point. The instrumented runs showed it was never skipped, in 39 crossings where it could have been.
+
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (`sendTrajectoryAcked`, `_crossing`, `leaveContent`). `edge-exit.test.mjs` went with it.
 
 ## #469: `popup-covered-click` took the date picker's rect before it had its real one
 
@@ -288,6 +376,8 @@ A reading, not a finding: the X11 popup window exists before it is sized and pla
 
 **What misled.** The guard's 250 read as a stock-derived limit on the product, and the #419 note ("if the tail ever shows without uBO, the ceiling's design is the next question") pointed at the timer, not at the 10 ms between the clamp and the ceiling.
 
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (the hover dwell and double-click gap). `driven-dblclick-gap.py` and `click-pacing.test.mjs` went with it.
+
 ## #451: at 105% text scale a move to the content's edge row stalled 5 s and reached the page as a mouseout
 
 **Symptom.** The `ui.textScaleFactor: 105` arm of `humanize-mouse-trajectory.py`, added by the upstream sync (df9ca115), failed on Windows (job 132037002566) and on macOS (job 132330070472). Every flagged exit was at `y = 0`, 12-67 ms after the last mousemove. The default-prefs arm passed, and so did Linux.
@@ -311,6 +401,8 @@ Why the arm passed on Linux and at the default prefs: the chrome's scale is the 
 - `humanize-mouse-trajectory.py`: the 105% arm's `y = 0` exits appeared in 4 of 4 runs before, and in none of 2 completed runs after. Its remaining failures, on both builds and at the default prefs too, are exits placed correctly but more than a frame after the last mousemove. That is #472, a separate mechanism.
 
 **What misled.** The guard printed each flagged mouseout beside the last mousemove before it, so a failed re-entry read as an exit placed a pixel short and a frame late. The probe's `over` timestamps, 5 s after each "exit", and Juggler's own `WARN` lines showed the 5 s waits. `mouse-boundary-sweep.py` exists for this class, but it swept only the default prefs. Its humanized arms count any mousemove, so they could not see a dropped destination.
+
+**Since the 4c909d69 upstream sync.** `_isShown` and `leaveContent` went with upstream's removal of the in-browser trajectory (daijro/camoufox#1000). The device-pixel snap in `MouseDispatch._measured` stays, since every `Page.dispatchMouseEvent` still converts through it, and so does the 105% arm of `mouse-boundary-sweep.py`.
 
 ## #469: `popup-covered-click` moved to a point the date picker did not cover, and read a dropped move as a covered one
 
@@ -463,7 +555,7 @@ A first version passed the screen predicate beside the display bound (`Screen.as
 - `startup-size-frame-extents` is in `LINUX_ONLY`.
 - `context-process-isolation` is in `NOT_ON` for Windows and macOS, with the `/proc` reason. #450 is the port to psutil that would measure it there.
 
-**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one. `test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere` pins the arch arm: run on Linux, not applicable on Windows and macOS. On the same Windows build:
+**Evidence.** Red then green: `test_cpu_vendor_guard_reads_the_host_vendor_off_linux` in `ci/tests/test_ci.py` failed 3 of 3 on the old guard and passes on the new one. `test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere` pins the arch arm: run on Linux, not applicable on Windows and macOS. (Since daijro/camoufox#1033 the sampler draws llvmpipe beside ARM, so the arm runs on every host; the test is now `test_cpu_vendor_guard_arch_arm_runs_on_every_host`.) On the same Windows build:
 - **Red:** probe run 43469379888 (job 132037002566). All three guards fail.
 - **Partial:** run 43481814285 (job 132079996522). `startup-size-frame-extents` and `context-process-isolation` are reported not applicable with their reasons. `cpu-vendor-estimates` matches stock for Intel and AMD, then stops at the arch arm.
 - **Green:** run 43492226035 (job 132116145127, head 3fa4515a). `✓ cpu-vendor-estimates.py`, spoofing 32/32.
@@ -555,6 +647,8 @@ A first version passed the screen predicate beside the display bound (`Screen.as
 
 **What misled.** Nothing; the failure message already named the cause. The trap is that the test depends on the pinned model: a model bump re-rolls the seeded sequence, and the test then fails deterministically at about 0.125% per bump, to be fixed by choosing another seed.
 
+**Since the 4c909d69 upstream sync.** The seeded mulberry32 test body was replaced by upstream's (#1094, daijro/camoufox#1099): `fingerprints.test.ts` now spies on `Generator.prototype.generate` and checks the OS predicate directly, with no random draws, so a model bump cannot re-roll it. The Python twin still raises `InvalidConstraints` for an OS list.
+
 ## #428: a launch crashed with `UnicodeEncodeError` when the browser did not know a config key
 
 **Fixed by:** the PR that fixes #428. **Found by:** reading the sync PR (#426): an unpinned launcher fetches a release whose `properties.json` lacks `voices:speechd`.
@@ -612,6 +706,8 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 **Fix.** The guard launches without uBlock Origin (`exclude_addons`), as `navigation-preconnect-proxied` does, and says so in its docstring with the numbers and what is not proven. The 50 to 250 ms window is unchanged: the old code's late ack (+225 ms) was a product defect that the ceiling caught (the entry above).
 
 **Evidence.** The guard without uBO: 20 of 20 on the fixed Juggler (diag-77); with uBO 8 of 10 (diag-75). If the tail ever shows without uBO, the ceiling's design is the next question.
+
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (the double-click gap), and `driven-dblclick-gap.py`.
 
 ## #419: `identity-golden` "reproduces 800 voice lists" timed out on a hosted runner
 
@@ -680,6 +776,8 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 **Evidence.** Dwell forced to 60, 150 and 240, orders L M L and L L L L, 10 launches per cell (diag-75, run 42950463501): every warm cell reads 0 to 2 ms over the dwell and nothing reads under it (before: -9 to -11). The first-double-click tail that remains is the parent's `setTimeout` firing 70 to 210 ms late (p3 minus the arrival stamp 220 to 285 ms for a 150 ms wait, the wait itself computed correctly) in some runs and not in others (present in diag-63, 70, 71, 75, absent in 66, 72, 77); the old and the fixed code overshoot identically (diag-77, run 42953609503: median -1 ms, max 0, 0 of 80 samples above 50). `driven-dblclick-gap` launches without uBlock Origin for that reason (below).
 
 **What misled the investigation.** `_moveDelivered` looked like the delivery time and was not: it runs when the next command asks for it, so its stamp was the press's arrival. `beforeDispatch`'s comment says the page has seen the move before any other command runs, which is false for a press sent behind a move. A diag that added page-side `mousemove` recording moved timing enough to hide the offset (diag-66).
+
+**Since the 4c909d69 upstream sync.** Upstream removed humanization from the browser (daijro/camoufox#1000), and with it the code this entry fixed (`_clickPacing`), along with `EventWatcher.receivedAt` and the queued move's `arrivedAt`, which only it read.
 
 ## #419: five patch guards were red on a hosted Windows runner after the upstream sync, for five different reasons
 
@@ -799,6 +897,9 @@ After the fix, Tests run 43031439753 (head d116e21a, attempt 4; attempts 1 to 3 
 **Evidence.** With `/account`'s body held back for 2 s after its first 60 bytes (a local, uncommitted change to `e2e/web/server.py`), the old test fails 2 of 2 (`pw-plain`, `pw-humanize`) with the error above, and the fixed test passes 2 of 2. Without the delay the fixed test passes 4 of 4 (`pw` and `pkg` drivers). Release `v159.0-beta.35-fork.1`, macOS arm64.
 
 **What misled the investigation.** Nothing. The first local reproduction crashed in its own server change (`render()` already returns bytes) and produced the same error from a broken response, so it was discarded and repeated with a clean server.
+
+**Since the 4c909d69 upstream sync.** The `humanize` legs cited above then ran the browser's own humanization. Humanization now runs in the driver, and the `pw-humanize` leg attaches it by hand (`e2e/drivers/playwright_drivers.py`); the fix, a `readyState` wait, does not depend on either.
+
 ## #421: a release-asset 504 in pythonlib skipped the Linux build
 
 **Fixed by:** the PR that fixes #421. **Found by:** three `pythonlib` failures on 2026-11-09 (jobs 129007541532, 129008759434 and 129011278012).

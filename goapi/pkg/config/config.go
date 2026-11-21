@@ -121,11 +121,8 @@ type Config struct {
 	LocaleScript         string   `json:"locale:script,omitempty"`
 	LocaleAll            string   `json:"locale:all,omitempty"`
 
-	// humanize / cursor
-	Humanize        *bool    `json:"humanize,omitempty"`
-	HumanizeMaxTime *float64 `json:"humanize:maxTime,omitempty"`
-	HumanizeMinTime *float64 `json:"humanize:minTime,omitempty"`
-	ShowCursor      *bool    `json:"showcursor,omitempty"`
+	// cursor
+	ShowCursor *bool `json:"showcursor,omitempty"`
 
 	// AudioContext:*
 	AudioContextSampleRate      *uint32  `json:"AudioContext:sampleRate,omitempty"`

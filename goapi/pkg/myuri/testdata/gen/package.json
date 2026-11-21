@@ -1,0 +1,9 @@
+{
+  "name": "myuri-golden-gen",
+  "private": true,
+  "type": "module",
+  "description": "Records the host calls of @jwriter20/myuri for the Go port's golden tests. Run: npm ci && node gen.mjs",
+  "dependencies": {
+    "@jwriter20/myuri": "4.0.0"
+  }
+}

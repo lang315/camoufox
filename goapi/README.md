@@ -29,6 +29,7 @@ The package implements the launch path and Juggler RPC core:
 - `pkg/juggler` — pipe transport (FDs 3/4, `\0`-delimited JSON), dispatcher, sessions
 - `pkg/config` — full `CAMOU_CONFIG` schema (mirrors `browser/settings/properties.json`) and env-var chunking
 - `pkg/proxy` — proxy struct + IP/timezone resolution via `ip-api.com`
+- `pkg/myuri` — Go port of myuri's mouse, wheel and typing planners, run by `WithHumanize`
 - `pkg/fingerprint` — minimal Firefox fingerprint sampler (presets + font/voice subset)
 - `camoufox` — top-level public API: `Launch`, `Browser`, `BrowserContext`, `Page`
 
@@ -138,6 +139,63 @@ value cannot become a handle), a node that is not an element (a text node, a com
 document) is an error, and so is an element of an iframe's document, because a handle
 carries the main frame and `Click` would aim its frame-relative coordinates at the main
 page. `ElementHandle.Evaluate` decodes the value as `Page.Evaluate` does.
+
+## Humanized input
+
+The browser does not humanize input: each input call is one native event, and no `humanize*`
+config key reaches it. goapi humanizes in the driver, as the Python and TypeScript launchers do
+([`docs/humanize.md`](../docs/humanize.md)), with `pkg/myuri`, a Go port of
+[myuri](https://github.com/JWriter20/Myuri)'s smart actions: paths, clicks, typing and wheel turns as
+the people it was fitted to make them on the identity's OS, and the decisions around a click (scroll
+into view, the point, whether the press would land on the element, trying again when it does not).
+
+```go
+// myuri on every channel
+b, err := camoufox.Launch(ctx, camoufox.WithExecutablePath(bin), camoufox.WithHumanize(&camoufox.Humanize{}))
+
+// per channel, replayable: the same seed makes a launch send the same calls
+seed := uint64(1234)
+camoufox.WithHumanize(&camoufox.Humanize{
+    Keyboard: &camoufox.Engine{Name: "myuri", WPM: 70},
+    Scroll:   &camoufox.Engine{Name: "raw"}, // goapi's own calls; "myuri" is the default
+    Seed:     &seed,
+})
+```
+
+Without `WithHumanize` every channel is raw: goapi sends what it always has. An engine name other
+than `"myuri"` (or its alias `"cursory"`) or `"raw"`, a `WPM` anywhere but on a myuri keyboard, or a
+seed of 2^32 or more, makes `Launch` return an error. The OS myuri
+models is the identity's (`WithOS`, or the config's user agent).
+
+| Channel | Routed when it is myuri |
+|---|---|
+| `Mouse` | `Mouse.Move`, `Mouse.Click`, `Mouse.DblClick`, `Page.MouseClick`, `Page.Click`, `ElementHandle.Click` and `Hover` |
+| `Keyboard` | `Keyboard.Type` and `Press`, `Page.Type`, `ElementHandle.Type` |
+| `Scroll` | `Mouse.Wheel`, `ElementHandle.ScrollIntoViewIfNeeded`, and the scroll into view before a click, hover or `Type` |
+
+`Keyboard.Type` ignores `WithDelay` and `Keyboard.Press` takes chords such as `Control+a` when
+myuri types: the pace is myuri's. goapi has no Locator, so the `ElementHandle` methods are where the
+Python and TypeScript launchers humanize Locator's. `Mouse.Wheel` turns at the `(x, y)` it is given:
+a myuri mouse is moved there first, a raw one is not; it returns when its last notch has been sent. A click
+that misses its element is tried again for 30 s, then returns an error wrapping the reason.
+`ScrollTo`, `ScrollBy`, `ScrollToBottom`, `Mouse.Down` and `Up`, `Keyboard.Down` and `Up`, touch and
+drag are always goapi's own. One stream, from the seed or a random one per launch, serves every page
+of the browser, so two pages never replay the same draws; each page has its own cursor, and runs one
+humanized call at a time. A humanized call that fails or is cancelled midway releases the keys and
+buttons it pressed.
+
+The port's planners are pinned to myuri 4.0.0 by golden traces recorded from the JS library;
+the whole-scenario `browser/tests/humanize/sequence.json` that the Python and TypeScript launchers
+share is not pinned for Go, which has no caller-replaced parts, `fill`, `position=` or `trial=`.
+
+## Licence
+
+Camoufox is MPL-2.0, but `pkg/myuri` is a port of [myuri](https://github.com/JWriter20/Myuri) and
+[cursory-js](https://github.com/JWriter20/cursory-js) and stays LGPL-3.0-or-later. goapi links it into every
+binary that imports goapi. Under LGPL section 4 you keep its notices, ship the licence texts
+([`LICENSE`](pkg/myuri/LICENSE), [`COPYING`](pkg/myuri/COPYING), [`NOTICE`](pkg/myuri/NOTICE)) with your
+binary, and let a user relink your program against a modified `pkg/myuri`, which this module's source gives
+them. The rest of goapi is unaffected.
 
 ## Calling back into Go from the page
 

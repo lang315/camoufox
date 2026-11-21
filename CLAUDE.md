@@ -96,7 +96,7 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   A WebGL check that finds no WebGL fails; it used to pass on "WebGL not
   available", which scored a run without a GL context as green (issue #75).
 - **`browser/tests/playwright/patches/`** — one standalone guard per shipped spoofing behaviour
-  (isolated evaluate, trusted events, fonts, mouse trajectories, touchscreen).
+  (isolated evaluate, trusted events, fonts, input dispatch, touchscreen).
   The most direct evidence a Firefox bump did not neuter a patch that still
   *applies* cleanly.
   ```bash
@@ -108,7 +108,8 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `virtual-display-window-visible`, `driven-drag-gtk`, `headless-software-webgl`, `css-device-size-fractional`,
   `startup-size-frame-extents`); `system-font-alias-stall`
   does not run on macOS, `windows-keyboard` not on Windows, and `context-process-isolation`
-  (it counts processes from `/proc`) on neither. On those platforms
+  (it counts processes from `/proc`) and the guards that draw a macOS identity (no hosted
+  display fits one) on neither. On those platforms
   they are reported as "not applicable" with the reason, never as passes. On Linux a
   missing prerequisite fails. `stock-gpu-parity` fails on a host whose hardware GPU
   fpgen did not record, with that reason (the launcher's `plan_rendering` rule).
