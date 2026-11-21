@@ -28,7 +28,11 @@ const (
 // PlanArgs are the arguments of SCROLL_PLAN_JS; FromX and FromY are the cursor
 // in the target's own window.
 type PlanArgs struct {
-	FinishPosition, Pad, Edge, FromX, FromY float64
+	FinishPosition float64 `json:"finishPosition"`
+	Pad            float64 `json:"pad"`
+	Edge           float64 `json:"edge"`
+	FromX          float64 `json:"fromX"`
+	FromY          float64 `json:"fromY"`
 }
 
 // ScrollPlan is what SCROLL_PLAN_JS returns, in the target's own window.
@@ -82,8 +86,11 @@ func (a *Actions) measure(ctx context.Context, target Target) (*ScrollPlan, erro
 	return plan, nil
 }
 
-// IntoView scrolls target into view with the wheel.
+// IntoView scrolls target into view with the wheel, or as Options.IntoView does.
 func (a *Actions) IntoView(ctx context.Context, target Target) error {
+	if a.intoView != nil {
+		return a.intoView(ctx, target)
+	}
 	for i := 0; i < scrollPasses; i++ {
 		plan, err := a.measure(ctx, target)
 		if err != nil {

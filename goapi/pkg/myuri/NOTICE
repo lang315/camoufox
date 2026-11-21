@@ -30,6 +30,9 @@ original author to:
   - MIMIC-LOGICS, for Mouse-Synthesizer
     (https://github.com/MIMIC-LOGICS/Mouse-Synthesizer)
 
+page_functions.json holds the source of myuri 4.0.0's SCROLL_PLAN_JS and HIT_TEST_JS, the two
+functions it runs in the page, as testdata/gen/gen.mjs writes it from the pinned package.
+
 Typing
 ------
 

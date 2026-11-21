@@ -60,6 +60,9 @@ func (a *Actions) here(ctx context.Context) (Point, error) {
 
 // Move moves the cursor to (x, y), clamped to the viewport and rounded to a pixel.
 func (a *Actions) Move(ctx context.Context, x, y float64) error {
+	if a.rawMove {
+		return a.Play(ctx, []Step{{Kind: StepMove, X: x, Y: y}})
+	}
 	w, h, err := a.host.Viewport(ctx)
 	if err != nil {
 		return err

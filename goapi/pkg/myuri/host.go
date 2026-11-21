@@ -39,6 +39,10 @@ type Options struct {
 	OS   string
 	Seed uint64
 	WPM  float64
+	// IntoView replaces the wheel scroll into view, as a part of the JS Actions does (a raw scroll channel).
+	IntoView func(ctx context.Context, target Target) error
+	// RawMove makes every move one event at its point, with no path and no clamping, as a raw mouse channel does.
+	RawMove bool
 }
 
 // Missed is a click that could not reach its element; Reason says why.
@@ -53,6 +57,9 @@ type Actions struct {
 	rng  RNG
 	os   string
 	wpm  float64
+
+	intoView func(ctx context.Context, target Target) error
+	rawMove  bool
 
 	// Where the cursor is, in page px; unset until known. Before the first move
 	// it is only where the person's hand is taken to be.
@@ -75,5 +82,5 @@ func New(host Host, opts Options) *Actions {
 	if wpm == 0 {
 		wpm = defaultWPM
 	}
-	return &Actions{host: host, rng: MakeRNG(opts.Seed), os: opts.OS, wpm: wpm, movedAt: math.Inf(-1), releasedAt: math.Inf(-1)}
+	return &Actions{host: host, rng: MakeRNG(opts.Seed), os: opts.OS, wpm: wpm, intoView: opts.IntoView, rawMove: opts.RawMove, movedAt: math.Inf(-1), releasedAt: math.Inf(-1)}
 }

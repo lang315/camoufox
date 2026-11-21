@@ -54,12 +54,9 @@ var composedAccents = map[string]string{
 	"ö": "o", "ü": "u", "é": "e", "è": "e", "à": "a", "ù": "u", "ç": "c",
 }
 
-// jsLower is String.toLowerCase for one character; Go maps İ (U+0130) to a plain i.
+// jsLower is String.toLowerCase; Go maps İ (U+0130) to a plain i, JS to i and a combining dot.
 func jsLower(c string) string {
-	if c == "İ" {
-		return "i̇"
-	}
-	return strings.ToLower(c)
+	return strings.ToLower(strings.ReplaceAll(c, "İ", "i̇"))
 }
 
 func normalizeChar(c string) string {
@@ -146,7 +143,7 @@ func stripPunctuation(word string) string {
 
 // wordDifficulty drives how often a word is mistyped.
 func wordDifficulty(word string) string {
-	w := stripPunctuation(strings.ToLower(word))
+	w := stripPunctuation(jsLower(word))
 	if commonWords[w] {
 		return "common"
 	}

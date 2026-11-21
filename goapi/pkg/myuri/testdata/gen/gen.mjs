@@ -6,6 +6,8 @@
 //
 // Regenerate the goldens whenever the pinned myuri version (package.json) changes,
 // and run `node tables.mjs` too: the Go tables are copied from that version.
+// It also writes ../../page_functions.json, the two page functions the Go port
+// runs in the page (pagefunctions.go embeds it).
 //
 // The host is a fake with a virtual clock: sleep(ms) and a click's hold advance
 // it by exactly ms, so a run is deterministic and takes no real time. Each page
@@ -185,6 +187,8 @@ async function write(file, targets, ops, seeds = SEEDS) {
     writeFileSync(join(here, '..', `${file}.json`), `${JSON.stringify({ versions, viewport: VIEWPORT, clockStart: CLOCK_START, cases })}\n`);
 }
 
+writeFileSync(join(here, '..', '..', 'page_functions.json'), `${JSON.stringify({ SCROLL_PLAN_JS: SCROLL_PLAN_JS.toString(), HIT_TEST_JS: HIT_TEST_JS.toString() }, null, 1)}\n`);
+
 await write('mouse', mouseTargets, mouseOps);
 await write('scroll', scrollTargets, scrollOps);
 
@@ -197,6 +201,8 @@ const typingOps = [
     { op: 'type', text: 'Hello, World.' },
     { op: 'type', text: 'café naïve ÉCOLE 日本語 😀' },
     { op: 'type', text: 'The quick brown fox jumps over 13 lazy dogs;\nthey zigzag, quickly!' },
+    // İ lowercases to two UTF-16 units in JS, so İstanbul is a nine-letter, complex word.
+    { op: 'type', text: 'İstanbul '.repeat(60).trim() },
 ];
 const keyOps = ['Enter', 'Tab', 'Control+a', 'Meta+Shift+z', 'A', '?', 'Control++', '+', 'Backspace'].map((key) => ({ op: 'key', key }));
 
