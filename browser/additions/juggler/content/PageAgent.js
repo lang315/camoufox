@@ -509,7 +509,7 @@ export class PageAgent {
     });
   }
 
-  async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text}) {
+  async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text, afterMs}) {
     const frame = this._frameTree.mainFrame();
     const tip = frame.textInputProcessor();
     const KeyboardEvent = frame.domWindow().KeyboardEvent;
@@ -533,6 +533,10 @@ export class PageAgent {
       shiftKey,
     });
     if (type === 'keydown') {
+      // A repeat the browser makes is stamped afterMs after its key's keydown,
+      // when the OS would have made it (docs/input-dispatch.md, "Key repeat").
+      if (afterMs !== undefined)
+        ChromeUtils.camouStampKeyRepeat(afterMs);
       try {
         if (text && text !== key) {
           tip.commitCompositionWith(text, keyEvent);

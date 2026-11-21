@@ -80,10 +80,18 @@ def main() -> int:
                 page.close()
                 # Marionette may have been on the closed page's window.
                 m.call("WebDriver:SwitchToWindow", {"handle": m.call("WebDriver:GetWindowHandles", {})[0]})
-                for _ in range(5):
+                # The leak holds the page for as long as its connections stay
+                # open, which outlasts this deadline. On a hosted Linux runner
+                # the page was still alive after a 1 s window in 2 of 3 runs,
+                # and freed within 0.2 s in 16 of 16 others (#510).
+                start = time.monotonic()
+                while True:
                     m.js(COLLECT)
+                    alive = m.js(ALIVE)
+                    if not (alive["target"] or alive["network"]) or time.monotonic() - start > 10:
+                        break
                     time.sleep(0.2)
-                alive = m.js(ALIVE)
+                print(f"  checked for {time.monotonic() - start:.1f} s")
             finally:
                 m.close()
             context.close()

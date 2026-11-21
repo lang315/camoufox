@@ -26,6 +26,10 @@ later change should read first.
 
 **Fix.** `_holdKey` still marks the key held when the command comes, so a release that overtakes the press stops it. `_repeatKey` starts the delay once the keydown has been dispatched. A failed dispatch clears the held key, as the failed repeat did before.
 
+That alone made the timing worse. The first repeat landed a return hop after the delay, plus whatever the timer lost on a loaded runner. `driven-key-repeat` read 547 ms on a Windows identity (Tests run 44878823241), against 500 ± 17. Each repeat is now stamped when the OS would have made it: its key's keydown plus the delay and the intervals. Juggler passes the offset to `ChromeUtils.camouStampKeyRepeat`. `MaskConfig::KeyTimeStamp` keeps the keydown's time per physical key and puts the sum on the Windows tick grid (`input-timestamp-tick.patch`). The timer's lateness then delays a repeat without moving its stamp, as an OS's queue does.
+
+Rejected: widening the guard's 17 ms. Unfixed code had already read 563 ms (Tests run 44873598829), so the arm measured the runner's load, not the browser.
+
 **Evidence.** `driven-key-repeat.py` has a new arm: `d` pressed once on a page whose keydown handler is busy for 700 ms. Measured on a macOS arm64 host with the build of `8d987e33`, its `omni.ja` as shipped and then with the fixed `PageHandler.js`, 4 runs per identity:
 
 | | `d` keydowns | first repeat (macOS identity) | repeats of `a` (Linux identity) |
@@ -33,7 +37,7 @@ later change should read first.
 | as shipped | 2, in 12 of 12 | 497.4 to 500.2 ms | 21, 21, 21, 22 |
 | fixed | 1, in 12 of 12 | 502.4 to 504.6 ms | 21, 21, 21, 21 |
 
-The first repeat now lands a return hop after the delay. One fixed run on a busy desktop read 524 ms, outside the guard's 17 ms. Before the fix, Tests run 44873598829 read 563 ms.
+Those runs predate the stamping: one of them read 524 ms on a busy desktop.
 
 **What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
 
@@ -74,6 +78,12 @@ The first repeat now lands a return hop after the delay. One fixed run on a busy
 **What misled.** Nothing checked that a guard's imports from `helpers` resolve, so the failure waited for a binary. The darwin half rests on the 1280x720 fact recorded for `driven-wheel-notches-macos`, not on a macOS run of these five guards.
 
 The guard that remains red on Windows, `bare-launch-host-fonts`, is a product finding, not a guard bug: #513.
+
+With the import fixed, `closed-page-released` still read the closed page alive after its 1 s GC window. That happened on Linux in Tests run 44873598829 and in e2e run 44876047156. It passed in Tests run 44878823241.
+
+On the same Linux build, `diag/510-signin` ran the guard 16 times: in process, as fresh subprocesses after `addons-install-once`, and inside the full group sequence. That is runs 44879124653, 44882603030, 44883152099 and 44883154410. Every time the page freed within 0.2 s.
+
+The guard now collects for up to 10 s and prints how long it took. The leak it guards keeps a page for as long as its connections stay open, and they stay open past the deadline. A red therefore still means a retained page. Why the two reds kept the page past 1 s is not known.
 
 
 ## #480: a driven move right after `showPicker()` was dropped after the 5 s ack deadline

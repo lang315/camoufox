@@ -232,7 +232,9 @@ wheel (`nsDOMWindowUtils::SendWheelEvent`) and keys
 (`TextInputProcessor::PrepareKeyboardEventToDispatch`). Under a Windows launch
 that is the latest tick, read off `steady_clock`, which every process shares,
 so mouse events from the parent process and keys from the content process fall
-on one grid. Under any other launch it is the current time, as before. Events a
+on one grid. Under any other launch it is the current time, as before. A key
+repeat Juggler makes is the exception: it is stamped when the OS would have
+made it ("Key repeat" below). Events a
 page creates itself (`new Event()`) keep their high-resolution stamp, as they
 do on Windows. `browser/tests/playwright/patches/driven-input-timestamp-grid.py`
 checks both.
@@ -267,8 +269,18 @@ The delay starts when the page has handled the keydown, not when the command
 arrives. A client sends the keyup only after the keydown returns, so a delay
 counted from the command fired a repeat whenever the page took longer than the
 delay to handle the press. A person's quick press on a busy page then typed its
-character twice (#510). The first repeat therefore lands a few ms after the
-delay: measured on a macOS host, 502 to 505 ms against 497 to 500 ms before.
+character twice (#510).
+
+The OS makes repeats on its own clock, so a page that reads `timeStamp` sees
+the delay and the interval exactly, however late the page gets them. Juggler's
+timer fires late on a loaded machine, so each repeat carries the time the OS
+would have made it instead: its key's keydown plus the delay and the
+intervals. Juggler passes that offset to `ChromeUtils.camouStampKeyRepeat`
+just before it dispatches the repeat. `TextInputProcessor` adds it to the
+keydown's time, which `MaskConfig::KeyTimeStamp` keeps per physical key.
+Under a Windows launch the sum goes on the tick grid, so a repeat lands a
+whole number of ticks after its keydown. A repeat the client sends is stamped
+when it is dispatched.
 
 | OS | Delay | Interval | Modifiers |
 |---|---|---|---|

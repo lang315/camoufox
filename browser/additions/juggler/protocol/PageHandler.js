@@ -637,7 +637,7 @@ export class PageHandler {
     return result;
   }
 
-  async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text}, held = null) {
+  async _dispatchKeyEvent({type, keyCode, code, key, repeat, location, text, afterMs}, held = null) {
     await this._awaitUserInputGate();
     // A repeat is the OS's while the key is still the one it repeats.
     if (held && this._heldKey !== held)
@@ -656,7 +656,7 @@ export class PageHandler {
       }
       return;
     }
-    return await this._contentPage.send('dispatchKeyEvent', {type, keyCode, code, key, repeat, location, text});
+    return await this._contentPage.send('dispatchKeyEvent', {type, keyCode, code, key, repeat, location, text, afterMs});
   }
 
   async ['Page.dispatchTouchEvent'](options) {
@@ -1045,7 +1045,8 @@ export class PageHandler {
       if (this._heldKey !== held)
         return;
       try {
-        await this._dispatchKeyEvent({...params, repeat: true}, held);
+        // Stamped when the OS would have made it, however late the timer fires.
+        await this._dispatchKeyEvent({...params, repeat: true, afterMs: os.repeatDelayMs + k * os.repeatEveryMs}, held);
       } catch (e) {
         // The page is gone or no longer takes keys: nothing is held there.
         if (this._heldKey === held)

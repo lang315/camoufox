@@ -1,5 +1,34 @@
+diff --git a/dom/base/ChromeUtils.cpp b/dom/base/ChromeUtils.cpp
+index 1d7875ea1e..3cf0b97110 100644
+--- a/dom/base/ChromeUtils.cpp
++++ b/dom/base/ChromeUtils.cpp
+@@ -2745,6 +2745,11 @@ void ChromeUtils::CamouDrainAccessRecords(GlobalObject& aGlobal,
+       camoufox::AccessObserver::DrainJSON().c_str()));
+ }
+ 
++/* static */
++void ChromeUtils::CamouStampKeyRepeat(GlobalObject& aGlobal, double aAfterMs) {
++  MaskConfig::PendingKeyRepeatMs() = aAfterMs;
++}
++
+ double ChromeUtils::DateNow(GlobalObject&) { return JS_Now() / 1000.0; }
+ 
+ /* static */
+diff --git a/dom/base/ChromeUtils.h b/dom/base/ChromeUtils.h
+index 974bdd5144..6f373321cb 100644
+--- a/dom/base/ChromeUtils.h
++++ b/dom/base/ChromeUtils.h
+@@ -345,6 +345,8 @@ class ChromeUtils {
+ 
+   static void CamouDrainAccessRecords(GlobalObject& aGlobal, nsAString& aRetVal);
+ 
++  static void CamouStampKeyRepeat(GlobalObject& aGlobal, double aAfterMs);
++
+   static double DateNow(GlobalObject&);
+ 
+   static double Now(GlobalObject&);
 diff --git a/dom/base/TextInputProcessor.cpp b/dom/base/TextInputProcessor.cpp
-index 929e614023..889790b7d8 100644
+index 929e614023..357551d28e 100644
 --- a/dom/base/TextInputProcessor.cpp
 +++ b/dom/base/TextInputProcessor.cpp
 @@ -2,6 +2,7 @@
@@ -10,11 +39,13 @@ index 929e614023..889790b7d8 100644
  #include "mozilla/TextInputProcessor.h"
  
  #include "mozilla/AutoRestore.h"
-@@ -969,6 +970,7 @@ nsresult TextInputProcessor::PrepareKeyboardEventToDispatch(
+@@ -969,6 +970,9 @@ nsresult TextInputProcessor::PrepareKeyboardEventToDispatch(
    if (NS_WARN_IF(aKeyboardEvent.mCodeNameIndex == CODE_NAME_INDEX_USE_STRING)) {
      return NS_ERROR_INVALID_ARG;
    }
-+  aKeyboardEvent.mTimeStamp = MaskConfig::InputTimeStamp();
++  aKeyboardEvent.mTimeStamp = MaskConfig::KeyTimeStamp(
++      static_cast<uint32_t>(aKeyboardEvent.mCodeNameIndex),
++      aKeyboardEvent.mMessage == eKeyDown, aKeyboardEvent.mIsRepeat);
    if ((aKeyFlags & KEY_NON_PRINTABLE_KEY) &&
        NS_WARN_IF(aKeyboardEvent.mKeyNameIndex == KEY_NAME_INDEX_USE_STRING)) {
      return NS_ERROR_INVALID_ARG;
@@ -39,7 +70,7 @@ index 5c41420da8..6d23c2ed28 100644
    nsPresContext* presContext = aPresShell->GetPresContext();
    if (!presContext) {
 diff --git a/dom/base/nsDOMWindowUtils.cpp b/dom/base/nsDOMWindowUtils.cpp
-index d93380181f..4fa15b4d10 100644
+index 9321637f72..e671bb2438 100644
 --- a/dom/base/nsDOMWindowUtils.cpp
 +++ b/dom/base/nsDOMWindowUtils.cpp
 @@ -2,6 +2,7 @@
@@ -58,3 +89,20 @@ index d93380181f..4fa15b4d10 100644
    wheelEvent.mModifiers = nsContentUtils::GetWidgetModifiers(aModifiers);
    wheelEvent.mDeltaX = aDeltaX;
    wheelEvent.mDeltaY = aDeltaY;
+diff --git a/dom/chrome-webidl/ChromeUtils.webidl b/dom/chrome-webidl/ChromeUtils.webidl
+index 4816f5b877..750a3b1706 100644
+--- a/dom/chrome-webidl/ChromeUtils.webidl
++++ b/dom/chrome-webidl/ChromeUtils.webidl
+@@ -942,6 +942,12 @@ partial namespace ChromeUtils {
+    */
+   DOMString camouDrainAccessRecords();
+ 
++  /**
++   * Camoufox: stamp the next key repeat this process dispatches afterMs after
++   * its key's keydown, when the OS would have made it.
++   */
++  undefined camouStampKeyRepeat(double afterMs);
++
+   /**
+    * Starts the JSOracle process for ORB JavaScript validation, if it hasn't started already.
+    */
