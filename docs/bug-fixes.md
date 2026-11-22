@@ -13,6 +13,32 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #519: driven-click-count failed when the parent stalled between two presses
+
+**Symptom.**
+- On a hosted Windows runner, under the Windows identity, the fifth of eight quick presses in place counted 1, where 3 is expected (e2e 44986993365).
+- On Linux, under the Linux identity, the count started again at the sixth press: `[1, 2, 3, 1, 2, 1, 2, 3, 1, 1]` (Tests run 45009355612).
+
+**Root cause.** The guard expected the counts of presses made 60 ms apart. But the parent stalls once in every launch, soon after the first page loads.
+- In Tests run 45028910395 the guard printed the gaps between the presses' `timeStamp`s over 30 Linux-host launches. Every launch had one gap of 226 to 350 ms between presses 5 and 7; the others were 62 to 152 ms. A GTK press counts up only within 400 ms of the last one, so a slightly longer stall is enough.
+- On a Windows host the stall lasts 1.2 to 3.9 s (e2e 45001396498, where the fifth press came 1672 ms after the fourth). Playwright's own Firefox stalls there too (#518).
+
+Juggler is the OS for a driven press, and the press really reached it late. So a count of 1 is what the OS gives, and the page's `timeStamp` shows the gap. Only the guard was wrong.
+
+There was a second gap, in Juggler. `_countPress` took `Date.now()` before `sendEvents` awaited `apz-repaints-flushed`, and the press was stamped after that wait. A long wait would have given the page a count that disagreed with its `timeStamp` gap. No run caught that happening.
+
+**Fix.**
+- The guard works out each expected count from the OS's rule, applied to the `timeStamp` gaps the page saw. It fails when no press came soon enough after the last to count up, because a browser that reports 1 for every press would then pass.
+- `sendEvents` counts a mousedown after the wait, synchronously before the dispatch stamps it.
+- What remains: under a Windows identity the stamp is floored to the 15.625 ms tick, and the count is not. A gap within one tick of 500 ms can still read differently in the two.
+
+**Evidence.**
+- *Red.* The old guard failed on Linux in Tests run 45009355612, on the reading above. The new guard's self-check holds that reading: with presses 5 and 6 more than 400 ms apart, the GTK count is `[1, 2, 3, 1, 2, 1, 2, 3, 1, 1]`.
+- *Green.* This PR's Linux Tests run, and the guard on a Windows host (below).
+- A browser that reports 1 for every press still fails: with the gaps of Tests run 45028910395, the rule gives counts of 2 and 3.
+
+**What misled.** The #518 diagnostics saw the stall only on Windows hosts, where it lasts seconds, and called it Windows-only. On Linux it is a quarter of a second, too short to break most launches, and it showed only when the guard printed its gaps.
+
 ## #517: five patch guards measured none of their identities on Windows and macOS hosts
 
 **Symptom.** A review of #511 found that `driven-click-count`, `driven-input-timestamp-grid`, `driven-key-repeat`, `driven-move-device-pixels` and `driven-right-click-order` were reported not applicable on `win32` and `darwin`. Each guard draws a macOS identity next to a Windows one, and three of them draw a Linux one too. So the Windows identity was never measured on a Windows host, where the #510 key-repeat race was found.
