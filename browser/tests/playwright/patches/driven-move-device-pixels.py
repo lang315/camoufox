@@ -27,7 +27,7 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import hidden_display, resolve_binary  # noqa: E402
+from helpers import drawable, hidden_display, resolve_binary  # noqa: E402
 
 PAGE = b"""<!doctype html><html><body style="margin:0;width:1200px;height:800px"><script>
   const seen = [];
@@ -87,8 +87,9 @@ def on_device_pixel(v, dpr):
 def main() -> int:
     failures = []
     with hidden_display("1920x1080"):
-        sweep, still = probe(resolve_binary(), "windows", 2.5)
-        mac_sweep, mac_still = probe(resolve_binary(), "macos", 2)
+        runs = {os_name: probe(resolve_binary(), os_name, {"windows": 2.5, "macos": 2}[os_name])
+                for os_name in drawable(("windows", "macos"))}
+    sweep, still = runs["windows"]
 
     asked = set(SWEEP)
     moves = [e for e in sweep if e[0] == "pointermove"]
@@ -110,22 +111,25 @@ def main() -> int:
     if not downs or not here or downs[0][1:3] != here[-1][1:3]:
         failures.append(f"pointerdown at {downs[0][1:3] if downs else None}, the pointer at {here[-1][1:3] if here else None}")
 
-    mac = [e for e in mac_sweep if e[0] == "pointermove"]
-    if not mac or any(e[1] != int(e[1]) or e[2] != int(e[2]) for e in mac):
-        failures.append(f"a macOS identity's pointermoves are fractional: {[e for e in mac if e[1] != int(e[1])][:5]}")
+    if "macos" in runs:
+        mac_sweep, mac_still = runs["macos"]
+        mac = [e for e in mac_sweep if e[0] == "pointermove"]
+        if not mac or any(e[1] != int(e[1]) or e[2] != int(e[2]) for e in mac):
+            failures.append(f"a macOS identity's pointermoves are fractional: {[e for e in mac if e[1] != int(e[1])][:5]}")
 
-    for kind in ("pointermove", "mousemove"):
-        repeats = [e for e in mac_still if e[0] == kind]
-        # Moves sent within one frame coalesce, so fewer than REPEATS arrive.
-        if len(repeats) < 2 or any(e[1:] != [*STILL, 0, 0] for e in repeats[1:]):
-            failures.append(f"{REPEATS} macOS moves to {STILL} reached the page as {repeats}: "
-                            f"a Mac repeats the position")
+        for kind in ("pointermove", "mousemove"):
+            repeats = [e for e in mac_still if e[0] == kind]
+            # Moves sent within one frame coalesce, so fewer than REPEATS arrive.
+            if len(repeats) < 2 or any(e[1:] != [*STILL, 0, 0] for e in repeats[1:]):
+                failures.append(f"{REPEATS} macOS moves to {STILL} reached the page as {repeats}: "
+                                f"a Mac repeats the position")
 
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"PASS: {frac:.0%} of {len(moves)} pointermoves fractional at 2.5, whole under macOS")
+    print(f"PASS: {frac:.0%} of {len(moves)} pointermoves fractional at 2.5"
+          + (", whole under macOS" if "macos" in runs else ""))
     return 0
 
 

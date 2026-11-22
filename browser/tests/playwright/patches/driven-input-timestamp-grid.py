@@ -25,7 +25,7 @@ import threading
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import hidden_display, resolve_binary  # noqa: E402
+from helpers import drawable, hidden_display, resolve_binary  # noqa: E402
 
 PAGE = b"""<!doctype html><html><body style="margin:0;height:3000px">
 <input id="field" style="margin:200px"><script>
@@ -94,19 +94,22 @@ def probe(binary, os_name):
 def main() -> int:
     failures = []
     with hidden_display("1920x1080"):
-        windows = probe(resolve_binary(), "windows")
-        macos = probe(resolve_binary(), "macos")
+        gaps = {os_name: probe(resolve_binary(), os_name) for os_name in drawable(("windows", "macos"))}
+    windows = gaps["windows"]
     off = [round(g, 3) for g in windows if not on_grid(g)]
     if len(windows) < 50 or off:
         failures.append(f"windows: {len(off)} of {len(windows)} gaps off the 15.625 ms tick: {off[:8]}")
-    share = sum(map(on_grid, macos)) / max(1, len(macos))
-    if len(macos) < 50 or share > 0.5:
-        failures.append(f"macos: {share:.0%} of {len(macos)} gaps on the Windows tick; macOS stamps at high resolution")
+    if "macos" in gaps:
+        macos = gaps["macos"]
+        share = sum(map(on_grid, macos)) / max(1, len(macos))
+        print(f"{share:.0%} of {len(macos)} macOS gaps on the Windows tick")
+        if len(macos) < 50 or share > 0.5:
+            failures.append(f"macos: {share:.0%} of {len(macos)} gaps on the Windows tick; macOS stamps at high resolution")
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"PASS: {len(windows)} Windows gaps on the tick, {share:.0%} of macOS gaps")
+    print(f"PASS: {len(windows)} Windows gaps on the tick")
     return 0
 
 

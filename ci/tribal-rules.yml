@@ -1421,7 +1421,10 @@ rules:
       each guard because the runner must decide without running the script.
       A guard that does not apply on one platform for that platform's reason
       (system-font-alias-stall on macOS, windows-keyboard on Windows) sits in NOT_ON
-      with the reason, counted the same way.
+      with the reason, counted the same way. A guard that draws several identities,
+      one of which a platform cannot draw, is not in NOT_ON: the runner names that
+      identity in CAMOUFOX_GUARD_SKIP_OS, logs it, and the guard runs the others
+      (DRAWS_MACOS, #517).
 
   - id: a-tested-tree-is-tested-once
     title: A push to main that lands a tree its pull request run passed, and a cut of a commit main's run passed, do not run the suites again

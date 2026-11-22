@@ -3415,6 +3415,57 @@ def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_
     assert record["tests"] == {"patches/system-font-alias-stall.py": results.NOT_APPLICABLE}
 
 
+def test_a_guard_that_draws_a_macos_identity_runs_its_other_identities_off_linux(tmp_path, monkeypatch):
+    """No hosted Windows or macOS display fits a macOS identity, so only that identity is left out (#517)."""
+    import sys
+
+    from ci import run_patch_guards
+
+    envs = {}
+
+    class Ran:
+        ok, code = True, 0
+
+        def combined(self):
+            return ""
+
+    def fake_run(cmd, env, **kwargs):
+        envs[pathlib.Path(cmd[1]).stem] = env
+        return Ran()
+
+    monkeypatch.setattr(run_patch_guards, "run", fake_run)
+    monkeypatch.setattr(run_patch_guards, "leftover_browsers", lambda _: [])
+    binary = tmp_path / "camoufox-bin"
+    binary.write_bytes(b"")
+    for platform, skipped in (("win32", "macos"), ("darwin", "macos"), ("linux", None)):
+        envs.clear()
+        monkeypatch.setattr(sys, "platform", platform)
+        code = run_patch_guards.main(["--binary", str(binary), "--evidence-dir", str(tmp_path / platform),
+                                      "--only", "driven-key-repeat", "startup-prefs"])
+        assert code == 0
+        assert results.load("patch_guards", tmp_path / platform)["tests"] == {
+            "patches/driven-key-repeat.py": results.PASS,
+            "patches/startup-prefs.py": results.PASS,
+        }
+        assert envs["driven-key-repeat"].get("CAMOUFOX_GUARD_SKIP_OS") == skipped
+        assert "CAMOUFOX_GUARD_SKIP_OS" not in envs["startup-prefs"]
+
+
+def test_a_guard_draws_every_identity_but_the_one_the_runner_leaves_out(monkeypatch):
+    import sys
+    from pathlib import Path
+
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "browser/tests/playwright/patches"))
+    try:
+        import helpers
+    finally:
+        sys.path.pop(0)
+    monkeypatch.delenv("CAMOUFOX_GUARD_SKIP_OS", raising=False)
+    assert helpers.drawable({"windows": 1, "macos": 2, "linux": 3}) == ["windows", "macos", "linux"]
+    monkeypatch.setenv("CAMOUFOX_GUARD_SKIP_OS", "macos")
+    assert helpers.drawable({"windows": 1, "macos": 2, "linux": 3}) == ["windows", "linux"]
+
+
 def test_a_display_guard_runs_on_the_hosts_display_off_linux(monkeypatch):
     """hidden_display starts Xvfb on Linux and fails without it; elsewhere the host has a display."""
     import sys

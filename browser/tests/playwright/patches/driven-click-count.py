@@ -26,7 +26,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import hidden_display, resolve_binary  # noqa: E402
+from helpers import drawable, hidden_display, resolve_binary  # noqa: E402
 
 PAGE = """<!doctype html><html><body style="margin:0;width:800px;height:600px"><script>
   const seen = [];
@@ -65,9 +65,9 @@ def probe(binary, os_name):
 def main() -> int:
     failures = []
     with hidden_display("1920x1080"):
-        seen = {os_name: probe(resolve_binary(), os_name) for os_name in IN_PLACE}
-    for os_name, counts in IN_PLACE.items():
-        expected = counts + [1, 1]
+        seen = {os_name: probe(resolve_binary(), os_name) for os_name in drawable(IN_PLACE)}
+    for os_name in seen:
+        expected = IN_PLACE[os_name] + [1, 1]
         downs = [d for t, d in seen[os_name] if t == "mousedown"]
         if downs != expected:
             failures.append(f"{os_name}: presses counted {downs}, a person's count {expected}")
