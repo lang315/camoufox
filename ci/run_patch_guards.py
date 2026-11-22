@@ -180,8 +180,8 @@ LINUX_ONLY = frozenset({
 # apart from the passes with the reason in the log. windows-keyboard compares a
 # Windows identity with Windows' keyboard, which a Windows host has natively, and
 # on a macOS host runs its caret arm alone (the rest is GTK); driven-wheel-notches-macos
-# and the guards in _DRAWS_MACOS need a macOS identity, and a hosted Windows (1366x768) or
-# macOS (1280x720) display fits none (fpgen raises RestrictiveConstraints);
+# needs a macOS identity, and a hosted Windows (1366x768) or macOS (1280x720) display fits
+# none (fpgen raises RestrictiveConstraints);
 # driven-move-coalescing needs moves that outrun a refresh tick (Juggler paces a driven move at 8 ms,
 # PageHandler.js kMoveIntervalMs): measured on hosted runners they land 8.0 ms apart on Linux and a tick apart on
 # Windows and macOS.
@@ -192,8 +192,6 @@ _PACED_AT_A_TICK = (
     "one pointermove each as well"
 )
 _COUNTED_FROM_PROC = "it counts web-content processes from /proc, which this platform does not have"
-_DRAWS_MACOS = ("driven-click-count", "driven-input-timestamp-grid", "driven-key-repeat",
-                "driven-move-device-pixels", "driven-right-click-order")
 _NO_MACOS_ON = {
     "darwin": "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
     "win32": "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
@@ -204,14 +202,12 @@ NOT_ON = {
         "system-font-alias-stall":
             "its count reads the host's font universe, and its ratio alone cannot go red on this host",
         "driven-wheel-notches-macos": _NO_MACOS_ON["darwin"],
-        **dict.fromkeys(_DRAWS_MACOS, _NO_MACOS_ON["darwin"]),
         "driven-move-coalescing": _PACED_AT_A_TICK,
         "context-process-isolation": _COUNTED_FROM_PROC,
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
         "driven-wheel-notches-macos": _NO_MACOS_ON["win32"],
-        **dict.fromkeys(_DRAWS_MACOS, _NO_MACOS_ON["win32"]),
         "driven-move-coalescing": _PACED_AT_A_TICK,
         "context-process-isolation": _COUNTED_FROM_PROC,
     },
@@ -223,6 +219,17 @@ def not_applicable_reason(stem: str, platform: str) -> Optional[str]:
     if stem in LINUX_ONLY and not platform.startswith("linux"):
         return "it is Linux-only by subject"
     return NOT_ON.get(platform, {}).get(stem)
+
+
+# These guards draw a macOS identity beside others. Where no macOS identity fits the
+# display, the guard is told to leave that one out and runs the rest (#517).
+DRAWS_MACOS = frozenset({"driven-click-count", "driven-input-timestamp-grid", "driven-key-repeat",
+                         "driven-move-device-pixels", "driven-right-click-order"})
+
+
+def skipped_identity(stem: str, platform: str) -> Optional[str]:
+    """The identity a guard leaves out on `platform` (CAMOUFOX_GUARD_SKIP_OS), or None."""
+    return "macos" if stem in DRAWS_MACOS and platform in _NO_MACOS_ON else None
 
 
 def guard_env(binary: Path) -> Dict[str, str]:
@@ -315,7 +322,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             not_applicable.append(guard.name)
             log(f"  - {guard.name} not applicable on {sys.platform}: {reason}")
             continue
-        proc = run([sys.executable, str(guard)], cwd=REPO_ROOT, env=env, timeout=args.timeout)
+        skipped = skipped_identity(guard.stem, sys.platform)
+        if skipped:
+            result.note(f"{guard.name}: its {skipped} identity not applicable on {sys.platform}")
+            log(f"  - {guard.name}: its {skipped} identity not applicable on {sys.platform}: "
+                f"{_NO_MACOS_ON[sys.platform]}")
+        proc = run([sys.executable, str(guard)], cwd=REPO_ROOT, timeout=args.timeout,
+                   env={**env, "CAMOUFOX_GUARD_SKIP_OS": skipped} if skipped else env)
         outcome = evidence.PASS if proc.ok else evidence.FAIL
         result.record(f"patches/{guard.name}", outcome)
         if not proc.ok:

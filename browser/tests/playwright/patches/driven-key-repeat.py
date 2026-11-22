@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from helpers import hidden_display, resolve_binary  # noqa: E402
+from helpers import drawable, hidden_display, resolve_binary  # noqa: E402
 
 PAGE = """<!doctype html><html><body><input id="field"><script>
   const seen = [];
@@ -89,8 +89,9 @@ def held(seen, key):
 def main() -> int:
     failures = []
     with hidden_display("1920x1080"):
-        runs = {os_name: probe(resolve_binary(), os_name) for os_name in REPEAT}
-    for os_name, (delay, interval, modifiers) in REPEAT.items():
+        runs = {os_name: probe(resolve_binary(), os_name) for os_name in drawable(REPEAT)}
+    for os_name in runs:
+        delay, interval, modifiers = REPEAT[os_name]
         seen, value = runs[os_name]
         flagged = [k for type, k, repeat, _ in seen if type == "keydown" and repeat]
         first, repeats = held(seen, "a")

@@ -13,6 +13,25 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #517: five patch guards measured none of their identities on Windows and macOS hosts
+
+**Symptom.** A review of #511 found that `driven-click-count`, `driven-input-timestamp-grid`, `driven-key-repeat`, `driven-move-device-pixels` and `driven-right-click-order` were reported not applicable on `win32` and `darwin`. Each guard draws a macOS identity next to a Windows one, and three of them draw a Linux one too. So the Windows identity was never measured on a Windows host, where the #510 key-repeat race was found.
+
+**Root cause.** No hosted Windows (1366x768) or macOS (1280x720) display fits a macOS identity (fpgen raises `RestrictiveConstraints`). #511 handled that by listing the whole guard in `NOT_ON` (`_DRAWS_MACOS` in `ci/run_patch_guards.py`), so the identities that a host can draw were dropped with the one it cannot.
+
+**Fix.** The runner names the identity a host cannot draw in `CAMOUFOX_GUARD_SKIP_OS` (`DRAWS_MACOS`, `skipped_identity`), and logs it with the reason. Each guard draws the rest through `helpers.drawable`. `driven-wheel-notches-macos` draws only a macOS identity, so it stays in `NOT_ON`.
+
+**Evidence.**
+- *Red to green.* `test_a_guard_that_draws_a_macos_identity_runs_its_other_identities_off_linux` failed against the old runner, because it recorded `driven-key-repeat` as not applicable. It passes with the fix, as does `test_a_guard_draws_every_identity_but_the_one_the_runner_leaves_out`.
+- *Hosts.* Build `5f20b55a` was run with this runner.
+  - macOS (e2e 44986996047): all five guards ran and passed under their Windows and Linux identities. The parity group went from 29/32 to 33/37 guards run and passed.
+  - Windows (e2e 44986993365): the parity group went from 30/31 to 33/36 guards run and passed. `driven-input-timestamp-grid`, `driven-move-device-pixels` and `driven-right-click-order` passed. The newly measured Windows identity failed two of them:
+    - `driven-key-repeat`: `a` held 1100 ms repeated once, where 19 repeats are expected (#518).
+    - `driven-click-count`: the fifth quick press counted 1, where 3 is expected (#519).
+  - Both guards passed under the Linux identity on that host. They also pass under every identity in the Linux Tests run.
+
+**What misled.** Whether a Windows or Linux identity fits these displays had never been measured. The fix assumed it does; both runs show it does.
+
 ## #510: a quick key press typed its character twice when the page was slow to handle the keydown
 
 **Fixed by:** the PR that refs #510. **Found by:** `test_sign_in_and_shop[pkg-plain]` and `[pw-plain]` on Windows after the 4c909d69 sync (e2e run 44868302020): the form stayed on `/login`.
@@ -91,7 +110,7 @@ A keydown's keypress does not reach `KeyTimeStamp`. `TextInputProcessor` dispatc
 - *The import.* The 2853a767 sync deleted upstream's STUN block from `helpers.py`, `own_address` included (`5b6e5313`). That sync moved its one caller to `default_route_ipv4`. Upstream's #1110 then added `closed-page-released.py`, which imports `own_address`. Both functions return the source address of a UDP socket connected to a public address.
 - *The five guards.* Each one launches a macOS identity sized to the host's display. Hosted Windows (1366x768) and macOS (1280x720) displays fit no recorded macOS screen, as `driven-wheel-notches-macos` already records. Upstream's runner reads `/proc`, so upstream runs these guards on Linux only.
 
-**Fix.** `closed-page-released.py` takes `default_route_ipv4`. The five guards are not applicable on `darwin` and `win32`, with the same reason as `driven-wheel-notches-macos` (`_DRAWS_MACOS` in `ci/run_patch_guards.py`). They still run on Linux, which draws every identity, all three OSes included.
+**Fix.** `closed-page-released.py` takes `default_route_ipv4`. The five guards are not applicable on `darwin` and `win32`, with the same reason as `driven-wheel-notches-macos` (`_DRAWS_MACOS` in `ci/run_patch_guards.py`). They still run on Linux, which draws every identity, all three OSes included. Since #517, only the macOS identity is left out on those hosts, and the guards run their other identities there.
 
 **Evidence.**
 - *Red to green.* `test_every_name_a_guard_imports_from_helpers_exists` failed against the merged guard with `{'closed-page-released.py: own_address'}`. It passes with the fix.

@@ -108,9 +108,11 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `virtual-display-window-visible`, `driven-drag-gtk`, `headless-software-webgl`, `css-device-size-fractional`,
   `startup-size-frame-extents`); `system-font-alias-stall`
   does not run on macOS, `windows-keyboard` not on Windows, and `context-process-isolation`
-  (it counts processes from `/proc`) and the guards that draw a macOS identity (no hosted
-  display fits one) on neither. On those platforms
-  they are reported as "not applicable" with the reason, never as passes. On Linux a
+  (it counts processes from `/proc`) on neither. On those platforms
+  they are reported as "not applicable" with the reason, never as passes. No hosted
+  Windows or macOS display fits a macOS identity, so there `driven-wheel-notches-macos`
+  is not applicable and the five guards in `DRAWS_MACOS` run without their macOS
+  identity (`CAMOUFOX_GUARD_SKIP_OS`, logged with the reason). On Linux a
   missing prerequisite fails. `stock-gpu-parity` fails on a host whose hardware GPU
   fpgen did not record, with that reason (the launcher's `plan_rendering` rule).
 - **Playwright** — upstream playwright-python, fetched fresh at the tag

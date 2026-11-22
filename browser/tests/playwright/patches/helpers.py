@@ -47,7 +47,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Iterator, List
+from typing import Any, Dict, Iterable, Iterator, List
 
 
 def stock_gpu_parity():
@@ -96,6 +96,15 @@ def check(failures: List[str], label: str, got: Any, want: Any) -> None:
     print(f"    [{'ok  ' if ok else 'FAIL'}] {label}: {got}" + ("" if ok else f" (expected {want})"))
     if not ok:
         failures.append(label)
+
+
+def drawable(identities: Iterable[str]) -> List[str]:
+    """The identities a guard draws on this host: all but the one the runner names in
+    CAMOUFOX_GUARD_SKIP_OS, because no identity of that OS fits the host's display."""
+    skipped = os.environ.get("CAMOUFOX_GUARD_SKIP_OS")
+    if skipped:
+        print(f"{skipped}: not applicable, the runner left this identity out on this host")
+    return [name for name in identities if name != skipped]
 
 
 def _forbid_installed_release() -> None:
