@@ -17,7 +17,12 @@ A driven press always reported the clickCount the client sent: 1 for every
 page.click(), however quick and wherever.
 
 The guard presses in place under each identity, then presses after a pause
-and after a move, and checks every count.
+and after a move. It checks every count against the rule above, applied to
+when the page saw each press (its `timeStamp`), not when the guard meant to
+press. The browser stalls once soon after launch (#519): a press that comes
+after it really is late, and the OS counts it so. The guard fails when no
+press came soon enough after the last to count up, because then no count
+could tell a driven press from one that always reports 1.
 
     python browser/tests/playwright/patches/driven-click-count.py
 """
@@ -32,16 +37,35 @@ PAGE = """<!doctype html><html><body style="margin:0;width:800px;height:600px"><
   const seen = [];
   for (const type of ['mousedown', 'mouseup', 'click'])
     addEventListener(type, (e) => {
-      seen.push([type, e.detail]);
+      seen.push([type, e.detail, e.timeStamp]);
       document.body.dataset.seen = JSON.stringify(seen);
     }, true);
 </script></body></html>"""
 PRESSES = 8
-IN_PLACE = {
-    "windows": [1, 2, 3, 2, 3, 2, 3, 2],
-    "macos": [1, 2, 3, 4, 5, 6, 7, 8],
-    "linux": [1, 2, 3, 1, 2, 3, 1, 2],
-}
+CLICK_MS = {"windows": 500, "macos": 500, "linux": 400}
+
+
+def os_counts(os_name, stamps):
+    """The count the OS gives each press, from when the page saw it. Every
+    press is in place but the last, which moved 60 px."""
+    counts, single = [], False
+    for i, at in enumerate(stamps):
+        soon = 0 < i < len(stamps) - 1 and at - stamps[i - 1] < CLICK_MS[os_name]
+        count = counts[-1] if counts else 0
+        if os_name == "windows":
+            count, single = (2, False) if soon and single else (count + 1 if soon else 1, True)
+        elif os_name == "macos":
+            count = count + 1 if soon else 1
+        else:
+            count = count + 1 if soon and count < 3 else 1
+        counts.append(count)
+    return counts
+
+
+assert os_counts("windows", [0, 100, 200, 300, 400, 500, 600, 700, 1500, 1600]) == [1, 2, 3, 2, 3, 2, 3, 2, 1, 1]
+assert os_counts("macos", [0, 100, 200, 300, 400, 500, 600, 700, 1500, 1600]) == [1, 2, 3, 4, 5, 6, 7, 8, 1, 1]
+assert os_counts("linux", [0, 100, 200, 300, 400, 500, 600, 700, 1500, 1600]) == [1, 2, 3, 1, 2, 3, 1, 2, 1, 1]
+assert os_counts("linux", [0, 100, 200, 300, 400, 900, 1000, 1100, 1900, 2000]) == [1, 2, 3, 1, 2, 1, 2, 3, 1, 1]
 
 
 def probe(binary, os_name):
@@ -65,14 +89,18 @@ def probe(binary, os_name):
 def main() -> int:
     failures = []
     with hidden_display("1920x1080"):
-        seen = {os_name: probe(resolve_binary(), os_name) for os_name in drawable(IN_PLACE)}
+        seen = {os_name: probe(resolve_binary(), os_name) for os_name in drawable(CLICK_MS)}
     for os_name in seen:
-        expected = IN_PLACE[os_name] + [1, 1]
-        downs = [d for t, d in seen[os_name] if t == "mousedown"]
+        stamps = [at for t, _, at in seen[os_name] if t == "mousedown"]
+        gaps = [round(b - a) for a, b in zip(stamps, stamps[1:])]
+        expected = os_counts(os_name, stamps)
+        if max(expected[:PRESSES], default=0) < 2:
+            failures.append(f"{os_name}: no press came within {CLICK_MS[os_name]} ms of the last, so none could count up; gaps {gaps} ms")
+        downs = [d for t, d, _ in seen[os_name] if t == "mousedown"]
         if downs != expected:
-            failures.append(f"{os_name}: presses counted {downs}, a person's count {expected}")
+            failures.append(f"{os_name}: presses counted {downs}, the OS's count {expected} for presses {gaps} ms apart")
         for kind in ("mouseup", "click"):
-            got = [d for t, d in seen[os_name] if t == kind]
+            got = [d for t, d, _ in seen[os_name] if t == kind]
             if got != expected:
                 failures.append(f"{os_name}: {kind} detail {got}, its press counted {expected}")
     for failure in failures:

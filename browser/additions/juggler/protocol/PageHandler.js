@@ -754,6 +754,10 @@ export class PageHandler {
       // 2. Make sure compositor is flushed after scrolling.
       if (win.windowUtils.flushApzRepaints())
         await helper.awaitTopicWithin('apz-repaints-flushed', kAckDeadlineMs);
+      // Camoufox: counted after that wait, synchronously before the dispatch
+      // stamps the press, so a page reads the count and the timeStamp of one moment.
+      if (types.includes('mousedown'))
+        eventArgs.clickCount = this._countPress(button, at);
       // 3. Get element's bounding box in the browser after the scroll is completed.
       //    MouseDispatch owns every conversion from these relative coordinates to
       //    absolute ones, and every wait for a renderer ack.
@@ -818,9 +822,7 @@ export class PageHandler {
         // fire it on press. Follow the claimed OS (measured 2026-09-14: stock
         // Windows contextmenu.buttons=0, camoufox 2).
         const eventNames = (button === 2 && !this._contextMenuOnMouseUp()) ? ['mousedown', 'contextmenu'] : ['mousedown'];
-        const at = this._pressPoint(x, y);
-        eventArgs.clickCount = this._countPress(button, at);
-        await sendEvents(eventNames, at);
+        await sendEvents(eventNames, this._pressPoint(x, y));
         return;
       }
 
