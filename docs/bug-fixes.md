@@ -55,6 +55,12 @@ At rest, the unstamped timing passed the guard too, so nothing would have caught
 | call removed | 1203.0 ms | 1201.4 ms | 1201.4 ms | FAIL, exit 1 |
 | as shipped | 500.0 ms | 500.0 ms | 500.0 ms | PASS, exit 0 |
 
+On the build with the bound (build.yml run 44924800257, `5f20b55a`), the guard passed twice on the same host, at 500.0 ms for `a` and `e` under every identity.
+
+No arm checks the bound itself. None has a second page press a held key, or holds a key through a drag or a navigation. The bound is checked by reading `KeyTimeStamp`, not by a guard: whatever such a case does, a repeat is stamped between the last key stamp and now.
+
+A keydown's keypress does not reach `KeyTimeStamp`. `TextInputProcessor` dispatches it through `MaybeDispatchKeypressEvents`, without `PrepareKeyboardEventToDispatch`, so it neither drops the keydown's time nor moves the last stamp.
+
 **What misled.** The sign-in journey draws its identity's OS, so the failure looked tied to the drawn OS. It is not: every OS has a 500 ms delay. The diag's one failure was the first launch of the run.
 
 **Inferred, not shown.** The journey's own failures are attributed to this fix by inference. The plain legs failed 3 of 4 in the first two Windows runs (44868302020, 44873395322). On the same unfixed binary they then passed 8 of 8 in four diag runs. The only doubled character on record is the probe's `s33cret`.
