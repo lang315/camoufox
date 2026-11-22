@@ -2,10 +2,8 @@
 // whatever the chrome's scale (#451).
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {load, provide} from './gecko.mjs';
+import {load} from './gecko.mjs';
 
-// Helper.js needs XPCOM; MouseDispatch uses it only to scroll a point into view.
-provide('Helper.js', {Helper: class {}});
 const {MouseDispatch} = await load('input/MouseDispatch.js');
 
 /** The snapped bounds of a browser rect, in a chrome of `auPerDevPx` app units. */

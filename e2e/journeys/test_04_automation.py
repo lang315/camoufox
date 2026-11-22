@@ -42,7 +42,15 @@ def test_sign_in_and_shop(drv, site, humanize, check):
     carts = len(site.seen("/shop/cart"))
     page.goto(site.url("/shop"))
     page.hover("#menu")
-    check(page.eval("!document.getElementById('cart-link').hidden"), "hover opened the menu")
+    # The sign-in click left the pointer over #menu, so a humanized hover moves
+    # nothing: the mouseenter is the one Gecko sends a new page under a resting
+    # pointer, which can come after goto returns (#510).
+    opened = "!document.getElementById('cart-link').hidden"
+    try:
+        wait_for(page, opened, timeout=5)
+    except TimeoutError:
+        pass
+    check(page.eval(opened), "hover opened the menu")
     target = page.eval("document.querySelectorAll('.item').length + 5")  # exists only after scrolling
     wait_for(page, f"(window.scrollTo(0, document.body.scrollHeight), !!document.querySelector('.add[data-id=\"{target}\"]'))")
     page.click(f'.add[data-id="{target}"]')

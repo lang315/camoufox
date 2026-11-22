@@ -139,7 +139,8 @@ class PwDriver(_Base):
     def launch(self, os=None, headless=True, humanize=False, proxy=None, geoip=None, locale=None,
                webrtc_ip=None, prefs=None, env=None, exclude_addons=None) -> PwBrowser:
         from camoufox.host_rendering import has_canvas_placeholder
-        from camoufox.utils import launch_options
+        from camoufox.humanize import attach
+        from camoufox.utils import launch_options, launch_os
 
         if headless == "virtual":
             pytest.skip("pw: no headless='virtual' (the Camoufox class owns the Xvfb)")
@@ -147,7 +148,10 @@ class PwDriver(_Base):
                   proxy=proxy, geoip=geoip, locale=locale, firefox_user_prefs=prefs,
                   config={"webrtc:ipv4": webrtc_ip} if webrtc_ip else None, env=env, exclude_addons=exclude_addons)
         opts = launch_options(**{k: v for k, v in kw.items() if v is not None})
-        b = PwBrowser(playwright().firefox.launch(**opts),
+        browser = playwright().firefox.launch(**opts)
+        if humanize:  # launch_options only validates it: the driver-side humanizer is attached by hand
+            browser = attach(browser, humanize, launch_os(opts))
+        b = PwBrowser(browser,
                       canvas_covered=has_canvas_placeholder(opts["firefox_user_prefs"]),
                       context_kwargs={"no_viewport": True})
         self.browsers.append(b)

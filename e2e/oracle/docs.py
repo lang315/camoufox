@@ -15,7 +15,7 @@ CLAIMS = {
     "os_option": ("python/src/camoufox/utils.py", 'Can be "windows", "macos", "linux", or a list to randomly choose from.'),
     "locale": ("python/src/camoufox/utils.py", "The first listed locale will be used for the Intl API."),
     "geoip": ("python/src/camoufox/utils.py", "Calculate longitude, latitude, timezone, country, & locale based on the IP address."),
-    "humanize": ("python/src/camoufox/utils.py", "Humanize the cursor movement."),
+    "humanize": ("python/src/camoufox/utils.py", "Driver-side humanization. True is `myuri()` on every channel"),
     "virtual": ("python/src/camoufox/utils.py", "passing headless='virtual' to Camoufox, AsyncCamoufox"),
     "webrtc": ("README.md", "ICE candidates, SDP and `getStats()` rewritten to the proxy IP"),
     "unique_context": ("python/src/camoufox/sync_api.py", "Creates a new browser context with a unique fingerprint identity."),

@@ -946,30 +946,32 @@ describe.skipIf(!MODEL.ok)("fpgen generation (needs the model)", () => {
 	it("accepts a list of OSes (Python raises InvalidConstraints here)", () => {
 		// Divergence by design: fpgen passes predicates the casefolded value,
 		// so Python's `v in {'Linux', 'Windows'}` never matches; TS compares
-		// casefolded.
-		// fpgen draws with Math.random() alone (one call site, the cumulative
-		// pick in bayesian-network.js) and takes no seed. Unseeded, 20 draws
-		// land on one OS about 1 time in 800 (P(Linux) = 0.284), so the draws
-		// come from a seeded mulberry32 instead: the same 20 every run.
-		let state = 1;
-		const random = vi.spyOn(Math, "random").mockImplementation(() => {
-			state = (state + 0x6d2b79f5) | 0;
-			let t = Math.imul(state ^ (state >>> 15), 1 | state);
-			t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-			return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-		});
-		const platforms = new Set<string>();
+		// casefolded. The predicate is checked directly because 20 random
+		// draws miss one of the OSes in about 0.4% of runs (#1094).
+		const real = Generator.prototype.generate;
+		let predicate: ((v: unknown) => boolean) | null = null;
+		const spy = vi
+			.spyOn(Generator.prototype, "generate")
+			.mockImplementation(function (this: Generator, ...args: any[]) {
+				const conditions = (args[0] ?? {}) as Record<string, unknown>;
+				if (typeof conditions.os === "function")
+					predicate = conditions.os as (v: unknown) => boolean;
+				return (real as any).apply(this, args);
+			});
 		try {
 			for (let i = 0; i < 20; i++) {
 				const f = generateFingerprint({ os: ["linux", "windows"] });
 				const p = String(f.navigator.platform);
 				expect(p.includes("Linux") || p === "Win32", p).toBe(true);
-				platforms.add(p === "Win32" ? "win" : "lin");
 			}
+			expect(predicate).not.toBeNull();
+			const pred = predicate as (v: unknown) => boolean;
+			expect(pred("linux")).toBe(true);
+			expect(pred("windows")).toBe(true);
+			expect(pred("macos")).toBe(false);
 		} finally {
-			random.mockRestore();
+			spy.mockRestore();
 		}
-		expect(platforms.size).toBe(2);
 	});
 
 	it("rejects an unknown OS", () => {

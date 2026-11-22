@@ -38,10 +38,9 @@ schema: 1
 skip:
   # --- synthesized input -----------------------------------------------------
   #
-  # Camoufox routes every synthesized mouse and wheel event through the
-  # humanization chokepoint in
-  # browser/additions/juggler/input/MouseDispatch.js: real trajectories, real
-  # timings, trusted events.
+  # Camoufox routes every synthesized mouse and wheel event through one
+  # chokepoint in browser/additions/juggler/input/MouseDispatch.js: one
+  # trusted native event per call, humanized (if at all) by the driver.
   #
   # That breaks far less than this section used to claim. test_click.py,
   # test_check.py, test_fill.py, test_focus.py, test_dispatch_event.py and
@@ -52,8 +51,7 @@ skip:
   # stock timing (instantAnimations is now opt-in) they pass too.
   #
   # See docs/input-dispatch.md.
-  # browser/tests/playwright/patches/humanize-mouse-trajectory.py and
-  # browser/tests/playwright/patches/input-ack-backstop.py assert the behaviour
+  # browser/tests/playwright/patches/input-ack-backstop.py asserts the behaviour
   # that replaces them.
 
   - test: tests/async/test_keyboard.py::test_should_send_proper_codes_while_typing

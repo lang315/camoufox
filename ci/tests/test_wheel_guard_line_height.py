@@ -1,7 +1,7 @@
 """driven-wheel-notches-macos.py derives its expectations from the line height the page reports (#461).
 
 Firefox rounds a line to whole pixels for the events and scrolls its exact height, so a
-page whose line is 16.5 px gets 17 in every event and 16.5 px a line. The readings are
+page whose line is 16.5 px gets 17 in every event and 16.5 px a line. The line heights are
 those of Tests run 43681967153, job 132718067021.
 """
 
@@ -33,8 +33,8 @@ def delivered(wheels, line):
 
 
 def reading(line, rounded):
-    # The three turns of the guard: the lines each event carries, as the red job delivered them.
-    turns = {"slow": [1], "turn": [1, 3, 2], "long": [1, 4, 5, 7, 8, 10, 11, 12, 5]}
+    # The three turns of the guard (16, 100 and 1000 px): each one event of round(px / 16) lines.
+    turns = {"slow": [1], "turn": [6], "long": [63]}
     got = {"step": 3 * line, "arrow": ""}
     for name, wheels in turns.items():
         got[name] = (delivered(wheels, rounded), line * sum(wheels))
@@ -57,3 +57,9 @@ def test_a_scroll_other_than_the_pages_own_line_fails(guard):
     got = reading(16.5, 17)
     got["slow"] = (got["slow"][0], 17)
     assert any("scrolled 17 px, expected 16.5" in f for f in guard.mac_failures(got))
+
+
+def test_a_turn_split_over_several_events_fails(guard):
+    got = reading(17, 17)
+    got["turn"] = (delivered([1, 3, 2], 17), 17 * 6)
+    assert any("one event of 6 lines" in f for f in guard.mac_failures(got))

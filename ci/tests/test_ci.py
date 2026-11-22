@@ -1172,9 +1172,9 @@ def _bt_profile(webgl_renderer: str, *, noswift_passed: bool) -> dict:
         "profiles": [
             {
                 "profile": {
+                    "name": "Linux Per-Context A",
                     "os": "linux",
                     "mode": "per-context",
-                    "index": 0,
                     "webglRenderer": webgl_renderer,
                 },
                 "results": {
@@ -1204,7 +1204,7 @@ def test_a_profile_that_asked_for_llvmpipe_is_not_graded_headless():
     from ci.run_build_tester import category_failures, flatten
 
     full = _bt_profile("llvmpipe, or similar", noswift_passed=False)
-    tid = "linux-per-context-0/extended/headlessDetection/noSwiftShader"
+    tid = "Linux Per-Context A/extended/headlessDetection/noSwiftShader"
     assert flatten(full)[tid] == "pass"
     assert category_failures(full, ["headlessDetection"]) == {}
 
@@ -1214,7 +1214,7 @@ def test_an_unasked_for_software_renderer_still_fails():
     from ci.run_build_tester import category_failures, flatten
 
     full = _bt_profile("AMD Radeon R9 200 Series", noswift_passed=False)
-    tid = "linux-per-context-0/extended/headlessDetection/noSwiftShader"
+    tid = "Linux Per-Context A/extended/headlessDetection/noSwiftShader"
     assert flatten(full)[tid] == "fail"
     assert category_failures(full, ["headlessDetection"]) == {"headlessDetection": 1}
 
@@ -1227,7 +1227,7 @@ def test_the_exemption_is_confined_to_that_one_check():
     checks = full["profiles"][0]["results"]["extended"]["headlessDetection"]
     checks["noWebdriver"] = {"passed": False, "detail": "navigator.webdriver = true"}
     tests = flatten(full)
-    assert tests["linux-per-context-0/extended/headlessDetection/noWebdriver"] == "fail"
+    assert tests["Linux Per-Context A/extended/headlessDetection/noWebdriver"] == "fail"
 
 
 # ---------------------------------------------------------------------------
@@ -3271,11 +3271,12 @@ def test_cpu_vendor_guard_reads_the_host_vendor_off_linux(monkeypatch, platform,
     assert guard.host_vendor() == vendor
 
 
-def test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere(monkeypatch):
-    """Off Linux the identity's GPU is sampled, and no recorded Linux GPU stands beside
-    an ARM64 CPU (probe run 43481814285: "No recorded lin GPU fits a 1024x768 screen"),
-    so the arm is not applicable there. On Linux it must never be skipped: the launch
-    claims the host's renderer, and a launch that fails fails the guard."""
+def test_cpu_vendor_guard_arch_arm_runs_on_every_host(monkeypatch):
+    """Off Linux the identity's GPU is sampled. No recorded Linux hardware GPU stands
+    beside an ARM64 CPU (probe run 43481814285), but since daijro/camoufox#1033 the
+    sampler draws llvmpipe there instead of refusing, so the arm runs on every host.
+    On Linux it is never skipped: the launch claims the host's renderer, and a launch
+    that fails fails the guard."""
     import importlib.util
 
     import camoufox.display
@@ -3288,7 +3289,7 @@ def test_cpu_vendor_guard_arch_arm_runs_on_linux_and_is_not_applicable_elsewhere
     monkeypatch.setattr(camoufox.display, "largest_display", lambda: camoufox.display.DisplaySize(1024, 768))
     assert guard.undrawable("arm", "linux") is None
     for platform in ("win32", "darwin"):
-        assert guard.undrawable("arm", platform) == "No recorded lin GPU fits a 1024x768 screen"
+        assert guard.undrawable("arm", platform) is None
         assert guard.undrawable("intel", platform) is None
         assert guard.undrawable("amd", platform) is None
 
@@ -3362,6 +3363,43 @@ def test_every_linux_only_guard_is_a_guard():
     from ci.run_patch_guards import LINUX_ONLY, guards
 
     assert LINUX_ONLY <= {g.stem for g in guards()}
+
+
+def test_a_guard_prints_a_non_ascii_font_name_on_a_cp1252_console(tmp_path):
+    """bare-launch-host-fonts crashed printing Heiti-간체 on a Windows runner (#510)."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from ci.run_patch_guards import guard_env
+
+    # A cp1252 console, as on a Windows runner; guard_env must override it.
+    env = {**os.environ, "PYTHONIOENCODING": "cp1252", **guard_env(Path("camoufox-bin"))}
+    proc = subprocess.run([sys.executable, "-c", "print('FAIL: Heiti-\\uac04\\uccb4')"],
+                          env=env, capture_output=True, text=True, errors="strict")
+    assert proc.returncode == 0, proc.stderr
+    assert "Heiti-\\uac04\\uccb4" in proc.stdout
+
+
+def test_every_name_a_guard_imports_from_helpers_exists():
+    """An upstream sync can bring a guard that imports a helper the fork removed (own_address)."""
+    import ast
+    from ci.run_patch_guards import GUARD_DIR, guards
+
+    helpers = ast.parse((GUARD_DIR / "helpers.py").read_text(encoding="utf-8"))
+    defined = set()
+    for n in helpers.body:
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined.add(n.name)
+        elif isinstance(n, ast.Assign):
+            defined |= {t.id for t in n.targets if isinstance(t, ast.Name)}
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            defined |= {(a.asname or a.name).split(".")[0] for a in n.names}
+    missing = {f"{g.name}: {a.name}" for g in guards()
+               for n in ast.walk(ast.parse(g.read_text(encoding="utf-8")))
+               if isinstance(n, ast.ImportFrom) and n.module == "helpers"
+               for a in n.names if a.name not in defined}
+    assert not missing
 
 
 def test_a_guard_that_has_nothing_to_compare_is_not_applicable_on_that_platform_only(tmp_path, monkeypatch):

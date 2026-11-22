@@ -40,6 +40,7 @@ type args struct {
 	OS       string         `json:"os"`
 	WebRTCIP string         `json:"webrtc_ip"`
 	Headless bool           `json:"headless"`
+	Humanize bool           `json:"humanize"`
 	Proxy    *proxy.Proxy   `json:"proxy"`
 	Prefs    map[string]any `json:"prefs"`
 	URL      string         `json:"url"`
@@ -129,6 +130,9 @@ func (s *state) do(ctx context.Context, r request) (any, error) {
 		opts := []camoufox.Option{camoufox.WithExecutablePath(a.Binary), camoufox.WithHeadless(a.Headless)}
 		if a.OS != "" {
 			opts = append(opts, camoufox.WithOS(a.OS))
+		}
+		if a.Humanize {
+			opts = append(opts, camoufox.WithHumanize(&camoufox.Humanize{}))
 		}
 		if a.Proxy != nil {
 			opts = append(opts, camoufox.WithProxy(*a.Proxy))

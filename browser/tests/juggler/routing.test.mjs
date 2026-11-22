@@ -3,10 +3,8 @@
 // the popup's widget rect reads (#480).
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {load, provide} from './gecko.mjs';
+import {load} from './gecko.mjs';
 
-// Helper.js needs XPCOM; MouseDispatch uses it only to scroll a point into view.
-provide('Helper.js', {Helper: class {}});
 const {MouseDispatch} = await load('input/MouseDispatch.js');
 
 const box = {left: 0, top: 85, width: 800, height: 600};

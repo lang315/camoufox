@@ -33,14 +33,19 @@ func WithMouseModifiers(m int) MouseClickOption {
 // Mouse returns the Mouse helper for this page.
 func (p *Page) Mouse() *Mouse { return &Mouse{page: p} }
 
-// Move dispatches a mousemove event at (x, y).
+// Move dispatches a mousemove event at (x, y). When myuri drives the mouse
+// (WithHumanize) it moves along a path to (x, y) instead.
 func (m *Mouse) Move(ctx context.Context, x, y float64) error {
+	if h := m.page.humanizer(); h != nil && h.mouse {
+		return h.move(ctx, x, y)
+	}
 	ev := juggler.PageDispatchMouseEventParams{
 		Type: "mousemove", X: x, Y: y,
 	}
 	if err := m.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil); err != nil {
 		return fmt.Errorf("camoufox: mouse Move: %w", err)
 	}
+	m.page.noteMouse(x, y)
 	return nil
 }
 
@@ -63,6 +68,7 @@ func (m *Mouse) Down(ctx context.Context, x, y float64, opts ...MouseClickOption
 	if err := m.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil); err != nil {
 		return fmt.Errorf("camoufox: mouse Down: %w", err)
 	}
+	m.page.noteMouse(x, y)
 	return nil
 }
 
@@ -85,11 +91,16 @@ func (m *Mouse) Up(ctx context.Context, x, y float64, opts ...MouseClickOption) 
 	if err := m.page.session.Call(ctx, "Page.dispatchMouseEvent", ev, nil); err != nil {
 		return fmt.Errorf("camoufox: mouse Up: %w", err)
 	}
+	m.page.noteMouse(x, y)
 	return nil
 }
 
-// Click dispatches move → down → up at (x, y).
+// Click dispatches move → down → up at (x, y). When myuri drives the mouse
+// (WithHumanize) it moves along a path and presses as a person does.
 func (m *Mouse) Click(ctx context.Context, x, y float64, opts ...MouseClickOption) error {
+	if h := m.page.humanizer(); h != nil && h.mouse {
+		return m.humanClick(ctx, h, x, y, 1, opts)
+	}
 	if err := m.Move(ctx, x, y); err != nil {
 		return err
 	}
@@ -101,14 +112,26 @@ func (m *Mouse) Click(ctx context.Context, x, y float64, opts ...MouseClickOptio
 
 // DblClick dispatches two sequential clicks at (x, y).
 func (m *Mouse) DblClick(ctx context.Context, x, y float64, opts ...MouseClickOption) error {
+	if h := m.page.humanizer(); h != nil && h.mouse {
+		return m.humanClick(ctx, h, x, y, 2, opts)
+	}
 	if err := m.Click(ctx, x, y, opts...); err != nil {
 		return err
 	}
 	return m.Click(ctx, x, y, opts...)
 }
 
-// Wheel dispatches a wheel event with the given scroll deltas.
+// Wheel dispatches a wheel event with the given scroll deltas. When myuri
+// drives the scroll channel (WithHumanize) it turns the wheel in notches over
+// time, at (x, y), and returns when the last one has been sent.
 func (m *Mouse) Wheel(ctx context.Context, x, y, deltaX, deltaY float64) error {
+	if h := m.page.humanizer(); h != nil && h.scroll {
+		return h.wheel(ctx, x, y, deltaX, deltaY)
+	}
+	return m.wheelRaw(ctx, x, y, deltaX, deltaY)
+}
+
+func (m *Mouse) wheelRaw(ctx context.Context, x, y, deltaX, deltaY float64) error {
 	params := juggler.PageDispatchWheelEventParams{
 		X:      x,
 		Y:      y,
