@@ -255,7 +255,15 @@ The mouseup and the click take their press's count.
   press, without bound.
 - **GTK.** 1, 2, 3 and then 1 again, within GTK's default 400 ms and 5 pixels.
 
-`browser/tests/playwright/patches/driven-click-count.py` checks each.
+Juggler counts a press when it dispatches it, so the time it counts from is the
+time the page reads in `timeStamp`. It used to count before the dispatch's wait
+for the compositor, so a long wait could give the page a count that disagreed
+with its gap from the last press. The OS counts a press by when it came, not by
+when the client meant to send it. Juggler is the OS here, so a press that
+reaches it late, after the parent stalls, starts the count again (#519).
+
+`browser/tests/playwright/patches/driven-click-count.py` checks each, against
+the gaps between the presses' `timeStamp`s.
 
 ## Key repeat
 
