@@ -271,6 +271,13 @@ counted from the command fired a repeat whenever the page took longer than the
 delay to handle the press. A person's quick press on a busy page then typed its
 character twice (#510).
 
+After that, Juggler sends each repeat on time without waiting for the page to
+read the one before. An OS queues the repeats it makes while the page is busy,
+and the page reads them all, then the release. Juggler used to make a repeat
+only once the page had read the last one, and a release stopped the rest. So a
+page busy from before the first repeat until after the release read one repeat
+(#518).
+
 The OS makes repeats on its own clock, so a page that reads `timeStamp` sees
 the delay and the interval exactly, however late the page gets them. Juggler's
 timer fires late on a loaded machine, so each repeat carries the time the OS
