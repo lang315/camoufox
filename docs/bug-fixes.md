@@ -13,6 +13,22 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #513: a bare launch on Windows and macOS rendered the other OSes' bundled fonts
+
+**Symptom.** `bare-launch-host-fonts` launches the binary with no `CAMOU_CONFIG` and compares it with a launch whose bundle is off (`gfx.bundled-fonts.activate=0`). On a hosted Windows runner the bare launch rendered 507 bundled families the host does not have (e2e 44868304511), and on a hosted macOS runner 365 (e2e 44876051546). Upstream wrote the guard for Linux and never runs it on the other two.
+
+**Root cause.** Both bundle gates in `font-hijacker.patch` asked whether the launch claims the host's OS by comparing `MaskConfig::GetSpoofedOS()` with it. With no `navigator.platform` in the config, as in a bare launch, `GetSpoofedOS()` returns `SpoofedOS::None`, so the gates took the launch for another OS's identity:
+- on Windows, `gfxDWriteFontList` set `mStockFilesOnly` from `GetSpoofedOS() == SpoofedOS::Windows`, so `BundledFontFileEnumerator` registered every set in `fonts/`, not only `twemojimozilla.ttf`;
+- on macOS, `CoreTextFontList::ShouldActivateBundledFonts` skipped the bundle only for `GetSpoofedOS() == SpoofedOS::MacOS`.
+
+**Fix.** `MaskConfig::ClaimsHostOS(aHost)` is true for a launch that names the host's OS or names none, and both gates use it. A bare launch now gets what stock Firefox gets: on Windows TwemojiMozilla only, on macOS no bundled font, since stock Firefox bundles TwemojiMozilla on Windows and Linux only (`browser/fonts/moz.build`). The guard expects exactly that. The launchers always set `navigator.platform`, so a launch through them is unchanged.
+
+**Evidence.**
+- *Red.* e2e 45103445539, Windows host, before this fix: 506 bundled families rendered that the host does not have, and 10 host families did not render.
+- *Green.* Build 45130185642 of this PR on a Windows host: the patch guards (e2e 45135729104) passed, `bare-launch-host-fonts` included, and the journeys passed (e2e 45135733184).
+
+**What misled.** Each red run also listed host families that did not render in the bare launch (7 to 49, such as `Segoe UI Semilight` and `Hiragino Kaku Gothic Pro W3`). They looked like a second bug, but they render once the bundle is off, so they were a side effect of it.
+
 ## #518: a page busy after a keydown read one repeat of a held key
 
 **Symptom.** On a hosted Windows runner, `driven-key-repeat` under a Windows identity read one repeat of `a` held 1100 ms, where 19 are expected (e2e 44986993365, #517's entry).
