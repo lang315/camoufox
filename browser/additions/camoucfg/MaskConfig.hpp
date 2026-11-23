@@ -504,6 +504,12 @@ inline SpoofedOS GetSpoofedOS() {
   return os;
 }
 
+// Whether the launch claims aHost, the host's OS: it names it, or names none,
+// as a launch without the launcher's config does.
+inline bool ClaimsHostOS(SpoofedOS aHost) {
+  return GetSpoofedOS() == SpoofedOS::None || GetSpoofedOS() == aHost;
+}
+
 // The time a driven input event carries. Windows stamps input with its tick
 // count (GetMessageTime): whole milliseconds that advance 15.625 ms at a time.
 // The tick is read off steady_clock, which every process shares, through an

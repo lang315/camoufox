@@ -89,10 +89,14 @@ What differs is how the groups are gated:
   is no directory gate on those hosts; the allowlist in
   `browser/patches/font-hijacker.patch` is what restricts a lookup. Basenames therefore
   must not collide within a package's group set, which `verify-fonts.py` checks.
-- **On Linux, a launch without the launcher's config gets the host's fonts.**
-  It claims no OS, fontconfig uses the host's own configuration, and
-  `font-hijacker.patch` adds only the files directly in `fonts/` (Firefox's
-  `TwemojiMozilla.ttf`), as stock does, never the group subdirectories.
+- **A launch without the launcher's config gets the host's fonts.** It claims
+  no OS, so it is the host's. On Linux, fontconfig uses the host's own
+  configuration, and `font-hijacker.patch` adds only the files directly in
+  `fonts/` (Firefox's `TwemojiMozilla.ttf`), never the group subdirectories. On
+  Windows it activates only `TwemojiMozilla.ttf` from the flat directory. On
+  macOS it activates nothing, as with a macOS identity: stock Firefox bundles no
+  font there (`browser/fonts/moz.build` ships Twemoji on Windows and GTK only).
+  Before #513, Windows and macOS activated every set in a bare launch.
   `browser/tests/playwright/patches/bare-launch-host-fonts.py` checks it.
 - **On a macOS host, a file holding a hidden system face (a PostScript name
   starting with `.`) is never activated.** WebRender loads those by name and gets

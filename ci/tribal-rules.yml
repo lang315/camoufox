@@ -773,7 +773,8 @@ rules:
       so never ran the bundle's registration. CoreText there ignores the path
       attribute for a file it does not know and returns another font, so the
       glyph ids content shaped with are drawn with that font's outlines. The
-      gate (the gfx.bundled-fonts.activate pref and a native macOS identity) and
+      gate (the gfx.bundled-fonts.activate pref, and a launch claiming macOS or
+      no OS, #513) and
       the loop are one function pair, CoreTextFontList::ShouldActivateBundledFonts
       and ActivateBundledFonts, called by the content-side font list and by
       GPUParent::RecvInit before the render thread starts, so the two file sets
