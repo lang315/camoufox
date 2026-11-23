@@ -154,8 +154,8 @@ index b6696c70c4..dd3772549d 100644
 +  // Camoufox: a native macOS identity or a launch claiming no OS uses the
 +  // system fonts only, as stock macOS bundles none; the bundle is for others.
 +  const int32_t pref = StaticPrefs::gfx_bundled_fonts_activate_AtStartup();
-+  const bool nativeIdentity = MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::None ||
-+                              MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::MacOS;
++  const bool nativeIdentity =
++      MaskConfig::ClaimsHostOS(MaskConfig::SpoofedOS::MacOS);
 +  LOG_FONTLIST(
 +      ("CAMOU-FL bundled-fonts gate gfx.bundled-fonts.activate=%d "
 +       "native-identity=%d\n",
@@ -250,7 +250,7 @@ index a804e7154b..ec81e42dc7 100644
  };
  
 +// Camoufox: the fonts/ directory holds Firefox's own bundled font AND the font
-+// sets camoufox ships for identities of other OSes. A native Windows identity
++// sets camoufox ships for identities of other OSes. A launch claiming Windows
 +// must use the real system fonts, so those sets stay inactive -- but skipping
 +// the whole directory (as this patch once did) also dropped Twemoji Mozilla,
 +// the emoji font stock Firefox bundles and names first in font.name-list.emoji:
@@ -269,8 +269,8 @@ index a804e7154b..ec81e42dc7 100644
 -    : mFactory(aFactory), mFontDir(aFontDir) {
 +    : mFactory(aFactory),
 +      mFontDir(aFontDir),
-+      mStockFilesOnly(MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::None ||
-+                      MaskConfig::GetSpoofedOS() == MaskConfig::SpoofedOS::Windows) {
++      mStockFilesOnly(
++          MaskConfig::ClaimsHostOS(MaskConfig::SpoofedOS::Windows)) {
    mFontDir->GetDirectoryEntries(getter_AddRefs(mEntries));
  }
  
