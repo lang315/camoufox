@@ -23,11 +23,15 @@ later change should read first.
 
 **Fix.** `MaskConfig::ClaimsHostOS(aHost)` is true for a launch that names the host's OS or names none, and both gates use it. A bare launch now gets what stock Firefox gets: on Windows TwemojiMozilla only, on macOS no bundled font, since stock Firefox bundles TwemojiMozilla on Windows and Linux only (`browser/fonts/moz.build`). The guard expects exactly that. The launchers always set `navigator.platform`, so a launch through them is unchanged.
 
+The guard itself compared two launches that could differ by timing. Without a font list, a legacy family name (name ID 1, such as `Segoe UI Semilight` or `Avenir Next Demi Bold`) resolves only once the font loader has run, so either launch could render it and the other not. Both launches now set `gfx.font_loader.delay=0`, which reads those names at startup.
+
 **Evidence.**
 - *Red.* e2e 45103445539, Windows host, before this fix: 506 bundled families rendered that the host does not have, and 10 host families did not render.
-- *Green.* Build 45130185642 of this PR on a Windows host: the patch guards (e2e 45135729104) passed, `bare-launch-host-fonts` included, and the journeys passed (e2e 45135733184).
+- *Green.* Builds of this PR (macOS 45130189970, Windows 45130185642), the guard run 8 times on each (`diag/513-font-timing`):
+  - Windows, e2e 45189729663: 8 of 8 passed, 123 families in the bare launch and 122 in the reference every time (the one more is Twemoji Mozilla). The guard without the timing fix passed 4 of 8 in the same job, with 1 to 4 families in either direction (`Franklin Gothic Medium`, `Segoe UI Light`).
+  - The guard without the timing fix on macOS, after the product fix (e2e 45174033418): 304 families against 300, the four extra being `Avenir Next` faces of the host. The macOS package ships only the Windows and Linux sets.
 
-**What misled.** Each red run also listed host families that did not render in the bare launch (7 to 49, such as `Segoe UI Semilight` and `Hiragino Kaku Gothic Pro W3`). They looked like a second bug, but they render once the bundle is off, so they were a side effect of it.
+**What misled.** Each red run also listed host families that did not render in the bare launch (7 to 49, such as `Segoe UI Semilight` and `Hiragino Kaku Gothic Pro W3`). They looked like a second bug, and after the product fix like a side effect of the bundle. They were the legacy-name timing above: on macOS after the fix, with the bundle off in both launches, four host faces still rendered in one launch only. The guard printed every difference as "bundled families", so host faces read as bundle faces.
 
 ## #518: a page busy after a keydown read one repeat of a held key
 
