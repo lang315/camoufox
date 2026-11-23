@@ -286,6 +286,16 @@ only once the page had read the last one, and a release stopped the rest. So a
 page busy from before the first repeat until after the release read one repeat
 (#518).
 
+Juggler's repeats run on the parent's main thread, so a stall there stops
+them. An OS would keep queuing repeats. A hosted Windows runner stalls the
+parent for 1.7 to 2.3 s soon after a fresh profile loads its first page, and
+Playwright's own Firefox stalls the same way. A key held through that stall
+reads one repeat. The parent cannot date a release that arrives after the
+stall, so it cannot make up the missing repeats without guessing how many there
+were. Juggler counts a hold from the keydown's return to the keyup's arrival.
+That is the client's hold plus one hop each way, so a hold can read one repeat
+more than the client's wait implies.
+
 The OS makes repeats on its own clock, so a page that reads `timeStamp` sees
 the delay and the interval exactly, however late the page gets them. Juggler's
 timer fires late on a loaded machine, so each repeat carries the time the OS
