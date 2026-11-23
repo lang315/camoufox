@@ -11,7 +11,8 @@ resolved beside a Linux User-Agent, which Akamai's detectOSFontsSignal reads as
 Windows, and sans-serif measured 99 px high where stock measures 98.
 
 The reference is the same binary on a profile with gfx.bundled-fonts.activate=0,
-which registers nothing from fonts/. Each family the bundle can render
+which registers nothing from fonts/. Both launches set gfx.font_loader.delay=0,
+so each reads the legacy family names before the page measures them. Each family the bundle can render
 (python/src/camoufox/fonts.json, every OS) is measured against the generic
 fallbacks, and the generics are measured as a 72 px span. Both launches must
 agree, except for Twemoji Mozilla, which only the default launch has.
@@ -70,10 +71,14 @@ async def probe(binary: Path, bundled_fonts: bool) -> Dict[str, Any]:
 
     page_html = PAGE.replace("%FAMILIES%", json.dumps(bundle_families()))
     with tempfile.TemporaryDirectory() as profile:
+        # The font list reads these prefs once, at startup, so they go in the
+        # profile before the browser starts. Without a font list a legacy name
+        # (Avenir Next Demi Bold) resolves only once the font loader has run, so
+        # the two launches would differ by timing; delay 0 reads the names at once.
+        prefs = 'user_pref("gfx.font_loader.delay", 0);\n'
         if not bundled_fonts:
-            # The font list reads this pref once, at startup, so it goes in the
-            # profile before the browser starts.
-            Path(profile, "prefs.js").write_text('user_pref("gfx.bundled-fonts.activate", 0);\n', encoding="utf-8")
+            prefs += 'user_pref("gfx.bundled-fonts.activate", 0);\n'
+        Path(profile, "prefs.js").write_text(prefs, encoding="utf-8")
         async with async_playwright() as p:
             context = await p.firefox.launch_persistent_context(
                 profile, executable_path=str(binary), headless=True)
@@ -103,7 +108,7 @@ async def main() -> int:
     missing = sorted(set(host["rendered"]) - set(bare["rendered"]))
     print(f"  families rendered: {len(bare['rendered'])} bare, {len(host['rendered'])} with the host's fonts only")
     if extra:
-        failures.append(f"{len(extra)} bundled families render that the host does not have: {', '.join(extra[:12])}")
+        failures.append(f"{len(extra)} families render only with the bundle active: {', '.join(extra[:12])}")
     if missing:
         failures.append(f"{len(missing)} host families do not render: {', '.join(missing[:12])}")
     for generic, size in bare["spans"].items():
