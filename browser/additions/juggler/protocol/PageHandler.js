@@ -1043,18 +1043,17 @@ export class PageHandler {
   _repeatKey(params, held) {
     const os = kOsInput[this._identityOS()];
     const start = Date.now() + os.repeatDelayMs;
-    const next = k => setTimeout(async () => {
+    const next = k => setTimeout(() => {
       if (this._heldKey !== held)
         return;
-      try {
-        // Stamped when the OS would have made it, however late the timer fires.
-        await this._dispatchKeyEvent({...params, repeat: true, afterMs: os.repeatDelayMs + k * os.repeatEveryMs}, held);
-      } catch (e) {
+      // Stamped when the OS would have made it, however late the timer fires.
+      // Sent without waiting for the page to read the last one: a busy page
+      // reads the repeats an OS queued before the release, then the release.
+      this._dispatchKeyEvent({...params, repeat: true, afterMs: os.repeatDelayMs + k * os.repeatEveryMs}, held).catch(() => {
         // The page is gone or no longer takes keys: nothing is held there.
         if (this._heldKey === held)
           this._heldKey = null;
-        return;
-      }
+      });
       next(k + 1);
     }, Math.max(0, start + k * os.repeatEveryMs - Date.now()));
     next(0);

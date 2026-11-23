@@ -13,6 +13,22 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #518: a page busy after a keydown read one repeat of a held key
+
+**Symptom.** On a hosted Windows runner, `driven-key-repeat` under a Windows identity read one repeat of `a` held 1100 ms, where 19 are expected (e2e 44986993365, #517's entry).
+
+**Root cause.** Two things, of which this entry fixes the first.
+- `PageHandler._repeatKey` scheduled repeat k+1 only after repeat k's dispatch had returned, and a keyup cleared `_heldKey`. When the page stayed busy from before the first repeat until after the release, the first repeat waited for the page, the keyup came in meanwhile, and no repeat followed. An OS queues the repeats it makes while a page is busy, and the page reads them all before the release. This does not depend on the host: in e2e 45001396498 (Windows host, build `5f20b55a`, `diag/518-key-repeat`), a Linux identity read 21 repeats of a key held on an idle page and 1 of a key held on a page busy for 1500 ms after its keydown.
+- On every launch with a fresh profile, a hosted Windows runner stalls the parent's main thread once for 1.2 to 3.9 s, about 1 s after the first page loads. The guard holds `a` during it. Playwright's own Firefox 153 stalls the same way (e2e 45003687733), so this is the runner's, not Camoufox's. The same stall was #519's, whose entry is below. `driven-key-repeat`'s `a` arm on a Windows host has not been measured with this fix, which needs a build.
+
+**Fix.** `_repeatKey` sends each repeat when its timer fires, without waiting for the page to read the last one. Content reads them in order, then the keyup. A failed dispatch still clears the held key.
+
+**Evidence.** `driven-key-repeat.py` has a new arm: `f` held 1100 ms on a page whose keydown handler is busy for 1500 ms.
+- *Red.* Build `5f20b55a` on a hosted macOS runner (e2e 45002035445): `f` repeated 1 time under the Windows identity, where the OS makes 19, and 1 time under the Linux identity, where it makes 20.
+- *Green.* The Linux Tests run of this PR, with the fixed Juggler overlaid on main's browser.
+
+**What misled.** The guard printed `first repeat after 500.0 ms` while the repeat came over a second late. That number is the repeat's stamp, which #510 made the time the OS would have made it, so it is right however late the repeat lands. The parent stall then hid the Juggler defect: on a Windows host every hold landed in it, so the defect looked Windows-only. A diagnostic first blamed `initFOG`, the startup idle task the profiler sampled during the stall. Removing it left the stall in place.
+
 ## #519: driven-click-count failed when the parent stalled between two presses
 
 **Symptom.**
