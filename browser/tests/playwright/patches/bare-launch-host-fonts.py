@@ -16,6 +16,11 @@ which registers nothing from fonts/. Each family the bundle can render
 fallbacks, and the generics are measured as a 72 px span. Both launches must
 agree, except for Twemoji Mozilla, which only the default launch has.
 
+Windows and macOS activated every set in a bare launch too: the gate kept only
+Twemoji Mozilla for a Windows identity, and nothing for a macOS one, and a launch
+claiming no OS was neither (#513). Stock Firefox bundles Twemoji Mozilla on
+Windows and Linux only (browser/fonts/moz.build), so on macOS neither launch has it.
+
     python browser/tests/playwright/patches/bare-launch-host-fonts.py
 """
 
@@ -31,7 +36,7 @@ from helpers import resolve_binary  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 
-STOCK_BUNDLED = "Twemoji Mozilla"
+STOCK_BUNDLED = [] if sys.platform == "darwin" else ["Twemoji Mozilla"]
 ORIGIN = "https://camoufox.test/"
 PAGE = r"""<!doctype html><meta charset=utf-8><body><script>
 const families = %FAMILIES%;
@@ -89,11 +94,12 @@ async def main() -> int:
     host = await probe(binary, bundled_fonts=False)
     failures: List[str] = []
 
-    if STOCK_BUNDLED not in bare["rendered"]:
-        failures.append(f"{STOCK_BUNDLED}, which stock Firefox bundles, does not render")
-    if STOCK_BUNDLED in host["rendered"]:
-        failures.append(f"{STOCK_BUNDLED} renders with gfx.bundled-fonts.activate=0: the reference is not the host's fonts")
-    extra = sorted(set(bare["rendered"]) - set(host["rendered"]) - {STOCK_BUNDLED})
+    for family in STOCK_BUNDLED:
+        if family not in bare["rendered"]:
+            failures.append(f"{family}, which stock Firefox bundles, does not render")
+        if family in host["rendered"]:
+            failures.append(f"{family} renders with gfx.bundled-fonts.activate=0: the reference is not the host's fonts")
+    extra = sorted(set(bare["rendered"]) - set(host["rendered"]) - set(STOCK_BUNDLED))
     missing = sorted(set(host["rendered"]) - set(bare["rendered"]))
     print(f"  families rendered: {len(bare['rendered'])} bare, {len(host['rendered'])} with the host's fonts only")
     if extra:
