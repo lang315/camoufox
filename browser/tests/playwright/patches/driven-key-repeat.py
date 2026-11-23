@@ -33,11 +33,24 @@ each identity, and checks the repeat keydowns, their delay and interval, and
 the text the repeats type. A last letter's keydown queues 1.5 s of work, so
 the page is busy for the whole hold.
 
+Juggler counts a hold from the keydown's return to the keyup's arrival: the
+client's hold plus a hop each way. On a hosted Windows runner the Linux
+identity's `f` read 21 repeats in eight launches and 22 in one, where 20 fit
+1100 ms (#518). So the most repeats a hold may read are those of the time from
+sending the press to sending the release, which carries the press's round trip.
+
+The parent's main thread stalls once soon after a fresh profile loads its first
+page, 1.7 to 2.3 s on a hosted Windows runner, as stock Firefox does (#518,
+#519). A key held through it reads one repeat: Juggler's repeat timer cannot
+fire, and the release comes next. The guard holds its keys once the parent's
+round trips have stayed quick for 2 s, and measures the repeats, not the runner.
+
     python browser/tests/playwright/patches/driven-key-repeat.py
 """
 
 import statistics
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -60,6 +73,28 @@ REPEAT = {"windows": (500, 31.25, True), "macos": (500, 1000 / 12, False), "linu
 HOLD = 1100
 
 
+def hold(page, key, ms):
+    """Hold `key` `ms`; returns the time from sending the press to sending the release."""
+    sent = time.perf_counter()
+    page.keyboard.down(key)
+    page.wait_for_timeout(ms)
+    span = (time.perf_counter() - sent) * 1000
+    page.keyboard.up(key)
+    return span
+
+
+def settle(page):
+    """Wait out the parent's startup stall: until its round trips stay under 100 ms for 2 s."""
+    start = quiet = time.perf_counter()
+    while time.perf_counter() - quiet < 2:
+        sent = time.perf_counter()
+        page.context.cookies()
+        if time.perf_counter() - sent > 0.1:
+            quiet = time.perf_counter()
+        if time.perf_counter() - start > 20:
+            raise SystemExit("the parent did not stay responsive for 2 s within 20 s")
+
+
 def probe(binary, os_name):
     from camoufox.sync_api import Camoufox
 
@@ -69,9 +104,8 @@ def probe(binary, os_name):
         page = browser.new_page()
         page.set_content(PAGE)
         page.click("#field")
-        page.keyboard.down("a")
-        page.wait_for_timeout(HOLD)
-        page.keyboard.up("a")
+        settle(page)
+        spans = {"a": hold(page, "a", HOLD)}
         page.keyboard.down("Shift")
         page.wait_for_timeout(HOLD)
         page.keyboard.up("Shift")
@@ -86,10 +120,8 @@ def probe(binary, os_name):
         page.keyboard.down("e")
         page.wait_for_timeout(HOLD)
         page.keyboard.up("e")
-        page.keyboard.down("f")
-        page.wait_for_timeout(HOLD)
-        page.keyboard.up("f")
-        return page.evaluate("() => JSON.parse(document.body.dataset.seen || '[]')"), page.input_value("#field")
+        spans["f"] = hold(page, "f", HOLD)
+        return page.evaluate("() => JSON.parse(document.body.dataset.seen || '[]')"), page.input_value("#field"), spans
 
 
 def held(seen, key):
@@ -103,7 +135,9 @@ def main() -> int:
         runs = {os_name: probe(resolve_binary(), os_name) for os_name in drawable(REPEAT)}
     for os_name in runs:
         delay, interval, modifiers = REPEAT[os_name]
-        seen, value = runs[os_name]
+        seen, value, spans = runs[os_name]
+        # The repeats a hold of each span makes, the one at its very end included.
+        most = {k: int((span - delay) / interval) + 1 for k, span in spans.items()}
         flagged = [k for type, k, repeat, _ in seen if type == "keydown" and repeat]
         first, repeats = held(seen, "a")
         e_down, e_repeats = held(seen, "e")
@@ -112,8 +146,9 @@ def main() -> int:
         print(f"{os_name}: 'a' first repeat after "
               f"{repeats[0] - first if repeats else float('nan'):.1f} ms, {len(repeats)} repeats; "
               f"'d' {1 + len(held(seen, 'd')[1])} keydowns; 'e' on a busy page first repeat after {e_first:.1f} ms")
-        if not expected - 3 <= len(repeats) <= expected + 1:
-            failures.append(f"{os_name}: 'a' held {HOLD} ms repeated {len(repeats)} times, the OS {expected}")
+        if not expected - 3 <= len(repeats) <= most["a"]:
+            failures.append(f"{os_name}: 'a' held {HOLD} ms repeated {len(repeats)} times, the OS {expected} "
+                            f"to {most['a']} over {spans['a']:.0f} ms")
         else:
             # The Windows tick puts each stamp on a 15.625 ms step.
             if abs(repeats[0] - first - delay) > 17:
@@ -136,9 +171,9 @@ def main() -> int:
             failures.append(f"{os_name}: 'e', held on a page busy 700 ms in its keydown, first repeated "
                             f"{e_first:.0f} ms after its keydown, the OS {delay}")
         f_repeats = held(seen, "f")[1]
-        if not expected - 3 <= len(f_repeats) <= expected + 1:
+        if not expected - 3 <= len(f_repeats) <= most["f"]:
             failures.append(f"{os_name}: 'f', held {HOLD} ms on a page busy after its keydown, "
-                            f"repeated {len(f_repeats)} times, the OS {expected}")
+                            f"repeated {len(f_repeats)} times, the OS {expected} to {most['f']} over {spans['f']:.0f} ms")
         if any(k not in "abcShiftdef" for k in flagged):
             failures.append(f"{os_name}: repeats of keys not held: {set(flagged)}")
         typed = "a" * (1 + len(repeats)) + "b" * (1 + len(b_repeats)) + "c" * len(held(seen, "c")[1] + [c_down]) + "d" + "e" * (1 + len(e_repeats)) + "f" * (1 + len(f_repeats))
