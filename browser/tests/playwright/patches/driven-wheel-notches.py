@@ -93,28 +93,37 @@ def probe(binary, os, turns):
         return out
 
 
-def main() -> int:
-    with hidden_display("1920x1080"):
-        binary = resolve_binary()
-        got = probe(binary, "linux", (("one", 100), ("three", 300), ("short", 30)))
+def notch_failures(got):
     failures = []
     step = got["step"]
     if not step:
         failures.append(f"ArrowDown did not finish scrolling ({got['arrow']})")
-    elif step % 3 or not 24 <= step <= 120:
-        failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px were expected")
+    elif step * 2 % 3 or not 24 <= step <= 120:
+        failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px, in half pixels, were expected")
+    # The line may be fractional (19.5 px on a local Mac, #461). Gecko rounds it to whole pixels
+    # for MozMousePixelScroll (EventStateManager: CSSIntSize::FromAppUnitsRounded) and scrolls its exact height.
+    line = step / 3
     for name, notches in (("one", 1), ("three", 3), ("short", 1)):
         events, scrolled = got[name]
         shape = [e[:5] if e[0] == "wheel" else e for e in events]
-        if shape != notched(notches, step):
-            failures.append(f"mouse.wheel ({name}) delivered {shape}, expected {notched(notches, step)}")
+        expected = notched(notches, 3 * int(line + 0.5))
+        if shape != expected:
+            failures.append(f"mouse.wheel ({name}) delivered {shape}, expected {expected}")
         if scrolled != 2 * step * notches:
-            failures.append(f"mouse.wheel ({name}) scrolled {scrolled} px, stock {2 * step * notches} (six lines of {step // 3} px a notch)")
+            failures.append(f"mouse.wheel ({name}) scrolled {scrolled} px, stock {2 * step * notches} (six lines of {line} px a notch)")
+    return failures
+
+
+def main() -> int:
+    with hidden_display("1920x1080"):
+        binary = resolve_binary()
+        got = probe(binary, "linux", (("one", 100), ("three", 300), ("short", 30)))
+    failures = notch_failures(got)
     for failure in failures:
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"PASS: one mouse.wheel call is one native wheel event ({step // 3} px lines)")
+    print(f"PASS: one mouse.wheel call is one native wheel event ({got['step'] / 3} px lines)")
     return 0
 
 
