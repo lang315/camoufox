@@ -22,8 +22,9 @@ later change should read first.
 **Fix.** `display.visible_height()` (TypeScript `visibleHeight()`, through `osascript`) reads the visible frame's height on macOS. A drawn headful window is capped at it (`clamp_window_dimensions(config, max_outer_height)`), and a pinned one taller than it is refused with the visible height in the message. `popup-window-size.py` fits its identity to it.
 
 **Evidence.**
-- *Red.* `test_display.py::TestVisibleHeight` and the two #514 tests in `test_display_scale.py` fail before the fix with `module 'camoufox.display' has no attribute 'visible_height'`.
-- *Green.* The same tests pass, as do the TypeScript twins (`display.test.ts`, `launch.test.ts`, `fingerprints.test.ts`).
+- *Measured.* e2e 45303798377 (macOS build 45130189970): visible frame `[0, 63, 1024, 674]` on the 1024x768 monitor; windows of 709 to 723 px asked for at y 45 landed at y 31, 674 or 679 px tall, and a 683 px one stayed at y 45. On a Windows host (e2e 45302918957) every height stayed at y 45.
+- *Red.* `popup-window-size.py` on macOS: `the headful main window is at [123, 31], not the identity's position [123, 45]` (e2e 44907014576, 44899378810, 45174033418). `test_display.py::TestVisibleHeight` and the two #514 tests in `test_display_scale.py` fail before the fix with `module 'camoufox.display' has no attribute 'visible_height'`.
+- *Green.* `popup-window-size.py` passes on the same macOS build with this fix's guard (e2e 45306820206). The unit tests pass, as do the TypeScript twins (`display.test.ts`, `launch.test.ts`, `fingerprints.test.ts`): Tests 45308777851.
 
 **What misled.** The monitor bound already existed and was correct for Windows, so the bound looked complete; only the macOS menu bar and Dock make the usable height smaller than the monitor.
 
