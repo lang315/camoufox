@@ -54,9 +54,11 @@ def test_window_taller_than_the_visible_frame_raises(monkeypatch, isolated_launc
 def test_drawn_window_fits_the_visible_frame(monkeypatch):
     monkeypatch.setattr(utils, "OS_NAME", "lin")
     monkeypatch.setattr(utils, "has_display", lambda env: True)
-    monkeypatch.setattr(utils, "visible_height", lambda: 600)
+    # Below any window drawn for a 1024x768 screen, so the clamp always applies.
+    monkeypatch.setattr(utils, "visible_height", lambda: 400)
     env = utils.launch_options(os="linux", headless=False, screen=Screen(max_width=1024, max_height=768),
                                i_know_what_im_doing=True)["env"]
     chunks = sorted((int(k.rsplit("_", 1)[1]), v) for k, v in env.items() if k.startswith("CAMOU_CONFIG_"))
     cfg = orjson.loads("".join(v for _, v in chunks))
-    assert cfg["window.outerHeight"] <= 600
+    assert cfg["window.outerHeight"] == 400
+    assert 0 < cfg["window.innerHeight"] < 400
