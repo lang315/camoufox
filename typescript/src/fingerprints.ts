@@ -1028,8 +1028,14 @@ export function followBaselineProtection(
 	}
 }
 
-/** Enforce inner <= outer <= avail <= screen on both axes. */
-export function clampWindowDimensions(config: Config): void {
+/**
+ * Enforce inner <= outer <= avail <= screen on both axes, and outer height <=
+ * maxOuterHeight (the host's visible frame, #514).
+ */
+export function clampWindowDimensions(
+	config: Config,
+	maxOuterHeight?: number,
+): void {
 	for (const axis of ["Width", "Height"]) {
 		const screen = config[`screen.${axis.toLowerCase()}`];
 		const avail = config[`screen.avail${axis}`];
@@ -1043,7 +1049,12 @@ export function clampWindowDimensions(config: Config): void {
 		const availClamped = get(config, `screen.avail${axis}`, screen);
 
 		// outer must not exceed avail (or screen if avail is unknown)
-		const outerCap = !isNone(availClamped) ? availClamped : screen;
+		let outerCap = !isNone(availClamped) ? availClamped : screen;
+		if (axis === "Height" && maxOuterHeight) {
+			outerCap = pyTruthy(outerCap)
+				? Math.min(num(outerCap), maxOuterHeight)
+				: maxOuterHeight;
+		}
 		if (pyTruthy(outer) && pyTruthy(outerCap) && num(outer) > num(outerCap)) {
 			const chrome = pyTruthy(inner) ? Math.max(0, num(outer) - num(inner)) : 0;
 			config[`window.outer${axis}`] = outerCap;

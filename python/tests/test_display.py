@@ -9,6 +9,7 @@ Run with:
     cd python && python -m pytest tests/test_display.py -v
 """
 
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -107,3 +108,38 @@ class TestHasDisplay:
     def test_linux_requires_a_session(self, monkeypatch, env, expected):
         monkeypatch.setattr(display, "OS_NAME", "lin")
         assert display.has_display(env) is expected
+
+
+class TestVisibleHeight:
+    """macOS shrinks a window taller than the visible frame (#514)."""
+
+    @staticmethod
+    def appkit(monkeypatch, *screens):
+        found = [
+            SimpleNamespace(
+                frame=SimpleNamespace(size=SimpleNamespace(width=w, height=h)),
+                visibleFrame=SimpleNamespace(size=SimpleNamespace(width=w, height=v)),
+            )
+            for w, h, v in screens
+        ]
+        module = SimpleNamespace(NSScreen=SimpleNamespace(screens=lambda: found))
+        monkeypatch.setitem(sys.modules, "AppKit", module)
+
+    def test_none_off_macos(self, monkeypatch):
+        monkeypatch.setattr(display, "OS_NAME", "lin")
+        assert display.visible_height() is None
+
+    def test_largest_screen_wins(self, monkeypatch):
+        monkeypatch.setattr(display, "OS_NAME", "mac")
+        self.appkit(monkeypatch, (1024, 768, 674), (2560, 1440, 1337.5))
+        assert display.visible_height() == 1337
+
+    def test_first_wins_a_tie(self, monkeypatch):
+        monkeypatch.setattr(display, "OS_NAME", "mac")
+        self.appkit(monkeypatch, (1920, 1080, 1000), (1920, 1080, 900))
+        assert display.visible_height() == 1000
+
+    def test_none_when_unreadable(self, monkeypatch):
+        monkeypatch.setattr(display, "OS_NAME", "mac")
+        monkeypatch.setitem(sys.modules, "AppKit", None)
+        assert display.visible_height() is None

@@ -121,6 +121,18 @@ describe("followBaselineProtection", () => {
 });
 
 describe("clampWindowDimensions", () => {
+	it("caps the outer height at the visible frame, keeping the chrome delta (#514)", () => {
+		const c: Record<string, number> = {
+			"screen.height": 768,
+			"screen.availHeight": 768,
+			"window.outerHeight": 723,
+			"window.innerHeight": 640,
+		};
+		clampWindowDimensions(c, 674);
+		expect(c["window.outerHeight"]).toBe(674);
+		expect(c["window.innerHeight"]).toBe(591);
+	});
+
 	it("clamps impossible geometry on both axes", () => {
 		const c: Record<string, number> = {
 			"screen.width": 1920,

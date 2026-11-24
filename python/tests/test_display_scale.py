@@ -1,5 +1,6 @@
 """The browser renders at the identity's devicePixelRatio (#933)."""
 
+import orjson
 import pytest
 
 from camoufox import utils
@@ -31,3 +32,31 @@ def test_window_too_large_for_the_monitor_raises(monkeypatch, isolated_launch_de
     with pytest.raises(ValueError, match="needs 3200 pixels, but this monitor has 1920"):
         prefs(2.5, headless=False, screen=Screen(max_width=1920, max_height=1080))
     assert prefs(1.25, headless=False, screen=Screen(max_width=1920, max_height=1200))[PREF] == "1.25"
+
+
+def test_window_taller_than_the_visible_frame_raises(monkeypatch, isolated_launch_dependencies):  # noqa: F811
+    """macOS shrinks it and moves it to the top of the visible frame (#514)."""
+    monkeypatch.setattr(utils, "OS_NAME", "lin")
+    monkeypatch.setattr(utils, "has_display", lambda env: True)
+    monkeypatch.setattr(utils, "visible_height", lambda: 674)
+    screen = Screen(max_width=1920, max_height=768)
+
+    def launch(outer_height):
+        return utils.launch_options(
+            config={**WIN, "window.devicePixelRatio": 1, "window.outerHeight": outer_height},
+            i_know_what_im_doing=True, headless=False, screen=screen)
+
+    with pytest.raises(ValueError, match="this monitor shows 674 between the menu bar and the Dock"):
+        launch(723)
+    launch(674)
+
+
+def test_drawn_window_fits_the_visible_frame(monkeypatch):
+    monkeypatch.setattr(utils, "OS_NAME", "lin")
+    monkeypatch.setattr(utils, "has_display", lambda env: True)
+    monkeypatch.setattr(utils, "visible_height", lambda: 600)
+    env = utils.launch_options(os="linux", headless=False, screen=Screen(max_width=1024, max_height=768),
+                               i_know_what_im_doing=True)["env"]
+    chunks = sorted((int(k.rsplit("_", 1)[1]), v) for k, v in env.items() if k.startswith("CAMOU_CONFIG_"))
+    cfg = orjson.loads("".join(v for _, v in chunks))
+    assert cfg["window.outerHeight"] <= 600

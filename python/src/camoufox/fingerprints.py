@@ -1007,8 +1007,9 @@ def resample_screen_for_dpr1(
     config['screen.height'] = screen['height']
 
 
-def clamp_window_dimensions(config: Dict[str, Any]) -> None:
-    """Enforce inner <= outer <= avail <= screen on BOTH axes.
+def clamp_window_dimensions(config: Dict[str, Any], max_outer_height: Optional[int] = None) -> None:
+    """Enforce inner <= outer <= avail <= screen on BOTH axes, and
+    outer height <= max_outer_height (the host's visible frame, #514).
 
     The browser faithfully reports whatever we inject, so a generated
     fingerprint that ships e.g. outerWidth > screen.width or innerWidth >
@@ -1029,6 +1030,8 @@ def clamp_window_dimensions(config: Dict[str, Any]) -> None:
 
         # outer must not exceed avail (or screen if avail is unknown)
         outer_cap = avail_clamped if avail_clamped is not None else screen
+        if axis == 'Height' and max_outer_height:
+            outer_cap = min(outer_cap, max_outer_height) if outer_cap else max_outer_height
         if outer and outer_cap and outer > outer_cap:
             chrome = max(0, outer - inner) if inner else 0
             config[f'window.outer{axis}'] = outer_cap

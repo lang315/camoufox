@@ -113,6 +113,37 @@ function enumerateWindows(): DisplaySize[] {
 }
 
 /**
+ * Height of the roomiest macOS screen's visible frame (below the menu bar,
+ * above the Dock), or null elsewhere or when it cannot be read. macOS shrinks a
+ * window taller than it and moves it to the frame's top (#514); Windows and X11
+ * leave a window over the taskbar where it was placed.
+ */
+export function visibleHeight(): number | null {
+	if (OS_NAME !== "mac") return null;
+	// osascript prints the script's last expression; run() discards stderr.
+	const out = run("osascript", [
+		"-l",
+		"JavaScript",
+		"-e",
+		"ObjC.import('AppKit'); const s = $.NSScreen.screens; const out = []; " +
+			"for (let i = 0; i < s.count; i++) { const sc = s.objectAtIndex(i); " +
+			"const f = sc.frame, v = sc.visibleFrame; " +
+			"out.push([f.size.width, f.size.height, v.size.height]); } JSON.stringify(out)",
+	]);
+	if (!out) return null;
+	try {
+		const screens: number[][] = JSON.parse(out);
+		// max() keeps the FIRST of equally large screens, as Python's max() does.
+		const screen = screens.reduce((prev, curr) =>
+			curr[0] * curr[1] > prev[0] * prev[1] ? curr : prev,
+		);
+		return Math.trunc(screen[2]);
+	} catch {
+		return null;
+	}
+}
+
+/**
  * Size of the roomiest attached monitor in CSS pixels, or null when the display
  * cannot be probed (no monitors, or enumeration failed).
  */

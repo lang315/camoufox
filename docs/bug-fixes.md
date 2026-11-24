@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #514: a headful macOS window taller than the visible frame was shrunk and moved
+
+**Symptom.** On a hosted macOS runner with a 1024x768 monitor, a headful window asked for 723 px at y 45 landed 674 px tall at y 31, so the page read a shrunk `outerHeight` next to the identity's `innerHeight`. A 671 px window stayed at y 45.
+
+**Root cause.** The launcher bounded a headful window by the full monitor only: `get_screen_cons()` returns `display.largest_display()`, `clamp_window_dimensions()` caps a drawn outer height at the identity's `screen.availHeight`, and the refusal check compares a pinned window with the monitor. On macOS `NSScreen.visibleFrame` is `[0, 63, 1024, 674]` (31 px menu bar, 63 px Dock), and macOS shrinks any window taller than that and moves it to the frame's top. A window over the Dock is left where it was placed as long as its height fits. Windows and X11 leave a window over the taskbar alone.
+
+**Fix.** `display.visible_height()` (TypeScript `visibleHeight()`, through `osascript`) reads the visible frame's height on macOS. A drawn headful window is capped at it (`clamp_window_dimensions(config, max_outer_height)`), and a pinned one taller than it is refused with the visible height in the message. `popup-window-size.py` fits its identity to it.
+
+**Evidence.**
+- *Red.* `test_display.py::TestVisibleHeight` and the two #514 tests in `test_display_scale.py` fail before the fix with `module 'camoufox.display' has no attribute 'visible_height'`.
+- *Green.* The same tests pass, as do the TypeScript twins (`display.test.ts`, `launch.test.ts`, `fingerprints.test.ts`).
+
+**What misled.** The monitor bound already existed and was correct for Windows, so the bound looked complete; only the macOS menu bar and Dock make the usable height smaller than the monitor.
+
 ## #513: a bare launch on Windows and macOS rendered the other OSes' bundled fonts
 
 **Symptom.** `bare-launch-host-fonts` launches the binary with no `CAMOU_CONFIG` and compares it with a launch whose bundle is off (`gfx.bundled-fonts.activate=0`). On a hosted Windows runner the bare launch rendered 507 bundled families the host does not have (e2e 44868304511), and on a hosted macOS runner 365 (e2e 44876051546). Upstream wrote the guard for Linux and never runs it on the other two.
