@@ -73,7 +73,7 @@ def notch_guard():
 
 def notch_reading(line, rounded):
     """driven-wheel-notches.py's turns of 1, 3 and 1 notches: a notch is six lines of deltaY, three of the
-    legacy events, and scrolls six lines. The 19.5 px line is the local Retina Mac reading in #461."""
+    legacy events, and scrolls six lines. The 19.5 px line is the local arm64 Mac reading in #461."""
     got = {"step": 3 * line, "arrow": ""}
     for name, n in (("one", 1), ("three", 3), ("short", 1)):
         events = [["wheel", 1, 0, 6 * n, -120 * n, 1234], ["DOMMouseScroll", 3 * n], ["MozMousePixelScroll", 3 * rounded * n]]

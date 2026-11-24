@@ -100,7 +100,7 @@ def notch_failures(got):
         failures.append(f"ArrowDown did not finish scrolling ({got['arrow']})")
     elif step * 2 % 3 or not 24 <= step <= 120:
         failures.append(f"an arrow key scrolled the scroller {step} px: three lines of 8 to 40 px, in half pixels, were expected")
-    # The line may be fractional (19.5 px at a device pixel ratio of 2, #461). Gecko rounds it to whole pixels
+    # The line may be fractional (19.5 px on a local Mac, #461). Gecko rounds it to whole pixels
     # for MozMousePixelScroll (EventStateManager: CSSIntSize::FromAppUnitsRounded) and scrolls its exact height.
     line = step / 3
     for name, notches in (("one", 1), ("three", 3), ("short", 1)):

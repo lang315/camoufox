@@ -13,6 +13,20 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #461, again: driven-wheel-notches also assumed a whole-pixel line
+
+**Fixed by:** the PR that refs #461. **Found by:** a local run of the patch guards on an arm64 Mac (macOS 15.7.4), macOS build 44055830400. Why that page's line was a half pixel was not measured; a device pixel ratio of 2 would give one.
+
+**Symptom.** `driven-wheel-notches.py` (the Linux identity) failed every arm: `an arrow key scrolled the scroller 58.5 px: three lines of 8 to 40 px were expected`, and each notch delivered `MozMousePixelScroll 60` where the guard expected 58.5.
+
+**Root cause.** The guard, not the browser. The page's line was 19.5 px, three lines of 58.5. Stock Gecko computes a notch's `MozMousePixelScroll` from the line rounded to whole pixels (`EventStateManager.cpp`, `FIREFOX_159_0_RELEASE`: `CSSIntSize::FromAppUnitsRounded(aEvent->mScrollAmount)`, then `RoundDown(mDeltaY * scrollAmountInCSSPixels.height)`), so three lines of 20 give 60, and it scrolls the exact height. The guard required `step % 3 == 0` and an event of exactly the arrow key's 58.5 px. #465 had fixed the same assumption in `driven-wheel-notches-macos.py` only.
+
+**Fix.** `notch_failures` takes #465's rule: three lines in half pixels for the arrow key, `MozMousePixelScroll` of three times the rounded line per notch, and a scroll of the exact six lines.
+
+**Evidence.** Four new tests in `ci/tests/test_wheel_guard_line_height.py` feed `notch_failures` a 19.5 px line with events of 20. With the old rule put back in that function the 19.5 px test fails (`1 failed, 8 passed`); with the fix all pass (`9 passed`). The controls give the same verdict on both rules: a whole 20 px line passes, and events that do not round the line, or a scroll other than six lines, fail. A hosted runner draws at a device pixel ratio of 1, so CI runs the whole-pixel case only.
+
+**What misled.** #465's fix named the macOS guard alone, and the Linux guard's integral lines on Xvfb and Windows never exercised its rule.
+
 ## #500, again: a deleted branch's caches stayed until evicted
 
 **Symptom.** On 24 November the repository's caches held about 10 GB, the size limit. `fix/513-bare-launch-fonts` still held 5.9 GB (its browser cache, both build legs' ccache and the 3.9 GB Windows mozbuild state) a day after its pull request merged and its branch was deleted. `main`'s macOS arm64 ccache and mozbuild entries, saved by build 44886770321 on 21 November, were gone, and so was `main`'s Windows mozbuild entry saved by build 45092855974 on 23 November, while that run's Windows ccache, restored later that day, was still live.
