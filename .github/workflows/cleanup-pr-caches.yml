@@ -4,7 +4,8 @@ name: Delete a closed pull request's or a deleted branch's caches
 # branch's own runs (a dispatched build, a push) under refs/heads/<branch>; no
 # other ref can restore either. Once the pull request is closed or the branch is
 # deleted they only take space, and at the repository's size limit GitHub evicts
-# the oldest-accessed caches first, which has been main's build ccache (#500).
+# the oldest-accessed caches first, and main's build caches, saved only when a
+# build is dispatched, are often the oldest (#500).
 # This is the recipe from GitHub's "Managing caches" documentation, "Force
 # deleting cache entries". It runs on pull_request_target so that a pull request
 # from a fork is cleaned up too (the pull_request token is read-only for forks).
