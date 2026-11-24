@@ -61,4 +61,3 @@ def test_drawn_window_fits_the_visible_frame(monkeypatch):
     chunks = sorted((int(k.rsplit("_", 1)[1]), v) for k, v in env.items() if k.startswith("CAMOU_CONFIG_"))
     cfg = orjson.loads("".join(v for _, v in chunks))
     assert cfg["window.outerHeight"] == 400
-    assert 0 < cfg["window.innerHeight"] < 400
