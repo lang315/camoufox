@@ -1,33 +1,38 @@
-name: Delete a closed pull request's caches
+name: Delete a closed pull request's or a deleted branch's caches
 
-# A pull request's workflow runs save their caches under refs/pull/N/merge, which
-# no other ref can restore. Once the pull request is closed they only take space,
-# and at the repository's size limit GitHub evicts the oldest-accessed caches
-# first, which has been the build legs' ccache.
+# A pull request's workflow runs save their caches under refs/pull/N/merge, and a
+# branch's own runs (a dispatched build, a push) under refs/heads/<branch>; no
+# other ref can restore either. Once the pull request is closed or the branch is
+# deleted they only take space, and at the repository's size limit GitHub evicts
+# the oldest-accessed caches first, which has been main's build ccache (#500).
 # This is the recipe from GitHub's "Managing caches" documentation, "Force
 # deleting cache entries". It runs on pull_request_target so that a pull request
 # from a fork is cleaned up too (the pull_request token is read-only for forks).
-# It never checks out or runs the pull request's code; the only input it uses is
-# the pull request number.
+# It never checks out or runs any code; the only input it uses is the pull
+# request number or the deleted branch's name.
 
 on:
   pull_request_target:
     types: [closed]
+  delete:
 
 permissions: {}
 
 jobs:
   cleanup:
+    if: github.event_name == 'pull_request_target' || github.event.ref_type == 'branch'
     runs-on: ubuntu-24.04
     permissions:
       actions: write
     steps:
-      - name: Delete the caches of refs/pull/N/merge
+      - name: Delete the caches of refs/pull/N/merge or refs/heads/<branch>
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          REF: refs/pull/${{ github.event.pull_request.number }}/merge
+          PR: ${{ github.event.pull_request.number }}
+          BRANCH: ${{ github.event.ref }}
         run: |
+          if [ -n "$PR" ]; then REF="refs/pull/$PR/merge"; else REF="refs/heads/${BRANCH#refs/heads/}"; fi
           ids=$(gh cache list --ref "$REF" --limit 100 --json id --jq '.[].id')
           echo "caches under $REF: $(echo "$ids" | grep -c . || true)"
           for id in $ids; do
