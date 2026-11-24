@@ -3977,19 +3977,47 @@ def test_the_prune_lists_only_the_ref_and_the_leg_prefix_the_run_saved_under(tmp
     assert sorted(c.split("--key ")[1].split()[0] for c in lists) == ["ccache-windows-x86_64-", "mozbuild-windows-x86_64-"]
 
 
-def test_closing_a_pull_request_deletes_the_caches_it_saved():
-    """A pull request's caches live under refs/pull/N/merge, where nothing else can restore them,
-    and at the size limit the eviction took the build legs' ccache instead."""
+def _run_cleanup(tmp_path, *, pr="", branch=""):
+    """Run the cleanup step's script against a `gh` that lists caches 11 and 12 and records every call."""
+    workflow = _workflow("cleanup-pr-caches.yml")
+    (job,) = workflow["jobs"].values()
+    (step,) = job["steps"]
+    assert step["env"]["PR"] == "${{ github.event.pull_request.number }}"
+    assert step["env"]["BRANCH"] == "${{ github.event.ref }}"
+    fake = tmp_path / "bin"
+    fake.mkdir(parents=True)
+    (fake / "gh").write_text(
+        '#!/bin/bash\necho "$@" >> "$CALLS"\n[ "$1 $2" = "cache list" ] && printf "11\\n12\\n"\nexit 0\n',
+        encoding="utf-8",
+    )
+    (fake / "gh").chmod(0o755)
+    calls = tmp_path / "calls.txt"
+    env = {**os.environ, "PATH": f"{fake}:{os.environ['PATH']}", "CALLS": str(calls), "PR": pr, "BRANCH": branch}
+    subprocess.run(["bash", "-e", "-c", step["run"]], env=env, check=True, capture_output=True)
+    return calls.read_text(encoding="utf-8").splitlines()
+
+
+def test_closing_a_pull_request_or_deleting_a_branch_deletes_the_caches_it_saved(tmp_path):
+    """A pull request's caches live under refs/pull/N/merge and a branch's under refs/heads/<branch>,
+    where nothing else can restore them, and at the size limit the eviction took main's build
+    ccache instead (#500)."""
     workflow = _workflow("cleanup-pr-caches.yml")
     triggers = workflow.get("on") or workflow[True]
-    assert triggers == {"pull_request_target": {"types": ["closed"]}}
+    assert triggers == {"pull_request_target": {"types": ["closed"]}, "delete": None}
     assert workflow["permissions"] == {}
     (job,) = workflow["jobs"].values()
     assert job["permissions"] == {"actions": "write"}
+    assert "github.event.ref_type == 'branch'" in job["if"], "a deleted tag holds no caches"
     assert not any("uses" in step for step in job["steps"]), "must not check out or run pull request code"
     (step,) = job["steps"]
-    assert step["env"]["REF"] == "refs/pull/${{ github.event.pull_request.number }}/merge"
-    assert "github.event" not in step["run"], "the pull request number is the only event input, passed through env"
+    assert "github.event" not in step["run"], "the event inputs are passed through env, never interpolated"
+
+    cases = [({"pr": "7"}, "refs/pull/7/merge"), ({"branch": "fix/x"}, "refs/heads/fix/x"),
+             ({"branch": "refs/heads/fix/x"}, "refs/heads/fix/x")]
+    for i, (kwargs, ref) in enumerate(cases):
+        calls = _run_cleanup(tmp_path / str(i), **kwargs)
+        assert calls[0].startswith(f"cache list --ref {ref} "), calls
+        assert calls[1:] == ["cache delete 11", "cache delete 12"], calls
 
 
 def test_packaged_entries_are_readable_by_every_user(tmp_path):

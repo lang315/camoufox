@@ -13,6 +13,18 @@ The issue and the PR hold the full record. This file is the short version a
 later change should read first.
 
 
+## #500, again: a deleted branch's caches stayed until evicted
+
+**Symptom.** On 24 November the repository's caches held about 10 GB, the size limit. `fix/513-bare-launch-fonts` still held 5.9 GB (its browser cache, both build legs' ccache and the 3.9 GB Windows mozbuild state) a day after its pull request merged and its branch was deleted. `main`'s macOS arm64 ccache and mozbuild entries, saved by build 44886770321 on 21 November, were gone, and so was `main`'s Windows mozbuild entry saved by build 45092855974 on 23 November, while that run's Windows ccache, restored later that day, was still live.
+
+**Root cause.** A dispatched build or a push run saves its caches under `refs/heads/<branch>`, which no other ref can restore. `cleanup-pr-caches.yml` deleted only `refs/pull/N/merge`, the scope of a pull request's own runs, so a branch's caches stayed after the branch was deleted, holding space until GitHub evicted the oldest-accessed entries at the limit. `main`'s missing entries fit that eviction, but it was not observed (the cache API lists live entries only), and `fix/513`'s own saves on 23 November came while its branch was still alive, so whether a deleted branch's caches are what took `main`'s is not shown. This fix removes space that only an eviction would otherwise free.
+
+**Fix.** `cleanup-pr-caches.yml` also runs on the `delete` event of a branch and deletes the caches under `refs/heads/<branch>`, with the same recipe. The branch name reaches the script through `env`, and a `refs/heads/` prefix is stripped, since GitHub's payload docs call `ref` only "the git ref resource". A branch deleted by a workflow's `GITHUB_TOKEN` starts no run, so its caches still stay; a person's delete, from the web or `git push --delete`, does.
+
+**Evidence.** `test_closing_a_pull_request_or_deleting_a_branch_deletes_the_caches_it_saved` fails on `main`'s workflow (the triggers lack `delete`) and passes with the change; it runs the step's script against a fake `gh` for a pull request, a branch name and a full branch ref. A `delete` event runs only the default branch's copy of a workflow, so the trigger is shown after the merge, in #500.
+
+**What misled.** #500's first fix bounded each ref to one entry per leg, which looked like it bounded the total; it bounds a live ref, not a deleted one.
+
 ## #514: a headful macOS window taller than the visible frame was shrunk and moved
 
 **Symptom.** On a hosted macOS runner with a 1024x768 monitor, a headful window asked for 723 px at y 45 landed 674 px tall at y 31, so the page read a shrunk `outerHeight` next to the identity's `innerHeight`. A 671 px window stayed at y 45.
