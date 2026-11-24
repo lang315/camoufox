@@ -59,6 +59,46 @@ def test_a_scroll_other_than_the_pages_own_line_fails(guard):
     assert any("scrolled 17 px, expected 16.5" in f for f in guard.mac_failures(got))
 
 
+NOTCHES = Path(__file__).resolve().parents[2] / "browser/tests/playwright/patches/driven-wheel-notches.py"
+
+
+@pytest.fixture(scope="module")
+def notch_guard():
+    sys.path.insert(0, str(NOTCHES.parent))
+    spec = importlib.util.spec_from_file_location("driven_wheel_notches", NOTCHES)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def notch_reading(line, rounded):
+    """driven-wheel-notches.py's turns of 1, 3 and 1 notches: a notch is six lines of deltaY, three of the
+    legacy events, and scrolls six lines. The 19.5 px line is the local Retina Mac reading in #461."""
+    got = {"step": 3 * line, "arrow": ""}
+    for name, n in (("one", 1), ("three", 3), ("short", 1)):
+        events = [["wheel", 1, 0, 6 * n, -120 * n, 1234], ["DOMMouseScroll", 3 * n], ["MozMousePixelScroll", 3 * rounded * n]]
+        got[name] = (events, 6 * line * n)
+    return got
+
+
+def test_the_notch_guard_passes_a_line_of_nineteen_and_a_half_pixels(notch_guard):
+    assert notch_guard.notch_failures(notch_reading(19.5, 20)) == []
+
+
+def test_the_notch_guard_still_passes_a_whole_pixel_line(notch_guard):
+    assert notch_guard.notch_failures(notch_reading(20, 20)) == []
+
+
+def test_the_notch_guard_fails_events_that_do_not_round_the_line(notch_guard):
+    assert notch_guard.notch_failures(notch_reading(19.5, 19.5))
+
+
+def test_the_notch_guard_fails_a_scroll_other_than_six_of_the_pages_lines(notch_guard):
+    got = notch_reading(19.5, 20)
+    got["one"] = (got["one"][0], 120)
+    assert any("scrolled 120 px, stock 117.0" in f for f in notch_guard.notch_failures(got))
+
+
 def test_a_turn_split_over_several_events_fails(guard):
     got = reading(17, 17)
     got["turn"] = (delivered([1, 3, 2], 17), 17 * 6)
