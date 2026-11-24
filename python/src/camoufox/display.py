@@ -66,6 +66,29 @@ def largest_display() -> Optional[DisplaySize]:
     )
 
 
+def visible_height() -> Optional[int]:
+    """
+    Height of the roomiest macOS screen's visible frame (below the menu bar,
+    above the Dock), or None elsewhere or when it cannot be read. macOS shrinks
+    a window taller than it and moves it to the frame's top (#514); Windows and
+    X11 leave a window over the taskbar where it was placed.
+    """
+    if OS_NAME != 'mac':
+        return None
+    try:
+        from AppKit import NSScreen  # type: ignore[import-not-found]
+
+        def rect(screen: Any, name: str) -> Any:
+            value = getattr(screen, name)
+            return value() if callable(value) else value
+
+        screens = list(NSScreen.screens())
+        screen = max(screens, key=lambda s: rect(s, 'frame').size.width * rect(s, 'frame').size.height)
+        return int(rect(screen, 'visibleFrame').size.height)
+    except Exception:
+        return None
+
+
 def _scale_factor(monitor: Any) -> float:
     """
     Physical pixels per CSS pixel on `monitor`. Always 1.0 outside Windows.

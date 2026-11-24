@@ -511,6 +511,27 @@ describe("test_launch_environment: prefs", () => {
 				}),
 			).rejects.toThrow("needs 3200 pixels, but this monitor has 1920");
 		});
+		it("refuses a window taller than the visible frame (#514)", async () => {
+			deps.osName = () => "lin";
+			deps.hasDisplay = () => true;
+			deps.visibleHeight = () => 674;
+			const launchAt = (outerHeight: number) =>
+				prefsFor({
+					...ua(WIN_UA, {
+						"screen.width": 1382,
+						"screen.height": 864,
+						"window.outerWidth": 1280,
+						"window.outerHeight": outerHeight,
+						"window.devicePixelRatio": 1,
+					}),
+					headless: false,
+					screen: new fingerprints.Screen({ maxWidth: 1920, maxHeight: 768 }),
+				});
+			await expect(launchAt(723)).rejects.toThrow(
+				"this monitor shows 674 between the menu bar and the Dock",
+			);
+			expect((await launchAt(674))[PREF]).toBe("1");
+		});
 	});
 
 	describe("Windows scrollbars follow the version the fonts present", () => {

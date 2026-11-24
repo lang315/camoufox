@@ -18,7 +18,7 @@ from ua_parser import user_agent_parser
 
 from . import driver_defaults
 from .addons import DefaultAddons, add_default_addons, confirm_paths
-from .display import has_display, largest_display
+from .display import has_display, largest_display, visible_height
 from .exceptions import (
     InvalidOS,
     InvalidPropertyType,
@@ -1672,6 +1672,9 @@ def launch_options(
     screen_cons = screen or (
         get_screen_cons(headless) if has_display(env) and not virtual_display else None
     )
+    host_visible_height = (
+        visible_height() if headless is False and has_display(env) and not virtual_display else None
+    )
 
     if not _used_preset and fingerprint is None:
         # Default: synthetic generation via fpgen (infinite unique fingerprints)
@@ -1756,7 +1759,9 @@ def launch_options(
             clamp_screen_to_display(config, screen_cons.max_width and int(screen_cons.max_width / fit),
                                     screen_cons.max_height and int(screen_cons.max_height / fit))
         follow_baseline_protection(config, target_os)
-        clamp_window_dimensions(config)
+        clamp_window_dimensions(
+            config, host_visible_height and int(host_visible_height / _physical_scale(config))
+        )
         clamp_window_position(config)
 
     # Deliberately NOT setting window.history.length. It used to be pinned to a
@@ -2192,7 +2197,14 @@ def launch_options(
         fit = _physical_scale(config, firefox_user_prefs)
         for axis, cap in (('Width', screen_cons.max_width), ('Height', screen_cons.max_height)):
             size = config.get(f'window.outer{axis}')
-            if cap and size and size * fit > cap:
+            if axis == 'Height' and host_visible_height and (not cap or host_visible_height < cap):
+                if size and size * fit > host_visible_height:
+                    raise ValueError(
+                        f'window.outerHeight {size} at display scale {fit:g} needs {size * fit:g} pixels, '
+                        f'but this monitor shows {host_visible_height} between the menu bar and the Dock. '
+                        'Pass a smaller screen and window, or run headless.'
+                    )
+            elif cap and size and size * fit > cap:
                 raise ValueError(
                     f'window.outer{axis} {size} at display scale {fit:g} needs {size * fit:g} pixels, '
                     f'but this monitor has {cap}. Pass a smaller screen and window, or run headless.'

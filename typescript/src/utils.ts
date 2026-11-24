@@ -14,7 +14,7 @@ import { UAParser } from "ua-parser-js";
 import { addDefaultAddons, confirmPaths, type DefaultAddon } from "./addons.js";
 import * as coherence from "./coherence.js";
 import * as cpuAffinity from "./cpu_affinity.js";
-import { hasDisplay, largestDisplay } from "./display.js";
+import { hasDisplay, largestDisplay, visibleHeight } from "./display.js";
 import {
 	InvalidOS,
 	InvalidPropertyType,
@@ -257,6 +257,7 @@ export const utilsDeps = {
 	stockProfileDiskCapacityKb,
 	hasDisplay,
 	largestDisplay,
+	visibleHeight,
 	getScreenCons: (headless?: boolean) => getScreenCons(headless),
 	print: (line: string): void => {
 		process.stdout.write(`${line}\n`);
@@ -1953,6 +1954,10 @@ export async function launchOptions({
 		: utilsDeps.hasDisplay(env)
 			? utilsDeps.getScreenCons(headless)
 			: null;
+	const hostVisibleHeight =
+		headless === false && !virtual_display && utilsDeps.hasDisplay(env)
+			? utilsDeps.visibleHeight()
+			: null;
 
 	if (!usedPreset && fingerprint == null) {
 		// Default: synthetic generation via fpgen (infinite unique fingerprints)
@@ -2046,7 +2051,12 @@ export async function launchOptions({
 			);
 		}
 		utilsDeps.followBaselineProtection(config, targetOs);
-		utilsDeps.clampWindowDimensions(config);
+		utilsDeps.clampWindowDimensions(
+			config,
+			hostVisibleHeight
+				? Math.trunc(hostVisibleHeight / physicalScale(config))
+				: undefined,
+		);
 		utilsDeps.clampWindowPosition(config);
 	}
 
@@ -2512,7 +2522,19 @@ export async function launchOptions({
 			["Height", screenCons.maxHeight],
 		] as const) {
 			const size = config[`window.outer${axis}`];
-			if (cap && size && size * fit > cap) {
+			if (
+				axis === "Height" &&
+				hostVisibleHeight &&
+				(!cap || hostVisibleHeight < cap)
+			) {
+				if (size && size * fit > hostVisibleHeight) {
+					throw new Error(
+						`window.outerHeight ${size} at display scale ${fit} needs ${size * fit} pixels, ` +
+							`but this monitor shows ${hostVisibleHeight} between the menu bar and the Dock. ` +
+							"Pass a smaller screen and window, or run headless.",
+					);
+				}
+			} else if (cap && size && size * fit > cap) {
 				throw new Error(
 					`window.outer${axis} ${size} at display scale ${fit} needs ${size * fit} pixels, ` +
 						`but this monitor has ${cap}. Pass a smaller screen and window, or run headless.`,

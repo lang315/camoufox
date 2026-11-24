@@ -30,7 +30,8 @@ resize to the identity's size is caught too.
 
 The identity is fitted to the monitor the guard runs on (a hosted Windows
 monitor is 1024 px wide and a hosted macOS one 1280), because the launcher
-refuses a headful window the monitor cannot hold. The subject is the same at any
+refuses a headful window the monitor cannot hold (on macOS, one taller than the
+visible frame between the menu bar and the Dock, #514). The subject is the same at any
 size above the popup's: the popup asks for 400x300, and a popup that took the
 identity's size would read that size instead.
 
@@ -60,10 +61,14 @@ def identity(monitor):
     monitor's (at most 1920x1080) and the window leaves room for the claimed
     position. Nothing below depends on the window being 1366 wide: the popup
     asks for REQUESTED, and the main window only has to be larger than that and
-    answer with the identity's own sizes."""
+    answer with the identity's own sizes. On macOS the window is also no taller
+    than the visible frame, which macOS shrinks a taller window to (#514)."""
+    from camoufox.display import visible_height
+
     width = min(1920, monitor.max_width)
     height = min(1080, monitor.max_height)
-    outer = [min(WIDE[0], width - CLAIMED[0]), min(WIDE[1], height - CLAIMED[1])]
+    outer = [min(WIDE[0], width - CLAIMED[0]),
+             min(WIDE[1], height - CLAIMED[1], visible_height() or monitor.max_height)]
     return {
         "window.screenX": CLAIMED[0],
         "window.screenY": CLAIMED[1],
