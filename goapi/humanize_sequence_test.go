@@ -58,22 +58,22 @@ func TestHumanizeDefaultScenarioMatchesTheSharedSequence(t *testing.T) {
 		}
 		return "", false
 	}
-	hum := p.humanizer()
-	var now float64
-	hum.host.nowFn = func() float64 { return now }
-	hum.host.sleepFn = func(_ context.Context, ms float64) error {
-		now += ms
+	virtualClock(p)
+	host := p.humanizer().host
+	sleep := host.sleepFn
+	host.sleepFn = func(ctx context.Context, ms float64) error {
 		fb.mu.Lock()
-		defer fb.mu.Unlock()
 		fb.calls = append(fb.calls, fakeCall{"sleep", map[string]any{"ms": ms}})
-		return nil
+		fb.mu.Unlock()
+		return sleep(ctx, ms)
 	}
 
 	ctx := ctxT(t)
 	steps := []func() error{
 		func() error { return p.Mouse().Move(ctx, 300, 200) },
 		func() error { return p.Mouse().Wheel(ctx, 300, 200, 0, 480) },
-		func() error { return p.withElement(ctx, "Click", "#far", (*ElementHandle).Click) },
+		func() error { return p.Click(ctx, "#far") },
+		// goapi has no Page.Hover.
 		func() error { return p.withElement(ctx, "Hover", "#near", (*ElementHandle).Hover) },
 		func() error { return p.Keyboard().Type(ctx, "Hi") },
 		func() error { return p.Keyboard().Press(ctx, "Enter") },
@@ -102,7 +102,7 @@ func TestHumanizeDefaultScenarioMatchesTheSharedSequence(t *testing.T) {
 			got = append(got, []any{"mouse.wheel", c.Params["deltaX"], c.Params["deltaY"]})
 		case c.Method == "Page.dispatchKeyEvent":
 			got = append(got, []any{"keyboard." + strings.TrimPrefix(typ, "key"), c.Params["key"]})
-		case strings.HasPrefix(c.Method, "Page.dispatch") || c.Method == "Page.insertText":
+		case strings.HasPrefix(c.Method, "Page.dispatch") || c.Method == "Page.insertText" || c.Method == "Page.scrollIntoViewIfNeeded":
 			t.Fatalf("unmapped input call %s", sig(c))
 		}
 	}
@@ -137,7 +137,7 @@ func sameEvent(got, want []any) bool {
 			if math.Abs(g-w) > 1e-9*math.Max(1, math.Abs(w)) {
 				return false
 			}
-		} else if fmt.Sprint(got[i]) != fmt.Sprint(want[i]) {
+		} else if got[i] != want[i] {
 			return false
 		}
 	}

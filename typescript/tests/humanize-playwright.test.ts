@@ -468,11 +468,10 @@ describe("the default-parts scenario", () => {
 			{ mouse: myuri(), keyboard: myuri(), scroll: myuri() },
 			1234,
 		);
-		let now = 0;
-		clock.now = () => now;
+		const virtualSleep = clock.sleep;
 		clock.sleep = async (ms) => {
-			now += ms;
 			browser.events.push(["sleep", ms]);
+			await virtualSleep(ms);
 		};
 		await page.mouse.move(300, 200);
 		await page.mouse.wheel(0, 480);

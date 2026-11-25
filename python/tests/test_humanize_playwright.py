@@ -5,7 +5,7 @@ The page here is a fake that records what reaches Playwright and answers
 myuri's page functions from a layout with a vertical scroll. The sequence a
 scenario records is pinned in browser/tests/humanize/sequence.json, which the
 TypeScript launcher is held to as well, and the one myuri's default parts
-record in sequence-default.json, which goapi is held to too. The browser run is
+record in sequence-default.json, which TypeScript and goapi are held to as well. The browser run is
 browser/tests/playwright/patches/humanize.py.
 
 Regenerate both sequences after an intended change with
@@ -475,27 +475,24 @@ def test_the_scenario_reads_as_intended():
 DEFAULT_SEQUENCE = SEQUENCE.with_name("sequence-default.json")
 
 
-def same_events(got, want):
+def same_event(got, want):
     """Equal, numbers to 1e-9 relative: Python, JavaScript and Go round some math in the last bit."""
     def same(a, b):
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
             return abs(a - b) <= 1e-9 * max(1, abs(b))
         return a == b
-    return len(got) == len(want) and all(
-        len(g) == len(w) and all(map(same, g, w)) for g, w in zip(got, want))
+    return len(got) == len(want) and all(map(same, got, want))
 
 
 def test_the_default_scenario_matches_the_shared_sequence(monkeypatch):
     """myuri's own parts on every channel, its waits recorded. goapi plays the same
     calls (goapi/humanize_sequence_test.go), as does the TypeScript launcher."""
-    clock = [0.0]
+    virtual_sleep = hp._Host.sleep
 
     def sleep(host, ms):
-        clock[0] += ms
         host.page.rec.events.append(["sleep", ms])
-        return host.page.rec.ret()
+        return virtual_sleep(host, ms)
 
-    monkeypatch.setattr(hp._Host, "now", lambda host: clock[0])
     monkeypatch.setattr(hp._Host, "sleep", sleep)
     browser, page = attached_page({"mouse": myuri(), "keyboard": myuri(), "scroll": myuri()}, seed=1234)
     page.mouse.move(300, 200)
@@ -510,7 +507,10 @@ def test_the_default_scenario_matches_the_shared_sequence(monkeypatch):
     if os.environ.get("CAMOUFOX_REGEN_GOLDEN"):
         DEFAULT_SEQUENCE.write_text('{"seed": 1234, "events": [\n'
                                     + ",\n".join(json.dumps(e) for e in events) + "\n]}\n")
-    assert same_events(events, json.loads(DEFAULT_SEQUENCE.read_text())["events"])
+    want = json.loads(DEFAULT_SEQUENCE.read_text())["events"]
+    bad = next((i for i, (g, w) in enumerate(zip(events, want)) if not same_event(g, w)), None)
+    assert bad is None, f"event {bad}: got {events[bad]}, want {want[bad]}"
+    assert len(events) == len(want)
 
 
 # ---- myuri's own parts ---------------------------------------------------------------
