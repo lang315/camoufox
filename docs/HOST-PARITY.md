@@ -35,8 +35,9 @@ first measurements and the design notes. It was measured on Apple silicon only; 
 
 Since the CPU emulation (`cpu-vendor-estimates.patch`, upstream #1034), a Windows identity
 claims an Intel or AMD CPU (`general.cpu_identity` 1 or 2), and the JIT and the
-interpreter make x86's negative NaN. That closes most of the rows below but not all;
-the two left are #453.
+interpreter make x86's negative NaN. `%` is the exception: Windows Firefox's `fmod` is
+the CRT's, which makes the positive NaN, so with `use_ucrt_math` on `NumberMod` returns
+it (`windows-crt-math.patch`, #453).
 
 **What was measured** (the probe is a list of expressions with run-time operands, read
 interpreted and after a 30,000-iteration loop; high 16 bits of each result):
@@ -58,10 +59,21 @@ interpreted and after a 30,000-iteration loop; high 16 bits of each result):
   values compared here are the ones below, measured with #381's probe. `Infinity - Infinity`,
   `Infinity * 0`, `Math.log`, `log2`, `log10`, `log1p`, `acos`, `asin`, `acosh`, `atanh` and
   `Math.pow(-2, ±0.5)` read `fff8` interpreted and after the loop, and `0 / 0` reads `7ff8`
-  interpreted and `fff8` after the loop, as stock Windows does. The two left (#453):
-  `Math.sqrt(-1)` reads `fff8` interpreted and `7ff8` after the loop, where stock 159.0 reads
-  `fff8`; `Infinity % 2` reads `fff8` both ways, where the earlier build and an `os="macos"`
-  control read `7ff8`. It is unverified against stock and may be a new mismatch from #1034.
+  interpreted and `fff8` after the loop, as stock Windows does. Two rows looked left (#453).
+- macOS arm64 app of `main` (build run 44886770321, head `b3f08dbc`), `os="windows"`, three
+  launches, #381's page read in the page's own script as on stock. `Math.sqrt(-1)` reads
+  `fff8` interpreted and after the loop in all three, as stock 159.0 does; the scratch
+  probe's hot `7ff8` recurs (2 of 3 launches) but stock 158.0.1 also read it in 1 of 3, so
+  it is not a mismatch. `Infinity % 2` reads `fff8` interpreted, hot and as an interpreted
+  literal, where stock 159.0, stock 158.0.1 in all three launches and the native x86
+  Windows build read `7ff8`: a mismatch #1034 made, since `NumberMod` gave `fmod`'s NaN the
+  sign of an invalid SSE operation. A Windows identity on a Linux x86 host read `fff8` too,
+  from glibc's `fmod` (Tests run 45574357349). `windows-crt-math.patch` returns the positive
+  NaN there, and the `windows-crt-math` guard reads the row cold and hot.
+- macOS arm64 app of the #453 fix (build run 45577534661, head `769adc35`), `os="windows"`,
+  three launches, #381's page. `Infinity % 2` reads `7ff8` interpreted, hot and as a literal
+  both ways, in all three, as stock does. `Math.sqrt(-1)` after the loop read `7ff8` in 2 of
+  3 launches on this page, so its variance does not depend on the probe.
 - Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
   `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
 
@@ -70,7 +82,10 @@ expression after the loop reads `fff8`. In one of three 158.0.1 launches `Math.s
 read `7ff8` after the loop, where the other two launches and 159.0 read `fff8`; the cause
 was not found. With literal operands the optimizer folds, and 158.0.1 read `7ff8` for
 `Infinity - Infinity` and `Infinity * 0` after the loop in all three launches where
-159.0 read `fff8`. A fix would aim at a set of values Windows shows, not one.
+159.0 read `fff8`. Camoufox's literal reads after the loop vary between launches too
+(`Math.log(-1)`, `Math.pow(-2, -0.5)` and `Infinity * 0` read `fff8` in some of three and
+`7ff8` in the others, build run 44886770321). A fix would aim at a set of values Windows
+shows, not one.
 
 **Why no chokepoint.** In a release build every path that writes a double to memory
 stores its bits as they are: `js::SupportDifferentialTesting()` is `return false` outside

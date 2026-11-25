@@ -15,6 +15,10 @@ pow (the square roots for an exponent of 0.5 and -0.5, in the interpreter and as
 Ion compiles a literal one). browser/tests/ucrt-math/check.py covers the C alone,
 against ucrtbase.dll, on a much larger set.
 
+It also reads the sign of the NaN `Infinity % 2` makes, cold and hot: Windows
+Firefox reads the positive one, which its fmod (the CRT's) returns, where an
+invalid x86 SSE operation gives the negative one (#453).
+
 A control run with the pref off must differ, or the reference would not be
 telling the two apart. A Windows host has no such control (its libm is the CRT),
 so there only the pref-on results are read.
@@ -34,6 +38,19 @@ HERE = Path(__file__).resolve().parent
 REFERENCE = json.loads((HERE / "assets" / "windows-crt-math.json").read_text(encoding="utf-8"))
 PROBE = (HERE.parents[1] / "ucrt-math" / "probe.js").read_text(encoding="utf-8")
 TIMEOUT_MS = 120_000
+# The high 32 bits of Infinity % 2 with run-time operands, interpreted and after 30,000 calls. Stock Firefox
+# 159.0 read 7ff80000 both ways on a hosted Windows x64 runner (e2e run 41640652457), as did 158.0.1 in three
+# launches (e2e run 41649632064).
+MOD_NAN = """([a, b]) => {
+  const f = new Float64Array(1), u = new Uint32Array(f.buffer);
+  const hi = (x) => { f[0] = x; return u[1].toString(16); };
+  const mod = (x, y) => x % y;
+  const cold = hi(mod(a, b));
+  let r;
+  for (let i = 0; i < 30000; i++) r = mod(a, b);
+  return [cold, hi(r)];
+}"""
+WINDOWS_MOD_NAN = ["7ff80000", "7ff80000"]
 
 
 async def run_probe(binary, prefs):
@@ -43,7 +60,11 @@ async def run_probe(binary, prefs):
                              firefox_user_prefs=prefs, i_know_what_im_doing=True) as browser:
         page = await browser.new_page()
         page.set_default_timeout(TIMEOUT_MS)
-        return await page.evaluate(PROBE, REFERENCE["input"])
+        got = await page.evaluate(PROBE, REFERENCE["input"])
+        # In the page's own script, as stock was read.
+        await page.set_content(f"<script>document.title = JSON.stringify(({MOD_NAN})([Infinity, 2]));</script>")
+        got["mod_nan"] = json.loads(await page.title())
+        return got
 
 
 def mismatches(got):
@@ -59,6 +80,7 @@ def mismatches(got):
     pairs = [(a[0] if len(a) == 1 else a, b)
              for a, b in zip(got["half"], want["results"]["pow"]) if a is not None]
     out["literal exponent +-0.5, every call"] = differing(*map(list, zip(*pairs)))
+    out[f"NaN sign of Infinity % 2, cold and hot (read {got['mod_nan']})"] = differing(got["mod_nan"], WINDOWS_MOD_NAN)
     return out
 
 
