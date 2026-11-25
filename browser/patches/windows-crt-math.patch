@@ -158,6 +158,29 @@ diff --git a/js/src/jit/MIR.cpp b/js/src/jit/MIR.cpp
      MOZ_ASSERT(type() == MIRType::Double);
      MPowHalf* half = MPowHalf::New(alloc, input());
      block()->insertBefore(this, half);
+diff --git a/js/src/util/PortableMath.h b/js/src/util/PortableMath.h
+--- a/js/src/util/PortableMath.h
++++ b/js/src/util/PortableMath.h
+@@ -11,6 +11,7 @@
+ #include <math.h>
+ 
+ #include "jit/JitOptions.h"
++#include "js/Prefs.h"
+ #include "js/Value.h"
+ #include "vm/JSContext.h"
+ 
+@@ -64,6 +65,11 @@ inline double NumberMod(double a, double b) {
+     return -0.0;
+   }
+ #endif
++  // The Windows CRT's fmod makes the positive NaN for an infinite dividend,
++  // where an invalid x86 operation makes the negative one (#453).
++  if (r != r && a == a && b == b && JS::Prefs::use_ucrt_math()) {
++    return JS::GenericNaN();
++  }
+   return jit::X86NaN(r, a, b);
+ }
+ 
 diff --git a/modules/libpref/init/StaticPrefList.yaml b/modules/libpref/init/StaticPrefList.yaml
 --- a/modules/libpref/init/StaticPrefList.yaml
 +++ b/modules/libpref/init/StaticPrefList.yaml
