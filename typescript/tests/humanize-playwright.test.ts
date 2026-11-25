@@ -442,6 +442,55 @@ describe("the scenario", () => {
 	});
 });
 
+// Equal, numbers to 1e-9 relative: Python, JavaScript and Go round some math in the last bit.
+const same = (a: unknown, b: unknown) =>
+	typeof a === "number" && typeof b === "number"
+		? Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(b))
+		: a === b;
+
+describe("the default-parts scenario", () => {
+	it("matches sequence-default.json, which goapi plays too", async () => {
+		const want: unknown[][] = JSON.parse(
+			fs.readFileSync(
+				path.resolve(
+					HERE,
+					"..",
+					"..",
+					"browser",
+					"tests",
+					"humanize",
+					"sequence-default.json",
+				),
+				"utf-8",
+			),
+		).events;
+		const { browser, page } = await attachedPage(
+			{ mouse: myuri(), keyboard: myuri(), scroll: myuri() },
+			1234,
+		);
+		const virtualSleep = clock.sleep;
+		clock.sleep = async (ms) => {
+			browser.events.push(["sleep", ms]);
+			await virtualSleep(ms);
+		};
+		await page.mouse.move(300, 200);
+		await page.mouse.wheel(0, 480);
+		await page.locator("#far").click();
+		await page.locator("#near").hover();
+		await page.keyboard.type("Hi");
+		await page.keyboard.press("Enter");
+		await page.mouse.click(10, 20);
+		await page.click("#near");
+		const got = browser.events;
+		const bad = got.findIndex(
+			(e, i) =>
+				e.length !== want[i]?.length || e.some((v, j) => !same(v, want[i][j])),
+		);
+		expect(bad === -1 ? null : [bad, got[bad], want[bad]]).toBeNull();
+		expect(got.length).toBe(want.length);
+	});
+});
+
 // ---- myuri's own parts -----------------------------------------------------
 
 describe("myuri", () => {

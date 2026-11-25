@@ -4,10 +4,11 @@ the page wrappers.
 The page here is a fake that records what reaches Playwright and answers
 myuri's page functions from a layout with a vertical scroll. The sequence a
 scenario records is pinned in browser/tests/humanize/sequence.json, which the
-TypeScript launcher is held to as well. The browser run is
+TypeScript launcher is held to as well, and the one myuri's default parts
+record in sequence-default.json, which TypeScript and goapi are held to as well. The browser run is
 browser/tests/playwright/patches/humanize.py.
 
-Regenerate the sequence after an intended change with
+Regenerate both sequences after an intended change with
     CAMOUFOX_REGEN_GOLDEN=1 python3 -m pytest python/tests/test_humanize_playwright.py
 """
 
@@ -467,6 +468,49 @@ def test_the_scenario_reads_as_intended():
     assert ["keyboard.press", "Enter"] in events and "keyboard.type" not in kinds
     # fill("") is Playwright's alone.
     assert ["locator.fill", "#name", ""] in events
+
+
+# ---- the default-parts scenario ------------------------------------------------------
+
+DEFAULT_SEQUENCE = SEQUENCE.with_name("sequence-default.json")
+
+
+def same_event(got, want):
+    """Equal, numbers to 1e-9 relative: Python, JavaScript and Go round some math in the last bit."""
+    def same(a, b):
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            return abs(a - b) <= 1e-9 * max(1, abs(b))
+        return a == b
+    return len(got) == len(want) and all(map(same, got, want))
+
+
+def test_the_default_scenario_matches_the_shared_sequence(monkeypatch):
+    """myuri's own parts on every channel, its waits recorded. goapi plays the same
+    calls (goapi/humanize_sequence_test.go), as does the TypeScript launcher."""
+    virtual_sleep = hp._Host.sleep
+
+    def sleep(host, ms):
+        host.page.rec.events.append(["sleep", ms])
+        return virtual_sleep(host, ms)
+
+    monkeypatch.setattr(hp._Host, "sleep", sleep)
+    browser, page = attached_page({"mouse": myuri(), "keyboard": myuri(), "scroll": myuri()}, seed=1234)
+    page.mouse.move(300, 200)
+    page.mouse.wheel(0, 480)
+    page.locator("#far").click()
+    page.locator("#near").hover()
+    page.keyboard.type("Hi")
+    page.keyboard.press("Enter")
+    page.mouse.click(10, 20)
+    page.click("#near")
+    events = browser.rec.events
+    if os.environ.get("CAMOUFOX_REGEN_GOLDEN"):
+        DEFAULT_SEQUENCE.write_text('{"seed": 1234, "events": [\n'
+                                    + ",\n".join(json.dumps(e) for e in events) + "\n]}\n")
+    want = json.loads(DEFAULT_SEQUENCE.read_text())["events"]
+    bad = next((i for i, (g, w) in enumerate(zip(events, want)) if not same_event(g, w)), None)
+    assert bad is None, f"event {bad}: got {events[bad]}, want {want[bad]}"
+    assert len(events) == len(want)
 
 
 # ---- myuri's own parts ---------------------------------------------------------------
