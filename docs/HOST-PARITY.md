@@ -70,6 +70,10 @@ interpreted and after a 30,000-iteration loop; high 16 bits of each result):
   sign of an invalid SSE operation. A Windows identity on a Linux x86 host read `fff8` too,
   from glibc's `fmod` (Tests run 45574357349). `windows-crt-math.patch` returns the positive
   NaN there, and the `windows-crt-math` guard reads the row cold and hot.
+- macOS arm64 app of the #453 fix (build run 45577534661, head `769adc35`), `os="windows"`,
+  three launches, #381's page. `Infinity % 2` reads `7ff8` interpreted, hot and as a literal
+  both ways, in all three, as stock does. `Math.sqrt(-1)` after the loop read `7ff8` in 2 of
+  3 launches on this page, so its variance does not depend on the probe.
 - Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
   `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
 

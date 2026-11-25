@@ -25,9 +25,9 @@ later change should read first.
 
 A Windows identity on a Linux x86 host read the same negative NaN without any emulation, from glibc's `fmod`.
 
-**Evidence.** The `windows-crt-math` guard now reads `Infinity % 2` cold and hot in the page's own script. Before the fix it fails on Linux x86 (Tests run 45574357349: `read ['fff80000', 'fff80000']: 0/2 match`) and against the macOS arm64 build of main, build run 44886770321 (`read ['fff80000', '7ff80000']: 1/2 match`). With the fix it passes on Linux x86 (Tests run 45577518614).
+**Evidence.** The `windows-crt-math` guard now reads `Infinity % 2` cold and hot in the page's own script. Before the fix it fails on Linux x86 (Tests run 45574357349: `read ['fff80000', 'fff80000']: 0/2 match`) and against the macOS arm64 build of main, build run 44886770321 (`read ['fff80000', '7ff80000']: 1/2 match`). With the fix it passes on Linux x86 (Tests run 45577518614) and, run locally on an arm64 Mac, against the macOS arm64 build of the fix, build run 45577534661 (`read ['7ff80000', '7ff80000']: 2/2 match`, with the `use_ucrt_math` control still differing). On that build #381's page reads `Infinity % 2` as `7ff8` interpreted, hot and as a literal both ways, in three launches out of three.
 
-**What misled.** #453 also listed `Math.sqrt(-1)` after the loop. Its scratch probe reads `7ff8` there in 2 of 3 launches, but stock 158.0.1 read `7ff8` in 1 of 3 too, and with #381's page Camoufox reads `fff8` in all three, as stock 159.0 does. A hot read that varies between launches is not a mismatch unless stock never shows it. The `Infinity % 2` row had been in #381's stock logs all along, reading `7ff8`, but was never compared after #1034.
+**What misled.** #453 also listed `Math.sqrt(-1)` after the loop. Its scratch probe reads `7ff8` there in 2 of 3 launches, but stock 158.0.1 read `7ff8` in 1 of 3 too, and with #381's page main's build 44886770321 read `fff8` in all three, as stock 159.0 does, where the fixed build 45577534661 read `7ff8` in 2 of 3. A hot read that varies between launches is not a mismatch unless stock never shows it. The `Infinity % 2` row had been in #381's stock logs all along, reading `7ff8`, but was never compared after #1034.
 
 
 ## #461, again: driven-wheel-notches also assumed a whole-pixel line

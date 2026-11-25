@@ -1491,6 +1491,7 @@ rules:
       - "stock Firefox 158.0.1 on a hosted Windows x64 runner, run 41649632064 (three launches), and 159.0, run 41640652457: not one value (interpreted 0/0 is 7ff8, hot 0/0 is fff8; Math.sqrt(-1) hot read 7ff8 in one launch)"
       - "macOS arm64 build run 43456661774 (head 403757cd, with upstream #1034), os=\"windows\" with an Intel/AMD cpu_identity, a local scratch probe not run on stock Windows: the other 12 rows read fff8 and 0/0 splits as stock does; Math.sqrt(-1) hot reads 7ff8 and Infinity % 2 reads fff8 (#453)"
       - "#453: #381's page on macOS arm64 build run 44886770321, os=\"windows\", three launches: Math.sqrt(-1) reads fff8 cold and hot as stock 159.0 does; Infinity % 2 reads fff8 where stock 159.0, 158.0.1 (three launches) and the native x86 Windows build read 7ff8, so windows-crt-math.patch makes NumberMod return the positive NaN under use_ucrt_math, and the windows-crt-math guard reads it"
+      - "#453 fixed: macOS arm64 build run 45577534661 (head 769adc35), os=\"windows\": the windows-crt-math guard reads Infinity % 2 as 7ff80000 cold and hot (2/2), and #381's page reads 7ff8 in every column in three launches; Math.sqrt(-1) hot read 7ff8 in 2 of 3 there, a variance stock 158.0.1 shows too"
     rationale: >-
       The fork had documented the limit rather than carry a JIT back-end patch that
       makes x86's default NaN where x86 makes it. Upstream's CPU emulation (#1034)
