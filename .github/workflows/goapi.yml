@@ -9,6 +9,7 @@ on:
       - 'browser/settings/properties.json'
       - 'browser/bundle/fontconfig/**'
       - 'python/src/camoufox/fonts.json'
+      - 'browser/tests/humanize/sequence-default.json'
       - '.github/workflows/goapi.yml'
   pull_request:
     paths:
@@ -19,6 +20,8 @@ on:
       - 'browser/settings/properties.json'
       - 'browser/bundle/fontconfig/**'
       - 'python/src/camoufox/fonts.json'
+      # humanize_sequence_test.go plays the scenario the launchers recorded here.
+      - 'browser/tests/humanize/sequence-default.json'
       - '.github/workflows/goapi.yml'
   workflow_dispatch:
 

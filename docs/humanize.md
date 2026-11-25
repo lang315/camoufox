@@ -78,9 +78,12 @@ and both launchers are tested against it. Without a seed, each launch draws a
 random one.
 
 goapi's Go port of myuri (`goapi/pkg/myuri`) pins its planners to myuri 4.0.0 by
-golden traces recorded from the JS library. It is not tested against
-`sequence.json`, which needs caller-replaced parts, `fill`, `position=` and
-`trial=`, and goapi has none of them.
+golden traces recorded from the JS library. `sequence.json` needs caller-replaced
+parts, `fill`, `position=` and `trial=`, which goapi has none of, so a second
+scenario, `browser/tests/humanize/sequence-default.json`, plays myuri's own parts
+on every channel with their waits on a virtual clock, and Python, TypeScript and
+goapi are all tested against it. Its numbers are compared to 1e-9 relative,
+because the three languages round some math differently in the last bit.
 
 ## What the browser still times
 
