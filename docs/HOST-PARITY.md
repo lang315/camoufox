@@ -67,8 +67,9 @@ interpreted and after a 30,000-iteration loop; high 16 bits of each result):
   it is not a mismatch. `Infinity % 2` reads `fff8` interpreted, hot and as an interpreted
   literal, where stock 159.0, stock 158.0.1 in all three launches and the native x86
   Windows build read `7ff8`: a mismatch #1034 made, since `NumberMod` gave `fmod`'s NaN the
-  sign of an invalid SSE operation. `windows-crt-math.patch` returns the positive NaN there,
-  and the `windows-crt-math` guard reads the row cold and hot.
+  sign of an invalid SSE operation. A Windows identity on a Linux x86 host read `fff8` too,
+  from glibc's `fmod` (Tests run 45574357349). `windows-crt-math.patch` returns the positive
+  NaN there, and the `windows-crt-math` guard reads the row cold and hot.
 - Stock Firefox 158.0.1 on a GitHub-hosted Windows x64 runner (run 41649632064, image
   `win25-vs2026 20261030.294.1`, three launches), and 159.0 (run 41640652457).
 
