@@ -184,9 +184,11 @@ of the browser, so two pages never replay the same draws; each page has its own 
 humanized call at a time. A humanized call that fails or is cancelled midway releases the keys and
 buttons it pressed.
 
-The port's planners are pinned to myuri 4.0.0 by golden traces recorded from the JS library;
-the whole-scenario `browser/tests/humanize/sequence.json` that the Python and TypeScript launchers
-share is not pinned for Go, which has no caller-replaced parts, `fill`, `position=` or `trial=`.
+The port's planners are pinned to myuri 4.0.0 by golden traces recorded from the JS library, and
+the whole humanized scenario of `browser/tests/humanize/sequence-default.json` (myuri's own parts,
+seed 1234) is pinned against the Python and TypeScript launchers. Their other shared scenario,
+`sequence.json`, is not, because it needs caller-replaced parts, `fill`, `position=` and `trial=`,
+which goapi does not have.
 
 ## Licence
 

@@ -1054,9 +1054,10 @@ rules:
       version: python/pyproject.toml, typescript/package.json, the golden
       generator's package.json and the versions recorded in the goldens must
       name one myuri release, and the goldens are traces of that release's JS
-      library, which the Go tests replay. Whole-scenario parity with
-      browser/tests/humanize/sequence.json is not pinned for Go, which has no
-      caller-replaced parts, fill, position= or trial=.
+      library, which the Go tests replay. Whole-scenario parity is pinned by
+      browser/tests/humanize/sequence-default.json (myuri's own parts), which
+      Python, TypeScript and Go all play; sequence.json is not pinned for Go,
+      which has no caller-replaced parts, fill, position= or trial=.
 
   - id: humanize-parts-replace-myuris-pieces
     title: A caller customises humanized input by replacing myuri's parts, with one seeded stream per browser
