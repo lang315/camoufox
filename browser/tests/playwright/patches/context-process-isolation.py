@@ -34,7 +34,7 @@ CONTEXTS = 3
 WAIT_S = 60
 # Each child process's pid and the documents its windows hold.
 PROCESSES = """return ChromeUtils.requestProcInfo().then(info => info.children.map(c => ({
-  pid: c.pid, type: c.type, urls: c.windows.map(w => w.documentURI && w.documentURI.spec),
+  pid: c.pid, urls: c.windows.map(w => w.documentURI && w.documentURI.spec),
 })));"""
 
 
