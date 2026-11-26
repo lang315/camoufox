@@ -107,8 +107,7 @@ patch -p1 --forward -l --binary --dry-run < ../patches/your.patch
   `occluded-window-active`, `pointer-lock-offscreen`,
   `virtual-display-window-visible`, `driven-drag-gtk`, `headless-software-webgl`, `css-device-size-fractional`,
   `startup-size-frame-extents`); `system-font-alias-stall`
-  does not run on macOS, `windows-keyboard` not on Windows, and `context-process-isolation`
-  (it counts processes from `/proc`) on neither. On those platforms
+  does not run on macOS and `windows-keyboard` not on Windows. On those platforms
   they are reported as "not applicable" with the reason, never as passes. No hosted
   Windows or macOS display fits a macOS identity, so there `driven-wheel-notches-macos`
   is not applicable and the five guards in `DRAWS_MACOS` run without their macOS

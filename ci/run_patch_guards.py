@@ -185,13 +185,11 @@ LINUX_ONLY = frozenset({
 # driven-move-coalescing needs moves that outrun a refresh tick (Juggler paces a driven move at 8 ms,
 # PageHandler.js kMoveIntervalMs): measured on hosted runners they land 8.0 ms apart on Linux and a tick apart on
 # Windows and macOS.
-# context-process-isolation counts web-content processes from /proc.
 _PACED_AT_A_TICK = (
     "Juggler's driven moves land one refresh tick apart on a hosted Windows or macOS runner (16.0 ms against 15.6 ms; "
     "17.0 ms against 16.7 ms; Linux 8.0 ms), so a sweep cannot outrun the tick; stock real input at 25 ms/move is "
     "one pointermove each as well"
 )
-_COUNTED_FROM_PROC = "it counts web-content processes from /proc, which this platform does not have"
 _NO_MACOS_ON = {
     "darwin": "a hosted macOS display, 1280x720, fits no macOS identity, so the identity cannot be drawn there",
     "win32": "no macOS identity fits a hosted Windows display, so the identity cannot be drawn there",
@@ -203,13 +201,11 @@ NOT_ON = {
             "its count reads the host's font universe, and its ratio alone cannot go red on this host",
         "driven-wheel-notches-macos": _NO_MACOS_ON["darwin"],
         "driven-move-coalescing": _PACED_AT_A_TICK,
-        "context-process-isolation": _COUNTED_FROM_PROC,
     },
     "win32": {
         "windows-keyboard": "a Windows host has the Windows keyboard natively, so there is nothing to compare",
         "driven-wheel-notches-macos": _NO_MACOS_ON["win32"],
         "driven-move-coalescing": _PACED_AT_A_TICK,
-        "context-process-isolation": _COUNTED_FROM_PROC,
     },
 }
 
